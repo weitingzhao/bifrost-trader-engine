@@ -81,6 +81,11 @@ class AgentClient:
         req = AgentRequest(action="is-active", unit=unit)
         return await self.send(req)
 
+    async def worker_kill(self, unit: str, timeout: int = 30) -> AgentResponse:
+        """``systemctl kill --kill-who=main -s KILL`` for stuck Celery worker instances."""
+        req = AgentRequest(action="kill", unit=unit, timeout=timeout)
+        return await self.send(req)
+
     async def ping(self) -> bool:
         try:
             await self.is_active("bifrost-celery-worker.service")

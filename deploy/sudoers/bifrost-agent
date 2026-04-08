@@ -18,6 +18,7 @@ bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start bifrost-celery-worke
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop bifrost-celery-worker@*.service
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart bifrost-celery-worker@*.service
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active bifrost-celery-worker@*.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl kill --kill-who=main -s KILL bifrost-celery-worker@*.service
 
 # Celery beat
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start bifrost-celery-beat.service

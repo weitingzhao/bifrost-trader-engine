@@ -304,6 +304,14 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [confirmState, setConfirmState] = useState<ConfirmDialogState>(INITIAL_CONFIRM)
+  const [confirmVariant, setConfirmVariant] = useState<'default' | 'scale-remove'>('default')
+  const [scaleRemoveForce, setScaleRemoveForce] = useState(false)
+  const scaleRemoveForceRef = useRef(false)
+
+  const resetConfirmDialog = useCallback(() => {
+    setConfirmState(INITIAL_CONFIRM)
+    setConfirmVariant('default')
+  }, [])
   const [tick, setTick] = useState(0)
 
   const [queueSummary, setQueueSummary] = useState<QueueSummaryRow[]>([])
@@ -508,17 +516,25 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
 
   // ── Scaling handlers ──────────────────────────────────────────────────
   const onScaleRemove = (instanceId: string) => {
+    scaleRemoveForceRef.current = false
+    setScaleRemoveForce(false)
+    setConfirmVariant('scale-remove')
     setConfirmState({
       open: true,
       title: `Remove worker instance ${instanceId}?`,
-      message: `This will stop bifrost-celery-worker@${instanceId}.service via systemd.`,
+      message: `This will stop bifrost-celery-worker@${instanceId}.service (graceful stop first). If the process is stuck, enable force kill below.`,
       confirming: false,
       confirmLabel: 'Confirm delete',
       action: async () => {
+        const force = scaleRemoveForceRef.current
         setConfirmState(prev => ({ ...prev, confirming: true }))
         setScaleBusy(true)
         try {
-          const res = await scaleWorker({ action: 'remove', instance_id: instanceId })
+          const res = await scaleWorker({
+            action: 'remove',
+            instance_id: instanceId,
+            force,
+          })
           setScaleMsg({
             text: res.ok
               ? `Instance ${instanceId} stopped (unit ${res.after_state ?? 'inactive'}).`
@@ -531,7 +547,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           setScaleMsg({ text: e instanceof Error ? e.message : 'Error', isErr: true })
         } finally {
           setScaleBusy(false)
-          setConfirmState(INITIAL_CONFIRM)
+          resetConfirmDialog()
         }
       },
     })
@@ -579,7 +595,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             setBrokerMsg({ text: e instanceof Error ? e.message : 'Error', isErr: true })
           } finally {
             setBrokerBusy(false)
-            setConfirmState(INITIAL_CONFIRM)
+            resetConfirmDialog()
           }
         },
       })
@@ -685,7 +701,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
     createPortal(
       <div
         className="data-reset-modal-overlay celery-control-confirm-overlay"
-        onClick={() => !confirmState.confirming && setConfirmState(INITIAL_CONFIRM)}
+        onClick={() => !confirmState.confirming && resetConfirmDialog()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="celery-control-confirm-title"
@@ -693,11 +709,27 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
         <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
           <h3 id="celery-control-confirm-title">{confirmState.title}</h3>
           <p>{confirmState.message}</p>
+          {confirmVariant === 'scale-remove' && (
+            <label className="celery-control-force-remove">
+              <input
+                type="checkbox"
+                checked={scaleRemoveForce}
+                onChange={e => {
+                  scaleRemoveForceRef.current = e.target.checked
+                  setScaleRemoveForce(e.target.checked)
+                }}
+                disabled={confirmState.confirming}
+              />
+              <span>
+                Force kill stuck worker (SIGKILL) if it is still active after graceful stop
+              </span>
+            </label>
+          )}
           <div className="data-reset-modal-actions">
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => setConfirmState(INITIAL_CONFIRM)}
+              onClick={() => resetConfirmDialog()}
               disabled={confirmState.confirming}
             >
               Cancel

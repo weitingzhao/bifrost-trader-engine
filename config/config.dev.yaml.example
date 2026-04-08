@@ -10,6 +10,8 @@ postgres:
 # IB Operator cmd RPC (scripts/run_ib_operator.py). Legacy key ib_gateway is still read with a deprecation warning.
 # ib_operator:
 #   enabled: true
+#   # Bars Celery on a host without TWS: set true so backfill uses Redis RPC to run_ib_operator.
+#   # use_for_celery_bars: true
 
 ib:
   connect_timeout: 60.0

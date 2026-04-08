@@ -271,11 +271,42 @@ async def scale_worker(
         return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
 
     after_state = await _wait_worker_unit_quiet(exc, unit)
+    force_result: Optional[Dict[str, Any]] = None
+    if after_state == "active" and body.force:
+        if not hasattr(exc, "force_stop_worker_unit"):
+            detail = "Force remove is not supported by this Ops executor."
+            _audit(request, "scale_remove", unit, "failed", detail=detail)
+            return JSONResponse(
+                status_code=501,
+                content={
+                    "ok": False,
+                    "error": detail,
+                    "action": "remove",
+                    "unit": unit,
+                    "instance_id": body.instance_id,
+                    "after_state": after_state,
+                    "result": result,
+                },
+            )
+        try:
+            force_result = await exc.force_stop_worker_unit(unit)
+        except Exception as e:
+            _audit(request, "scale_remove", unit, "failed", detail=f"force_kill:{e}")
+            return JSONResponse(
+                status_code=500,
+                content={"ok": False, "error": str(e), "action": "remove", "unit": unit},
+            )
+        after_state = await _wait_worker_unit_quiet(exc, unit)
+
     if after_state == "active":
         detail = (
             "Unit still reports active after stop. Another machine may be running a worker with the "
             "same instance id on this Redis broker, or the process was not started by this unit."
         )
+        if body.force:
+            detail += " A force kill was already attempted on this host."
+        else:
+            detail += " Retry remove with force=true to SIGKILL the local unit/process."
         _audit(request, "scale_remove", unit, "failed", detail=f"after_state={after_state}")
         return JSONResponse(
             status_code=409,
@@ -287,11 +318,15 @@ async def scale_worker(
                 "instance_id": body.instance_id,
                 "after_state": after_state,
                 "result": result,
+                **({"force_result": force_result} if force_result is not None else {}),
             },
         )
 
-    _audit(request, "scale_remove", unit, "success", detail=f"after_state={after_state}")
-    return {
+    audit_detail = f"after_state={after_state}"
+    if force_result is not None:
+        audit_detail += ",force_kill=ok"
+    _audit(request, "scale_remove", unit, "success", detail=audit_detail)
+    out: Dict[str, Any] = {
         "ok": True,
         "action": "remove",
         "unit": unit,
@@ -299,6 +334,9 @@ async def scale_worker(
         "after_state": after_state,
         "result": result,
     }
+    if force_result is not None:
+        out["force_result"] = force_result
+    return out
 
 
 @router.get("/ops/workers/instances")

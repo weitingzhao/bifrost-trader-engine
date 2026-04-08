@@ -1,8 +1,8 @@
 """Celery tasks for bars backfill. Task updates job_bars_backfill row when done.
 
-When ``IbOperatorClient`` is available from merged config (Redis + ib_operator.enabled), bars jobs
-use IB Operator RPC (``fetch_bars_range``) so the worker does not open a socket to TWS — same as
-Market API. Otherwise the worker keeps a long-lived ``MarketIbClient`` to TWS (``ib_client_id_worker_market``).
+By default bars workers use a long-lived :class:`~src.monitor.integrations.ib_clients.MarketIbClient`
+to TWS (``ib_client_id_worker_market``). IB Operator RPC is used only when
+``ib_operator.use_for_celery_bars: true`` (workers that cannot open a socket to TWS).
 """
 
 from __future__ import annotations
@@ -233,25 +233,32 @@ def _ensure_worker_loop() -> None:
 
 
 async def _get_or_create_bars_ib_client(control_cfg: Dict[str, Any]) -> Any:
-    """Return IB transport: IbOperatorBarsAdapter (Redis → run_ib_operator on TWS host) or MarketIbClient."""
+    """Return IB transport: MarketIbClient (default) or IbOperatorBarsAdapter if opted in."""
     global _worker_ib_client
     from src.bars.ib_operator_transport import IbOperatorBarsAdapter
     from src.ib_operator.client import IbOperatorClient
+    from src.ib_operator.config import effective_ib_operator_settings
 
-    gw = IbOperatorClient.from_merged_config(control_cfg)
+    op_settings = effective_ib_operator_settings(control_cfg)
+    use_operator_for_bars = bool(op_settings.get("use_for_celery_bars"))
+
+    gw = IbOperatorClient.from_merged_config(control_cfg) if use_operator_for_bars else None
     if gw is not None:
         if not isinstance(_worker_ib_client, IbOperatorBarsAdapter):
             if _worker_ib_client is not None:
                 await _reset_worker_ib_client("switching to IB Operator transport for bars")
             _worker_ib_client = IbOperatorBarsAdapter.from_merged_config(control_cfg, gw)
             logger.info(
-                "Celery bars worker uses IB Operator (Redis) for historical bars; no direct TWS socket from this process.",
+                "Celery bars worker uses IB Operator (Redis) for historical bars "
+                "(ib_operator.use_for_celery_bars=true); no direct TWS socket from this process.",
             )
             _start_worker_ib_heartbeat(int(getattr(_worker_ib_client, "client_id", 0)))
         return _worker_ib_client
 
     if isinstance(_worker_ib_client, IbOperatorBarsAdapter):
-        await _reset_worker_ib_client("IB Operator disabled or unavailable; using direct TWS")
+        await _reset_worker_ib_client(
+            "Switching from IB Operator to direct TWS (operator off or use_for_celery_bars=false)",
+        )
     from src.monitor.reader import StatusReader
 
     reader = StatusReader(control_cfg)

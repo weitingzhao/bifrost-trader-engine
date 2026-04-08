@@ -1,4 +1,4 @@
-"""Celery bars backfill via IB Operator (Redis RPC) when direct TWS from worker is unreachable."""
+"""Celery bars backfill via IB Operator (Redis RPC) when ``ib_operator.use_for_celery_bars`` is true."""
 
 from __future__ import annotations
 

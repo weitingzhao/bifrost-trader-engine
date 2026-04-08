@@ -261,16 +261,21 @@ export interface ScaleResult {
   error?: string
   /** systemd / subprocess view after remove (e.g. inactive). */
   after_state?: string
+  /** Present when remove used ``force`` and SIGKILL ran on this host. */
+  force_result?: Record<string, unknown>
 }
 
 export async function scaleWorker(params: {
   action: ScaleAction
   instance_id?: string
   worker_type?: string
+  /** Remove only: SIGKILL local unit/process if still active after graceful stop. */
+  force?: boolean
 }): Promise<ScaleResult> {
   const body: Record<string, unknown> = { action: params.action }
   if (params.instance_id) body.instance_id = params.instance_id
   if (params.worker_type) body.worker_type = params.worker_type
+  if (params.force === true) body.force = true
   const r = await fetch(`${opsBase()}/ops/workers/scale`, {
     method: 'POST',
     headers: jsonAuthHeaders(),

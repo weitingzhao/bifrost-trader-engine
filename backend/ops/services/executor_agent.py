@@ -125,3 +125,18 @@ class AgentExecutor:
             if out in states:
                 return out
         return "unknown"
+
+    async def force_stop_worker_unit(self, unit: str) -> Dict[str, Any]:
+        self._validate("stop", unit)
+        RestrictedExecutor.assert_celery_worker_instance_unit(unit)
+        timeout = _SYSTEMCTL_TIMEOUT_STOP_RESTART_SEC
+        resp = await self._client.worker_kill(unit, timeout=timeout)
+        if not resp.ok:
+            raise RuntimeError(
+                f"Agent: force kill {unit} failed: {resp.error}"
+            )
+        return resp.result or {
+            "method": "agent-systemd",
+            "action": "kill",
+            "unit": unit,
+        }

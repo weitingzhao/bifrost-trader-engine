@@ -76,6 +76,8 @@ class ScaleRequest(BaseModel):
     instance_id: Optional[str] = None
     worker_type: Optional[str] = None
     queues: List[str] = Field(default_factory=list)
+    #: For ``remove`` only: after graceful ``stop``, send SIGKILL if the unit/process is still active.
+    force: bool = False
 
 
 class BrokerControlRequest(BaseModel):

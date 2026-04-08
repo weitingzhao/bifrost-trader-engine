@@ -83,6 +83,19 @@ class RestrictedExecutor:
             raise ValueError(f"Invalid instance_id: {instance_id!r}")
         return f"{_WORKER_UNIT_BASE}@{instance_id}.service"
 
+    @staticmethod
+    def assert_celery_worker_instance_unit(unit: str) -> None:
+        """Raise PermissionError unless *unit* is ``bifrost-celery-worker@<id>.service``."""
+        u = (unit or "").strip()
+        prefix = f"{_WORKER_UNIT_BASE}@"
+        if not (u.startswith(prefix) and u.endswith(".service")):
+            raise PermissionError(
+                f"Expected {_WORKER_UNIT_BASE}@<instance_id>.service; got {unit!r}"
+            )
+        inst = u[len(prefix) : -len(".service")]
+        if not _INSTANCE_ID_RE.match(inst):
+            raise PermissionError(f"Invalid Celery worker instance id in unit: {unit!r}")
+
     def _validate(self, action: str, unit: str) -> None:
         if action not in _ALLOWED_ACTIONS:
             raise PermissionError(
@@ -168,6 +181,54 @@ class RestrictedExecutor:
         return {
             "method": "systemd",
             "action": action,
+            "unit": unit,
+            "returncode": proc.returncode,
+            "stdout": (stdout or b"").decode().strip(),
+        }
+
+    async def force_stop_worker_unit(
+        self, unit: str, timeout: int = _SYSTEMD_TIMEOUT_SEC,
+    ) -> Dict[str, Any]:
+        """Send SIGKILL to the unit's main process (``systemctl kill``) for stuck workers."""
+        self._validate("stop", unit)
+        self.assert_celery_worker_instance_unit(unit)
+        pre_sudo = await asyncio.create_subprocess_exec(
+            "sudo", "-n", "true",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, pre_sudo_err = await pre_sudo.communicate()
+        if pre_sudo.returncode != 0:
+            raise RuntimeError(
+                "Ops executor requires non-interactive sudo (NOPASSWD). "
+                "Current host returned: "
+                f"{(pre_sudo_err or b'').decode().strip() or 'sudo -n failed'}"
+            )
+        cmd = [
+            "sudo", "systemctl", "kill", "--kill-who=main", "-s", "KILL", unit,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout,
+            )
+        except asyncio.TimeoutError as exc:
+            proc.kill()
+            raise asyncio.TimeoutError(
+                f"systemctl kill {unit} timed out after {timeout}s"
+            ) from exc
+        if proc.returncode != 0:
+            err_msg = (stderr or b"").decode().strip()
+            raise RuntimeError(
+                f"systemctl kill {unit} failed (rc={proc.returncode}): {err_msg}"
+            )
+        return {
+            "method": "systemd",
+            "action": "kill",
             "unit": unit,
             "returncode": proc.returncode,
             "stdout": (stdout or b"").decode().strip(),
@@ -361,7 +422,7 @@ class SubprocessLocalExecutor:
             "message": "Worker process started in background (run_celery.py).",
         }
 
-    async def _stop_worker_unit(self, unit: str) -> Dict[str, Any]:
+    async def _pgrep_worker_pids(self, unit: str) -> List[str]:
         instance_id = self._instance_from_worker_unit(unit)
         safe = instance_id.replace("\\", "\\\\").replace(".", "\\.")
         pattern = f"python.*run_celery\\.py.*--instance {safe}"
@@ -372,13 +433,22 @@ class SubprocessLocalExecutor:
         )
         stdout, _ = await asyncio.wait_for(pg.communicate(), timeout=15)
         if pg.returncode != 0:
+            return []
+        return [
+            x.strip()
+            for x in stdout.decode().strip().splitlines()
+            if x.strip().isdigit()
+        ]
+
+    async def _stop_worker_unit(self, unit: str) -> Dict[str, Any]:
+        pids = await self._pgrep_worker_pids(unit)
+        if not pids:
             return {
                 "method": "subprocess",
                 "action": "stop",
                 "unit": unit,
                 "message": "No matching worker process (already stopped).",
             }
-        pids = [x.strip() for x in stdout.decode().strip().splitlines() if x.strip().isdigit()]
         killed: List[str] = []
         for pid_str in pids:
             try:
@@ -392,6 +462,43 @@ class SubprocessLocalExecutor:
             "unit": unit,
             "pids": killed,
             "message": f"SIGTERM sent to {killed}" if killed else "No PIDs killed",
+        }
+
+    async def force_stop_worker_unit(self, unit: str) -> Dict[str, Any]:
+        """SIGKILL matching ``run_celery.py --instance`` PIDs (macOS / subprocess mode)."""
+        self._validate("stop", unit)
+        RestrictedExecutor.assert_celery_worker_instance_unit(unit)
+        pids = await self._pgrep_worker_pids(unit)
+        if not pids:
+            return {
+                "method": "subprocess",
+                "action": "kill",
+                "unit": unit,
+                "sigkill_pids": [],
+                "message": "No matching worker process (already stopped).",
+            }
+        sigkill_pids: List[str] = []
+        for pid_str in pids:
+            try:
+                pid = int(pid_str)
+            except ValueError:
+                continue
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+                sigkill_pids.append(pid_str)
+            except OSError:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                    sigkill_pids.append(pid_str)
+                except (ProcessLookupError, PermissionError, ValueError):
+                    pass
+        await asyncio.sleep(0.35)
+        return {
+            "method": "subprocess",
+            "action": "kill",
+            "unit": unit,
+            "sigkill_pids": sigkill_pids,
+            "message": f"SIGKILL sent to {sigkill_pids}" if sigkill_pids else "No PIDs killed",
         }
 
     def _append_ingest_config_argv(self, cmd: List[str], script_name: str) -> None:

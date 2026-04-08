@@ -1,6 +1,6 @@
 """Structured JSON protocol for the Local Control Agent (UDS).
 
-Request:  {"id": "<uuid>", "action": "start|stop|restart", "unit": "<systemd-unit>"}
+Request:  {"id": "<uuid>", "action": "start|stop|restart|kill|…", "unit": "<systemd-unit>"}
 Response: {"id": "<uuid>", "ok": true|false, "result": {...}, "error": "..."}
 """
 
@@ -11,7 +11,14 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
-ALLOWED_ACTIONS = frozenset({"start", "stop", "restart", "is-active", "list-units"})
+ALLOWED_ACTIONS = frozenset({
+    "start",
+    "stop",
+    "restart",
+    "kill",
+    "is-active",
+    "list-units",
+})
 ALLOWED_UNIT_PATTERNS = [
     re.compile(r"^bifrost-celery-worker(@[a-zA-Z0-9_-]+)?\.service$"),
     re.compile(r"^bifrost-celery-beat\.service$"),

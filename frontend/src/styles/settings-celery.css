@@ -331,6 +331,21 @@
   z-index: 6000;
 }
 
+.celery-control-force-remove {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.35;
+  color: var(--color-text-secondary, rgba(255, 255, 255, 0.72));
+}
+
+.celery-control-force-remove input {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+
 /* Embedded Daemon/Celery under Settings: don't let grid/flex min-content widen the whole page */
 .settings-main > .settings-page-card.celery-page--embedded,
 .settings-main > .settings-page-card.daemon-status-page--embedded {

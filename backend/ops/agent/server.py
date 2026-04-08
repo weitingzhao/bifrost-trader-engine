@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import signal
 import sys
 import time
@@ -92,7 +93,18 @@ class AgentServer:
                 error=f"Unit {req.unit!r} not in whitelist",
             )
 
-        if req.action in ("start", "stop", "restart"):
+        if req.action == "kill":
+            if not re.fullmatch(
+                r"bifrost-celery-worker@[a-zA-Z0-9_-]+\.service",
+                unit_norm,
+            ):
+                return AgentResponse(
+                    request_id=req.request_id,
+                    ok=False,
+                    error="kill is only allowed for bifrost-celery-worker@<instance>.service",
+                )
+
+        if req.action in ("start", "stop", "restart", "kill"):
             if not self._rate.check(req.unit):
                 return AgentResponse(
                     request_id=req.request_id,
@@ -108,6 +120,8 @@ class AgentServer:
                 error=f"Another command is in-flight for {req.unit}; try again shortly",
             )
         async with lock:
+            if req.action == "kill":
+                return await self._systemctl_kill(req)
             return await self._systemctl(req)
 
     async def _systemctl_is_active(self, req: AgentRequest) -> AgentResponse:
@@ -172,6 +186,49 @@ class AgentServer:
             result={
                 "method": "agent-systemd",
                 "action": req.action,
+                "unit": req.unit,
+                "returncode": proc.returncode,
+                "stdout": (stdout or b"").decode().strip(),
+            },
+            error=(stderr or b"").decode().strip() if not ok else None,
+        )
+
+    async def _systemctl_kill(self, req: AgentRequest) -> AgentResponse:
+        cmd = [
+            "sudo",
+            "-n",
+            "/usr/bin/systemctl",
+            "kill",
+            "--kill-who=main",
+            "-s",
+            "KILL",
+            req.unit,
+        ]
+        logger.info("Executing: %s", " ".join(cmd))
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=req.timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            return AgentResponse(
+                request_id=req.request_id,
+                ok=False,
+                error=f"Timed out after {req.timeout}s",
+            )
+
+        ok = proc.returncode == 0
+        return AgentResponse(
+            request_id=req.request_id,
+            ok=ok,
+            result={
+                "method": "agent-systemd",
+                "action": "kill",
                 "unit": req.unit,
                 "returncode": proc.returncode,
                 "stdout": (stdout or b"").decode().strip(),
