@@ -1,7 +1,8 @@
 """Canonical Redis keys for Socket ingest health under ``bifrost:health:*``.
 
 Service **ids** in Ops YAML stay ``massive_ws`` / ``ib_ingestor`` / ``ib_operator``; Redis **health**
-hashes use the ``ws_*`` suffix names below.
+hashes use the ``ws_*`` suffix names below. Trading daemon (Engine) health + Ops lease use
+``bifrost:health:daemon_trading_engine``.
 
 Readers fall back to prior bifrost key names and (Massive only) ``massive:meta:status`` when the
 canonical hash is empty.
@@ -17,8 +18,13 @@ BIFROST_HEALTH_IB_INGESTOR = "bifrost:health:ws_ib_ingestor"
 BIFROST_HEALTH_IB_OPERATOR = "bifrost:health:ws_ib_operator"
 BIFROST_HEALTH_IB_ACCOUNT_AGENT = "bifrost:health:ws_ib_account_agent"
 
-# Ops Dev/Prod lease for trading_engine (same Redis as Socket); not written by ingest writers.
-BIFROST_OPS_TRADING_ENGINE_META = "bifrost:ops:trading_engine"
+# Trading daemon (Engine): health hash + Ops Dev/Prod lease fields (``bifrost_ops_control_*``,
+# ``engine_ops_active``) on the same key, same pattern as ``bifrost:health:ws_ib_operator``.
+BIFROST_HEALTH_DAEMON_TRADING_ENGINE = "bifrost:health:daemon_trading_engine"
+# Previous key (YAML / Redis migration); normalized in ``market_ingest_config``.
+LEGACY_BIFROST_OPS_TRADING_ENGINE_META = "bifrost:ops:trading_engine"
+# Deprecated alias — prefer ``BIFROST_HEALTH_DAEMON_TRADING_ENGINE``.
+BIFROST_OPS_TRADING_ENGINE_META = BIFROST_HEALTH_DAEMON_TRADING_ENGINE
 ENGINE_OPS_ACTIVE_REDIS_FIELD = "engine_ops_active"
 
 # Previous bifrost names (read / YAML normalization fallback).

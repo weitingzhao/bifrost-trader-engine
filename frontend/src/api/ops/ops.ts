@@ -341,6 +341,8 @@ export interface MarketIngestServiceRow {
   process_active: string
   /** dev|prod from Redis hash field bifrost_ops_control_env (Ops start/stop); null if unclaimed. */
   redis_control_env?: string | null
+  /** Hostname from bifrost_ops_control_host at last Ops start; null if missing. */
+  redis_control_host?: string | null
 }
 
 export async function fetchMarketIngestServices(): Promise<{

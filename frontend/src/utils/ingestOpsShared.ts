@@ -38,20 +38,23 @@ export function normalizedPageDevProd(configProfile: string | null): 'dev' | 'pr
 export function runtimeControlHostDisplay(
   redisControlEnv: string | null | undefined,
   redisMetaKey: string,
+  redisControlHost?: string | null,
 ): { title: string; pill: OpsHostEnvPill } {
   const r = (redisControlEnv ?? '').toLowerCase().trim()
+  const host = (redisControlHost ?? '').trim()
+  const hostSentence = host ? ` Last Ops start host: ${host}.` : ''
   if (r === 'dev' || r === 'prod') {
     const pill = opsHostEnvFromConfigProfile(r)
     const keyHint = redisMetaKey ? `${redisMetaKey}` : 'ingest meta hash'
     return {
       pill,
-      title: `Ops control lease in Redis (${keyHint}): last start from ${pill.ariaLabel}. Field bifrost_ops_control_env.`,
+      title: `Ops control lease in Redis (${keyHint}): last start from ${pill.ariaLabel}.${hostSentence} Fields bifrost_ops_control_env, bifrost_ops_control_host.`,
     }
   }
   return {
     pill: { shortLabel: '—', pillVariant: 'other', ariaLabel: 'Unclaimed' },
     title: redisMetaKey.trim()
-      ? `No Ops control lease in Redis yet (${redisMetaKey}). Starting from Ops (Dev or Prod) writes bifrost_ops_control_env.`
+      ? `No Ops control lease in Redis yet (${redisMetaKey}). Starting from Ops (Dev or Prod) writes bifrost_ops_control_env and bifrost_ops_control_host.${hostSentence}`
       : 'No redis_meta_key for this row; cross-stack lease is not tracked.',
   }
 }

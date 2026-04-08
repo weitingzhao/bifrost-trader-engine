@@ -12,6 +12,7 @@ this field may remain after expiry + a subsequent Ops write).
 from __future__ import annotations
 
 import logging
+import socket
 import time
 from typing import Optional
 
@@ -20,6 +21,8 @@ from src.bifrost.redis_health_keys import ENGINE_OPS_ACTIVE_REDIS_FIELD
 logger = logging.getLogger(__name__)
 
 BIFROST_OPS_CONTROL_ENV_FIELD = "bifrost_ops_control_env"
+# Set on successful Ops start (same hash as bifrost_ops_control_env); cleared on stop.
+BIFROST_OPS_CONTROL_HOST_FIELD = "bifrost_ops_control_host"
 
 _REDIS_SOCKET_SEC = 3.0
 
@@ -37,6 +40,35 @@ def meta_redis_url_from_ops_config(config: dict) -> Optional[str]:
     from src.core.redis_url import redis_url_from_config
 
     return redis_url_from_config(config or {})
+
+
+def control_hostname() -> str:
+    """Short host id for Redis lease (which machine last ran Ops start for this service)."""
+    try:
+        return (socket.gethostname() or "unknown").strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def read_control_host(redis_url: str, meta_key: str) -> Optional[str]:
+    """Hostname written at last Ops start; ``None`` if missing."""
+    if not meta_key.strip():
+        return None
+    try:
+        import redis
+
+        r = redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=_REDIS_SOCKET_SEC,
+            socket_timeout=_REDIS_SOCKET_SEC,
+        )
+        raw = r.hget(meta_key.strip(), BIFROST_OPS_CONTROL_HOST_FIELD)
+        s = (raw or "").strip()
+        return s or None
+    except Exception as e:
+        logger.debug("read_control_host %s: %s", meta_key, e)
+        return None
 
 
 def read_control_env(redis_url: str, meta_key: str) -> Optional[str]:
@@ -73,7 +105,14 @@ def write_control_env(redis_url: str, meta_key: str, profile: str) -> None:
         socket_connect_timeout=_REDIS_SOCKET_SEC,
         socket_timeout=_REDIS_SOCKET_SEC,
     )
-    r.hset(meta_key.strip(), BIFROST_OPS_CONTROL_ENV_FIELD, norm)
+    host = control_hostname()
+    r.hset(
+        meta_key.strip(),
+        mapping={
+            BIFROST_OPS_CONTROL_ENV_FIELD: norm,
+            BIFROST_OPS_CONTROL_HOST_FIELD: host,
+        },
+    )
 
 
 def write_trading_engine_ops_lease(redis_url: str, meta_key: str, profile: str) -> None:
@@ -91,10 +130,12 @@ def write_trading_engine_ops_lease(redis_url: str, meta_key: str, profile: str) 
         socket_connect_timeout=_REDIS_SOCKET_SEC,
         socket_timeout=_REDIS_SOCKET_SEC,
     )
+    host = control_hostname()
     r.hset(
         meta_key.strip(),
         mapping={
             BIFROST_OPS_CONTROL_ENV_FIELD: norm,
+            BIFROST_OPS_CONTROL_HOST_FIELD: host,
             ENGINE_OPS_ACTIVE_REDIS_FIELD: "1",
             "updated_at": str(time.time()),
         },
@@ -113,7 +154,11 @@ def clear_control_env(redis_url: str, meta_key: str) -> None:
             socket_connect_timeout=_REDIS_SOCKET_SEC,
             socket_timeout=_REDIS_SOCKET_SEC,
         )
-        r.hdel(meta_key.strip(), BIFROST_OPS_CONTROL_ENV_FIELD)
+        r.hdel(
+            meta_key.strip(),
+            BIFROST_OPS_CONTROL_ENV_FIELD,
+            BIFROST_OPS_CONTROL_HOST_FIELD,
+        )
     except Exception as e:
         logger.warning("clear_control_env %s: %s", meta_key, e)
         raise

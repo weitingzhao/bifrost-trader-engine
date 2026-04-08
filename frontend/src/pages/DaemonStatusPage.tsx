@@ -215,17 +215,17 @@ export function DaemonStatusPage({
 
         <section className="replay-section" aria-labelledby="daemon-console-head">
           <h3 id="daemon-console-head" className="page-title-with-tooltip">
-            Daemon log
-            <InfoTooltip text="Real-time daemon log (Redis stream). Start daemon: python scripts/run_engine.py" />
+            Trading Daemon log
+            <InfoTooltip text="Trading daemon console (Redis Streams: bifrost:console:{dev|prod}:daemon_trading; legacy bifrost:console:daemon_trading merged). Start: python scripts/run_engine.py" />
           </h3>
           <LogConsolePanel
             controller={daemonConsole}
             loadingText="Connecting…"
             errorText="Unable to load (Redis may be down)."
             emptyText="No log lines yet. Start daemon: python scripts/run_engine.py"
-            infoTooltipText="Real-time daemon log (Redis Stream)."
-            resizeAriaLabel="Resize daemon console height"
-            clearTitle="Clear displayed log and Redis stream"
+            infoTooltipText="Trading daemon logs merged from dev/prod streams (same Redis)."
+            resizeAriaLabel="Resize trading daemon console height"
+            clearTitle="Clear displayed log and Redis streams"
           />
         </section>
 

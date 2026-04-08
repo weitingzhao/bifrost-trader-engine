@@ -31,7 +31,7 @@ _YELLOW = "\033[33m"
 _RED = "\033[31m"
 _CYAN = "\033[36m"
 
-from src.bifrost.redis_console_streams import BIFROST_CONSOLE_DAEMON_TRADING
+from src.config.yaml_config import daemon_trading_console_stream_key
 
 _DAEMON_LOG_STREAM_MAXLEN = 50
 
@@ -98,8 +98,22 @@ def _daemon_log_redis_url() -> str:
     return format_redis_url(effective_redis_dict(config, default_db=0))
 
 
-def setup_logging(debug: bool = False) -> None:
+def setup_logging(debug: bool = False, config_path: str | None = None) -> None:
     """Configure colorful logging with distinct styles per level."""
+    resolved_path = config_path
+    if not resolved_path:
+        try:
+            from src.app.config import read_config
+
+            _, resolved_path = read_config()
+        except (ImportError, OSError, ValueError, TypeError):
+            resolved_path = ""
+
+    from src.app.config import config_profile_from_resolved_path
+
+    profile = config_profile_from_resolved_path(resolved_path) if resolved_path else None
+    stream_key = daemon_trading_console_stream_key(profile)
+
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(
         ColoredFormatter(
@@ -107,9 +121,10 @@ def setup_logging(debug: bool = False) -> None:
             datefmt="%Y-%m-%d %H:%M:%S",
         )
     )
+    redis_url = _daemon_log_redis_url()
     redis_handler = RedisStreamLogHandler(
-        _daemon_log_redis_url(),
-        BIFROST_CONSOLE_DAEMON_TRADING,
+        redis_url,
+        stream_key,
         maxlen=_DAEMON_LOG_STREAM_MAXLEN,
     )
     redis_handler.setFormatter(
@@ -134,9 +149,9 @@ if __name__ == "__main__":
     config_path, _ = resolve_startup_config_path(_PROJECT_ROOT, argv_raw)
     os.environ["BIFROST_CONFIG"] = config_path
     if "--debug" in sys.argv:
-        setup_logging(debug=True)
+        setup_logging(debug=True, config_path=config_path)
     else:
-        setup_logging(debug=False)
+        setup_logging(debug=False, config_path=config_path)
 
     from src.daemon.app.entry import run_daemon
 

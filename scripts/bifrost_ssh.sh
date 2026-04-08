@@ -33,7 +33,7 @@ SYNC_PROD_CONFIG="${DEPLOY_SYNC_PROD_CONFIG:-0}"
 RESTART_ALL=0
 ACTION=""
 DO_STATUS=0
-# When 1, systemctl targets full stack: all HTTP APIs + engine + bifrost-agent + Socket Services ingest units (Celery: Dashboard / Ops UI).
+# When 1, systemctl targets full stack: all HTTP APIs + bifrost-agent + Socket Services ingest units (no bifrost-celery; no bifrost-engine — Engine start/stop via Ops UI like Socket Services).
 RESTART_ALL_STACK=0
 # When 1, systemctl targets all FastAPI units only (Monitor + domain APIs).
 RESTART_ALL_APIS=0
@@ -58,15 +58,15 @@ BIFROST_HTTP_UNITS=(
   "${BIFROST_CATEGORY_RESEARCH[@]}"
   "${BIFROST_CATEGORY_FEED[@]}"
 )
-# Full prod stack: monitor, engine, other HTTP APIs, agent (Celery: Dashboard / Ops UI).
-BIFROST_FULL_STACK_UNITS=(bifrost-server bifrost-engine)
+# Full prod stack for this script (restart/deploy): monitor, other HTTP APIs, agent, Socket Services — excludes bifrost-engine (Ops UI).
+BIFROST_FULL_STACK_UNITS=(bifrost-server)
 for _u in "${BIFROST_HTTP_UNITS[@]}"; do
   [[ "${_u}" == bifrost-server ]] && continue
   BIFROST_FULL_STACK_UNITS+=("${_u}")
 done
 BIFROST_FULL_STACK_UNITS+=(bifrost-agent)
 BIFROST_FULL_STACK_UNITS+=("${BIFROST_CATEGORY_SOCKET_SERVICES[@]}")
-# TUI status / --status: HTTP by category order, Socket Services, then runtime (no bifrost-celery — use Ops UI).
+# TUI status / --status: HTTP by category order, Socket Services, then Daemon (engine+agent; no bifrost-celery — use Ops UI).
 BIFROST_STATUS_ROWS=(
   "${BIFROST_CATEGORY_ARCHITECTURE[@]}"
   "${BIFROST_CATEGORY_ACCOUNT[@]}"
@@ -89,6 +89,8 @@ declare -a RESTART_UNITS=()
 BIFROST_SSH_TUI=0
 BIFROST_SSH_LAST_LOG=""
 BIFROST_SSH_RESULT_LINES=20
+# TUI "Last output" tail count; after menu (4) systemd install set high so log + summaries fit (cleared on other menu keys).
+BIFROST_SSH_LAST_OUTPUT_LINES=""
 # Interactive: systemd snapshot for header (menu 3 refreshes all bifrost-* on DEPLOY_HOST).
 BIFROST_INTERACTIVE_STATUS_RAW=""
 BIFROST_INTERACTIVE_STATUS_AT=""
@@ -219,7 +221,7 @@ _bifrost_remote_print_unit_status() {
   fi
 }
 
-# Print captured status lines grouped by ops category (CLI --status). Args: $1 = raw multiline, rest = requested units.
+# Print captured status lines grouped by HTTP category (CLI --status). Args: $1 = raw multiline, rest = requested units.
 _bifrost_cli_print_status_grouped() {
   local raw="$1"
   shift
@@ -260,12 +262,12 @@ _bifrost_cli_print_status_grouped() {
       fi
     done
   }
-  _emit_section "Architecture (monitor+ops+docs)" "${BIFROST_CATEGORY_ARCHITECTURE[@]}"
+  _emit_section "Architecture" "${BIFROST_CATEGORY_ARCHITECTURE[@]}"
   _emit_section "Account (trading+portfolio)" "${BIFROST_CATEGORY_ACCOUNT[@]}"
   _emit_section "Research (market+research+strategy)" "${BIFROST_CATEGORY_RESEARCH[@]}"
   _emit_section "Feed (massive)" "${BIFROST_CATEGORY_FEED[@]}"
   _emit_section "Socket Services (ingest/IB edge)" "${BIFROST_CATEGORY_SOCKET_SERVICES[@]}"
-  _emit_section "Runtime (engine+agent)" bifrost-engine bifrost-agent
+  _emit_section "Daemon (trading engine + agent)" bifrost-engine bifrost-agent
 }
 
 # Paint one unit row from BIFROST_INTERACTIVE_STATUS_RAW (unit name $1).
@@ -289,7 +291,7 @@ _bifrost_status_paint_one_row() {
   fi
 }
 
-# Paint units under the banner (grouped: architecture / account / research / feed / socket services / runtime). Uses BIFROST_INTERACTIVE_STATUS_*.
+# Paint units under the banner (grouped: Architecture / Account / Research / Feed / Socket Services / Daemon). Uses BIFROST_INTERACTIVE_STATUS_*.
 _interactive_paint_remote_status_block() {
   if [[ -z "${BIFROST_INTERACTIVE_STATUS_RAW:-}" ]]; then
     echo "${C_DIM}  (Menu ${C_GREEN}3${C_DIM} loads systemd units from ${DEPLOY_HOST}; see Quick ${C_BOLD}a${C_DIM} = restart all HTTP APIs.)${C_RESET}"
@@ -300,7 +302,7 @@ _interactive_paint_remote_status_block() {
   if ! echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | grep -qE 'bifrost-(server|engine|massive|docs|ops|trading|strategy|portfolio|market|research|agent|massive-ws|ib-operator|ib-ingestor|ib-account-agent):'; then
     echo "${C_YELLOW}  $(echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | head -n 1)${C_RESET}"
   fi
-  echo "${C_MAGENTA}${C_BOLD}  Architecture${C_RESET} ${C_DIM}(monitor+ops+docs)${C_RESET}"
+  echo "${C_MAGENTA}${C_BOLD}  Architecture${C_RESET}"
   for u in "${BIFROST_CATEGORY_ARCHITECTURE[@]}"; do _bifrost_status_paint_one_row "${u}"; done
   echo "${C_MAGENTA}${C_BOLD}  Account${C_RESET} ${C_DIM}(trading+portfolio)${C_RESET}"
   for u in "${BIFROST_CATEGORY_ACCOUNT[@]}"; do _bifrost_status_paint_one_row "${u}"; done
@@ -310,33 +312,34 @@ _interactive_paint_remote_status_block() {
   for u in "${BIFROST_CATEGORY_FEED[@]}"; do _bifrost_status_paint_one_row "${u}"; done
   echo "${C_MAGENTA}${C_BOLD}  Socket Services${C_RESET} ${C_DIM}(ingest/IB edge)${C_RESET}"
   for u in "${BIFROST_CATEGORY_SOCKET_SERVICES[@]}"; do _bifrost_status_paint_one_row "${u}"; done
-  echo "${C_MAGENTA}${C_BOLD}  Runtime${C_RESET} ${C_DIM}(engine+agent)${C_RESET}"
+  echo "${C_MAGENTA}${C_BOLD}  Daemon${C_RESET} ${C_DIM}(trading engine + agent)${C_RESET}"
   _bifrost_status_paint_one_row bifrost-engine
   _bifrost_status_paint_one_row bifrost-agent
 }
 
 _interactive_paint_main_menu() {
   echo "${C_BLUE}${C_BOLD}--- Main menu ---${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}1)${C_RESET} ${C_BOLD}systemctl:${C_RESET} same keys as Quick ${C_DIM}(1–4 agent/engine/monitor/ops; ${C_BOLD}0${C_DIM}+action = all 9 HTTP; ${C_BOLD}a–d${C_DIM} = category; ${C_BOLD}h3 / 03${C_DIM} = restart all HTTP; ${C_BOLD}a3${C_DIM} = architecture+restart; words: all-stack, both, docs, massive, …)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}2)${C_RESET} ${C_BOLD}Quick:${C_RESET} Deploy ${C_DIM}(${C_BOLD}0${C_DIM} = deploy+restart all 9 HTTP · ${C_BOLD}1–4${C_DIM} agent/engine/monitor/ops + optional ${C_BOLD}R${C_RESET}${C_DIM} · ${C_BOLD}a–d${C_DIM} architecture/account/research/feed + optional ${C_BOLD}R${C_RESET}${C_DIM} · ${C_BOLD}q${C_DIM} or empty = cancel)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}1)${C_RESET} ${C_BOLD}systemctl:${C_RESET} same keys as Quick ${C_DIM}(1–3; ${C_BOLD}0${C_DIM}+action = all 9 HTTP; ${C_BOLD}a–d${C_DIM} = category; ${C_BOLD}h3 / 03${C_DIM} = restart all HTTP; ${C_BOLD}a3${C_DIM} = architecture+restart; words: all-stack, both, docs, massive, … — ${C_BOLD}Engine${C_DIM}: use Dashboard)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}2)${C_RESET} ${C_BOLD}Quick:${C_RESET} Deploy ${C_DIM}(${C_BOLD}0${C_DIM} = deploy+restart all 9 HTTP · ${C_BOLD}1–3${C_DIM} + optional ${C_BOLD}R${C_RESET}${C_DIM} · ${C_BOLD}a–d${C_DIM} architecture/account/research/feed + optional ${C_BOLD}R${C_RESET}${C_DIM} · ${C_BOLD}q${C_DIM} or empty = cancel)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}3)${C_RESET} ${C_BOLD}Status:${C_RESET} refresh ${C_DIM}(all bifrost units, summary above)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}4)${C_RESET} Reconnect SSH master ${C_DIM}(password again)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}4)${C_RESET} ${C_BOLD}systemd install:${C_RESET} ${C_DIM}local${C_RESET} render ${C_DIM}bifrost-status.conf${C_RESET} from prod YAML + rsync to host; ${C_DIM}remote${C_RESET} systemd register + copy nginx site + reload if nginx installed; ${C_DIM}repo unit list + summary like (3); widens Last output${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}5)${C_RESET} Clear stored sudo password"
   echo "  ${C_GREEN}${C_BOLD}6)${C_RESET} ${C_BOLD}DB: Refresh schema${C_RESET} ${C_DIM}(choose Dev=local --dev or Prod=remote --prod; pg_ddl / script changes — stays in this menu)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}7)${C_RESET} ${C_BOLD}DB: Release locks${C_RESET} ${C_DIM}(choose Dev=local or Prod=remote; dry-run then optional terminate)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}8)${C_RESET} ${C_BOLD}systemd install:${C_RESET} ${C_DIM}local${C_RESET} render ${C_DIM}bifrost-status.conf${C_RESET} from prod YAML + rsync to host; ${C_DIM}remote${C_RESET} systemd register + copy nginx site + reload if nginx installed${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}9)${C_RESET} Reconnect SSH master ${C_DIM}(password again)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}l)${C_RESET} ${C_BOLD}Local Mac:${C_RESET} Socket ingest + Celery ${C_DIM}(pgrep + logs/.ops-ingest-*.pid on this repo)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}p)${C_RESET} ${C_BOLD}Remote Prod:${C_RESET} systemd scan on ${DEPLOY_HOST} ${C_DIM}(same units as deploy + worker@*)${C_RESET}"
   echo "  ${C_YELLOW}${C_BOLD}q)${C_RESET} Quit"
 }
 
-# Pad with dim rows so the result area is always exactly BIFROST_SSH_RESULT_LINES lines.
+# Pad with dim rows so the result area is always exactly _lim lines (_lim from BIFROST_SSH_LAST_OUTPUT_LINES or BIFROST_SSH_RESULT_LINES).
 _interactive_paint_result_block() {
-  local _tmp _n line
-  echo "${C_BLUE}${C_BOLD}── Last output (last ${BIFROST_SSH_RESULT_LINES} lines) ──${C_RESET}"
+  local _tmp _n line _lim
+  _lim="${BIFROST_SSH_LAST_OUTPUT_LINES:-${BIFROST_SSH_RESULT_LINES}}"
+  echo "${C_BLUE}${C_BOLD}── Last output (last ${_lim} lines) ──${C_RESET}"
   _tmp="$(mktemp -t bifrost_ssh_tui)"
   if [[ -f "${BIFROST_SSH_LAST_LOG}" ]] && [[ -s "${BIFROST_SSH_LAST_LOG}" ]]; then
-    tail -n "${BIFROST_SSH_RESULT_LINES}" "${BIFROST_SSH_LAST_LOG}" >"${_tmp}"
+    tail -n "${_lim}" "${BIFROST_SSH_LAST_LOG}" >"${_tmp}"
   else
     : >"${_tmp}"
   fi
@@ -346,7 +349,7 @@ _interactive_paint_result_block() {
     _n=$((_n + 1))
   done <"${_tmp}"
   rm -f "${_tmp}"
-  while [[ ${_n} -lt ${BIFROST_SSH_RESULT_LINES} ]]; do
+  while [[ ${_n} -lt ${_lim} ]]; do
     echo "${C_DIM}·${C_RESET}"
     _n=$((_n + 1))
   done
@@ -375,9 +378,9 @@ Usage (from repo root):
   ./scripts/bifrost_ssh.sh --password 'REMOTE_SUDO_SECRET' -i
       Interactive menu: open one SSH master (login once; kept until you quit), then run operations in a loop;
       sudo password you enter (or -p) is kept in memory for every menu action until quit or menu (5) Clear.
-      Main menu stays on top; last command output is shown in the bottom 20 lines. Same flags as below.
-      Menu (3) Status refreshes units grouped by ops category + Socket Services + runtime (no bifrost-celery; use Ops UI). Quick deploy: 0 = deploy+restart all 9 HTTP APIs; 1–4 = agent/engine/monitor/ops; a–d = category; q or empty = cancel.
-      Menu (8) Install systemd: locally render deploy/nginx/bifrost-status.conf from merged prod YAML, rsync it to the server, then register deploy/systemd/*.service + *.target (sudo); install nginx site from that file + nginx -t + reload when nginx is present.
+      Main menu stays on top; last command output is shown in the bottom pane (20 lines by default; wider after menu 4 systemd install). Same flags as below.
+      Menu (3) Status refreshes units grouped by category + Socket Services + Daemon (no bifrost-celery; use Ops UI). Menu (4) systemd install appends repo unit file list + the same unit summary as (3). Quick deploy: 0 = deploy+restart all 9 HTTP APIs; 1–3 = single units (Engine not in this script — use Dashboard); a–d = category; q or empty = cancel.
+      Menu (4) Install systemd: locally render deploy/nginx/bifrost-status.conf from merged prod YAML, rsync it to the server, then register deploy/systemd/*.service + *.target (sudo); install nginx site from that file + nginx -t + reload when nginx is present.
       Menu (l) Local Mac: pgrep run_massive_ws / IB ingest / IB operator / run_celery + check logs/.ops-ingest-*.pid (this machine; not SSH).
       Menu (p) Remote Prod: systemctl scan on DEPLOY_HOST (bifrost-* units + socket ingest + bifrost-celery-worker@*); use --password if systemctl needs sudo.
       CLI: --local-mac-services | --remote-services-status
@@ -390,21 +393,21 @@ Usage (from repo root):
   OR use --status (with services), OR use --deploy-only alone:
 
     --server | -server          systemd unit bifrost-server
-    --engine | -engine          systemd unit bifrost-engine
     --massive | -massive        systemd unit bifrost-massive (Feed / Massive API, run_server_massive.py)
     --docs | -docs              systemd unit bifrost-docs (merged OpenAPI docs, run_server_docs.py)
-    --ops | -ops                systemd unit bifrost-ops (Ops API, run_server_ops.py)
+    --ops | -ops                systemd unit bifrost-ops
     --trading | -trading        systemd unit bifrost-trading (run_server_trading.py)
     --strategy | -strategy      systemd unit bifrost-strategy (run_server_strategy.py)
     --portfolio | -portfolio    systemd unit bifrost-portfolio (run_server_portfolio.py)
     --market | -market          systemd unit bifrost-market (run_server_market.py)
     --bifrost-research          systemd unit bifrost-research (run_server_research.py, research_port)
-    --agent | -agent            systemd unit bifrost-agent (Local Control Agent for Ops executor_mode=agent)
-    --all | -all                core pair: bifrost-server + bifrost-engine (Celery: Dashboard / Ops UI)
+    --agent | -agent            systemd unit bifrost-agent
+                                bifrost-engine is not a flag here — start/stop/restart Engine via Ops UI (same as Socket Services).
+    --all | -all                bifrost-server only (Engine is not controlled by this script — use Ops UI)
     --apis | -apis              all nine HTTP API units (architecture+account+research+feed; see category flags)
-    --all-stack | -all-stack    full stack: nine APIs + engine + bifrost-agent + four Socket Services units (15 units; no Celery unit)
+    --all-stack | -all-stack    full stack: nine APIs + bifrost-agent + four Socket Services units (14 units; no Celery, no Engine)
 
-    --architecture              HTTP category: bifrost-server, bifrost-ops, bifrost-docs (monitor+ops+docs)
+    --architecture              HTTP category: bifrost-server, bifrost-ops, bifrost-docs
     --account                   HTTP category: bifrost-trading, bifrost-portfolio
     --research                  HTTP category: bifrost-market, bifrost-research, bifrost-strategy (not --bifrost-research alone)
     --feed                      HTTP category: bifrost-massive only
@@ -424,7 +427,7 @@ Usage (from repo root):
     --migrate                   with --deploy or --deploy-only: run db_refresh_schema.py --prod on remote
     --sync-prod-config          with deploy: also rsync config/config.prod.yaml (overwrites remote)
 
-    --db-refresh                Remote ${DEPLOY_PATH}: python scripts/db_refresh_schema.py --prod (no rsync). Menu (6) Prod.
+    --db-refresh                Remote ${DEPLOY_PATH}: python scripts/db_refresh_schema.py --prod (no rsync). Interactive menu (6) Prod.
     --db-refresh-dev            This machine (repo root): python scripts/db_refresh_schema.py --dev (local .venv if present).
     --db-release-locks          Remote: db_release_dblock.py --prod --dry-run.
     --db-release-locks-dev      Local: db_release_dblock.py --dev --dry-run.
@@ -438,11 +441,10 @@ Usage (from repo root):
                                   Socket Services (massive-ws, ib-operator, ib-ingestor, ib-account-agent); list bifrost-celery-worker@*.
                                   Optional --password if remote systemctl requires sudo.
 
-    --install-systemd-units       On this machine: run scripts/render_nginx_status_conf.py with merged config/config.prod.yaml,
-                                  then rsync deploy/nginx/bifrost-status.conf to the server. Remote: sudo cp deploy/systemd/*.service
-                                  and *.target to /etc/systemd/system/, daemon-reload, copy that nginx file to sites-available,
-                                  nginx -t, reload (nginx steps skipped if nginx missing). One-shot; no other flags.
-                                  Sync unit files first if needed (e.g. --deploy-only). Then e.g. systemctl enable --now API units.
+    --install-systemd-units       Same as interactive menu (4): on this machine run scripts/render_nginx_status_conf.py with merged
+                                  config/config.prod.yaml, then rsync deploy/nginx/bifrost-status.conf to the server. Remote: register
+                                  deploy/systemd/*.service and *.target, daemon-reload, copy nginx site, nginx -t, reload when nginx
+                                  exists. One-shot; no other flags. Sync unit files first if needed (e.g. --deploy-only).
 
     --password VALUE | -p VALUE | --password=VALUE
                                 remote sudo password for sudo -S (interactive: skip password prompt;
@@ -460,7 +462,6 @@ Usage (from repo root):
 Examples:
 
   ./scripts/bifrost_ssh.sh --deploy-only
-  ./scripts/bifrost_ssh.sh -engine -restart -deploy
   ./scripts/bifrost_ssh.sh -server --stop
   ./scripts/bifrost_ssh.sh --all --restart -deploy
   ./scripts/bifrost_ssh.sh --all-stack --restart -deploy
@@ -471,7 +472,7 @@ Examples:
   ./scripts/bifrost_ssh.sh -ops -restart -deploy
   ./scripts/bifrost_ssh.sh -agent -restart -deploy
   ./scripts/bifrost_ssh.sh --all --status
-  ./scripts/bifrost_ssh.sh -server -engine --status
+  ./scripts/bifrost_ssh.sh -server --status
 
   ./scripts/bifrost_ssh.sh --db-refresh
   ./scripts/bifrost_ssh.sh --db-refresh-dev
@@ -751,7 +752,7 @@ _run_pipeline() {
   elif [[ "${RESTART_ALL_STACK}" == "1" ]]; then
     RESTART_UNITS=("${BIFROST_FULL_STACK_UNITS[@]}")
   elif [[ "${RESTART_ALL}" == "1" ]]; then
-    RESTART_UNITS=(bifrost-server bifrost-engine)
+    RESTART_UNITS=(bifrost-server)
   elif [[ -n "${RESTART_CATEGORY}" ]]; then
     case "${RESTART_CATEGORY}" in
       architecture) RESTART_UNITS=("${BIFROST_CATEGORY_ARCHITECTURE[@]}") ;;
@@ -915,19 +916,19 @@ REMOTE_EOF
 }
 
 # Interactive: rsync --delete + remote build; optional systemctl restart.
-# Keys align with menu (1) systemctl unit legend: 0=all HTTP restart, 1–4=agent/engine/monitor/ops, a–d=categories; R suffix = restart after deploy.
+# Keys align with menu (1) systemctl unit legend: 0=all HTTP restart, 1–3=single units (no Engine — use Dashboard), a–d=categories; R suffix = restart after deploy.
 _interactive_quick_deploy() {
   local _raw _norm _digit _ltr _want_r
   echo ""
   echo "${C_BLUE}${C_BOLD}--- Quick: Deploy ---${C_RESET}"
-  _msg_info "Remote: rsync --delete + venv pip + npm build (includes React SPA / Dashboard). Append R after 1–4 or a–d to restart those units after deploy."
+  _msg_info "Remote: rsync --delete + venv pip + npm build (includes React SPA / Dashboard). Append R after 1–3 or a–d to restart those units after deploy."
   echo "  ${C_GREEN}0${C_RESET} deploy + restart ${C_BOLD}all 9 HTTP${C_RESET} ${C_DIM}APIs${C_RESET}"
-  echo "  ${C_GREEN}1${C_RESET} agent  ${C_GREEN}2${C_RESET} engine  ${C_GREEN}3${C_RESET} monitor ${C_DIM}(bifrost-server)${C_RESET}  ${C_GREEN}4${C_RESET} ops"
+  echo "  ${C_GREEN}1${C_RESET} agent  ${C_GREEN}2${C_RESET} monitor  ${C_GREEN}3${C_RESET} ops"
   echo "  ${C_GREEN}a${C_RESET} architecture  ${C_GREEN}b${C_RESET} account  ${C_GREEN}c${C_RESET} research  ${C_GREEN}d${C_RESET} feed ${C_DIM}(massive)${C_RESET}"
-  echo "  Examples: ${C_DIM}0${C_RESET} = sync+build+restart all HTTP · ${C_DIM}3R${C_RESET} = +restart monitor · ${C_DIM}cR${C_RESET} = +restart research category · ${C_DIM}2${C_RESET} = deploy only (no systemctl)"
-  echo "  ${C_DIM}Tip: use ${C_BOLD}3R${C_RESET} after UI changes so bifrost-server remounts frontend/dist. ${C_BOLD}q${C_RESET} or empty = cancel.${C_RESET}"
+  echo "  Examples: ${C_DIM}0${C_RESET} = sync+build+restart all HTTP · ${C_DIM}2R${C_RESET} = +restart bifrost-server · ${C_DIM}cR${C_RESET} = +restart research category · ${C_DIM}2${C_RESET} = deploy only (no systemctl)"
+  echo "  ${C_DIM}Tip: use ${C_BOLD}2R${C_RESET} after UI changes so bifrost-server remounts frontend/dist. ${C_BOLD}q${C_RESET} or empty = cancel.${C_RESET}"
   while true; do
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[0, 1-4, a-d, optional R, q to cancel]${C_RESET} "
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[0, 1-3, a-d, optional R, q to cancel]${C_RESET} "
     read -r _raw
     _raw=$(echo "${_raw}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     _norm=$(echo "${_raw}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
@@ -944,7 +945,7 @@ _interactive_quick_deploy() {
       _run_pipeline || true
       break
     fi
-    if [[ "${_norm}" =~ ^([1-4])(r)?$ ]]; then
+    if [[ "${_norm}" =~ ^([1-3])(r)?$ ]]; then
       _digit="${BASH_REMATCH[1]}"
       _want_r="${BASH_REMATCH[2]}"
       if [[ -n "${_want_r}" ]]; then
@@ -952,9 +953,8 @@ _interactive_quick_deploy() {
         ACTION=restart
         case "${_digit}" in
           1) _restart_add_unit bifrost-agent ;;
-          2) _restart_add_unit bifrost-engine ;;
-          3) _restart_add_unit bifrost-server ;;
-          4) _restart_add_unit bifrost-ops ;;
+          2) _restart_add_unit bifrost-server ;;
+          3) _restart_add_unit bifrost-ops ;;
         esac
         echo "${C_CYAN}→ deploy + sudo systemctl restart …${C_RESET}"
       else
@@ -984,7 +984,7 @@ _interactive_quick_deploy() {
       _run_pipeline || true
       break
     fi
-    _msg_warn "Invalid — use 0, 1–4 or a–d, optional R (e.g. 3R, cR), q or empty to cancel."
+    _msg_warn "Invalid — use 0, 1–3 or a–d, optional R (e.g. 2R, cR), q or empty to cancel."
   done
 }
 
@@ -1147,13 +1147,13 @@ _block() {
 echo "=== Bifrost systemd scan (${DEPLOY_USER}@${DEPLOY_HOST}) ==="
 echo "Repo on server (expected): ${DEPLOY_PATH}"
 echo "Time: \$(date '+%Y-%m-%d %H:%M:%S %z')"
-_block "Core (server+engine+celery)" bifrost-server bifrost-engine bifrost-celery
-_block "HTTP · Architecture (monitor+ops+docs)" ${_arch}
+_block "Core (server+celery)" bifrost-server bifrost-celery
+_block "HTTP · Architecture" ${_arch}
 _block "HTTP · Account (trading+portfolio)" ${_acct}
 _block "HTTP · Research (market+research+strategy)" ${_res}
 _block "HTTP · Feed (massive)" ${_feed}
 _block "Socket Services (ingest/IB edge)" ${_socket}
-_block "Other runtime" bifrost-agent
+_block "Daemon (trading engine + agent)" bifrost-engine bifrost-agent
 echo ""
 echo "--- bifrost-celery-worker@*.service (template instances) ---"
 if out=\$(systemctl list-units 'bifrost-celery-worker@*.service' --all --no-legend --no-pager 2>/dev/null); then
@@ -1200,23 +1200,30 @@ _interactive_pick_db_env() {
   esac
 }
 
-# Interactive menu 3: systemd units on DEPLOY_HOST; store summary for banner (no sub-prompt).
-_interactive_show_status() {
-  local _raw _ec_sys _ec
+# Refresh BIFROST_INTERACTIVE_STATUS_* from DEPLOY_HOST (same units as menu 3 banner / --status grouping).
+_bifrost_interactive_capture_remote_status() {
+  local _raw _ec
   _bifrost_restore_session_sudo
-  _msg_info "Fetching status (all bifrost units) on ${DEPLOY_HOST} …"
-  echo ""
   set +e
   _raw="$(_bifrost_remote_print_unit_status "$(_bifrost_status_systemd_units_space)" 2>&1)"
-  _ec_sys=$?
+  _ec=$?
   set -e
-  _ec=${_ec_sys}
   BIFROST_INTERACTIVE_STATUS_RAW="${_raw}"
   BIFROST_INTERACTIVE_STATUS_AT="$(date '+%Y-%m-%d %H:%M:%S')"
+  return "${_ec}"
+}
+
+# Interactive menu 3: systemd units on DEPLOY_HOST; store summary for banner (no sub-prompt).
+_interactive_show_status() {
+  local _ec
+  _msg_info "Fetching status (all bifrost units) on ${DEPLOY_HOST} …"
+  echo ""
+  _bifrost_interactive_capture_remote_status
+  _ec=$?
   if [[ -n "${BIFROST_SSH_LAST_LOG:-}" ]]; then
     {
       echo "--- Status refresh (${BIFROST_INTERACTIVE_STATUS_AT}) exit ${_ec} ---"
-      echo "${_raw}"
+      echo "${BIFROST_INTERACTIVE_STATUS_RAW}"
     } >"${BIFROST_SSH_LAST_LOG}"
   fi
   _msg_info "Status refresh finished (exit ${_ec}). Redrawing menu…"
@@ -1588,9 +1595,40 @@ REMOTE_INSTALL_BODY
   return "${_ec}"
 }
 
-# Interactive menu 8: install systemd unit files from synced repo.
+# Append sorted list of deploy/systemd *.service and *.target (what the install loop registers).
+_bifrost_append_deploy_systemd_files_summary_to_log() {
+  local log="$1"
+  local d="${PROJECT_ROOT}/deploy/systemd"
+  local _tmp
+  _tmp="$(mktemp -t bifrost_sysd_units)"
+  {
+    echo ""
+    echo "--- Repo unit files processed by install (deploy/systemd) ---"
+    if [[ ! -d "${d}" ]]; then
+      echo "  (missing on this machine: ${d})"
+    else
+      (
+        shopt -s nullglob
+        local _f
+        for _f in "${d}"/*.service "${d}"/*.target; do
+          [[ -f "${_f}" ]] && basename "${_f}"
+        done | sort -u
+      ) >"${_tmp}"
+      if [[ ! -s "${_tmp}" ]]; then
+        echo "  (no .service or .target files)"
+      else
+        while IFS= read -r _b; do
+          [[ -n "${_b}" ]] && echo "  ${_b}"
+        done <"${_tmp}"
+      fi
+    fi
+  } >>"${log}"
+  rm -f "${_tmp}"
+}
+
+# Interactive menu 4: install systemd unit files from synced repo.
 _interactive_install_systemd_units() {
-  local _ec
+  local _ec _sum_ec _lc
   _bifrost_restore_session_sudo
   _msg_info "Local render + rsync nginx conf, then remote: register ${DEPLOY_PATH}/deploy/systemd + install nginx site if present …"
   echo ""
@@ -1602,19 +1640,45 @@ _interactive_install_systemd_units() {
     echo ""
     echo "--- exit code: ${_ec} ---"
   } >>"${BIFROST_SSH_LAST_LOG}"
-  _msg_info "systemd install finished (exit ${_ec}). Redrawing menu…"
+  if [[ -n "${BIFROST_SSH_LAST_LOG:-}" ]]; then
+    _bifrost_append_deploy_systemd_files_summary_to_log "${BIFROST_SSH_LAST_LOG}"
+  fi
+  _msg_info "systemd install finished (exit ${_ec}). Fetching unit summary (same as menu 3) …"
+  echo ""
+  _bifrost_interactive_capture_remote_status
+  _sum_ec=$?
+  if [[ -n "${BIFROST_SSH_LAST_LOG:-}" ]]; then
+    {
+      echo ""
+      echo "--- Unit summary (${BIFROST_INTERACTIVE_STATUS_AT}) exit ${_sum_ec} ---"
+      _bifrost_cli_print_status_grouped "${BIFROST_INTERACTIVE_STATUS_RAW}" "${BIFROST_STATUS_ROWS[@]}"
+    } >>"${BIFROST_SSH_LAST_LOG}"
+  fi
+  # Widen Last output so install log + file list + grouped summary are visible (cap avoids huge terminals).
+  if [[ -n "${BIFROST_SSH_LAST_LOG:-}" ]] && [[ -f "${BIFROST_SSH_LAST_LOG}" ]]; then
+    _lc=$(wc -l <"${BIFROST_SSH_LAST_LOG}" | tr -d ' ')
+    if [[ "${_lc}" -gt 200 ]]; then
+      BIFROST_SSH_LAST_OUTPUT_LINES=220
+    elif [[ "${_lc}" -gt 120 ]]; then
+      BIFROST_SSH_LAST_OUTPUT_LINES=200
+    else
+      BIFROST_SSH_LAST_OUTPUT_LINES=120
+    fi
+  else
+    BIFROST_SSH_LAST_OUTPUT_LINES=120
+  fi
+  _msg_info "Repo unit list + unit summary appended; top banner updated. Last output pane widened to ${BIFROST_SSH_LAST_OUTPUT_LINES} lines. Redrawing menu…"
   return 0
 }
 
 # Map token -> bifrost unit name, ALL*, or CAT_*.
-# Digits 1–4 match Quick Deploy / systemctl legend: 1=agent 2=engine 3=monitor 4=ops. Letters a–d = HTTP categories.
+# Digits 1–3 match Quick Deploy / systemctl legend: 1=agent 2=bifrost-server 3=bifrost-ops (bifrost-engine: Dashboard only). Letters a–d = HTTP categories.
 _interactive_map_unit_token() {
   case "$1" in
     0) echo ALL_HTTP ;;
     1|agent|bifrost-agent) echo bifrost-agent ;;
-    2|engine|e|bifrost-engine) echo bifrost-engine ;;
-    3|monitor|server|bifrost-server) echo bifrost-server ;;
-    4|ops|o|bifrost-ops) echo bifrost-ops ;;
+    2|monitor|server|bifrost-server) echo bifrost-server ;;
+    3|ops|o|bifrost-ops) echo bifrost-ops ;;
     a|architecture|arch) echo CAT_ARCH ;;
     b|account|acct) echo CAT_ACCOUNT ;;
     c|research|res) echo CAT_RESEARCH ;;
@@ -1643,17 +1707,17 @@ _interactive_map_action_token() {
   esac
 }
 
-# Interactive: systemctl — same unit keys as Quick Deploy (1–4, 0=all HTTP, a–d categories) plus words (all-stack, massive, …).
+# Interactive: systemctl — same unit keys as Quick Deploy (1–3, 0=all HTTP, a–d categories) plus words (all-stack, massive, …).
 _interactive_systemctl_one_service() {
   local _unit _act _t1 _t2 _u _a _line_lower _hx _digits _d1 _d2 _cl _ac_digit _cn
   echo ""
   echo "${C_BLUE}${C_BOLD}--- systemctl (one unit or all) ---${C_RESET}"
   _msg_info "Enter unit + action on one line (examples below)."
-  echo "  ${C_GREEN}Units:${C_RESET}  ${C_DIM}1${C_RESET} agent  ${C_DIM}2${C_RESET} engine  ${C_DIM}3${C_RESET} monitor ${C_DIM}(server)${C_RESET}  ${C_DIM}4${C_RESET} ops"
+  echo "  ${C_GREEN}Units:${C_RESET}  ${C_DIM}1${C_RESET} agent  ${C_DIM}2${C_RESET} monitor  ${C_DIM}3${C_RESET} ops"
   echo "  ${C_GREEN}0${C_RESET} all 9 HTTP APIs  ${C_DIM}(same as apis / h3)${C_RESET}  ·  ${C_GREEN}a–d${C_RESET} architecture / account / research / feed"
-  echo "  ${C_GREEN}Other words:${C_RESET} ${C_DIM}both${C_RESET} server+engine · ${C_DIM}all-stack${C_RESET} · ${C_DIM}docs massive trading strategy portfolio market bifrost-research${C_RESET}"
+  echo "  ${C_GREEN}Other words:${C_RESET} ${C_DIM}both${C_RESET} bifrost-server only · ${C_DIM}all-stack${C_RESET} · ${C_DIM}docs massive trading strategy portfolio market bifrost-research${C_RESET}"
   echo "  ${C_GREEN}Action:${C_RESET} ${C_DIM}1${C_RESET}=start ${C_DIM}2${C_RESET}=stop ${C_DIM}3${C_RESET}=restart"
-  echo "  ${C_CYAN}Shorthand:${C_RESET} ${C_BOLD}11–43${C_DIM} = unit+action e.g. ${C_BOLD}33${C_DIM}=monitor+restart · ${C_BOLD}01–03${C_DIM} = all HTTP+action · ${C_BOLD}a3${C_DIM}=architecture+restart · ${C_BOLD}h3${C_RESET}"
+  echo "  ${C_CYAN}Shorthand:${C_RESET} ${C_BOLD}11–33${C_DIM} = unit+action e.g. ${C_BOLD}23${C_DIM}=bifrost-server+restart · ${C_BOLD}01–03${C_DIM} = all HTTP+action · ${C_BOLD}a3${C_DIM}=architecture+restart · ${C_BOLD}h3${C_RESET}"
   echo "  ${C_DIM}empty or q = cancel${C_RESET} ${C_DIM}(0 is “all HTTP”, not cancel)${C_RESET}"
   while true; do
     echo -n "${C_GREEN}${C_BOLD}>${C_RESET} "
@@ -1721,19 +1785,19 @@ _interactive_systemctl_one_service() {
       fi
     fi
 
-    # Unit 1–4 + action 1–3 (e.g. 33 = monitor + restart)
+    # Unit 1–3 + action 1–3 (e.g. 23 = bifrost-server + restart)
     if [[ ${#_digits} -ge 2 ]]; then
       _d1="${_digits:0:1}"
       _d2="${_digits:1:1}"
-      if [[ "${_d1}" == [1234] && "${_d2}" == [123] ]]; then
+      if [[ "${_d1}" == [123] && "${_d2}" == [123] ]]; then
         _u="$(_interactive_map_unit_token "${_d1}")"
         _a="$(_interactive_map_action_token "${_d2}")"
         if [[ -z "${_u}" || -z "${_a}" ]]; then
-          _msg_warn "Invalid shorthand — use 11–43 (unit+action). Or q / empty to cancel."
+          _msg_warn "Invalid shorthand — use 11–33 (unit+action). Or q / empty to cancel."
           continue
         fi
         if [[ "${_u}" == "ALL" ]]; then
-          echo "${C_CYAN}→ sudo systemctl ${_a} bifrost-server bifrost-engine${C_RESET}"
+          echo "${C_CYAN}→ sudo systemctl ${_a} bifrost-server${C_RESET}"
         elif [[ "${_u}" == "ALL_STACK" ]]; then
           echo "${C_CYAN}→ sudo systemctl ${_a} ${BIFROST_FULL_STACK_UNITS[*]}${C_RESET}"
         elif [[ "${_u}" == "ALL_HTTP" ]]; then
@@ -1759,7 +1823,7 @@ _interactive_systemctl_one_service() {
 
     set -- ${_line}
     if [[ $# -lt 2 ]]; then
-      _msg_warn "Invalid input — two words (3 restart, 0 3, a restart) or shorthand 33, 03, a3. q / empty = cancel."
+      _msg_warn "Invalid input — two words (2 restart, 3 restart, 0 3, a restart) or shorthand 23, 33, 03, a3. q / empty = cancel."
       continue
     fi
     _t1="$1"
@@ -1781,13 +1845,13 @@ _interactive_systemctl_one_service() {
       fi
     fi
     if [[ "${_unit}" == "ALL" ]]; then
-      echo "${C_CYAN}→ sudo systemctl ${_act} bifrost-server bifrost-engine${C_RESET}"
+      echo "${C_CYAN}→ sudo systemctl ${_act} bifrost-server${C_RESET}"
     elif [[ "${_unit}" == "ALL_STACK" ]]; then
       echo "${C_CYAN}→ sudo systemctl ${_act} ${BIFROST_FULL_STACK_UNITS[*]}${C_RESET}"
     elif [[ "${_unit}" == "ALL_HTTP" ]]; then
       echo "${C_CYAN}→ sudo systemctl ${_act} ${BIFROST_HTTP_UNITS[*]}${C_RESET}"
     elif [[ "${_unit}" == "CAT_ARCH" ]]; then
-      echo "${C_CYAN}→ sudo systemctl ${_act} architecture (server+ops+docs)${C_RESET}"
+      echo "${C_CYAN}→ sudo systemctl ${_act} architecture category${C_RESET}"
     elif [[ "${_unit}" == "CAT_ACCOUNT" ]]; then
       echo "${C_CYAN}→ sudo systemctl ${_act} account (trading+portfolio)${C_RESET}"
     elif [[ "${_unit}" == "CAT_RESEARCH" ]]; then
@@ -1862,13 +1926,38 @@ interactive_mode() {
 
   while true; do
     _interactive_paint_full
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-8|l|p|q]${C_RESET} "
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-7|9|l|p|q]${C_RESET} "
     read -r _ch
     case "${_ch}" in
-      1) _interactive_systemctl_one_service ;;
-      2) _interactive_quick_deploy ;;
-      3) _interactive_show_status ;;
-      4)
+      1)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        _interactive_systemctl_one_service
+        ;;
+      2)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        _interactive_quick_deploy
+        ;;
+      3)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        _interactive_show_status
+        ;;
+      4) _interactive_install_systemd_units ;;
+      5)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        SUDO_PASSWORD=""
+        BIFROST_SESSION_SUDO_PASSWORD=""
+        echo "[INFO] Stored sudo password cleared." >"${BIFROST_SSH_LAST_LOG}"
+        ;;
+      6)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        _interactive_db_refresh_schema
+        ;;
+      7)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        _interactive_db_release_locks
+        ;;
+      9)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
         _msg_info "Reconnecting SSH (output streams below; may take a few seconds)…"
         echo ""
         {
@@ -1876,21 +1965,18 @@ interactive_mode() {
           SSH_CONTROL_PATH=""
           _ssh_control_start
         } 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
-        _rc4=${PIPESTATUS[0]}
+        _rc9=${PIPESTATUS[0]}
         {
           echo ""
-          echo "--- exit code: ${_rc4} ---"
+          echo "--- exit code: ${_rc9} ---"
         } >>"${BIFROST_SSH_LAST_LOG}"
         ;;
-      5)
-        SUDO_PASSWORD=""
-        BIFROST_SESSION_SUDO_PASSWORD=""
-        echo "[INFO] Stored sudo password cleared." >"${BIFROST_SSH_LAST_LOG}"
+      8)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        echo "[WARN] systemd install is now menu 4 (not 8)." >"${BIFROST_SSH_LAST_LOG}"
         ;;
-      6) _interactive_db_refresh_schema ;;
-      7) _interactive_db_release_locks ;;
-      8) _interactive_install_systemd_units ;;
       l|L)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
         set +e
         _cli_local_mac_subprocess_check 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
         _ec_l=${PIPESTATUS[0]}
@@ -1901,6 +1987,7 @@ interactive_mode() {
         } >>"${BIFROST_SSH_LAST_LOG}"
         ;;
       p|P)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
         _bifrost_restore_session_sudo
         set +e
         _cli_remote_services_systemd_scan 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
@@ -1912,11 +1999,15 @@ interactive_mode() {
         } >>"${BIFROST_SSH_LAST_LOG}"
         ;;
       q|Q)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
         echo "[INFO] Bye." >"${BIFROST_SSH_LAST_LOG}"
         _interactive_paint_full
         break
         ;;
-      *) echo "[WARN] Unknown choice — try 1–8, l, p, or q." >"${BIFROST_SSH_LAST_LOG}" ;;
+      *)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        echo "[WARN] Unknown choice — try 1–7, 9, l, p, or q. (systemd install = 4)" >"${BIFROST_SSH_LAST_LOG}"
+        ;;
     esac
   done
   _ssh_control_cleanup
@@ -2000,7 +2091,9 @@ while [[ $# -gt 0 ]]; do
     --remote-services-status) CLI_REMOTE_SERVICES_STATUS=1 ;;
     --install-systemd-units) CLI_INSTALL_SYSTEMD=1 ;;
     --server|-server) _restart_add_unit bifrost-server ;;
-    --engine|-engine) _restart_add_unit bifrost-engine ;;
+    --engine|-engine)
+      usage_error "bifrost-engine is not controlled by bifrost_ssh.sh; use Ops UI (Daemon / market-ingest) like Socket Services."
+      ;;
     --massive|-massive) _restart_add_unit bifrost-massive ;;
     --docs|-docs) _restart_add_unit bifrost-docs ;;
     --ops|-ops) _restart_add_unit bifrost-ops ;;
@@ -2162,13 +2255,13 @@ if [[ "${DO_DEPLOY_ONLY}" == "1" ]]; then
 fi
 
 if [[ "${RESTART_ALL}" == "1" ]] && [[ "${RESTART_ALL_STACK}" == "1" ]]; then
-  usage_error "use either --all (server+engine) or --all-stack (full stack incl. Socket Services), not both."
+  usage_error "use either --all (bifrost-server only) or --all-stack (HTTP+agent+Socket Services, no Engine), not both."
 fi
 if [[ "${RESTART_ALL_APIS}" == "1" ]] && [[ "${RESTART_ALL_STACK}" == "1" ]]; then
   usage_error "use either --apis (HTTP APIs only) or --all-stack (full stack), not both."
 fi
 if [[ "${RESTART_ALL_APIS}" == "1" ]] && [[ "${RESTART_ALL}" == "1" ]]; then
-  usage_error "use either --apis or --all (server+engine), not both."
+  usage_error "use either --apis or --all (bifrost-server only), not both."
 fi
 
 if [[ "${RESTART_ALL_STACK}" == "1" ]]; then
@@ -2176,7 +2269,7 @@ if [[ "${RESTART_ALL_STACK}" == "1" ]]; then
 elif [[ "${RESTART_ALL_APIS}" == "1" ]]; then
   RESTART_UNITS=("${BIFROST_HTTP_UNITS[@]}")
 elif [[ "${RESTART_ALL}" == "1" ]]; then
-  RESTART_UNITS=(bifrost-server bifrost-engine)
+  RESTART_UNITS=(bifrost-server)
 fi
 
 if [[ "${DO_DEPLOY_ONLY}" != "1" ]]; then
@@ -2188,7 +2281,7 @@ if [[ "${DO_DEPLOY_ONLY}" != "1" ]]; then
   fi
   if [[ -n "${ACTION}" || "${DO_STATUS}" == "1" ]]; then
     if [[ "${RESTART_ALL}" != "1" ]] && [[ "${RESTART_ALL_STACK}" != "1" ]] && [[ "${RESTART_ALL_APIS}" != "1" ]] && [[ -z "${RESTART_CATEGORY}" ]] && [[ ${#RESTART_UNITS[@]} -eq 0 ]]; then
-      usage_error "missing service: specify at least one of --server, --engine, --massive, --docs, --ops, --trading, --strategy, --portfolio, --market, --bifrost-research, --agent, --all, --apis, --all-stack, or --architecture/--account/--research/--feed."
+      usage_error "missing service: specify at least one of --server, --massive, --docs, --ops, --trading, --strategy, --portfolio, --market, --bifrost-research, --agent, --all, --apis, --all-stack, or --architecture/--account/--research/--feed. (bifrost-engine: use Dashboard.)"
     fi
   fi
 fi

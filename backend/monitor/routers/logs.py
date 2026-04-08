@@ -12,7 +12,6 @@ from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from backend.monitor.routers.deps import (
-    DAEMON_LOG_STREAM_KEY,
     IB_ACCOUNT_AGENT_LOG_STREAM_KEY,
     IB_OPERATOR_LOG_STREAM_KEY,
     IB_INGESTOR_LOG_STREAM_KEY,
@@ -20,6 +19,8 @@ from backend.monitor.routers.deps import (
     MASSIVE_WS_LOG_STREAM_KEY,
     daemon_log_redis_url,
 )
+from src.bifrost.redis_console_streams import BIFROST_CONSOLE_DAEMON_TRADING
+from src.config.yaml_config import daemon_trading_console_stream_key
 from src.core.sse.queue_utils import put_nowait_drop_oldest
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,14 @@ def _market_console_stream_keys_dual() -> List[str]:
     return list(dict.fromkeys([d, p]))
 
 
+def _daemon_console_stream_keys_for_read() -> List[str]:
+    """Legacy + dev + prod daemon streams (fixed names; same Redis, no extra config hash)."""
+    dev_default = daemon_trading_console_stream_key(None)
+    prod_default = daemon_trading_console_stream_key("prod")
+    legacy = BIFROST_CONSOLE_DAEMON_TRADING
+    return list(dict.fromkeys([legacy, dev_default, prod_default]))
+
+
 _TIME_PREFIX_RE_STREAM = re.compile(
     r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:,\d+)?)",
 )
@@ -111,19 +120,20 @@ def _merged_console_tail_from_keys(r: Any, keys: List[str], tail: int) -> Tuple[
 
 
 def _daemon_log_reader_loop(app_ref) -> None:
-    """Background thread: XREAD Redis stream bifrost:console:daemon_trading, push each line to all SSE queues."""
+    """Background thread: XREAD legacy + dev + prod daemon console streams."""
     try:
         import redis
-        r = redis.from_url(daemon_log_redis_url())
-        last_id = "$"
+        r = redis.from_url(daemon_log_redis_url(), decode_responses=True)
+        keys = _daemon_console_stream_keys_for_read()
+        last_ids: Dict[str, str] = {k: "$" for k in keys}
         while True:
             try:
-                result = r.xread(block=5000, streams={DAEMON_LOG_STREAM_KEY: last_id}, count=100)
+                result = r.xread(block=5000, streams=last_ids, count=100)
                 if not result:
                     continue
-                for _stream_name, entries in result:
+                for stream_name, entries in result:
                     for eid, fields in entries:
-                        last_id = eid
+                        last_ids[stream_name] = eid
                         line = _redis_stream_line(fields)
                         with app_ref.state.daemon_log_lock:
                             queues = list(app_ref.state.daemon_log_queues)
@@ -536,16 +546,16 @@ def get_daemon_logs(
     request: Request,
     tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
 ) -> Dict[str, Any]:
-    """Return last N lines from daemon console Redis stream (for initial display in System → Daemon Console)."""
+    """Return last N lines from Trading Daemon console streams (dev + prod + legacy, merged by time)."""
     try:
         import redis
-        r = redis.from_url(daemon_log_redis_url())
-        raw = r.xrevrange(DAEMON_LOG_STREAM_KEY, count=tail)
-        lines = []
-        for _eid, fields in reversed(raw):
-            line = _redis_stream_line(fields)
-            lines.append(line)
-        return {"lines": lines}
+        r = redis.from_url(daemon_log_redis_url(), decode_responses=True)
+        keys = _daemon_console_stream_keys_for_read()
+        lines, partial_err = _merged_console_tail_from_keys(r, keys, tail)
+        out: Dict[str, Any] = {"lines": lines}
+        if partial_err:
+            out["error"] = partial_err
+        return out
     except Exception as e:
         logger.warning("get_daemon_logs failed: %s", e)
         return {"lines": [], "error": str(e)}
@@ -553,11 +563,12 @@ def get_daemon_logs(
 
 @router.delete("/api/daemon/logs")
 def clear_daemon_logs(request: Request) -> Dict[str, Any]:
-    """Delete the daemon console Redis stream so next fetch is empty. UI Clear button uses this."""
+    """Delete Trading Daemon console Redis streams (dev + prod + legacy). UI Clear uses this."""
     try:
         import redis
-        r = redis.from_url(daemon_log_redis_url())
-        r.delete(DAEMON_LOG_STREAM_KEY)
+        r = redis.from_url(daemon_log_redis_url(), decode_responses=True)
+        for key in _daemon_console_stream_keys_for_read():
+            r.delete(key)
         return {"ok": True}
     except Exception as e:
         logger.warning("clear_daemon_logs failed: %s", e)
@@ -566,7 +577,7 @@ def clear_daemon_logs(request: Request) -> Dict[str, Any]:
 
 @router.post("/api/daemon/logs/trim")
 def trim_daemon_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """Trim daemon console Redis stream to at most max_lines (keep newest)."""
+    """Trim each Trading Daemon console stream to at most max_lines (keep newest)."""
     try:
         max_lines = body.get("max_lines")
         if max_lines is None:
@@ -575,8 +586,9 @@ def trim_daemon_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict
         if max_lines < 1 or max_lines > 10000:
             return {"ok": False, "error": "max_lines must be between 1 and 10000"}
         import redis
-        r = redis.from_url(daemon_log_redis_url())
-        r.xtrim(DAEMON_LOG_STREAM_KEY, maxlen=max_lines, approximate=True)
+        r = redis.from_url(daemon_log_redis_url(), decode_responses=True)
+        for key in _daemon_console_stream_keys_for_read():
+            r.xtrim(key, maxlen=max_lines, approximate=True)
         return {"ok": True}
     except Exception as e:
         logger.warning("trim_daemon_logs failed: %s", e)

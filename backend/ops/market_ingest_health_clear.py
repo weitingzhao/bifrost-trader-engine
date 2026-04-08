@@ -2,7 +2,7 @@
 
 - After a successful Ops **stop**, rewrite canonical health fields to a disconnected snapshot so
   Monitor GET /status updates without waiting for TTL or a graceful writer exit.
-- **trading_engine**: Ops meta hash ``bifrost:ops:trading_engine`` uses ``engine_ops_active`` +
+- **trading_engine**: Health / Ops meta hash ``bifrost:health:daemon_trading_engine`` uses ``engine_ops_active`` +
   ``updated_at`` for the same exclusive-start guard as Socket rows.
 - Before **start** when no ``bifrost_ops_control_env`` lease exists, detect a still-fresh connected
   hash so only one Dev/Prod stack runs a writer against the same Redis.

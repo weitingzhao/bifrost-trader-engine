@@ -1,6 +1,6 @@
 """YAML-driven registry for Ops-managed systemd services (Socket ingest + optional Engine).
 
-**trading_engine** uses ``redis_meta_key`` ``bifrost:ops:trading_engine`` by default (Dev/Prod
+**trading_engine** uses ``redis_meta_key`` ``bifrost:health:daemon_trading_engine`` by default (Dev/Prod
 Ops lease + ``engine_ops_active``, same exclusivity rules as Socket rows in
 :mod:`backend.ops.routers.market_ingest`). YAML may omit ``redis_meta_key`` for that id and the
 default meta key is applied.
@@ -11,15 +11,16 @@ from __future__ import annotations
 from typing import Dict, List
 
 from src.bifrost.redis_health_keys import (
+    BIFROST_HEALTH_DAEMON_TRADING_ENGINE,
     BIFROST_HEALTH_IB_ACCOUNT_AGENT,
     BIFROST_HEALTH_IB_INGESTOR,
     BIFROST_HEALTH_IB_OPERATOR,
     BIFROST_HEALTH_MASSIVE_WS,
-    BIFROST_OPS_TRADING_ENGINE_META,
     LEGACY_BIFROST_IB_ACCOUNT_AGENT,
     LEGACY_BIFROST_IB_INGESTOR,
     LEGACY_BIFROST_IB_OPERATOR,
     LEGACY_BIFROST_MASSIVE_WS,
+    LEGACY_BIFROST_OPS_TRADING_ENGINE_META,
 )
 
 _LEGACY_IB_INGESTER_META_HEALTH = "ib:ingester:meta:health"
@@ -54,7 +55,7 @@ DEFAULT_MARKET_INGEST_SERVICES: List[Dict[str, str]] = [
         "id": "trading_engine",
         "label": "Trading daemon (Engine)",
         "systemd_unit": "bifrost-engine.service",
-        "redis_meta_key": BIFROST_OPS_TRADING_ENGINE_META,
+        "redis_meta_key": BIFROST_HEALTH_DAEMON_TRADING_ENGINE,
     },
 ]
 
@@ -92,8 +93,10 @@ def market_ingest_services_from_config(config: dict) -> List[Dict[str, str]]:
             meta = BIFROST_HEALTH_IB_OPERATOR
         elif sid == "ib_account_agent" and meta == LEGACY_BIFROST_IB_ACCOUNT_AGENT:
             meta = BIFROST_HEALTH_IB_ACCOUNT_AGENT
+        elif sid == "trading_engine" and meta == LEGACY_BIFROST_OPS_TRADING_ENGINE_META:
+            meta = BIFROST_HEALTH_DAEMON_TRADING_ENGINE
         if sid == "trading_engine" and not meta:
-            meta = BIFROST_OPS_TRADING_ENGINE_META
+            meta = BIFROST_HEALTH_DAEMON_TRADING_ENGINE
         out.append({
             "id": sid,
             "label": label or sid,

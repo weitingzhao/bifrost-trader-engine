@@ -497,7 +497,7 @@ export function IngestServicesTable(props: {
           <th>Status</th>
           <th>
             Host
-            <InfoTooltip text="Only one of Dev or Prod may run each service against the same Redis: bifrost_ops_control_env on the meta hash records who started it from Ops. Starting elsewhere is rejected if the lease differs or if health still shows a fresh active writer. After Stop, Ops clears that lease and rewrites health to disconnected so Status updates." />
+            <InfoTooltip text="Only one of Dev or Prod may run each service against the same Redis: bifrost_ops_control_env and bifrost_ops_control_host on the meta hash record which stack and host last started it from Ops. Starting elsewhere is rejected if the lease differs or if health still shows a fresh active writer. After Stop, Ops clears those fields and rewrites health to disconnected so Status updates." />
           </th>
           <th>Category</th>
           <th className="massive-api-kv-label">Service</th>
@@ -510,6 +510,7 @@ export function IngestServicesTable(props: {
           const { title: rtTitle, pill: rtPill } = runtimeControlHostDisplay(
             svc.redis_control_env,
             svc.redis_meta_key,
+            svc.redis_control_host,
           )
           const block = ingestActionBlock(canOperate, disableIngestScript, pageEnv, svc.redis_control_env)
           return (

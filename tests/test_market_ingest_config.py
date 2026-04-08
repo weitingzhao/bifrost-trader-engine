@@ -1,6 +1,6 @@
 """Market ingest registry from YAML."""
 
-from src.bifrost.redis_health_keys import BIFROST_OPS_TRADING_ENGINE_META
+from src.bifrost.redis_health_keys import BIFROST_HEALTH_DAEMON_TRADING_ENGINE
 
 from backend.ops.market_ingest_config import (
     market_ingest_service_by_id,
@@ -24,7 +24,7 @@ def test_default_services():
     assert rows[3]["redis_meta_key"] == "bifrost:health:ws_ib_account_agent"
     assert rows[4]["id"] == "trading_engine"
     assert rows[4]["systemd_unit"] == "bifrost-engine.service"
-    assert rows[4]["redis_meta_key"] == BIFROST_OPS_TRADING_ENGINE_META
+    assert rows[4]["redis_meta_key"] == BIFROST_HEALTH_DAEMON_TRADING_ENGINE
 
 
 def test_custom_services_override():
@@ -53,7 +53,7 @@ def test_service_by_id():
     eng = market_ingest_service_by_id({}, "trading_engine")
     assert eng is not None
     assert eng["systemd_unit"] == "bifrost-engine.service"
-    assert eng["redis_meta_key"] == BIFROST_OPS_TRADING_ENGINE_META
+    assert eng["redis_meta_key"] == BIFROST_HEALTH_DAEMON_TRADING_ENGINE
 
 
 def test_engine_row_allows_omitted_redis_meta_key():
@@ -70,7 +70,25 @@ def test_engine_row_allows_omitted_redis_meta_key():
     }
     rows = market_ingest_services_from_config(cfg)
     assert len(rows) == 1
-    assert rows[0]["redis_meta_key"] == BIFROST_OPS_TRADING_ENGINE_META
+    assert rows[0]["redis_meta_key"] == BIFROST_HEALTH_DAEMON_TRADING_ENGINE
+
+
+def test_trading_engine_legacy_ops_redis_meta_key_normalizes():
+    cfg = {
+        "ops": {
+            "market_ingest_services": [
+                {
+                    "id": "trading_engine",
+                    "label": "Engine",
+                    "systemd_unit": "bifrost-engine.service",
+                    "redis_meta_key": "bifrost:ops:trading_engine",
+                },
+            ],
+        },
+    }
+    rows = market_ingest_services_from_config(cfg)
+    assert len(rows) == 1
+    assert rows[0]["redis_meta_key"] == BIFROST_HEALTH_DAEMON_TRADING_ENGINE
 
 
 def test_yaml_legacy_redis_meta_keys_normalize_to_bifrost_health():

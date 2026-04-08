@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Request
@@ -16,6 +17,7 @@ from backend.ops.market_ingest_control_env import (
     meta_redis_url_from_ops_config,
     normalize_control_profile,
     read_control_env,
+    read_control_host,
     write_control_env,
     write_trading_engine_ops_lease,
 )
@@ -44,6 +46,21 @@ def _ops_control_profile(request: Request) -> Optional[str]:
     return normalize_control_profile(raw if isinstance(raw, str) else None)
 
 
+def _effective_ops_control_profile(request: Request) -> Optional[str]:
+    """dev|prod for Redis lease + 409 guard: filename profile, then ``ops.control_profile`` YAML, then env."""
+    p = _ops_control_profile(request)
+    if p:
+        return p
+    cfg = _config(request)
+    ops_cfg = cfg.get("ops") if isinstance(cfg.get("ops"), dict) else {}
+    raw = ops_cfg.get("control_profile")
+    if isinstance(raw, str):
+        n = normalize_control_profile(raw)
+        if n:
+            return n
+    return normalize_control_profile(os.environ.get("BIFROST_OPS_CONTROL_PROFILE"))
+
+
 @router.get("/ops/market-ingest/services")
 async def market_ingest_services(request: Request) -> Dict[str, Any]:
     """List configured ingest services with current systemd ``is-active`` state."""
@@ -61,9 +78,16 @@ async def market_ingest_services(request: Request) -> Dict[str, Any]:
             logger.debug("systemctl_is_active %s: %s", unit, e)
         meta_key = (row.get("redis_meta_key") or "").strip()
         redis_control_env: Optional[str] = None
+        redis_control_host: Optional[str] = None
         if rurl and meta_key:
             redis_control_env = await asyncio.to_thread(read_control_env, rurl, meta_key)
-        out.append({**row, "process_active": active, "redis_control_env": redis_control_env})
+            redis_control_host = await asyncio.to_thread(read_control_host, rurl, meta_key)
+        out.append({
+            **row,
+            "process_active": active,
+            "redis_control_env": redis_control_env,
+            "redis_control_host": redis_control_host,
+        })
     return {"ok": True, "services": out}
 
 
@@ -104,7 +128,7 @@ async def market_ingest_control(
     action = body.action
     meta_key = (svc.get("redis_meta_key") or "").strip()
     rurl = meta_redis_url_from_ops_config(cfg)
-    ops_profile = _ops_control_profile(request)
+    ops_profile = _effective_ops_control_profile(request)
     claimed: Optional[str] = None
     if rurl and meta_key:
         claimed = await asyncio.to_thread(read_control_env, rurl, meta_key)
