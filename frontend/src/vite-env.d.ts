@@ -1,5 +1,8 @@
 /// <reference types="vite/client" />
 
+/** Injected by Vite `define` in vite.config.ts (package version · git short SHA · UTC time at dev/build start). */
+declare const __UI_BUILD_LABEL__: string
+
 interface ImportMetaEnv {
   /** Optional main bifrost-server origin (e.g. when UI is served separately). When unset, same-origin relative paths are used. */
   readonly VITE_API_BASE?: string

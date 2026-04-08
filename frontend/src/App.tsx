@@ -39,6 +39,7 @@ import { GatesConfigPage } from './pages/GatesConfigPage'
 import { StructureTypeConfigPage } from './pages/StructureTypeConfigPage'
 import { WatchlistPage } from './pages/WatchlistPage'
 import { MainTabIcon, SubmenuIcon, NavGroupDivider, type TabId, type TabGroup } from './components/AppNavIcons'
+import { UI_BUILD_LABEL } from './uiBuildLabel'
 import { useSettingsApiHealthProbes } from './hooks/useSettingsApiHealthProbes'
 import { useSocketIngestProbe } from './hooks/useSocketIngestProbe'
 import { FEED_MASSIVE_DAILY_DATA_ID, isMassiveOptionFeedHash } from './pages/massive/feedMassiveTabUtils'
@@ -1409,6 +1410,13 @@ export default function App() {
                 </svg>
                 Docs
               </a>
+              <div
+                className="app-header-menu-version"
+                role="presentation"
+                title="UI bundle build label (from last npm run build / Vite start). Compare after deploy to detect cache or stale static files."
+              >
+                UI build: {UI_BUILD_LABEL}
+              </div>
             </div>
           )}
         </div>

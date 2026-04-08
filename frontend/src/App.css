@@ -693,6 +693,17 @@ body::before {
   margin: var(--space-1) 0;
 }
 
+.app-header-menu-version {
+  font-size: var(--text-tiny);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  color: var(--color-text-muted);
+  line-height: 1.35;
+  padding: var(--space-2) var(--space-3);
+  margin-top: var(--space-1);
+  word-break: break-word;
+  user-select: all;
+}
+
 .app-header-icon-btn {
   display: inline-flex;
   align-items: center;
@@ -13284,6 +13295,7 @@ th {
 
 .coverage-pool-panel {
   min-width: 0;
+  overflow-x: auto;
   padding: 0.35rem 0.5rem 0.5rem;
   border-radius: var(--radius-md, 6px);
   border: 1px solid var(--color-border, #2a2f38);
@@ -13410,6 +13422,172 @@ th:has(> .coverage-pool-th-held-amt) {
 
 .coverage-held-shares-cell {
   font-variant-numeric: tabular-nums;
+}
+
+.coverage-pnl-stacked-th {
+  white-space: nowrap;
+}
+
+.coverage-pnl-stacked-cell {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  vertical-align: middle;
+  line-height: 1.25;
+  min-width: 4rem;
+}
+
+.coverage-pnl-stacked-pct {
+  font-size: 0.82em;
+  font-weight: 500;
+  color: var(--color-text-muted, #7a8492);
+  margin-top: 0.06rem;
+}
+
+/* ── Backing Pool Donut Chart ── */
+
+.backing-pool-chart-section {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border, #2a2f38);
+}
+
+.backing-pool-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+
+.backing-pool-chart-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #7a8492);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.backing-pool-chart-account-filter {
+  display: flex;
+  gap: 0.2rem;
+}
+
+.backing-pool-chart-acct-btn {
+  padding: 0.18rem 0.55rem;
+  border-radius: 4px;
+  border: 1px solid var(--color-border, #2a2f38);
+  background: transparent;
+  color: var(--color-text-muted, #7a8492);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+
+.backing-pool-chart-acct-btn:hover {
+  background: var(--color-surface-raised, rgba(255, 255, 255, 0.04));
+  color: var(--color-text, #e2e8f0);
+  border-color: var(--color-border-hover, #3d4655);
+}
+
+.backing-pool-chart-acct-btn.active {
+  background: rgba(56, 189, 175, 0.12);
+  border-color: #38bdb0;
+  color: #38bdb0;
+}
+
+.backing-pool-chart-body {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.backing-pool-chart-svg {
+  flex-shrink: 0;
+}
+
+.backing-pool-arc-other {
+  fill: var(--color-surface-raised, #1e2636);
+}
+
+.backing-pool-arc-backing {
+  fill: #38bdb0;
+}
+
+.backing-pool-arc-hole {
+  fill: var(--color-surface, #0f1117);
+}
+
+.backing-pool-chart-pct-text {
+  font-size: 1.1rem;
+  font-weight: 700;
+  fill: var(--color-text, #e2e8f0);
+  font-variant-numeric: tabular-nums;
+}
+
+.backing-pool-chart-sub-text {
+  font-size: 0.62rem;
+  font-weight: 500;
+  fill: var(--color-text-muted, #7a8492);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.backing-pool-chart-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.backing-pool-chart-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+}
+
+.backing-pool-chart-legend-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.backing-pool-chart-legend-dot--backing {
+  background: #38bdb0;
+}
+
+.backing-pool-chart-legend-dot--other {
+  background: var(--color-surface-raised, #1e2636);
+  border: 1px solid var(--color-border, #3d4655);
+}
+
+.backing-pool-chart-legend-label {
+  flex: 1;
+  color: var(--color-text-muted, #7a8492);
+  white-space: nowrap;
+}
+
+.backing-pool-chart-legend-total {
+  font-weight: 600;
+  color: var(--color-text, #e2e8f0);
+}
+
+.backing-pool-chart-legend-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--color-text, #e2e8f0);
+  white-space: nowrap;
+}
+
+.backing-pool-chart-legend-divider {
+  height: 1px;
+  background: var(--color-border, #2a2f38);
+  margin: 0.1rem 0;
 }
 
 .coverage-summary-heading-row {

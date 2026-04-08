@@ -66,7 +66,6 @@ function fmtAge(s: number | null | undefined): string {
 
 /** Colored pill badge for IB liveness probe countdown (ticks live via elapsed). */
 function IbProbeBadge({ nextInS, stale }: { nextInS: number; stale: boolean }) {
-  const isOk = !stale && nextInS > 2
   const isSoon = !stale && nextInS <= 2
   const bg = stale ? 'rgba(239,68,68,0.18)' : isSoon ? 'rgba(234,179,8,0.18)' : 'rgba(34,197,94,0.15)'
   const color = stale ? '#f87171' : isSoon ? '#fbbf24' : '#4ade80'

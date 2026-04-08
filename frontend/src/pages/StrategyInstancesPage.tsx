@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { IbPositionRow, StatusResponse } from '../types'
+
+function fmtExpiryMonthBubble(ym: string): string {
+  const [year, month] = ym.split('-')
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const m = parseInt(month ?? '', 10) - 1
+  if (!year || m < 0 || m > 11 || Number.isNaN(m)) return ym
+  return `${MONTHS[m]} '${year.slice(2)}`
+}
 import type { StrategyInstance } from '../types'
 import type { StrategyOpportunity, StrategyStructure } from '../api'
 import {
@@ -9,6 +17,7 @@ import {
   createStrategyInstance,
   deleteStrategyInstance,
 } from '../api'
+import { StrategyOpportunityCombobox } from '../components/StrategyOpportunityCombobox'
 import { StrategyInstanceDetailPage } from './StrategyInstanceDetailPage'
 import { fmtTsShort, fmtDate, parseOptionContractKey } from '../utils/format'
 import { computeRiskProfile, formatRiskLabel } from '../utils/riskProfile'
@@ -36,7 +45,13 @@ export function StrategyInstancesPage({
   const [opportunities, setOpportunities] = useState<StrategyOpportunity[]>([])
   const [accountIdFilter, setAccountIdFilter] = useState<string>('')
   const [opportunityIdFilter, setOpportunityIdFilter] = useState<number | ''>('')
-  const [instanceIdFilter, setInstanceIdFilter] = useState('')
+  const [instanceIdFilter, setInstanceIdFilter] = useState<number | ''>('')
+  const [instancesForOpportunity, setInstancesForOpportunity] = useState<StrategyInstance[]>([])
+  /** In-panel bubble filters (applied after API fetch) */
+  const [instStructureFilter, setInstStructureFilter] = useState<string>('')
+  const [instSymbolFilter, setInstSymbolFilter] = useState<string>('')
+  const [instRightFilter, setInstRightFilter] = useState<'' | 'C' | 'P'>('')
+  const [instExpiryFilter, setInstExpiryFilter] = useState<string>('')
   const [selectedInstanceId, setSelectedInstanceId] = useState<number | null>(null)
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [createOpportunityId, setCreateOpportunityId] = useState<number | ''>('')
@@ -92,19 +107,7 @@ export function StrategyInstancesPage({
     if (opportunityIdFilter !== '' && Number.isFinite(Number(opportunityIdFilter))) {
       params.strategy_opportunity_id = Number(opportunityIdFilter)
     }
-    const instanceIds: number[] = []
-    const seen = new Set<number>()
-    for (const part of instanceIdFilter.split(',')) {
-      const p = part.trim()
-      if (!p) continue
-      const n = Number(p)
-      if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) continue
-      const id = Math.floor(n)
-      if (seen.has(id)) continue
-      seen.add(id)
-      instanceIds.push(id)
-    }
-    if (instanceIds.length > 0) params.strategy_instance_ids = instanceIds
+    if (instanceIdFilter !== '') params.strategy_instance_ids = [instanceIdFilter]
     fetchStrategyInstances(params)
       .then((r) => setItems(r.items ?? []))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
@@ -114,6 +117,17 @@ export function StrategyInstancesPage({
   useEffect(() => {
     loadInstances()
   }, [loadInstances])
+
+  const oppIdNum = opportunityIdFilter === '' ? null : Number(opportunityIdFilter)
+  useEffect(() => {
+    if (oppIdNum == null || !Number.isFinite(oppIdNum)) {
+      setInstancesForOpportunity([])
+      return
+    }
+    fetchStrategyInstances({ strategy_opportunity_id: oppIdNum })
+      .then(r => setInstancesForOpportunity(r.items ?? []))
+      .catch(() => setInstancesForOpportunity([]))
+  }, [oppIdNum])
 
   const opportunitiesById = useMemo(() => {
     const m = new Map<number, StrategyOpportunity>()
@@ -128,6 +142,90 @@ export function StrategyInstancesPage({
     for (const s of structures) m.set(s.strategy_structure_id, s)
     return m
   }, [structures])
+
+  const getScopeSymbol = useCallback((row: StrategyInstance): string => {
+    const opp = opportunitiesById.get(row.strategy_opportunity_id)
+    if (opp == null) return '—'
+    const scopeType = (opp.scope_type ?? '').trim()
+    if (scopeType !== 'explicit_symbols' && scopeType !== 'watchlist_stk') return '—'
+    const symbols = (opp.symbols ?? [])
+      .map((s) => String(s ?? '').trim().toUpperCase())
+      .filter((s) => s.length > 0)
+    if (symbols.length === 0) return '—'
+    return symbols[0]
+  }, [opportunitiesById])
+
+  /** Per-instance rights and expiry months derived from live OPT positions via strategy_links. */
+  const instancePositionMeta = useMemo(() => {
+    const map = new Map<number, { rights: Set<'C' | 'P'>; expiryMonths: Set<string> }>()
+    for (const acc of status?.portfolio?.accounts ?? []) {
+      for (const p of acc.positions ?? []) {
+        if ((p.secType ?? '').toUpperCase() !== 'OPT') continue
+        const parsed = parseOptionContractKey(p.contract_key)
+        const r = parsed.right === 'C' || parsed.right === 'P' ? parsed.right : null
+        const s = parsed.expiry.replace(/\D/g, '')
+        const ym = s.length >= 6 ? `${s.slice(0, 4)}-${s.slice(4, 6)}` : null
+        for (const link of p.strategy_links ?? []) {
+          const instId = link.strategy_instance_id
+          if (instId == null || !Number.isFinite(instId)) continue
+          if (!map.has(instId)) map.set(instId, { rights: new Set(), expiryMonths: new Set() })
+          const meta = map.get(instId)!
+          if (r) meta.rights.add(r)
+          if (ym) meta.expiryMonths.add(ym)
+        }
+      }
+    }
+    return map
+  }, [status?.portfolio?.accounts])
+
+  /** Available filter options derived from all fetched items (pre-panel-filter). */
+  const instanceFilterOptions = useMemo(() => {
+    const structures = new Set<string>()
+    const symbols = new Set<string>()
+    const rights = new Set<'C' | 'P'>()
+    const expiryMonths = new Set<string>()
+    for (const row of items) {
+      const sn = (row.strategy_structure_name ?? '').trim()
+      if (sn) structures.add(sn)
+      const sym = getScopeSymbol(row)
+      if (sym !== '—') symbols.add(sym)
+      const meta = instancePositionMeta.get(row.strategy_instance_id)
+      if (meta) {
+        for (const r of meta.rights) rights.add(r)
+        for (const em of meta.expiryMonths) expiryMonths.add(em)
+      }
+    }
+    return {
+      structures: Array.from(structures).sort(),
+      symbols: Array.from(symbols).sort(),
+      rights: Array.from(rights).sort() as ('C' | 'P')[],
+      expiryMonths: Array.from(expiryMonths).sort().reverse(),
+    }
+  }, [items, getScopeSymbol, instancePositionMeta])
+
+  /** items filtered by the in-panel bubble filters (Structure / Symbol / Type / Expiry). */
+  const filteredItems = useMemo(() => {
+    let list = items
+    if (instStructureFilter) {
+      list = list.filter(row => (row.strategy_structure_name ?? '').trim() === instStructureFilter)
+    }
+    if (instSymbolFilter) {
+      list = list.filter(row => getScopeSymbol(row) === instSymbolFilter)
+    }
+    if (instRightFilter) {
+      list = list.filter(row => {
+        const meta = instancePositionMeta.get(row.strategy_instance_id)
+        return meta?.rights.has(instRightFilter) ?? false
+      })
+    }
+    if (instExpiryFilter) {
+      list = list.filter(row => {
+        const meta = instancePositionMeta.get(row.strategy_instance_id)
+        return meta?.expiryMonths.has(instExpiryFilter) ?? false
+      })
+    }
+    return list
+  }, [items, instStructureFilter, instSymbolFilter, instRightFilter, instExpiryFilter, getScopeSymbol, instancePositionMeta])
 
   const instanceRiskMap = useMemo(() => {
     const map = new Map<number, RiskProfile>()
@@ -214,18 +312,7 @@ export function StrategyInstancesPage({
   const groupedItems = useMemo(() => {
     const groups: Array<{ key: string; label: string; rows: StrategyInstance[] }> = []
     const groupIndexByKey = new Map<string, number>()
-    const getScopeSymbol = (row: StrategyInstance): string => {
-      const opp = opportunitiesById.get(row.strategy_opportunity_id)
-      if (opp == null) return '—'
-      const scopeType = (opp.scope_type ?? '').trim()
-      if (scopeType !== 'explicit_symbols' && scopeType !== 'watchlist_stk') return '—'
-      const symbols = (opp.symbols ?? [])
-        .map((s) => String(s ?? '').trim().toUpperCase())
-        .filter((s) => s.length > 0)
-      if (symbols.length === 0) return '—'
-      return symbols[0]
-    }
-    for (const row of items) {
+    for (const row of filteredItems) {
       const symbolKey = getScopeSymbol(row)
       const idx = groupIndexByKey.get(symbolKey)
       if (idx == null) {
@@ -236,7 +323,7 @@ export function StrategyInstancesPage({
       }
     }
     return groups
-  }, [items, opportunitiesById])
+  }, [filteredItems, getScopeSymbol])
 
   const toggleSymbolGroup = useCallback((key: string) => {
     setCollapsedSymbolGroups((prev) => {
@@ -283,6 +370,13 @@ export function StrategyInstancesPage({
       return (
         <tr>
           <td colSpan={11}>No strategy instances found.</td>
+        </tr>
+      )
+    }
+    if (filteredItems.length === 0) {
+      return (
+        <tr>
+          <td colSpan={11}>No instances match the current filters.</td>
         </tr>
       )
     }
@@ -403,7 +497,7 @@ export function StrategyInstancesPage({
         })}
       </>
     )
-  }, [items, groupedItems, collapsedSymbolGroups, instanceRiskMap, toggleSymbolGroup, openDeleteConfirm])
+  }, [items, filteredItems, groupedItems, collapsedSymbolGroups, instanceRiskMap, toggleSymbolGroup, openDeleteConfirm])
 
   if (effectiveDetailId != null) {
     return (
@@ -514,34 +608,34 @@ export function StrategyInstancesPage({
             ))}
           </select>
         </label>
-        <label>
-          <span className="filter-label">Opportunity</span>
-          <select
-            value={opportunityIdFilter === '' ? '' : String(opportunityIdFilter)}
-            onChange={(e) => setOpportunityIdFilter(e.target.value === '' ? '' : Number(e.target.value))}
-            aria-label="Filter by opportunity"
-          >
-            <option value="">All opportunities</option>
-            {opportunities.map((o) => (
-              <option key={o.strategy_opportunity_id} value={String(o.strategy_opportunity_id)}>
-                {o.name ?? `ID ${o.strategy_opportunity_id}`}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span className="filter-label">Instance</span>
-          <input
-            type="text"
-            inputMode="numeric"
-            value={instanceIdFilter}
-            onChange={(e) => setInstanceIdFilter(e.target.value)}
-            placeholder="e.g. 1, 2, 3"
-            title="Comma-separated instance IDs"
-            aria-label="Filter by instance IDs (comma-separated)"
-            style={{ minWidth: '11rem' }}
+        <div className="ledger-filter-field ledger-filter-field--strategy">
+          <StrategyOpportunityCombobox
+            opportunities={opportunities}
+            value={opportunityIdFilter}
+            onChange={(id) => {
+              setOpportunityIdFilter(id)
+              setInstanceIdFilter('')
+            }}
           />
-        </label>
+        </div>
+        {opportunityIdFilter !== '' && (
+          <label className="replay-filter-label-instance" title="Instance">
+            <span className="replay-filter-label">Instance</span>
+            <select
+              value={instanceIdFilter === '' ? '' : String(instanceIdFilter)}
+              onChange={(e) => setInstanceIdFilter(e.target.value === '' ? '' : Number(e.target.value))}
+              className="replay-filter-input replay-filter-select"
+              aria-label="Filter by instance"
+            >
+              <option value="">All</option>
+              {instancesForOpportunity.map((si) => (
+                <option key={si.strategy_instance_id} value={String(si.strategy_instance_id)}>
+                  {si.label?.trim() || `#${si.strategy_instance_id}`}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
       {error != null && (
@@ -552,6 +646,133 @@ export function StrategyInstancesPage({
         <p style={{ marginTop: '1rem' }}>Loading…</p>
       ) : (
         <div className="table-wrapper" style={{ overflowX: 'auto', marginTop: '1rem' }}>
+          {items.length > 0 && (
+            instanceFilterOptions.structures.length > 0 ||
+            instanceFilterOptions.symbols.length > 0 ||
+            instanceFilterOptions.rights.length > 1 ||
+            instanceFilterOptions.expiryMonths.length > 1
+          ) && (
+            <div className="ledger-strategy-tab-filters" style={{ marginBottom: '0.75rem' }}>
+              {instanceFilterOptions.structures.length > 0 && (
+                <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by structure">
+                  <span className="ledger-strategy-filter-label">Structure</span>
+                  <div className="ledger-strategy-filter-bubbles">
+                    <button
+                      type="button"
+                      className={`replay-bubble-switch-btn ${instStructureFilter === '' ? 'active' : ''}`}
+                      onClick={() => setInstStructureFilter('')}
+                    >
+                      All
+                    </button>
+                    {instanceFilterOptions.structures.map(s => (
+                      <button
+                        key={s}
+                        type="button"
+                        className={`replay-bubble-switch-btn ${instStructureFilter === s ? 'active' : ''}`}
+                        onClick={() => setInstStructureFilter(prev => prev === s ? '' : s)}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {instanceFilterOptions.symbols.length > 0 && (
+                <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by symbol">
+                  <span className="ledger-strategy-filter-label">Symbol</span>
+                  <div className="ledger-strategy-filter-bubbles">
+                    <button
+                      type="button"
+                      className={`replay-bubble-switch-btn ${instSymbolFilter === '' ? 'active' : ''}`}
+                      onClick={() => setInstSymbolFilter('')}
+                    >
+                      All
+                    </button>
+                    {instanceFilterOptions.symbols.map(sym => (
+                      <button
+                        key={sym}
+                        type="button"
+                        className={`replay-bubble-switch-btn ${instSymbolFilter === sym ? 'active' : ''}`}
+                        onClick={() => setInstSymbolFilter(prev => prev === sym ? '' : sym)}
+                      >
+                        {sym}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {instanceFilterOptions.rights.length > 1 && (
+                <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by call or put">
+                  <span className="ledger-strategy-filter-label">Type</span>
+                  <div className="ledger-strategy-filter-bubbles">
+                    <button
+                      type="button"
+                      className={`replay-bubble-switch-btn ${instRightFilter === '' ? 'active' : ''}`}
+                      onClick={() => setInstRightFilter('')}
+                    >
+                      All
+                    </button>
+                    <button
+                      type="button"
+                      className={`replay-bubble-switch-btn ${instRightFilter === 'C' ? 'active' : ''}`}
+                      onClick={() => setInstRightFilter(prev => prev === 'C' ? '' : 'C')}
+                    >
+                      Call
+                    </button>
+                    <button
+                      type="button"
+                      className={`replay-bubble-switch-btn ${instRightFilter === 'P' ? 'active' : ''}`}
+                      onClick={() => setInstRightFilter(prev => prev === 'P' ? '' : 'P')}
+                    >
+                      Put
+                    </button>
+                  </div>
+                </div>
+              )}
+              {instanceFilterOptions.expiryMonths.length > 1 && (
+                <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by expiry month">
+                  <span className="ledger-strategy-filter-label">Expiry</span>
+                  <div className="ledger-strategy-filter-bubbles">
+                    <button
+                      type="button"
+                      className={`replay-bubble-switch-btn ${instExpiryFilter === '' ? 'active' : ''}`}
+                      onClick={() => setInstExpiryFilter('')}
+                    >
+                      All
+                    </button>
+                    {instanceFilterOptions.expiryMonths.map(m => (
+                      <button
+                        key={m}
+                        type="button"
+                        className={`replay-bubble-switch-btn ledger-expiry-month-btn ${instExpiryFilter === m ? 'active' : ''}`}
+                        onClick={() => setInstExpiryFilter(prev => prev === m ? '' : m)}
+                        title={m}
+                      >
+                        {fmtExpiryMonthBubble(m)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(instStructureFilter || instSymbolFilter || instRightFilter || instExpiryFilter) && (
+                <div className="ledger-strategy-filter-meta">
+                  <span>Showing {filteredItems.length} of {items.length} instances</span>
+                  <button
+                    type="button"
+                    className="ledger-strategy-filter-clear"
+                    onClick={() => {
+                      setInstStructureFilter('')
+                      setInstSymbolFilter('')
+                      setInstRightFilter('')
+                      setInstExpiryFilter('')
+                    }}
+                  >
+                    Clear filters
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           {items.length > 0 && groupedItems.length > 0 && (
             <div className="instance-list-symbol-toolbar">
               <div className="instance-sheet-filter-bubble-row">

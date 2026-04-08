@@ -929,7 +929,7 @@ export function PositionsPage({
     ],
   )
 
-  /** Instance row: per option, abs execution qtys joined by comma; Final when present else TWS. Option groups separated by fullwidth | */
+  /** Instance row: per option, abs execution qtys joined by comma; Final book when any Final matches (else TWS). Option groups separated by fullwidth | */
   const formatInstanceOptExecQtyCell = useCallback(
     (allGroup: InstanceAllGroup): string => {
       const instId = allGroup.strategy_instance_id
@@ -940,15 +940,17 @@ export function PositionsPage({
           if (pos.filtered_exec_lists) return true
           return executionMatchesInstanceGroup(ex, instId, oppId)
         }
-        let src: Execution[] = []
+        let final: Execution[] = []
+        let tws: Execution[] = []
         if (pos.filtered_exec_lists) {
-          const final = pos.filtered_exec_lists.final.filter(execMatchesInstance)
-          const tws = pos.filtered_exec_lists.tws.filter(execMatchesInstance)
-          src = final.length > 0 ? final : tws
+          final = pos.filtered_exec_lists.final.filter(execMatchesInstance)
+          tws = pos.filtered_exec_lists.tws.filter(execMatchesInstance)
         } else {
           const lists = getPositionExecLists(pos)
-          src = positionExecsForAttribution(lists).filter(execMatchesInstance)
+          final = lists.final.filter(execMatchesInstance)
+          tws = lists.tws.filter(execMatchesInstance)
         }
+        const src = final.length > 0 ? final : tws
         const qtyStrs =
           src.length > 0
             ? src.map(ex => {
@@ -1316,8 +1318,10 @@ export function PositionsPage({
     }
 
     /**
-     * Fills that do not match this instance row → separate Uncategorized rows under Unassigned.
-     * Prefer Final (performance_book) for matching; if no Final rows for this contract, use TWS (tws_raw).
+     * Fills that do not match this instance row → optional Uncategorized clone under Unassigned.
+     * Skip positions already attributed by the backend (single or mixed) — the attribution API
+     * is the source of truth; TWS raw fills lack instance tags by nature and must not cause
+     * attributed positions to be duplicated under Uncategorized.
      */
     const unassignedKey = '__unassigned__'
     for (const [, b] of map) {
@@ -1325,6 +1329,7 @@ export function PositionsPage({
       const oppIdForMatch = resolveOppId(b)
       for (const p of b.options) {
         if (p.filtered_exec_lists) continue
+        if (p.attribution_type === 'single' || p.attribution_type === 'mixed') continue
         const full = getPositionExecLists(p)
         const unscopedFinal = full.final.filter(
           ex => !executionMatchesInstanceGroup(ex, b.id, oppIdForMatch),
@@ -1332,9 +1337,7 @@ export function PositionsPage({
         const unscopedTws = full.tws.filter(
           ex => !executionMatchesInstanceGroup(ex, b.id, oppIdForMatch),
         )
-        const useFinal = full.final.length > 0
-        const hasUnscoped = useFinal ? unscopedFinal.length > 0 : unscopedTws.length > 0
-        if (!hasUnscoped) continue
+        if (unscopedFinal.length === 0 && unscopedTws.length === 0) continue
         let u = map.get(unassignedKey)
         if (!u) {
           u = { id: null, label: null, oppName: null, oppId: null, openedAt: null, options: [] }
@@ -1342,9 +1345,7 @@ export function PositionsPage({
         }
         u.options.push({
           ...p,
-          filtered_exec_lists: useFinal
-            ? { final: unscopedFinal, tws: [] }
-            : { final: [], tws: unscopedTws },
+          filtered_exec_lists: { final: unscopedFinal, tws: unscopedTws },
           attribution_type: 'unassigned',
         })
       }
@@ -1780,6 +1781,32 @@ export function PositionsPage({
     )
   }, [])
 
+  const [backingPoolChartAccount, setBackingPoolChartAccount] = useState<string>('all')
+
+  const backingPoolChartData = useMemo(() => {
+    const matchAcct = (acct: string) => backingPoolChartAccount === 'all' || acct === backingPoolChartAccount
+
+    const totalStockMV = stockCoverageItems
+      .filter(ci => matchAcct(ci.account_id))
+      .reduce((s, ci) => {
+        const mv = coverageRowMarketValueTotal(ci)
+        return mv != null ? s + mv : s
+      }, 0)
+
+    const backingMV = watchlistOptionableCoverageItems
+      .filter(ci => matchAcct(ci.account_id))
+      .reduce((s, ci) => {
+        const rw = ci.required_watchlist_shares ?? 0
+        const backedShares = Math.min(Math.max(0, ci.held_shares), rw)
+        const price = ci.live_last_price
+        if (price == null || !Number.isFinite(price) || !Number.isFinite(backedShares)) return s
+        return s + backedShares * price
+      }, 0)
+
+    const pct = totalStockMV > 0 ? Math.min(1, Math.max(0, backingMV / totalStockMV)) : 0
+    return { backingMV, totalStockMV, otherMV: totalStockMV - backingMV, pct }
+  }, [stockCoverageItems, watchlistOptionableCoverageItems, backingPoolChartAccount])
+
   const independentStocks = useMemo(
     () => liveStockPositions.filter(s => {
       const opt = s.optionable
@@ -2104,24 +2131,46 @@ export function PositionsPage({
           ) : (
             <td>{fmtUsd(ci.live_last_price)}</td>
           )}
-          <td>
-            <span className={((ci.daily_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-              {fmtUsd(ci.daily_pnl)}
-            </span>
-            {' / '}
-            <span className={((ci.daily_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-              {fmtSignedPct(ci.daily_pct)}
-            </span>
-          </td>
-          <td>
-            <span className={((ci.total_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-              {fmtUsd(ci.total_pnl)}
-            </span>
-            {' / '}
-            <span className={((ci.total_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-              {fmtSignedPct(ci.total_pct)}
-            </span>
-          </td>
+          {slim || backingLayout ? (
+            <td className="coverage-pnl-stacked-cell">
+              <div className={((ci.daily_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                {fmtUsd(ci.daily_pnl)}
+              </div>
+              <div className={`coverage-pnl-stacked-pct ${((ci.daily_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}`}>
+                {fmtSignedPct(ci.daily_pct)}
+              </div>
+            </td>
+          ) : (
+            <td>
+              <span className={((ci.daily_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                {fmtUsd(ci.daily_pnl)}
+              </span>
+              {' / '}
+              <span className={((ci.daily_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                {fmtSignedPct(ci.daily_pct)}
+              </span>
+            </td>
+          )}
+          {slim || backingLayout ? (
+            <td className="coverage-pnl-stacked-cell">
+              <div className={((ci.total_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                {fmtUsd(ci.total_pnl)}
+              </div>
+              <div className={`coverage-pnl-stacked-pct ${((ci.total_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}`}>
+                {fmtSignedPct(ci.total_pct)}
+              </div>
+            </td>
+          ) : (
+            <td>
+              <span className={((ci.total_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                {fmtUsd(ci.total_pnl)}
+              </span>
+              {' / '}
+              <span className={((ci.total_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                {fmtSignedPct(ci.total_pct)}
+              </span>
+            </td>
+          )}
           {!slim && !backingSlim && (
             <td>
               <span className={`coverage-status-badge ${statusClass}`}>{statusLabel}</span>
@@ -2200,8 +2249,8 @@ export function PositionsPage({
             ) : (
               <th>Live last</th>
             )}
-            <th>Daily ($ / %)</th>
-            <th>Total ($ / %)</th>
+            {slim || backingLayout ? <th className="coverage-pnl-stacked-th">Daily</th> : <th>Daily ($ / %)</th>}
+            {slim || backingLayout ? <th className="coverage-pnl-stacked-th">Total</th> : <th>Total ($ / %)</th>}
             {!slim && !backingSlim && <th>Status</th>}
           </tr>
         </thead>
@@ -2640,13 +2689,8 @@ export function PositionsPage({
                                                     allGroup.strategy_opportunity_id,
                                                   )
                                                 }
-                                                const authFromFinal = execLists.final.length > 0
-                                                const scopedFinalExecs = authFromFinal
-                                                  ? execLists.final.filter(execMatchesInstance)
-                                                  : []
-                                                const scopedTwsExecs = authFromFinal
-                                                  ? []
-                                                  : execLists.tws.filter(execMatchesInstance)
+                                                const scopedFinalExecs = execLists.final.filter(execMatchesInstance)
+                                                const scopedTwsExecs = execLists.tws.filter(execMatchesInstance)
                                                 const execCount = scopedFinalExecs.length + scopedTwsExecs.length
                                                 const hasExecutions = execCount > 0
                                                 const isPosExpanded = expandedPositionKeys.includes(posKey)
@@ -3004,6 +3048,101 @@ export function PositionsPage({
                                 onColumnClick: onBackingPoolSortClick,
                               },
                             })}
+                            {/* Backing Pool vs total stock coverage donut chart */}
+                            {(() => {
+                              const { backingMV, totalStockMV, otherMV, pct } = backingPoolChartData
+                              const cx = 66, cy = 66, rO = 56, rI = 36
+                              const pctLabel = (pct * 100).toFixed(1) + '%'
+                              const toXY = (frac: number, r: number) => {
+                                const a = frac * 2 * Math.PI - Math.PI / 2
+                                return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) }
+                              }
+                              const buildArc = (startFrac: number, endFrac: number, r1: number, r2: number) => {
+                                if (endFrac - startFrac >= 0.9999) {
+                                  return `M ${cx} ${cy - r1} A ${r1} ${r1} 0 1 1 ${cx - 0.001} ${cy - r1} Z`
+                                }
+                                if (endFrac - startFrac <= 0.0001) return ''
+                                const s1 = toXY(startFrac, r1), e1 = toXY(endFrac, r1)
+                                const s2 = toXY(endFrac, r2), e2 = toXY(startFrac, r2)
+                                const lg = endFrac - startFrac > 0.5 ? 1 : 0
+                                return [
+                                  `M ${s1.x.toFixed(3)} ${s1.y.toFixed(3)}`,
+                                  `A ${r1} ${r1} 0 ${lg} 1 ${e1.x.toFixed(3)} ${e1.y.toFixed(3)}`,
+                                  `L ${s2.x.toFixed(3)} ${s2.y.toFixed(3)}`,
+                                  `A ${r2} ${r2} 0 ${lg} 0 ${e2.x.toFixed(3)} ${e2.y.toFixed(3)}`,
+                                  'Z',
+                                ].join(' ')
+                              }
+                              const backingArc = buildArc(0, pct, rO, rI)
+                              const otherArc = buildArc(pct, 1, rO, rI)
+                              return (
+                                <div className="backing-pool-chart-section">
+                                  <div className="backing-pool-chart-header">
+                                    <span className="backing-pool-chart-title">Backing Pool Coverage</span>
+                                    <div className="backing-pool-chart-account-filter" role="group" aria-label="Filter by account">
+                                      {[
+                                        { id: 'all', label: 'All' },
+                                        ...(streamHostAccountId ? [{ id: streamHostAccountId, label: streamHostAccountId }] : []),
+                                        ...(streamSecondaryAccountId && streamSecondaryAccountId !== streamHostAccountId
+                                          ? [{ id: streamSecondaryAccountId, label: streamSecondaryAccountId }]
+                                          : []),
+                                      ].map(opt => (
+                                        <button
+                                          key={opt.id}
+                                          type="button"
+                                          className={`backing-pool-chart-acct-btn${backingPoolChartAccount === opt.id ? ' active' : ''}`}
+                                          onClick={() => setBackingPoolChartAccount(opt.id)}
+                                        >
+                                          {opt.label}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <div className="backing-pool-chart-body">
+                                    <svg
+                                      width={132} height={132}
+                                      viewBox="0 0 132 132"
+                                      className="backing-pool-chart-svg"
+                                      role="img"
+                                      aria-label={`Backing pool ${pctLabel} of total stock coverage`}
+                                    >
+                                      {totalStockMV > 0 ? (
+                                        <>
+                                          {otherArc && <path d={otherArc} className="backing-pool-arc-other" />}
+                                          {backingArc && <path d={backingArc} className="backing-pool-arc-backing" />}
+                                        </>
+                                      ) : (
+                                        <circle cx={cx} cy={cy} r={rO} className="backing-pool-arc-other" />
+                                      )}
+                                      <circle cx={cx} cy={cy} r={rI} className="backing-pool-arc-hole" />
+                                      <text x={cx} y={cy - 7} className="backing-pool-chart-pct-text" textAnchor="middle" dominantBaseline="auto">
+                                        {totalStockMV > 0 ? pctLabel : '—'}
+                                      </text>
+                                      <text x={cx} y={cy + 10} className="backing-pool-chart-sub-text" textAnchor="middle" dominantBaseline="auto">
+                                        of total
+                                      </text>
+                                    </svg>
+                                    <div className="backing-pool-chart-legend">
+                                      <div className="backing-pool-chart-legend-item">
+                                        <span className="backing-pool-chart-legend-dot backing-pool-chart-legend-dot--backing" />
+                                        <span className="backing-pool-chart-legend-label">Backing Pool</span>
+                                        <span className="backing-pool-chart-legend-value">{fmtUsd(backingMV)}</span>
+                                      </div>
+                                      <div className="backing-pool-chart-legend-item">
+                                        <span className="backing-pool-chart-legend-dot backing-pool-chart-legend-dot--other" />
+                                        <span className="backing-pool-chart-legend-label">Other stock</span>
+                                        <span className="backing-pool-chart-legend-value">{fmtUsd(otherMV)}</span>
+                                      </div>
+                                      <div className="backing-pool-chart-legend-divider" />
+                                      <div className="backing-pool-chart-legend-item">
+                                        <span className="backing-pool-chart-legend-label backing-pool-chart-legend-total">Total stock</span>
+                                        <span className="backing-pool-chart-legend-value">{fmtUsd(totalStockMV)}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              )
+                            })()}
                           </div>
                         )}
                       </div>
@@ -3174,10 +3313,8 @@ export function PositionsPage({
                             const value = (pos.avg_cost ?? 0) * absQty * 100
                             const ts = getPositionTime(pos)
                             const execLists = getPositionExecLists(pos)
-                            const authExecs = positionExecsForAttribution(execLists)
-                            const execCount = authExecs.length
+                            const execCount = execLists.final.length + execLists.tws.length
                             const hasExecutions = execCount > 0
-                            const authFromFinal = execLists.final.length > 0
                             const isPosExpanded = expandedPositionKeys.includes(posKey)
                             const posRow = (
                               <tr
@@ -3200,7 +3337,7 @@ export function PositionsPage({
                                   {(() => {
                                     const p = getContractLabelParts(pos.contract_key)
                                     const strikeStr = pos.strike != null ? ` ${pos.strike}` : ''
-                                    const fill = instanceIconFillFromMergedExecutions(authExecs)
+                                    const fill = instanceIconFillFromMergedExecutions(execLists.merged)
                                     const instanceIcon =
                                       fill === 'empty'
                                         ? null
@@ -3302,13 +3439,14 @@ export function PositionsPage({
                               </tr>
                             )
                             const execRows = isPosExpanded
-                              ? authFromFinal
-                                ? execLists.final.map((ex, ei) =>
+                              ? [
+                                  ...execLists.final.map((ex, ei) =>
                                     renderOpenOptionExecutionRow(pos, posKey, ex, ei, 'final', execLists.final, execLists.tws, false),
-                                  )
-                                : execLists.tws.map((ex, ei) =>
+                                  ),
+                                  ...execLists.tws.map((ex, ei) =>
                                     renderOpenOptionExecutionRow(pos, posKey, ex, ei, 'tws', execLists.final, execLists.tws, false),
-                                  )
+                                  ),
+                                ]
                               : []
                             return [posRow, ...execRows]
                       })}
@@ -3347,8 +3485,9 @@ export function PositionsPage({
                             <th>Side</th>
                             <th>Qty</th>
                             <th>Avg Cost</th>
-                            <th>Mark</th>
-                            <th>UN PNL</th>
+                            <th>Last</th>
+                            <th className="coverage-pnl-stacked-th">Daily $/&nbsp;%</th>
+                            <th className="coverage-pnl-stacked-th">Since $/&nbsp;%</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -3364,17 +3503,28 @@ export function PositionsPage({
                             for (const accId of accountIds) {
                               rows.push(
                                 <tr key={`open-stk-header-${accId}`} className="replay-portfolio-group-header">
-                                  <td colSpan={7}>
+                                  <td colSpan={8}>
                                     <strong>{accId}</strong>
                                   </td>
                                 </tr>,
                               )
                               for (const position of byAccount[accId]) {
                                 const qty = Number(position.position)
+                                const lastPrice = position.price != null && Number.isFinite(Number(position.price)) ? Number(position.price) : null
+                                const avgCost = position.avgCost != null && Number.isFinite(Number(position.avgCost)) ? Number(position.avgCost) : null
+                                const prevClose = position.daily_prev_close != null && Number.isFinite(Number(position.daily_prev_close)) ? Number(position.daily_prev_close) : null
                                 const pnl = position.unrealized_pnl != null && Number.isFinite(Number(position.unrealized_pnl))
                                   ? Number(position.unrealized_pnl)
                                   : null
-                                const pnlClass = pnl == null ? '' : 'replay-pnl-unrealized'
+                                const sincePct = pnl != null && avgCost != null && avgCost !== 0 && Number.isFinite(qty)
+                                  ? (pnl / (Math.abs(avgCost * qty))) * 100
+                                  : null
+                                const dailyPnl = lastPrice != null && prevClose != null && Number.isFinite(qty)
+                                  ? (lastPrice - prevClose) * qty
+                                  : null
+                                const dailyPct = dailyPnl != null && prevClose != null && prevClose !== 0
+                                  ? ((lastPrice! - prevClose) / prevClose) * 100
+                                  : null
                                 const contractKey = position.contract_key ?? `${position.symbol ?? ''}|STK|||`
                                 rows.push(
                                   <tr key={`open-stk-${accId}-${position.symbol ?? ''}-${contractKey}`}>
@@ -3384,7 +3534,22 @@ export function PositionsPage({
                                     <td>{Number.isFinite(qty) ? qty : '—'}</td>
                                     <td>{fmtUsd(position.avgCost)}</td>
                                     <td>{fmtUsd(position.price)}</td>
-                                    <td><span className={pnlClass}>{fmtUsd(pnl ?? 0)}</span></td>
+                                    <td className="coverage-pnl-stacked-cell">
+                                      <div className={(dailyPnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}>
+                                        {dailyPnl != null ? fmtUsd(dailyPnl) : '—'}
+                                      </div>
+                                      <div className={`coverage-pnl-stacked-pct ${(dailyPct ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                                        {dailyPct != null ? fmtSignedPct(dailyPct) : '—'}
+                                      </div>
+                                    </td>
+                                    <td className="coverage-pnl-stacked-cell">
+                                      <div className={(pnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}>
+                                        {pnl != null ? fmtUsd(pnl) : '—'}
+                                      </div>
+                                      <div className={`coverage-pnl-stacked-pct ${(sincePct ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                                        {sincePct != null ? fmtSignedPct(sincePct) : '—'}
+                                      </div>
+                                    </td>
                                   </tr>,
                                 )
                               }

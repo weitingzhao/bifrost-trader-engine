@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { StatusResponse } from '../types'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
@@ -66,6 +66,15 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
   const [authPanelOpen, setAuthPanelOpen] = useState(false)
   const [confirmState, setConfirmState] = useState<ConfirmState>(INITIAL_CONFIRM)
   const [opsHealth, setOpsHealth] = useState<Awaited<ReturnType<typeof fetchOpsHealth>> | null>(null)
+
+  const statusReceivedAtRef = useRef(Date.now() / 1000)
+  const [, setTick] = useState(0)
+  useEffect(() => { statusReceivedAtRef.current = Date.now() / 1000 }, [status])
+  useEffect(() => {
+    const id = window.setInterval(() => setTick(t => (t + 1) & 0xffffff), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+  const elapsed = Math.max(0, Date.now() / 1000 - statusReceivedAtRef.current)
 
   const refresh = useCallback(async () => {
     try {
@@ -418,6 +427,7 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
         <IngestServicesTable
           rows={engineRows}
           status={status}
+          elapsed={elapsed}
           pageEnv={normalizedPageDevProd(configProfile)}
           disableIngestScript={disableIngestActions}
           emptyHint="No trading_engine row in Ops config (backend/ops/market_ingest_config.py)."

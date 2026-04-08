@@ -22,7 +22,7 @@ function parseRealtimeQuoteFromSSEPayload(data: string): RealtimeQuote | null {
     }
     const ts = Number(raw.ts)
     if (!sym || !Number.isFinite(ts)) return null
-    return { ...(raw as RealtimeQuote), symbol: sym, ts }
+    return { ...(raw as unknown as RealtimeQuote), symbol: sym, ts }
   } catch {
     return null
   }

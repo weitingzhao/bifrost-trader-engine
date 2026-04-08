@@ -123,6 +123,31 @@ _msg_warn() { echo "${C_YELLOW}${C_BOLD}[WARN]${C_RESET} $*" >&2; }
 _msg_err() { echo "${C_RED}${C_BOLD}[ERROR]${C_RESET} $*" >&2; }
 _msg_bug() { echo "${C_MAGENTA}${C_BOLD}[BUG]${C_RESET} $*" >&2; }
 
+# Append a prominent colored result banner to a log file (or stdout). Args: $1=exit_code, $2=label, $3=log_file (optional; stdout if empty).
+_emit_result_banner() {
+  local _ec="$1" _label="$2" _log="${3:-}"
+  local _ts
+  _ts="$(date '+%H:%M:%S')"
+  local _banner
+  if [[ "${_ec}" -eq 0 ]]; then
+    _banner=$(printf '\n%s\n%s  ✔  %s — %s (exit 0)  %s\n%s\n' \
+      "${C_GREEN}${C_BOLD}════════════════════════════════════════════════════════${C_RESET}" \
+      "${C_GREEN}${C_BOLD}" "${_label}" "SUCCESS" "${C_RESET}" \
+      "${C_GREEN}${C_BOLD}════════════════════════════════════════════════════════${C_RESET}")
+  else
+    _banner=$(printf '\n%s\n%s  ✘  %s — %s (exit %d)  %s\n%s  %s  Check output above for errors (npm build? SSH? sudo?)  %s\n%s\n' \
+      "${C_RED}${C_BOLD}════════════════════════════════════════════════════════${C_RESET}" \
+      "${C_RED}${C_BOLD}" "${_label}" "FAILED" "${_ec}" "${C_RESET}" \
+      "${C_YELLOW}" "${C_BOLD}" "${C_RESET}" \
+      "${C_RED}${C_BOLD}════════════════════════════════════════════════════════${C_RESET}")
+  fi
+  if [[ -n "${_log}" ]]; then
+    echo "${_banner}" >>"${_log}"
+  else
+    echo "${_banner}"
+  fi
+}
+
 # Short label for TUI status column (keep in sync with BIFROST_STATUS_ROWS).
 _bifrost_unit_display_label() {
   case "$1" in
@@ -890,8 +915,13 @@ REMOTE_EOF
     fi
   }
 
-  local _log _ec
+  local _log _ec _pipeline_label
   _log="$(mktemp -t bifrost_ssh_run)"
+  _pipeline_label="Deploy"
+  [[ "${DO_SYNC}" == "1" ]] && _pipeline_label="Deploy + Build"
+  [[ "${DO_SYSTEMCTL}" == "1" ]] && _pipeline_label="Deploy + Restart"
+  [[ "${DO_SYNC}" != "1" && "${DO_SYSTEMCTL}" == "1" ]] && _pipeline_label="systemctl ${ACTION}"
+  [[ "${DO_DEPLOY_ONLY}" == "1" ]] && _pipeline_label="Deploy-only"
   set +e
   if [[ "${BIFROST_SSH_TUI:-0}" == "1" ]] && [[ -n "${BIFROST_SSH_LAST_LOG:-}" ]]; then
     _msg_info "Running on remote — output streams below (SSH/sudo may take a while; sudo may prompt for password)."
@@ -900,15 +930,17 @@ REMOTE_EOF
     # Otherwise ssh -tt + sudo interactive password can misbehave or re-prompt.
     _run_pipeline_inner > >(tee "${BIFROST_SSH_LAST_LOG}") 2>&1
     _ec=$?
-    {
-      echo ""
-      echo "--- exit code: ${_ec} ---"
-    } >>"${BIFROST_SSH_LAST_LOG}"
-    _msg_info "Remote step finished (exit ${_ec}). Redrawing menu…"
+    _emit_result_banner "${_ec}" "${_pipeline_label}" "${BIFROST_SSH_LAST_LOG}"
+    if [[ "${_ec}" -eq 0 ]]; then
+      _msg_info "${C_GREEN}${C_BOLD}${_pipeline_label} — SUCCESS${C_RESET} Redrawing menu…"
+    else
+      _msg_err "${_pipeline_label} — ${C_RED}${C_BOLD}FAILED (exit ${_ec})${C_RESET}. Check Last output below."
+    fi
   else
     _run_pipeline_inner >"${_log}" 2>&1
     _ec=$?
     _show_result "Command output (exit ${_ec})" < "${_log}"
+    _emit_result_banner "${_ec}" "${_pipeline_label}"
   fi
   set -e
   rm -f "${_log}"
@@ -918,7 +950,7 @@ REMOTE_EOF
 # Interactive: rsync --delete + remote build; optional systemctl restart.
 # Keys align with menu (1) systemctl unit legend: 0=all HTTP restart, 1–3=single units (no Engine — use Dashboard), a–d=categories; R suffix = restart after deploy.
 _interactive_quick_deploy() {
-  local _raw _norm _digit _ltr _want_r
+  local _raw _norm _digit _ltr _want_r _qd_ec
   echo ""
   echo "${C_BLUE}${C_BOLD}--- Quick: Deploy ---${C_RESET}"
   _msg_info "Remote: rsync --delete + venv pip + npm build (includes React SPA / Dashboard). Append R after 1–3 or a–d to restart those units after deploy."
@@ -937,12 +969,13 @@ _interactive_quick_deploy() {
       return 0
     fi
     _reset_run_state
+    _qd_ec=0
     if [[ "${_norm}" == "0" ]]; then
       DO_DEPLOY=1
       ACTION=restart
       RESTART_ALL_APIS=1
       echo "${C_CYAN}→ deploy + sudo systemctl restart (all 9 HTTP APIs)${C_RESET}"
-      _run_pipeline || true
+      _run_pipeline && _qd_ec=0 || _qd_ec=$?
       break
     fi
     if [[ "${_norm}" =~ ^([1-3])(r)?$ ]]; then
@@ -961,7 +994,7 @@ _interactive_quick_deploy() {
         DO_DEPLOY_ONLY=1
         echo "${C_CYAN}→ deploy only (rsync --delete + build, no systemctl)${C_RESET}"
       fi
-      _run_pipeline || true
+      _run_pipeline && _qd_ec=0 || _qd_ec=$?
       break
     fi
     if [[ "${_norm}" =~ ^([abcd])(r)?$ ]]; then
@@ -981,11 +1014,12 @@ _interactive_quick_deploy() {
         DO_DEPLOY_ONLY=1
         echo "${C_CYAN}→ deploy only (rsync --delete + build, no systemctl)${C_RESET}"
       fi
-      _run_pipeline || true
+      _run_pipeline && _qd_ec=0 || _qd_ec=$?
       break
     fi
     _msg_warn "Invalid — use 0, 1–3 or a–d, optional R (e.g. 2R, cR), q or empty to cancel."
   done
+  return 0
 }
 
 # Run scripts/<name> from repo root with .venv if present (local Dev DB tools).
@@ -1709,7 +1743,7 @@ _interactive_map_action_token() {
 
 # Interactive: systemctl — same unit keys as Quick Deploy (1–3, 0=all HTTP, a–d categories) plus words (all-stack, massive, …).
 _interactive_systemctl_one_service() {
-  local _unit _act _t1 _t2 _u _a _line_lower _hx _digits _d1 _d2 _cl _ac_digit _cn
+  local _unit _act _t1 _t2 _u _a _line_lower _hx _digits _d1 _d2 _cl _ac_digit _cn _sc_ec
   echo ""
   echo "${C_BLUE}${C_BOLD}--- systemctl (one unit or all) ---${C_RESET}"
   _msg_info "Enter unit + action on one line (examples below)."
@@ -1740,7 +1774,7 @@ _interactive_systemctl_one_service() {
       _reset_run_state
       ACTION="${_a}"
       RESTART_ALL_APIS=1
-      _run_pipeline || true
+      _run_pipeline && _sc_ec=0 || _sc_ec=$?
       break
     fi
 
@@ -1763,7 +1797,7 @@ _interactive_systemctl_one_service() {
       _reset_run_state
       ACTION="${_a}"
       RESTART_CATEGORY="${_cn}"
-      _run_pipeline || true
+      _run_pipeline && _sc_ec=0 || _sc_ec=$?
       break
     fi
 
@@ -1779,7 +1813,7 @@ _interactive_systemctl_one_service() {
           _reset_run_state
           ACTION="${_a}"
           RESTART_ALL_APIS=1
-          _run_pipeline || true
+          _run_pipeline && _sc_ec=0 || _sc_ec=$?
           break
         fi
       fi
@@ -1816,7 +1850,7 @@ _interactive_systemctl_one_service() {
         else
           _restart_add_unit "${_u}"
         fi
-        _run_pipeline || true
+        _run_pipeline && _sc_ec=0 || _sc_ec=$?
         break
       fi
     fi
@@ -1880,9 +1914,10 @@ _interactive_systemctl_one_service() {
     else
       _restart_add_unit "${_unit}"
     fi
-    _run_pipeline || true
+    _run_pipeline && _sc_ec=0 || _sc_ec=$?
     break
   done
+  return 0
 }
 
 interactive_mode() {

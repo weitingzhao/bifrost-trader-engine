@@ -42,6 +42,26 @@ function loadServerPorts(): Record<string, number> {
   }
 }
 
+/** Shown in the header ⋮ menu so prod vs local cache vs stale deploy is obvious after each `npm run build`. */
+function loadUiBuildLabel(): string {
+  const pkgPath = path.join(__dirname, 'package.json')
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')) as { version?: string }
+  const ver = pkg.version ?? '0.0.0'
+  let sha = ''
+  try {
+    sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: projectRoot,
+      encoding: 'utf-8',
+    }).trim()
+  } catch {
+    /* no .git or git unavailable */
+  }
+  const when = `${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC`
+  return sha ? `${ver} · ${sha} · ${when}` : `${ver} · ${when}`
+}
+
+const UI_BUILD_LABEL = loadUiBuildLabel()
+
 const s = loadServerPorts()
 const MONITOR = `http://127.0.0.1:${s.monitor_port}`
 const MASSIVE = `http://127.0.0.1:${s.massive_port}`
@@ -55,6 +75,9 @@ const RESEARCH = `http://127.0.0.1:${s.research_port}`
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __UI_BUILD_LABEL__: JSON.stringify(UI_BUILD_LABEL),
+  },
   server: {
     port: 5173,
     allowedHosts: ['labtop-vs-mac-pro'],
