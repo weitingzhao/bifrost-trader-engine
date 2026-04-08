@@ -5,7 +5,7 @@ import logging
 import math
 import os
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
@@ -759,6 +759,18 @@ class PostgreSQLSink(StatusSink):
                     else:
                         bar_dt = bar_time
                     if period.upper() == "1 D":
+                        # stock_day.bar_time is DATE — use original local date to
+                        # avoid UTC date shift (e.g. 18:00-0600 → next day in UTC)
+                        bar_date_str = r.get("bar_date")
+                        if bar_date_str:
+                            try:
+                                bar_d = date.fromisoformat(str(bar_date_str)[:10])
+                            except (ValueError, TypeError):
+                                bar_d = bar_dt.date() if isinstance(bar_dt, datetime) else bar_dt
+                        elif isinstance(bar_dt, datetime):
+                            bar_d = bar_dt.date()
+                        else:
+                            bar_d = bar_dt
                         cur.execute(
                             """
                             INSERT INTO stock_day (symbol, bar_time, open, high, low, close, volume)
@@ -767,7 +779,7 @@ class PostgreSQLSink(StatusSink):
                             DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
                                           close = EXCLUDED.close, volume = EXCLUDED.volume
                             """,
-                            (symbol, bar_dt, open_, high, low, close, volume),
+                            (symbol, bar_d, open_, high, low, close, volume),
                         )
                     else:
                         cur.execute(

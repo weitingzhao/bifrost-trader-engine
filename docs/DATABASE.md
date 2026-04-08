@@ -330,7 +330,7 @@
 |------|------|------|
 | id | bigserial | 自增主键 |
 | symbol | text NOT NULL | 股票代码（如 NVDA） |
-| bar_time | timestamptz NOT NULL | K 线周期起始时间（日线为当日 00:00 UTC 或交易所日） |
+| bar_time | date NOT NULL | K 线日期（纯日期，不含时间；如 2026-01-15） |
 | open | double precision | 开 |
 | high | double precision | 高 |
 | low | double precision | 低 |

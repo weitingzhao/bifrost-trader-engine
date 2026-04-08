@@ -964,8 +964,7 @@ def _stock_close_on_date(cur: Any, symbol: str, trade_date: date_type) -> Option
         cur.execute(
             """
             SELECT close FROM stock_day
-            WHERE symbol = %s AND (bar_time::date) = %s
-            ORDER BY bar_time DESC
+            WHERE symbol = %s AND bar_time = %s
             LIMIT 1
             """,
             (symbol, trade_date),

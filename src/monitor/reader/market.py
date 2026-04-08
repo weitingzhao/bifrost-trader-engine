@@ -194,8 +194,8 @@ def get_bar_times_in_range(
                     SELECT extract(epoch from bar_time) AS t
                     FROM stock_day
                     WHERE symbol = %s
-                      AND bar_time >= to_timestamp(%s)
-                      AND bar_time <= to_timestamp(%s)
+                      AND bar_time >= to_timestamp(%s)::date
+                      AND bar_time <= to_timestamp(%s)::date
                     ORDER BY bar_time ASC
                     """,
                     (sym, float(start_ts), float(end_ts)),
@@ -237,7 +237,7 @@ def get_bars_benchmark(
                     SELECT symbol, bar_time, close,
                            LEAD(close) OVER (PARTITION BY symbol ORDER BY bar_time DESC) AS prev_close
                     FROM stock_day
-                    WHERE symbol = ANY(%s) AND (bar_time::date) <= %s
+                    WHERE symbol = ANY(%s) AND bar_time <= %s
                 )
                 SELECT DISTINCT ON (symbol) symbol,
                        extract(epoch from bar_time) AS bar_time,
@@ -481,6 +481,18 @@ def write_ohlc_bars_to_db(status_config: dict, rows: List[Dict[str, Any]]) -> bo
                     close = r.get("close")
                     volume = r.get("volume")
                     if period.upper() == "1 D":
+                        # stock_day.bar_time is DATE — use original local date to
+                        # avoid UTC date shift (e.g. 18:00-0600 → next day in UTC)
+                        bar_date_str = r.get("bar_date")
+                        if bar_date_str:
+                            try:
+                                bar_d = date.fromisoformat(str(bar_date_str)[:10])
+                            except (ValueError, TypeError):
+                                bar_d = bar_dt.date() if isinstance(bar_dt, datetime) else bar_dt
+                        elif isinstance(bar_dt, datetime):
+                            bar_d = bar_dt.date()
+                        else:
+                            bar_d = bar_dt
                         cur.execute(
                             """
                             INSERT INTO stock_day (symbol, bar_time, open, high, low, close, volume)
@@ -489,7 +501,7 @@ def write_ohlc_bars_to_db(status_config: dict, rows: List[Dict[str, Any]]) -> bo
                             DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
                                           close = EXCLUDED.close, volume = EXCLUDED.volume
                             """,
-                            (symbol, bar_dt, open_, high, low, close, volume),
+                            (symbol, bar_d, open_, high, low, close, volume),
                         )
                     else:
                         cur.execute(

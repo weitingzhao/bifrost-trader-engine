@@ -63,6 +63,7 @@ def _fetch_one_index(
                     ts = None
                 if ts is None:
                     continue
+                bar_date_str = str(idx)[:10]
                 open_ = row.get("open", row.get("Open"))
                 high = row.get("high", row.get("High"))
                 low = row.get("low", row.get("Low"))
@@ -70,6 +71,7 @@ def _fetch_one_index(
                 vol = row.get("volume", row.get("Volume"))
                 rows.append({
                     "bar_time": ts,
+                    "bar_date": bar_date_str,
                     "open": float(open_) if open_ is not None and str(open_) != "nan" else None,
                     "high": float(high) if high is not None and str(high) != "nan" else None,
                     "low": float(low) if low is not None and str(low) != "nan" else None,

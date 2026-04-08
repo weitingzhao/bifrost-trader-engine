@@ -1283,11 +1283,14 @@ class IBConnector:
         for bar in bars or []:
             t = getattr(bar, "date", None)
             ts: Optional[float]
+            bar_date_str: Optional[str] = None
             if t is None:
                 ts = None
             elif hasattr(t, "timestamp"):
-                # datetime-like
+                # datetime-like — preserve local date (YYYY-MM-DD) to avoid
+                # UTC date shift for daily bars (e.g. 18:00-0600 → next day UTC)
                 ts = float(t.timestamp())
+                bar_date_str = str(t)[:10]
             else:
                 # 兼容字符串等情况（极端情况下 bar.date 仍可能是 str）
                 try:
@@ -1295,18 +1298,22 @@ class IBConnector:
 
                     # IB formatDate=2 一般不会走到这里，但防御性处理
                     ts = datetime.fromisoformat(str(t)).timestamp()
+                    bar_date_str = str(t)[:10]
                 except Exception:
                     ts = None
             if ts is None:
                 continue
-            out.append({
+            entry: Dict[str, Any] = {
                 "bar_time": ts,
                 "open": float(getattr(bar, "open", 0) or 0),
                 "high": float(getattr(bar, "high", 0) or 0),
                 "low": float(getattr(bar, "low", 0) or 0),
                 "close": float(getattr(bar, "close", 0) or 0),
                 "volume": float(getattr(bar, "volume", 0) or 0),
-            })
+            }
+            if bar_date_str:
+                entry["bar_date"] = bar_date_str
+            out.append(entry)
         return out
 
     async def get_historical_bars_async(

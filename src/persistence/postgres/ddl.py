@@ -319,7 +319,7 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             CREATE TABLE IF NOT EXISTS stock_day (
                 id bigserial PRIMARY KEY,
                 symbol text NOT NULL,
-                bar_time timestamptz NOT NULL,
+                bar_time date NOT NULL,
                 open double precision,
                 high double precision,
                 low double precision,
@@ -329,6 +329,23 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 UNIQUE(symbol, bar_time)
             )
         """
+        )
+        # Migrate: if bar_time is still timestamptz from an older schema, convert to date.
+        cur.execute(
+            """
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'stock_day'
+                      AND column_name = 'bar_time'
+                      AND data_type = 'timestamp with time zone'
+                ) THEN
+                    TRUNCATE stock_day;
+                    ALTER TABLE stock_day ALTER COLUMN bar_time TYPE date USING bar_time::date;
+                END IF;
+            END $$
+            """
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS stock_day_symbol_time ON stock_day (symbol, bar_time DESC)"
