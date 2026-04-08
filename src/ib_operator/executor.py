@@ -30,6 +30,11 @@ class IbOperatorExecutor:
         self._account_secondary = account_secondary
         self._cmd_count = 0
         self._last_cmd_ts = 0.0
+        self._host_ib_probe_at = 0.0
+        self._host_ib_probe_ok = False
+        self._secondary_ib_probe_at = 0.0
+        self._secondary_ib_probe_ok = False
+        self._ib_probe_interval_sec = 5.0
 
     def note_cmd_processed(self) -> None:
         """Increment after each handled operator stream message (Redis cmd RPC)."""
@@ -155,22 +160,37 @@ class IbOperatorExecutor:
                 return jsonish_connected(snap())
             return jsonish_connected(getattr(c, "connected", False))
 
-        def _one(c: Any) -> Dict[str, Any]:
+        def _one_host() -> Dict[str, Any]:
+            c = self._primary
             return {
                 "connected": _connected_for_health(c),
                 "client_id": int(getattr(c, "client_id", 0)),
                 "last_error": getattr(c, "last_error", None),
                 "reconnects": int(getattr(c, "reconnects", 0)),
+                "ib_probe_at": float(self._host_ib_probe_at),
+                "ib_probe_ok": bool(self._host_ib_probe_ok),
+                "ib_probe_interval_sec": float(self._ib_probe_interval_sec),
+            }
+
+        def _one_secondary(c: Any) -> Dict[str, Any]:
+            return {
+                "connected": _connected_for_health(c),
+                "client_id": int(getattr(c, "client_id", 0)),
+                "last_error": getattr(c, "last_error", None),
+                "reconnects": int(getattr(c, "reconnects", 0)),
+                "ib_probe_at": float(self._secondary_ib_probe_at),
+                "ib_probe_ok": bool(self._secondary_ib_probe_ok),
+                "ib_probe_interval_sec": float(self._ib_probe_interval_sec),
             }
 
         out: Dict[str, Any] = {
-            "host": _one(self._primary),
+            "host": _one_host(),
             "service_alive": True,
             "cmd_count": self._cmd_count,
             "last_cmd_ts": self._last_cmd_ts,
         }
         if self._account_secondary is not None:
-            out["secondary"] = _one(self._account_secondary)
+            out["secondary"] = _one_secondary(self._account_secondary)
         else:
             out["secondary"] = None
         return out
@@ -179,6 +199,19 @@ class IbOperatorExecutor:
         await self._primary.ensure_connected()
         if self._account_secondary is not None:
             await self._account_secondary.ensure_connected()
+
+    async def record_ib_probe(self, interval_sec: float) -> None:
+        """Record per-slot IB liveness from connected_snapshot (Socket Services probe fields)."""
+        self._ib_probe_interval_sec = float(interval_sec)
+        now = time.time()
+        self._host_ib_probe_at = now
+        self._host_ib_probe_ok = bool(self._primary.connected_snapshot())
+        if self._account_secondary is not None:
+            self._secondary_ib_probe_at = now
+            self._secondary_ib_probe_ok = bool(self._account_secondary.connected_snapshot())
+        else:
+            self._secondary_ib_probe_at = 0.0
+            self._secondary_ib_probe_ok = False
 
     async def disconnect_all(self) -> None:
         try:

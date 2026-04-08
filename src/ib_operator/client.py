@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 
 import redis
 
+from src.app.config import get_effective_ib_config
 from src.ib_operator.config import effective_ib_operator_settings
 from src.ib_operator.health_redis import (
     jsonish_connected,
@@ -17,6 +18,7 @@ from src.ib_operator.health_redis import (
     operator_health_dict_from_redis_hash,
 )
 from src.ib_operator.protocol import PROTOCOL_VERSION, new_req_id, result_key
+from src.monitor.integrations.ib_probe_derived import attach_ib_probe_derived
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +178,29 @@ def build_monitor_ib_status(
     if health:
         health = normalize_operator_health_payload(health)
     unreachable = "IB Operator unreachable (is run_ib_operator.py running?)"
+    try:
+        _eff = get_effective_ib_config(config)
+        _stale_m = float(_eff.get("ib_probe_stale_multiplier") or 2.5)
+    except Exception:
+        _stale_m = 2.5
+    _now_ts = time.time()
+
+    def _slot_from_health_dict(h: dict, cid_i: int) -> Dict[str, Any]:
+        slot: Dict[str, Any] = {
+            "connected": jsonish_connected(h.get("connected")),
+            "client_id": int(h.get("client_id") or cid_i),
+            "last_error": h.get("last_error"),
+            "reconnects": int(h.get("reconnects") or 0),
+        }
+        attach_ib_probe_derived(
+            slot,
+            probe_at=float(h.get("ib_probe_at") or 0),
+            probe_interval=float(h.get("ib_probe_interval_sec") or 0),
+            probe_ok=jsonish_connected(h.get("ib_probe_ok")),
+            stale_mult=_stale_m,
+            now=_now_ts,
+        )
+        return slot
 
     def _slot(
         key: str,
@@ -196,12 +221,7 @@ def build_monitor_ib_status(
                 elif key == "secondary" and isinstance(health.get("account2"), dict):
                     h = health["account2"]
             if isinstance(h, dict):
-                return {
-                    "connected": jsonish_connected(h.get("connected")),
-                    "client_id": int(h.get("client_id") or cid_i),
-                    "last_error": h.get("last_error"),
-                    "reconnects": int(h.get("reconnects") or 0),
-                }
+                return _slot_from_health_dict(h, cid_i)
         return {
             "connected": False,
             "client_id": cid_i,
@@ -224,12 +244,7 @@ def build_monitor_ib_status(
             sec = health["account2"]
         if health and sec is not None and isinstance(sec, dict):
             a2 = sec
-            out["secondary"] = {
-                "connected": jsonish_connected(a2.get("connected")),
-                "client_id": int(a2.get("client_id") or cid2),
-                "last_error": a2.get("last_error"),
-                "reconnects": int(a2.get("reconnects") or 0),
-            }
+            out["secondary"] = _slot_from_health_dict(a2, cid2)
         else:
             out["secondary"] = {
                 "connected": False,

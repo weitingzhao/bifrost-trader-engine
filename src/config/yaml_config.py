@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 from src.core.dict_merge import deep_merge
+from src.ib.connection_policy import merge_ib_policy_into_effective_ib
 
 IB_PORT_MAP = {"tws_live": 7496, "tws_paper": 7497, "gateway": 4002}
 
@@ -482,4 +483,5 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
             "ib2_client_id_account_agent": 152,
         })
 
+    merge_ib_policy_into_effective_ib(out, config)
     return out

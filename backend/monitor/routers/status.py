@@ -414,9 +414,18 @@ def get_status(request: Request) -> Dict[str, Any]:
         ib_ingestor = None
         ib_account_agent = None
         try:
+            from src.app.config import get_effective_ib_config
+            from src.monitor.integrations.ib_probe_derived import (
+                attach_ib_probe_derived,
+                parse_redis_probe_triple,
+            )
             from src.vendor.massive.config import get_massive_settings
             from src.vendor.massive.reader import count_pending_massive_jobs
             from src.monitor.redis_url import redis_url_from_config
+
+            _ib_eff_status = get_effective_ib_config(reader._config)
+            _probe_stale_mult = float(_ib_eff_status.get("ib_probe_stale_multiplier") or 2.5)
+            _status_now = time.time()
 
             _ms = get_massive_settings(reader._config)
             _pending_m = count_pending_massive_jobs(control_via_db) if control_via_db else 0
@@ -491,6 +500,17 @@ def get_status(request: Request) -> Dict[str, Any]:
                             ib_ingestor_info["client_id"] = int(_cid)
                         except (TypeError, ValueError):
                             ib_ingestor_info["client_id"] = None
+                    _ipa, _ipok, _ipiv = parse_redis_probe_triple(
+                        _ih, "ib_probe_at", "ib_probe_ok", "ib_probe_interval_sec"
+                    )
+                    attach_ib_probe_derived(
+                        ib_ingestor_info,
+                        probe_at=_ipa,
+                        probe_interval=_ipiv,
+                        probe_ok=_ipok,
+                        stale_mult=_probe_stale_mult,
+                        now=_status_now,
+                    )
             ib_ingestor = ib_ingestor_info
 
             ib_account_agent_info: Dict[str, Any] = {
@@ -505,9 +525,7 @@ def get_status(request: Request) -> Dict[str, Any]:
             if _rurl:
                 _ah = hgetall_ib_account_agent_health(_r)
                 if _ah:
-                    from src.app.config import get_effective_ib_config
-
-                    _ib_eff = get_effective_ib_config(reader._config)
+                    _ib_eff = _ib_eff_status
                     _host_cid_cfg = int(_ib_eff.get("client_id_account_agent") or 151)
                     _host_on = redis_hash_field_truthy(
                         _ah, "host_connected"
@@ -553,6 +571,20 @@ def get_status(request: Request) -> Dict[str, Any]:
                         "last_error": None,
                         "reconnects": _recon,
                     }
+                    _hpa, _hpok, _hpiv = parse_redis_probe_triple(
+                        _ah,
+                        "host_ib_probe_at",
+                        "host_ib_probe_ok",
+                        "host_ib_probe_interval_sec",
+                    )
+                    attach_ib_probe_derived(
+                        ib_account_agent_info["host"],
+                        probe_at=_hpa,
+                        probe_interval=_hpiv,
+                        probe_ok=_hpok,
+                        stale_mult=_probe_stale_mult,
+                        now=_status_now,
+                    )
                     _ib2 = str(_ib_eff.get("ib2_host") or "").strip()
                     if _ib2:
                         _sec_cid_cfg = int(_ib_eff.get("ib2_client_id_account_agent") or 152)
@@ -570,6 +602,20 @@ def get_status(request: Request) -> Dict[str, Any]:
                             "last_error": None,
                             "reconnects": ib_account_agent_info["reconnects"],
                         }
+                        _spa, _spok, _spiv = parse_redis_probe_triple(
+                            _ah,
+                            "secondary_ib_probe_at",
+                            "secondary_ib_probe_ok",
+                            "secondary_ib_probe_interval_sec",
+                        )
+                        attach_ib_probe_derived(
+                            ib_account_agent_info["secondary"],
+                            probe_at=_spa,
+                            probe_interval=_spiv,
+                            probe_ok=_spok,
+                            stale_mult=_probe_stale_mult,
+                            now=_status_now,
+                        )
             ib_account_agent = ib_account_agent_info
         except Exception:
             massive = None

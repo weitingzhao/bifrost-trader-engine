@@ -85,8 +85,7 @@ def _redis_client(cfg: dict):
 
 
 SNAPSHOT_POLL_SEC = 2.0
-RECONNECT_BASE = 2.0
-RECONNECT_MAX = 60.0
+HOST_FAIL_ITERATIONS_BEFORE_SESSION_RESET = 15
 # After ensure_connected, ib_insync may lag before isConnected() is true on the client loop.
 _POST_CONNECT_SNAPSHOT_ATTEMPTS = 20
 _POST_CONNECT_SNAPSHOT_DELAY_SEC = 0.25
@@ -172,10 +171,82 @@ class IbAccountAgentApp:
         self._host_cid = 0
         self._sec_cid: Optional[int] = None
         self._fill_rows: List[Dict[str, Any]] = []
+        self._ib_probe_interval_sec = 5.0
+        self._reconnect_base_sec = 2.0
+        self._reconnect_max_sec = 60.0
+        self._reconnect_max_exp = 6
+        self._host_probe_at = 0.0
+        self._host_probe_ok = False
+        self._sec_probe_at = 0.0
+        self._sec_probe_ok = False
 
     def _bump(self) -> None:
         self._msg_count += 1
         self._last_msg_ts = time.time()
+
+    def _set_probe_state(
+        self,
+        *,
+        host_probe_at: float,
+        host_probe_ok: bool,
+        sec_probe_at: float,
+        sec_probe_ok: bool,
+    ) -> None:
+        self._host_probe_at = float(host_probe_at or 0.0)
+        self._host_probe_ok = bool(host_probe_ok)
+        self._sec_probe_at = float(sec_probe_at or 0.0)
+        self._sec_probe_ok = bool(sec_probe_ok)
+
+    def _write_agent_health_latest_probe(
+        self,
+        *,
+        host_ok: bool,
+        sec_ok: bool,
+        last_msg_ts: float,
+        secondary: Any,
+        host_alive: bool = True,
+    ) -> None:
+        self._write_agent_health(
+            host_ok=host_ok,
+            sec_ok=sec_ok,
+            last_msg_ts=last_msg_ts,
+            host_probe_at=self._host_probe_at,
+            host_probe_ok=self._host_probe_ok,
+            sec_probe_at=self._sec_probe_at,
+            sec_probe_ok=self._sec_probe_ok,
+            secondary=secondary,
+            host_alive=host_alive,
+        )
+
+    def _write_agent_health(
+        self,
+        *,
+        host_ok: bool,
+        sec_ok: bool,
+        last_msg_ts: float,
+        host_probe_at: float,
+        host_probe_ok: bool,
+        sec_probe_at: float,
+        sec_probe_ok: bool,
+        secondary: Any,
+        host_alive: bool = True,
+    ) -> None:
+        self._writer.update_health(
+            self._host_cid,
+            host_ok,
+            last_msg_ts,
+            self._reconnects,
+            self._msg_count,
+            secondary_connected=sec_ok if secondary is not None else None,
+            secondary_client_id=self._sec_cid,
+            host_alive=host_alive,
+            host_ib_probe_at=host_probe_at,
+            host_ib_probe_ok=host_probe_ok,
+            host_ib_probe_interval_sec=self._ib_probe_interval_sec,
+            secondary_ib_probe_at=sec_probe_at,
+            secondary_ib_probe_ok=sec_probe_ok,
+            secondary_ib_probe_interval_sec=self._ib_probe_interval_sec,
+        )
 
     async def run(self) -> None:
         loop = asyncio.get_event_loop()
@@ -186,9 +257,14 @@ class IbAccountAgentApp:
                 pass
 
         from src.app.config import get_effective_ib_config
+        from src.ib.connection_policy import reconnect_delay_s
         from src.monitor.integrations.ib_clients import MarketIbClient
 
         ib_eff = get_effective_ib_config(self._cfg)
+        self._ib_probe_interval_sec = float(ib_eff["ib_probe_interval_sec"])
+        self._reconnect_base_sec = float(ib_eff["ib_reconnect_base_sec"])
+        self._reconnect_max_sec = float(ib_eff["ib_reconnect_max_sec"])
+        self._reconnect_max_exp = int(ib_eff["ib_reconnect_max_exp"])
         self._host_cid = int(ib_eff["client_id_account_agent"])
         host = str(ib_eff["host"])
         port = int(ib_eff["port"])
@@ -225,6 +301,12 @@ class IbAccountAgentApp:
             self._msg_count,
             secondary_connected=False if secondary is not None else None,
             secondary_client_id=self._sec_cid,
+            host_ib_probe_at=0.0,
+            host_ib_probe_ok=False,
+            host_ib_probe_interval_sec=self._ib_probe_interval_sec,
+            secondary_ib_probe_at=0.0,
+            secondary_ib_probe_ok=False,
+            secondary_ib_probe_interval_sec=self._ib_probe_interval_sec,
         )
 
         while not self._stop.is_set():
@@ -238,9 +320,11 @@ class IbAccountAgentApp:
             if self._stop.is_set():
                 break
             self._reconnects += 1
-            delay = min(
-                RECONNECT_BASE * (2 ** min(self._reconnects - 1, 6)),
-                RECONNECT_MAX,
+            delay = reconnect_delay_s(
+                self._reconnects,
+                base=self._reconnect_base_sec,
+                max_s=self._reconnect_max_sec,
+                max_exp=self._reconnect_max_exp,
             )
             self._writer.update_health(
                 self._host_cid,
@@ -250,6 +334,12 @@ class IbAccountAgentApp:
                 self._msg_count,
                 secondary_connected=False if secondary is not None else None,
                 secondary_client_id=self._sec_cid,
+                host_ib_probe_at=0.0,
+                host_ib_probe_ok=False,
+                host_ib_probe_interval_sec=self._ib_probe_interval_sec,
+                secondary_ib_probe_at=0.0,
+                secondary_ib_probe_ok=False,
+                secondary_ib_probe_interval_sec=self._ib_probe_interval_sec,
             )
             logger.info("Reconnecting in %.1fs (attempt %d)…", delay, self._reconnects)
             try:
@@ -266,8 +356,69 @@ class IbAccountAgentApp:
             secondary_connected=False if secondary is not None else None,
             secondary_client_id=self._sec_cid,
             host_alive=False,
+            host_ib_probe_at=0.0,
+            host_ib_probe_ok=False,
+            host_ib_probe_interval_sec=self._ib_probe_interval_sec,
+            secondary_ib_probe_at=0.0,
+            secondary_ib_probe_ok=False,
+            secondary_ib_probe_interval_sec=self._ib_probe_interval_sec,
         )
         logger.info("IB Account Agent stopped")
+
+    async def _ib_probe_loop(self, primary: Any, secondary: Any) -> None:
+        """Periodic IB liveness probe — keeps host_ib_probe_at fresh independently of the snapshot loop.
+
+        Account snapshot RPCs (get_positions / get_account_summary) occupy the
+        IB client's private event-loop thread for 10-30 s.  If we called
+        ``connected_snapshot()`` here, it dispatches via
+        ``run_coroutine_threadsafe`` to that same busy loop and blocks the
+        main asyncio loop on ``fut.result(timeout=5)`` until the RPC finishes
+        — effectively starving this probe task.
+
+        Instead we read ``_connected_state`` directly (a simple bool set by
+        the connect/disconnect lifecycle, safe to read under CPython's GIL).
+        This lets the probe advance ``host_ib_probe_at`` every interval
+        regardless of how long account-snapshot RPCs take.
+        """
+        while not self._stop.is_set():
+            try:
+                await asyncio.wait_for(
+                    self._stop.wait(),
+                    timeout=max(1.0, self._ib_probe_interval_sec),
+                )
+                break
+            except asyncio.TimeoutError:
+                pass
+            now = time.time()
+            host_ok = bool(getattr(primary, "_connected_state", False))
+            sec_ok = (
+                bool(getattr(secondary, "_connected_state", False))
+                if secondary is not None
+                else False
+            )
+            self._host_probe_at = now
+            self._host_probe_ok = host_ok
+            if secondary is not None:
+                self._sec_probe_at = now
+                self._sec_probe_ok = sec_ok
+            try:
+                self._writer.update_health(
+                    self._host_cid,
+                    host_ok,
+                    self._last_msg_ts or now,
+                    self._reconnects,
+                    self._msg_count,
+                    secondary_connected=sec_ok if secondary is not None else None,
+                    secondary_client_id=self._sec_cid,
+                    host_ib_probe_at=now,
+                    host_ib_probe_ok=host_ok,
+                    host_ib_probe_interval_sec=self._ib_probe_interval_sec,
+                    secondary_ib_probe_at=now if secondary is not None else 0.0,
+                    secondary_ib_probe_ok=sec_ok,
+                    secondary_ib_probe_interval_sec=self._ib_probe_interval_sec,
+                )
+            except Exception as e:
+                logger.debug("ib probe health: %s", e)
 
     async def _run_session(
         self,
@@ -296,17 +447,24 @@ class IbAccountAgentApp:
         host_ok = bool(primary.connected_snapshot())
         sec_ok = bool(secondary.connected_snapshot()) if secondary is not None else False
 
-        # Redis health before reqAllOpenOrders / subscriptions — those calls can block a long time
-        # while TWS is busy, leaving connected flags at 0 until they return.
-        self._writer.update_health(
-            self._host_cid,
-            host_ok,
-            time.time(),
-            self._reconnects,
-            self._msg_count,
-            secondary_connected=sec_ok if secondary is not None else None,
-            secondary_client_id=self._sec_cid,
+        now0 = time.time()
+        self._set_probe_state(
+            host_probe_at=now0,
+            host_probe_ok=host_ok,
+            sec_probe_at=now0 if secondary is not None else 0.0,
+            sec_probe_ok=sec_ok if secondary is not None else False,
         )
+        self._write_agent_health_latest_probe(
+            host_ok=host_ok,
+            sec_ok=sec_ok,
+            last_msg_ts=now0,
+            secondary=secondary,
+        )
+
+        # Start probe task BEFORE subscriptions / reqAllOpenOrders — those IB
+        # RPCs can block the event loop for 30+ seconds (or hang entirely when
+        # TWS is busy), and probe_at must keep advancing during that time.
+        probe_task = asyncio.ensure_future(self._ib_probe_loop(primary, secondary))
 
         def on_orders_update() -> None:
             self._bump()
@@ -343,37 +501,73 @@ class IbAccountAgentApp:
                 await sc.get_open_orders_async(include_all_from_tws=True)
             except Exception as e:
                 logger.warning("Secondary subscriptions: %s", e)
+        host_fail_streak = 0
 
-        while not self._stop.is_set():
+        try:
+            while not self._stop.is_set():
+                try:
+                    if not primary.connected_snapshot():
+                        try:
+                            await primary.ensure_connected()
+                        except Exception as e:
+                            logger.warning("Host ensure_connected: %s", e)
+                    host_ok = bool(primary.connected_snapshot())
+                    if secondary is not None:
+                        if not secondary.connected_snapshot():
+                            try:
+                                await secondary.ensure_connected()
+                            except Exception as e:
+                                logger.warning("Secondary ensure_connected: %s", e)
+                        sec_ok = bool(secondary.connected_snapshot())
+                    else:
+                        sec_ok = False
+
+                    if not host_ok:
+                        host_fail_streak += 1
+                        if host_fail_streak >= HOST_FAIL_ITERATIONS_BEFORE_SESSION_RESET:
+                            raise ConnectionError(
+                                "IB Account Agent host API disconnected; resetting session for backoff reconnect"
+                            )
+                    else:
+                        host_fail_streak = 0
+
+                    now = time.time()
+                    self._set_probe_state(
+                        host_probe_at=now,
+                        host_probe_ok=host_ok,
+                        sec_probe_at=now if secondary is not None else 0.0,
+                        sec_probe_ok=sec_ok,
+                    )
+
+                    oo = _merged_open_orders(hc, sc)
+                    acct = await _accounts_snapshot(hc, sc)
+                    fills = list(self._fill_rows)
+                    self._fill_rows.clear()
+                    payload = {
+                        "open_orders": oo,
+                        "accounts_snapshot": acct,
+                        "last_execution_rows": fills,
+                        "host_connected": host_ok,
+                        "secondary_connected": sec_ok,
+                    }
+                    self._writer.write_snapshot(payload)
+                    self._write_agent_health_latest_probe(
+                        host_ok=host_ok,
+                        sec_ok=sec_ok,
+                        last_msg_ts=self._last_msg_ts or now,
+                        secondary=secondary,
+                    )
+                except Exception as e:
+                    logger.warning("snapshot iteration: %s", e)
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=SNAPSHOT_POLL_SEC)
+                except asyncio.TimeoutError:
+                    pass
+        finally:
+            probe_task.cancel()
             try:
-                host_ok = bool(primary.connected_snapshot())
-                sec_ok = bool(secondary.connected_snapshot()) if secondary is not None else False
-                oo = _merged_open_orders(hc, sc)
-                acct = await _accounts_snapshot(hc, sc)
-                fills = list(self._fill_rows)
-                self._fill_rows.clear()
-                payload = {
-                    "open_orders": oo,
-                    "accounts_snapshot": acct,
-                    "last_execution_rows": fills,
-                    "host_connected": host_ok,
-                    "secondary_connected": sec_ok,
-                }
-                self._writer.write_snapshot(payload)
-                self._writer.update_health(
-                    self._host_cid,
-                    host_ok,
-                    self._last_msg_ts or time.time(),
-                    self._reconnects,
-                    self._msg_count,
-                    secondary_connected=sec_ok if secondary is not None else None,
-                    secondary_client_id=self._sec_cid,
-                )
-            except Exception as e:
-                logger.warning("snapshot iteration: %s", e)
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=SNAPSHOT_POLL_SEC)
-            except asyncio.TimeoutError:
+                await probe_task
+            except asyncio.CancelledError:
                 pass
 
 

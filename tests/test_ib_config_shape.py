@@ -31,6 +31,7 @@ def test_host_secondary_blocks():
         }
     }
     eff = get_effective_ib_config(cfg)
+    assert eff["ib_probe_interval_sec"] == 5.0
     assert eff["host"] == "192.168.10.30"
     assert eff["port_type"] == "tws_live"
     assert eff["client_id_daemon"] == 110

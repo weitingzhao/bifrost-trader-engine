@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { StatusResponse } from '../types'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { AggregatedLogConsolePanel } from '../components/AggregatedLogConsolePanel'
@@ -64,6 +64,59 @@ function fmtAge(s: number | null | undefined): string {
   return `${Math.floor(s / 3600)}h`
 }
 
+/** Colored pill badge for IB liveness probe countdown (ticks live via elapsed). */
+function IbProbeBadge({ nextInS, stale }: { nextInS: number; stale: boolean }) {
+  const isOk = !stale && nextInS > 2
+  const isSoon = !stale && nextInS <= 2
+  const bg = stale ? 'rgba(239,68,68,0.18)' : isSoon ? 'rgba(234,179,8,0.18)' : 'rgba(34,197,94,0.15)'
+  const color = stale ? '#f87171' : isSoon ? '#fbbf24' : '#4ade80'
+  const border = stale ? '1px solid rgba(239,68,68,0.35)' : isSoon ? '1px solid rgba(234,179,8,0.35)' : '1px solid rgba(34,197,94,0.3)'
+  const label = stale ? 'Stale' : `~${Math.ceil(nextInS)}s`
+  return (
+    <span
+      title={stale ? 'Probe overdue — Monitor marked ib_probe_stale; check run_ib_*.py health loop.' : `Next IB liveness probe in ~${Math.ceil(nextInS)}s`}
+      style={{
+        display: 'inline-flex', alignItems: 'center',
+        padding: '1px 8px', borderRadius: 99,
+        fontSize: '0.72rem', fontWeight: 700,
+        fontVariantNumeric: 'tabular-nums',
+        letterSpacing: '0.01em', lineHeight: 1.65,
+        background: bg, color, border,
+        verticalAlign: 'middle', marginLeft: 4,
+        minWidth: stale ? undefined : 38, justifyContent: 'center',
+      }}
+    >
+      {label}
+    </span>
+  )
+}
+
+/** Colored pill badge for Massive WS last-message age (ticks live via elapsed). */
+function MassiveAgeBadge({ ageS }: { ageS: number }) {
+  const isOk = ageS < 5
+  const isWarn = ageS >= 5 && ageS < 30
+  const bg = isOk ? 'rgba(34,197,94,0.15)' : isWarn ? 'rgba(234,179,8,0.18)' : 'rgba(239,68,68,0.18)'
+  const color = isOk ? '#4ade80' : isWarn ? '#fbbf24' : '#f87171'
+  const border = isOk ? '1px solid rgba(34,197,94,0.3)' : isWarn ? '1px solid rgba(234,179,8,0.35)' : '1px solid rgba(239,68,68,0.35)'
+  const label = ageS < 60 ? `${Math.floor(ageS)}s ago` : ageS < 3600 ? `${Math.floor(ageS / 60)}m ago` : `${Math.floor(ageS / 3600)}h ago`
+  return (
+    <span
+      title={`Last Massive WS message ${label}. Green < 5s, yellow < 30s, red ≥ 30s.`}
+      style={{
+        display: 'inline-flex', alignItems: 'center',
+        padding: '1px 8px', borderRadius: 99,
+        fontSize: '0.72rem', fontWeight: 700,
+        fontVariantNumeric: 'tabular-nums',
+        letterSpacing: '0.01em', lineHeight: 1.65,
+        background: bg, color, border,
+        verticalAlign: 'middle',
+      }}
+    >
+      {label}
+    </span>
+  )
+}
+
 /** Table row category (Engine is used only on Daemon page; Socket page never lists trading_engine). */
 export type IngestCategory = 'Massive' | 'IB' | 'Engine' | 'Other'
 
@@ -76,7 +129,79 @@ function categoryForServiceId(id: string): IngestCategory {
 }
 
 /** One IB Client ID line under Socket Services (ingest: single row; IB Operator: Host + optional Sec). */
-type IbClientIdSlot = { label?: string; id: number | null; title: string }
+type IbClientIdSlot = {
+  label?: string
+  id: number | null
+  title: string
+  lastIbProbeLabel?: string
+  nextProbeInSec?: number | null
+  ibProbeStale?: boolean
+}
+
+function formatLastIbProbe(ts: number | undefined | null): string {
+  if (ts == null || !Number.isFinite(ts) || ts <= 0) return '—'
+  try {
+    return new Date(ts * 1000).toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+  } catch {
+    return '—'
+  }
+}
+
+function enrichIbClientSlotsWithProbe(
+  svcId: string,
+  slots: IbClientIdSlot[],
+  status: StatusResponse | null,
+): IbClientIdSlot[] {
+  const sid = svcId === 'ib_market' ? 'ib_ingestor' : svcId
+  if (slots.length === 0) return slots
+  if (sid === 'ib_ingestor') {
+    const ib = status?.socket?.ib_ingestor
+    if (!ib) return slots
+    return slots.map(s => ({
+      ...s,
+      lastIbProbeLabel: formatLastIbProbe(ib.last_ib_probe_at),
+      nextProbeInSec: ib.next_ib_probe_in_s ?? null,
+      ibProbeStale: ib.ib_probe_stale === true,
+    }))
+  }
+  if (sid === 'ib_account_agent') {
+    const aa = status?.socket?.ib_account_agent
+    if (!aa) return slots
+    return slots.map(s => {
+      const block = s.label === 'Sec' ? aa.secondary : aa.host
+      if (!block) {
+        return { ...s, lastIbProbeLabel: '—', nextProbeInSec: null, ibProbeStale: false }
+      }
+      return {
+        ...s,
+        lastIbProbeLabel: formatLastIbProbe(block.last_ib_probe_at),
+        nextProbeInSec: block.next_ib_probe_in_s ?? null,
+        ibProbeStale: block.ib_probe_stale === true,
+      }
+    })
+  }
+  if (sid === 'ib_operator') {
+    const op = status?.socket?.ib_operator
+    if (!op) return slots
+    return slots.map(s => {
+      const block = s.label === 'Sec' ? op.secondary : op.host
+      if (!block) {
+        return { ...s, lastIbProbeLabel: '—', nextProbeInSec: null, ibProbeStale: false }
+      }
+      return {
+        ...s,
+        lastIbProbeLabel: formatLastIbProbe(block.last_ib_probe_at),
+        nextProbeInSec: block.next_ib_probe_in_s ?? null,
+        ibProbeStale: block.ib_probe_stale === true,
+      }
+    })
+  }
+  return slots
+}
 
 /**
  * Client IDs for IB ingest rows (only called when `ibIngestClientIdShouldShow` is true).
@@ -306,6 +431,8 @@ function ServiceRow(props: {
   svc: MarketIngestServiceRow
   category: IngestCategory
   status: StatusResponse | null
+  /** Seconds elapsed since status prop was last received — used for live countdown. */
+  elapsed: number
   runtimeHostTitle: string
   runtimeHostPill: OpsHostEnvPill
   logicalText: string
@@ -319,6 +446,7 @@ function ServiceRow(props: {
     svc,
     category,
     status,
+    elapsed,
     runtimeHostTitle,
     runtimeHostPill,
     logicalText,
@@ -331,15 +459,29 @@ function ServiceRow(props: {
   const redisHealth = ingestRedisHealthLamp(svc.id, status)
   const lamp = redisHealth.lamp
   const statusTitle = redisHealth.title
-  const { showStart, showStop } = ingestActionButtonsForProcessState(svc.process_active)
+  const rawButtons = ingestActionButtonsForProcessState(svc.process_active)
+  // When Redis health is green the service is definitely running regardless of
+  // whether Ops/systemd can probe the unit (e.g. process started manually or
+  // on a remote host).  Prefer Stop in that case so the button reflects reality.
+  const showStart = lamp === 'green' ? false : rawButtons.showStart
+  const showStop  = lamp === 'green' ? true  : rawButtons.showStop
   const showIbClientId = ibIngestClientIdShouldShow(svc.id, category, svc.process_active, status)
-  const ibClientSlots = showIbClientId ? ibIngestClientIdSlots(svc.id, category, status) : []
+  const ibClientSlots = showIbClientId
+    ? enrichIbClientSlotsWithProbe(svc.id, ibIngestClientIdSlots(svc.id, category, status), status)
+    : []
   const ibOpForRow = svc.id === 'ib_operator' ? status?.socket?.ib_operator : undefined
   const liveHostApiConnected =
     svc.id !== 'ib_operator'
     || ingestRedisTruthyConnected(ibOpForRow?.connected)
     || ingestRedisTruthyConnected(ibOpForRow?.host?.connected)
   const actionsDisabled = actionBlock !== 'none'
+  // Massive WS: live last-message age counter
+  const massive = status?.socket?.massive
+  const liveMassiveMsgAgeS =
+    svc.id === 'massive_ws' && massive?.last_msg_age_s != null
+      ? Math.max(0, Math.floor(massive.last_msg_age_s + elapsed))
+      : null
+
   return (
     <tr>
       <td>
@@ -350,48 +492,86 @@ function ServiceRow(props: {
       <td title={runtimeHostTitle}>
         <OpsHostEnvPillBadge pill={runtimeHostPill} />
       </td>
-      <td>{category}</td>
       <td className="massive-api-kv-label">
-        {svc.label}
-        <div className="massive-api-doc-hint" style={{ marginTop: 4 }}>
+        <div style={{ fontWeight: 600 }}>{svc.label}</div>
+        <div className="massive-api-doc-hint" style={{ marginTop: 3 }}>
           <code>{svc.systemd_unit}</code>
         </div>
+        {/* IB: Client ID + live probe countdown badges */}
         {showIbClientId ? (
-          <div className="socket-ib-client-id-wrap">
+          <div className="socket-ib-client-id-wrap" style={{ marginTop: 6 }}>
             <span className="massive-api-doc-hint">IB Client ID</span>
             {ibClientSlots.length === 0 ? (
               <span className="massive-api-doc-hint" title="Not available from Monitor /status or ib_client.">
                 —
               </span>
             ) : (
-              ibClientSlots.map((slot, i) => (
-                <span
-                  key={`${slot.label ?? 'ingest'}-${i}`}
-                  className="socket-ib-client-id-slot"
-                  style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem' }}
-                >
-                  {slot.label ? (
-                    <span className="massive-api-doc-hint" style={{ margin: 0 }}>
-                      {slot.label}
-                    </span>
-                  ) : null}
-                  {slot.id != null ? (
-                    <span className="socket-ib-client-id-badge" title={slot.title} aria-label={slot.title}>
-                      {slot.id}
-                    </span>
-                  ) : (
-                    <span className="massive-api-doc-hint" title={slot.title} aria-label={slot.title}>
-                      —
-                    </span>
-                  )}
-                </span>
-              ))
+              ibClientSlots.map((slot, i) => {
+                const liveNextInS =
+                  slot.nextProbeInSec != null && Number.isFinite(slot.nextProbeInSec)
+                    ? Math.max(0, slot.nextProbeInSec - elapsed)
+                    : null
+                const showProbe = slot.lastIbProbeLabel != null && slot.lastIbProbeLabel !== '—'
+                return (
+                  <span
+                    key={`${slot.label ?? 'ingest'}-${i}`}
+                    className="socket-ib-client-id-slot"
+                    style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem' }}
+                  >
+                    {slot.label ? (
+                      <span className="massive-api-doc-hint" style={{ margin: 0 }}>
+                        {slot.label}
+                      </span>
+                    ) : null}
+                    {slot.id != null ? (
+                      <span className="socket-ib-client-id-badge" title={slot.title} aria-label={slot.title}>
+                        {slot.id}
+                      </span>
+                    ) : (
+                      <span className="massive-api-doc-hint" title={slot.title} aria-label={slot.title}>
+                        —
+                      </span>
+                    )}
+                    {showProbe ? (
+                      <span
+                        className="massive-api-doc-hint"
+                        style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                      >
+                        <span title="Last IB API liveness probe timestamp">
+                          {slot.lastIbProbeLabel}
+                        </span>
+                        {liveNextInS !== null ? (
+                          <IbProbeBadge nextInS={liveNextInS} stale={slot.ibProbeStale === true} />
+                        ) : slot.ibProbeStale ? (
+                          <IbProbeBadge nextInS={0} stale />
+                        ) : null}
+                      </span>
+                    ) : null}
+                  </span>
+                )
+              })
             )}
             {svc.id === 'ib_operator' && ibOpForRow && !liveHostApiConnected && showIbClientId ? (
               <div className="massive-api-doc-hint" style={{ marginTop: 6, maxWidth: 480 }}>
                 Yellow lamp: Redis <code>host_connected</code> is false. <code>host_client_id</code> is
                 unrelated (always filled from config). Hover Host / Sec badges for details.
               </div>
+            ) : null}
+          </div>
+        ) : null}
+        {/* Massive WS: live last-message heartbeat */}
+        {svc.id === 'massive_ws' && massive ? (
+          <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span className="massive-api-doc-hint" style={{ margin: 0 }}>Last msg</span>
+            {liveMassiveMsgAgeS != null ? (
+              <MassiveAgeBadge ageS={liveMassiveMsgAgeS} />
+            ) : (
+              <span className="massive-api-doc-hint" style={{ margin: 0 }}>—</span>
+            )}
+            {massive.ws_reconnects != null && massive.ws_reconnects > 0 ? (
+              <span className="massive-api-doc-hint" style={{ margin: 0 }}>
+                · {massive.ws_reconnects} reconnects
+              </span>
             ) : null}
           </div>
         ) : null}
@@ -461,9 +641,18 @@ function ServiceRow(props: {
   )
 }
 
+const CATEGORY_LABELS: Record<IngestCategory, string> = {
+  Massive: 'Massive Options WS',
+  IB: 'IB Broker Services',
+  Engine: 'Engine',
+  Other: 'Other',
+}
+
 export function IngestServicesTable(props: {
   rows: { svc: MarketIngestServiceRow; category: IngestCategory }[]
   status: StatusResponse | null
+  /** Seconds elapsed since status was last received — drives live countdown badges. */
+  elapsed: number
   pageEnv: 'dev' | 'prod' | null
   disableIngestScript: boolean
   canOperate: boolean
@@ -477,6 +666,7 @@ export function IngestServicesTable(props: {
   const {
     rows,
     status,
+    elapsed,
     pageEnv,
     disableIngestScript,
     canOperate,
@@ -490,46 +680,83 @@ export function IngestServicesTable(props: {
   if (rows.length === 0) {
     return <p className="massive-api-doc-hint">{emptyHint}</p>
   }
+
+  // Group rows by category to render section header rows
+  const groups: { cat: IngestCategory; rows: { svc: MarketIngestServiceRow; category: IngestCategory }[] }[] = []
+  for (const row of rows) {
+    const last = groups[groups.length - 1]
+    if (!last || last.cat !== row.category) {
+      groups.push({ cat: row.category, rows: [row] })
+    } else {
+      last.rows.push(row)
+    }
+  }
+
   return (
-    <table className="massive-api-kv-table">
+    <table className="massive-api-kv-table ingest-services-table">
       <thead>
         <tr>
-          <th>Status</th>
-          <th>
+          <th style={{ width: 32 }}>Status</th>
+          <th style={{ width: 80 }}>
             Host
             <InfoTooltip text="Only one of Dev or Prod may run each service against the same Redis: bifrost_ops_control_env and bifrost_ops_control_host on the meta hash record which stack and host last started it from Ops. Starting elsewhere is rejected if the lease differs or if health still shows a fresh active writer. After Stop, Ops clears those fields and rewrites health to disconnected so Status updates." />
           </th>
-          <th>Category</th>
           <th className="massive-api-kv-label">Service</th>
           <th>Redis / logical</th>
           <th>Actions</th>
         </tr>
       </thead>
       <tbody>
-        {rows.map(({ svc, category }) => {
-          const { title: rtTitle, pill: rtPill } = runtimeControlHostDisplay(
-            svc.redis_control_env,
-            svc.redis_meta_key,
-            svc.redis_control_host,
-          )
-          const block = ingestActionBlock(canOperate, disableIngestScript, pageEnv, svc.redis_control_env)
-          return (
-            <ServiceRow
-              key={svc.id}
-              svc={svc}
-              category={category}
-              status={status}
-              runtimeHostTitle={rtTitle}
-              runtimeHostPill={rtPill}
-              logicalText={logicalSummary(svc)}
-              actionBlock={block}
-              onStart={() => onStart(svc)}
-              onStop={() => onStop(svc)}
-              onRestart={() => onRestart(svc)}
-              onReset={() => onReset(svc)}
-            />
-          )
-        })}
+        {groups.map(({ cat, rows: catRows }) => (
+          <Fragment key={cat}>
+            <tr
+              style={{
+                background: 'rgba(255,255,255,0.03)',
+                borderTop: '1px solid rgba(255,255,255,0.07)',
+              }}
+            >
+              <td
+                colSpan={5}
+                style={{
+                  padding: '6px 10px',
+                  fontSize: '0.68rem',
+                  fontWeight: 700,
+                  letterSpacing: '0.09em',
+                  textTransform: 'uppercase',
+                  color: 'rgba(255,255,255,0.38)',
+                  userSelect: 'none',
+                }}
+              >
+                {CATEGORY_LABELS[cat] ?? cat}
+              </td>
+            </tr>
+            {catRows.map(({ svc, category }) => {
+              const { title: rtTitle, pill: rtPill } = runtimeControlHostDisplay(
+                svc.redis_control_env,
+                svc.redis_meta_key,
+                svc.redis_control_host,
+              )
+              const block = ingestActionBlock(canOperate, disableIngestScript, pageEnv, svc.redis_control_env)
+              return (
+                <ServiceRow
+                  key={svc.id}
+                  svc={svc}
+                  category={category}
+                  status={status}
+                  elapsed={elapsed}
+                  runtimeHostTitle={rtTitle}
+                  runtimeHostPill={rtPill}
+                  logicalText={logicalSummary(svc)}
+                  actionBlock={block}
+                  onStart={() => onStart(svc)}
+                  onStop={() => onStop(svc)}
+                  onRestart={() => onRestart(svc)}
+                  onReset={() => onReset(svc)}
+                />
+              )
+            })}
+          </Fragment>
+        ))}
       </tbody>
     </table>
   )
@@ -550,6 +777,22 @@ export function MarketIngestOpsPage({
   const [authPanelOpen, setAuthPanelOpen] = useState(false)
   const [confirmState, setConfirmState] = useState<ConfirmState>(INITIAL_CONFIRM)
   const [opsHealth, setOpsHealth] = useState<Awaited<ReturnType<typeof fetchOpsHealth>> | null>(null)
+
+  // Live 1-second ticker for countdown badges and heartbeat ages.
+  const [, setTick] = useState(0)
+  const statusReceivedAtRef = useRef<number>(Date.now() / 1000)
+  const prevStatusRef = useRef<StatusResponse | null>(null)
+  useEffect(() => {
+    if (status !== prevStatusRef.current) {
+      prevStatusRef.current = status
+      statusReceivedAtRef.current = Date.now() / 1000
+    }
+  })
+  useEffect(() => {
+    const id = window.setInterval(() => setTick(t => (t + 1) & 0xffffff), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+  const elapsed = Math.max(0, Date.now() / 1000 - statusReceivedAtRef.current)
 
   const socketServicesLogConsole = useSocketServicesUnifiedLogConsole({
     initialMaxLines: 500,
@@ -948,6 +1191,7 @@ export function MarketIngestOpsPage({
         <IngestServicesTable
           rows={unifiedServiceRows}
           status={status}
+          elapsed={elapsed}
           pageEnv={normalizedPageDevProd(configProfile)}
           disableIngestScript={disableIngestActions}
           emptyHint="No market ingest services in Ops config."

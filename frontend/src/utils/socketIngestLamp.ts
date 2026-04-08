@@ -25,6 +25,29 @@ export function ingestRedisTruthyConnected(v: unknown): boolean {
 /** Yellow "waiting for IB" only when Redis health is actively updating (avoids stale service_alive default). */
 const IB_OPERATOR_HEALTH_FRESH_MAX_S = 180
 
+/** True when Monitor exposes IB probe fields and they indicate failure or staleness (zombie writer). */
+function ibSlotProbeUnhealthy(
+  slot:
+    | {
+        ib_probe_stale?: boolean
+        ib_probe_ok?: boolean
+        last_ib_probe_at?: number | null
+      }
+    | null
+    | undefined,
+): boolean {
+  if (!slot) return false
+  if (slot.ib_probe_stale === true) return true
+  if (
+    typeof slot.last_ib_probe_at === 'number'
+    && slot.last_ib_probe_at > 0
+    && slot.ib_probe_ok === false
+  ) {
+    return true
+  }
+  return false
+}
+
 function ingestRedisExplicitlyOff(v: unknown): boolean {
   if (v === false || v === 0) return true
   if (typeof v === 'string') {
@@ -129,6 +152,13 @@ export function ingestRedisHealthLamp(
     if (ib == null) {
       return { lamp: 'gray', title: 'IB ingestor block missing from /status socket (Redis health unavailable).' }
     }
+    if (ibSlotProbeUnhealthy(ib)) {
+      return {
+        lamp: 'red',
+        title:
+          'IB ingestor IB liveness probe stale or failed (Redis bifrost:health:ws_ib_ingestor ib_probe_*).',
+      }
+    }
     if (ingestRedisTruthyConnected(ib.connected)) {
       return {
         lamp: 'green',
@@ -166,7 +196,21 @@ export function ingestRedisHealthLamp(
       && Number.isFinite(lastAge)
       && lastAge <= IB_OPERATOR_HEALTH_FRESH_MAX_S
     const hostUp = hostSlotUp && !procDead
+    if (ibSlotProbeUnhealthy(aa.host)) {
+      return {
+        lamp: 'red',
+        title:
+          'IB Account Agent Host IB probe stale or failed (Redis bifrost:health:ws_ib_account_agent host_ib_probe_*).',
+      }
+    }
     if (hostUp) {
+      if (secConfigured && ibSlotProbeUnhealthy(aa.secondary)) {
+        return {
+          lamp: 'yellow',
+          title:
+            'IB Account Agent Secondary IB probe stale or failed (Redis bifrost:health:ws_ib_account_agent).',
+        }
+      }
       if (secConfigured && !secUp) {
         return {
           lamp: 'yellow',
@@ -227,7 +271,21 @@ export function ingestRedisHealthLamp(
       && Number.isFinite(lastAge)
       && lastAge <= IB_OPERATOR_HEALTH_FRESH_MAX_S
     const hostUp = hostSlotUp && !procDead
+    if (ibSlotProbeUnhealthy(mon.host)) {
+      return {
+        lamp: 'red',
+        title:
+          'IB Operator Host IB probe stale or failed (Redis bifrost:health:ws_ib_operator host_ib_probe_*).',
+      }
+    }
     if (hostUp) {
+      if (mon.secondary != null && ibSlotProbeUnhealthy(mon.secondary)) {
+        return {
+          lamp: 'yellow',
+          title:
+            'IB Operator Secondary IB probe stale or failed (Redis bifrost:health:ws_ib_operator).',
+        }
+      }
       return {
         lamp: 'green',
         title: 'IB Operator healthy (Redis bifrost:health:ws_ib_operator, same roll-up as IB ingestor).',

@@ -87,12 +87,17 @@ def operator_health_dict_to_redis_hash(h: Dict[str, Any]) -> Dict[str, str]:
     cmd_count = int(h.get("cmd_count", 0) or 0)
     # Avoid truthiness bugs (e.g. non-empty string "0" is truthy in Python).
     svc_alive = jsonish_connected(h.get("service_alive", h.get("operator_alive", True)))
+    h_probe_at = float(host.get("ib_probe_at") or 0)
+    h_probe_iv = float(host.get("ib_probe_interval_sec") or 0)
     mapping: Dict[str, str] = {
         "host_connected": "1" if jsonish_connected(host.get("connected")) else "0",
         "host_client_id": str(int(host.get("client_id") or 0)),
         "host_last_error": "" if host.get("last_error") is None else str(host.get("last_error")),
         "host_alive": "1" if svc_alive else "0",
         "host_reconnects": str(int(host.get("reconnects") or 0)),
+        "host_ib_probe_at": str(h_probe_at),
+        "host_ib_probe_ok": "1" if jsonish_connected(host.get("ib_probe_ok")) else "0",
+        "host_ib_probe_interval_sec": str(h_probe_iv),
         "msg_count": str(cmd_count),
         "last_msg_ts": str(last_cmd if last_cmd > 0 else updated),
         "updated_at": str(updated),
@@ -101,6 +106,8 @@ def operator_health_dict_to_redis_hash(h: Dict[str, Any]) -> Dict[str, str]:
     if sec is None and h.get("account2") is not None:
         sec = h.get("account2")
     if sec is not None and isinstance(sec, dict):
+        s_probe_at = float(sec.get("ib_probe_at") or 0)
+        s_probe_iv = float(sec.get("ib_probe_interval_sec") or 0)
         mapping["secondary_present"] = "1"
         mapping["secondary_connected"] = "1" if jsonish_connected(sec.get("connected")) else "0"
         mapping["secondary_client_id"] = str(int(sec.get("client_id") or 0))
@@ -108,6 +115,9 @@ def operator_health_dict_to_redis_hash(h: Dict[str, Any]) -> Dict[str, str]:
             "" if sec.get("last_error") is None else str(sec.get("last_error"))
         )
         mapping["secondary_reconnects"] = str(int(sec.get("reconnects") or 0))
+        mapping["secondary_ib_probe_at"] = str(s_probe_at)
+        mapping["secondary_ib_probe_ok"] = "1" if jsonish_connected(sec.get("ib_probe_ok")) else "0"
+        mapping["secondary_ib_probe_interval_sec"] = str(s_probe_iv)
     else:
         # Always overwrite secondary_* so HSET does not leave stale fields from an older run.
         mapping["secondary_present"] = "0"
@@ -115,6 +125,9 @@ def operator_health_dict_to_redis_hash(h: Dict[str, Any]) -> Dict[str, str]:
         mapping["secondary_client_id"] = "0"
         mapping["secondary_last_error"] = ""
         mapping["secondary_reconnects"] = "0"
+        mapping["secondary_ib_probe_at"] = "0"
+        mapping["secondary_ib_probe_ok"] = "0"
+        mapping["secondary_ib_probe_interval_sec"] = "0"
     return mapping
 
 
@@ -125,12 +138,24 @@ def operator_health_dict_from_redis_hash(m: Dict[str, str]) -> Optional[Dict[str
     _host_rc = _safe_int(_field_map(m, "host_reconnects", "reconnects"))
     _mc = _safe_int(m.get("msg_count"))
     host_alive_raw = _field_map(m, "host_alive", "operator_alive") or "1"
+    def _probe_float(key: str, default: float = 0.0) -> float:
+        raw = m.get(key)
+        if raw is None or str(raw).strip() == "":
+            return default
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return default
+
     out: Dict[str, Any] = {
         "host": {
             "connected": _truthy_field(_field_map(m, "host_connected", "operator_connected")),
             "client_id": _safe_int(_field_map(m, "host_client_id", "operator_client_id")),
             "last_error": _err_from_field(_field_map(m, "host_last_error", "operator_last_error")),
             "reconnects": _host_rc,
+            "ib_probe_at": _probe_float("host_ib_probe_at"),
+            "ib_probe_ok": _truthy_field(m.get("host_ib_probe_ok")),
+            "ib_probe_interval_sec": _probe_float("host_ib_probe_interval_sec"),
         },
         "service_alive": _truthy_field(host_alive_raw),
         "msg_count": _mc,
@@ -147,6 +172,9 @@ def operator_health_dict_from_redis_hash(m: Dict[str, str]) -> Optional[Dict[str
             "client_id": _safe_int(_field_map(m, "secondary_client_id", "account2_client_id")),
             "last_error": _err_from_field(_field_map(m, "secondary_last_error", "account2_last_error")),
             "reconnects": _safe_int(_field_map(m, "secondary_reconnects", "account2_reconnects")),
+            "ib_probe_at": _probe_float("secondary_ib_probe_at"),
+            "ib_probe_ok": _truthy_field(m.get("secondary_ib_probe_ok")),
+            "ib_probe_interval_sec": _probe_float("secondary_ib_probe_interval_sec"),
         }
     else:
         out["secondary"] = None

@@ -13,6 +13,8 @@ from __future__ import annotations
 from typing import Any, Dict
 
 # Canonical health hashes (Socket Services / GET /status ``socket`` + Ops ``redis_meta_key``).
+# IB hashes may include per-slot ``*_ib_probe_at``, ``*_ib_probe_ok``, ``*_ib_probe_interval_sec``
+# (Operator host/secondary; Account Agent host/secondary; Ingestor ``ib_probe_*``) for liveness UI.
 BIFROST_HEALTH_MASSIVE_WS = "bifrost:health:ws_massive_option"
 BIFROST_HEALTH_IB_INGESTOR = "bifrost:health:ws_ib_ingestor"
 BIFROST_HEALTH_IB_OPERATOR = "bifrost:health:ws_ib_operator"

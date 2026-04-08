@@ -150,6 +150,11 @@ export interface SocketIbOperatorSlot {
   client_id?: number | null
   last_error?: string | null
   reconnects?: number
+  last_ib_probe_at?: number | null
+  ib_probe_interval_sec?: number | null
+  ib_probe_ok?: boolean
+  next_ib_probe_in_s?: number | null
+  ib_probe_stale?: boolean
 }
 
 /** GET /status `socket.ib_operator` — Host + optional Secondary operator RPC connections. */
@@ -235,6 +240,12 @@ export interface StatusSocketIbIngestor {
   reconnects?: number | null
   msg_count?: number | null
   client_id?: number | null
+  /** IB liveness probe (new writers); absent on legacy processes. */
+  last_ib_probe_at?: number | null
+  ib_probe_interval_sec?: number | null
+  ib_probe_ok?: boolean
+  next_ib_probe_in_s?: number | null
+  ib_probe_stale?: boolean
 }
 
 /** GET /status `socket.ib_account_agent` — Host + optional Secondary (same slot shape as IB Operator). */

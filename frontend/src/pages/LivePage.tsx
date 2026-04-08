@@ -5,6 +5,11 @@ import { fetchBarsBenchmark, fetchMarketStreamsSymbolOrder, fetchOpenOrders, fet
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtSince, fmtTs, fmtUsd, fmtUsdRound0, parseOptionContractKey } from '../utils/format'
 import {
+  computeMarketStreamsOk,
+  computeOpenOrdersSectionOk,
+  OPEN_ORDERS_POLL_FRESH_MAX_S,
+} from '../utils/livePageLamps'
+import {
   computeDailyChange,
   mergeQuotesIntoSymbolMap,
   normalizeBenchmarkMap,
@@ -134,16 +139,18 @@ export interface LivePageProps {
   status: StatusResponse | null
   /** Navigate to Strategy → Structure (Manage). */
   onNavigateToStrategy?: () => void
+  /** Navigate to Settings → Subscribe (IB Event Subscribe). */
+  onNavigateToSubscribe?: () => void
 }
 
-export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
+export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }: LivePageProps) {
   const j = status
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
   const [quotesByContractKey, setQuotesByContractKey] = useState<Record<string, RealtimeQuote>>({})
   const [benchmarks, setBenchmarks] = useState<Record<string, DailyBenchmark>>({})
   const [watchlistSymbolSet, setWatchlistSymbolSet] = useState<Set<string>>(new Set())
   const [watchlistOptionItems, setWatchlistOptionItems] = useState<WatchlistItem[]>([])
-  const [, setFreshnessTick] = useState(0)
+  const [freshnessTick, setFreshnessTick] = useState(0)
   const [positionCategories, setPositionCategories] = useState<PositionCategory[]>([])
   /** Custom category order (names). Empty = use default from API + data. */
   const [categoryOrder, setCategoryOrder] = useState<string[]>([])
@@ -332,9 +339,12 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
     }
   }, [mergeQuotes])
 
-  /** Market Streams lamp: Redis quotes API + IB ingestor socket (not daemon ticker). */
-  const marketStreamsOk =
-    j?.market_data?.quotes_redis_reader_ok === true && j?.socket?.ib_ingestor?.connected === true
+  /** Market Streams lamp: shared with App dashboard strip + Live nav (see livePageLamps). */
+  const marketStreamsOk = useMemo(
+    () => computeMarketStreamsOk(j, quotesMap),
+    [j, quotesMap, freshnessTick],
+  )
+  const openOrdersSectionOk = computeOpenOrdersSectionOk(openOrdersUpdatedAt)
 
   const subscribedSet = useMemo(
     () =>
@@ -678,6 +688,19 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
             />
           </h2>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {onNavigateToSubscribe && (
+              <button
+                type="button"
+                className="section-header-icon-btn"
+                onClick={onNavigateToSubscribe}
+                title="Open Subscribe page (IB Event Subscribe — Redis ingestor stream health)"
+                aria-label="Open Subscribe page"
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M22 12h-4l-3 9L9 3 6 12H2" />
+                </svg>
+              </button>
+            )}
             <button
               type="button"
               className="section-header-icon-btn"
@@ -1177,8 +1200,8 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
         <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
           <h2 className="daemon-card-title page-title-with-tooltip">
             <span
-              className={`title-inline-lamp lamp-icon ${(j?.daemon?.heartbeat?.daemon_alive && j?.daemon?.heartbeat?.ib_connected) ? 'green' : 'red'}`}
-              title="Open orders: green when daemon is connected to IB (event-driven write to DB); data polled from DB."
+              className={`title-inline-lamp lamp-icon ${openOrdersSectionOk ? 'green' : 'red'}`}
+              title={`Open orders: green when GET /open-orders succeeded within ${OPEN_ORDERS_POLL_FRESH_MAX_S}s (polled every 6s).${openOrdersUpdatedAt != null ? ` Last poll: ${Math.round(Date.now() / 1000 - openOrdersUpdatedAt)}s ago.` : ' No successful poll yet.'}`}
               aria-hidden
             >
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -1188,9 +1211,33 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
             Open Orders
             <InfoTooltip text="Unfilled orders from daemon (event-driven). Daemon writes to DB on orderStatus/openOrder events; this page polls GET /open-orders and also receives open_orders via GET /status. Data source: PostgreSQL table daemon_open_orders. Account ID is the IB account that placed each order. Updates every few seconds." />
           </h2>
-          {openOrdersUpdatedAt != null && (
-            <span className="section-hint" style={{ marginLeft: 'auto' }}>Last updated: {fmtTs(openOrdersUpdatedAt)}</span>
-          )}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {openOrdersUpdatedAt != null && (
+              <span
+                className="open-orders-freshness-badge"
+                title={`DB polled at ${fmtTs(openOrdersUpdatedAt)}`}
+              >
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ opacity: 0.7 }}>
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 6v6l4 2" />
+                </svg>
+                <span className="open-orders-freshness-age">{fmtSince(openOrdersUpdatedAt)} ago</span>
+              </span>
+            )}
+            {onNavigateToSubscribe && (
+              <button
+                type="button"
+                className="section-header-icon-btn"
+                onClick={onNavigateToSubscribe}
+                title="Open Subscribe page (IB Event Subscribe — account agent stream)"
+                aria-label="Open Subscribe page"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M22 12h-4l-3 9L9 3 6 12H2" />
+                </svg>
+              </button>
+            )}
+          </div>
           <span className="section-hint" style={{ marginLeft: 8 }}>Source: DB table daemon_open_orders</span>
         </div>
         <div className="open-orders-table-wrap">

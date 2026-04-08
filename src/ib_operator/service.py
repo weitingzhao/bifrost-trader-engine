@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 import redis
 
 from src.app.config import get_effective_ib_config
+from src.ib.connection_policy import operator_effective_health_refresh_sec
 from src.ib_operator.config import effective_ib_operator_settings
 from src.ib_operator.executor import IbOperatorExecutor
 from src.ib_operator.health_redis import (
@@ -59,7 +60,16 @@ def _build_clients(config: Dict[str, Any]) -> IbOperatorExecutor:
     return IbOperatorExecutor(primary=primary, account_secondary=acc2)
 
 
-def _write_health_sync(r: redis.Redis, executor: IbOperatorExecutor, key: str) -> None:
+def _write_health_sync(
+    r: redis.Redis,
+    executor: IbOperatorExecutor,
+    key: str,
+    probe_interval_sec: float,
+) -> None:
+    try:
+        asyncio.run(executor.record_ib_probe(probe_interval_sec))
+    except Exception as e:
+        logger.debug("IB Operator record_ib_probe: %s", e)
     h = executor.health_dict()
     h["updated_at"] = time.time()
     mapping = operator_health_dict_to_redis_hash(h)
@@ -136,7 +146,11 @@ def run_ib_operator_loop(
     result_prefix = settings["result_prefix"]
     max_bytes = settings["max_result_bytes"]
     health_key = settings["health_key"]
-    health_refresh = settings["health_refresh_sec"]
+    ib_eff = get_effective_ib_config(config)
+    probe_iv = float(ib_eff["ib_probe_interval_sec"])
+    ib_op_yaml = config.get("ib_operator")
+    ib_op_yaml = ib_op_yaml if isinstance(ib_op_yaml, dict) else {}
+    health_refresh = operator_effective_health_refresh_sec(ib_op_yaml, probe_iv)
 
     r = redis_client or redis.from_url(rurl, decode_responses=True)
     ensure_stream_and_group(r, stream, group)
@@ -153,7 +167,7 @@ def run_ib_operator_loop(
     # Publish Redis health before blocking on IB connect. Otherwise Ops may HSET only
     # bifrost_ops_control_env on this key after systemd start while connect_all() retries
     # TWS for a long time — leaving a hash with no host_* fields until connect returns.
-    _write_health_sync(r, executor, health_key)
+    _write_health_sync(r, executor, health_key, probe_iv)
     last_health = time.time()
 
     try:
@@ -161,7 +175,7 @@ def run_ib_operator_loop(
     except Exception as e:
         logger.warning("IB Operator initial connect failed (will retry on demand): %s", e)
 
-    _write_health_sync(r, executor, health_key)
+    _write_health_sync(r, executor, health_key, probe_iv)
     last_health = time.time()
     stop = stop_event or threading.Event()
 
@@ -180,7 +194,7 @@ def run_ib_operator_loop(
                     asyncio.run(executor.connect_all())
                 except Exception as e:
                     logger.debug("IB Operator health-tick connect retry: %s", e)
-            _write_health_sync(r, executor, health_key)
+            _write_health_sync(r, executor, health_key, probe_iv)
             last_health = now
 
         entries = []
@@ -240,7 +254,7 @@ def run_ib_operator_loop(
             write_result(r, rk, body or '{"ok":false,"error":"encode"}', ttl_sec=result_ttl)
             ack_message(r, stream, group, entry_id)
             executor.note_cmd_processed()
-            _write_health_sync(r, executor, health_key)
+            _write_health_sync(r, executor, health_key, probe_iv)
             last_health = time.time()
 
     logger.info("IB Operator stopping: disconnecting IB clients")

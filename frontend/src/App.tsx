@@ -8,6 +8,7 @@ import {
   fetchQuotes,
   subscribeQuotes,
   fetchBarsBenchmark,
+  fetchOpenOrders,
 } from './api'
 import { postMonitorStop } from './api/monitor/monitor'
 import { fetchOpsWorkers, fetchQueueSummary } from './api/ops/ops'
@@ -52,6 +53,12 @@ import { SettingsSectionIcon } from './pages/settings/SettingsSectionIcon'
 import logoImg from '../img/logo.png'
 import { fmtPctCompact, fmtUsdCompact } from './utils/format'
 import { ingestRedisHealthLamp } from './utils/socketIngestLamp'
+import {
+  aggregateLiveNavLamp,
+  computeMarketStreamsOk,
+  computeOpenOrdersSectionOk,
+  OPEN_ORDERS_POLL_FRESH_MAX_S,
+} from './utils/livePageLamps'
 import {
   computeDailyChange,
   mergeQuotesIntoSymbolMap,
@@ -109,7 +116,15 @@ function DashboardStrip({
             title="View open orders on Live page"
           >
             {openOrdersLamp != null && (
-              <span className={`lamp-icon ${openOrdersLamp}`} aria-hidden title={openOrdersLamp === 'green' ? 'Daemon alive; open orders data available' : 'Daemon down or no data'}>
+              <span
+                className={`lamp-icon ${openOrdersLamp}`}
+                aria-hidden
+                title={
+                  openOrdersLamp === 'green'
+                    ? `Open orders: GET /open-orders succeeded within ${OPEN_ORDERS_POLL_FRESH_MAX_S}s`
+                    : 'Open orders: no recent successful GET /open-orders poll'
+                }
+              >
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
                 </svg>
@@ -290,6 +305,10 @@ export default function App() {
   /** Short feedback after account refresh (success/fail/timeout); auto-cleared after a few seconds */
   const [accountsRefreshFeedback, setAccountsRefreshFeedback] = useState<string | null>(null)
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
+  /** Last successful GET /open-orders (unix s); drives dashboard + Live nav lamps with Market Streams. */
+  const [openOrdersPollAtSec, setOpenOrdersPollAtSec] = useState<number | null>(null)
+  /** Tick so quote-age and open-orders freshness lamps update without waiting on fetch. */
+  const [liveLampClock, setLiveLampClock] = useState(0)
   const [benchmarks, setBenchmarks] = useState<Record<string, DailyBenchmark>>({})
   /** Celery: Ops /ops/workers + /ops/queues/summary (header lamp + badge; falls back to /status if Ops fails). */
   const [celeryRuntimeLampOverride, setCeleryRuntimeLampOverride] = useState<LampId | null>(null)
@@ -528,6 +547,28 @@ export default function App() {
   }, [isDetailMode])
 
   useEffect(() => {
+    if (isDetailMode) return
+    const poll = () => {
+      fetchOpenOrders()
+        .then(() => {
+          setOpenOrdersPollAtSec(Date.now() / 1000)
+        })
+        .catch(() => {
+          /* keep previous timestamp; lamp goes stale via liveLampClock */
+        })
+    }
+    poll()
+    const id = setInterval(poll, 6000)
+    return () => clearInterval(id)
+  }, [isDetailMode])
+
+  useEffect(() => {
+    if (isDetailMode) return
+    const id = setInterval(() => setLiveLampClock((c) => c + 1), 5000)
+    return () => clearInterval(id)
+  }, [isDetailMode])
+
+  useEffect(() => {
     const acc = status?.portfolio?.accounts
     if (acc != null && accountsDisplay === null) setAccountsDisplay(acc ? [...acc] : [])
   }, [status?.portfolio?.accounts, accountsDisplay])
@@ -606,12 +647,18 @@ export default function App() {
     !hb || !hb.daemon_alive ? 'red' : j?.daemon?.trading?.trading_suspended === true ? 'yellow' : 'green'
   const celeryLamp: LampId =
     celeryRuntimeLampOverride ?? celeryMetricsFromStatus(status).celeryLamp
-  // Market Streams (header): green when quotes Redis OK and IB ingestor socket connected
-  const liveLamp: LampId =
-    status?.market_data?.quotes_redis_reader_ok === true &&
-    status?.socket?.ib_ingestor?.connected === true
-      ? 'green'
-      : 'red'
+  /** Same rules as Live page section lamps: Market Streams + Open Orders (no daemon). */
+  const marketStreamsOk = useMemo(
+    () => computeMarketStreamsOk(j, quotesMap),
+    [j, quotesMap, liveLampClock],
+  )
+  const openOrdersSectionOk = useMemo(
+    () => computeOpenOrdersSectionOk(openOrdersPollAtSec),
+    [openOrdersPollAtSec, liveLampClock],
+  )
+  const liveLamp: LampId = aggregateLiveNavLamp(marketStreamsOk, openOrdersSectionOk)
+  const dashboardStreamsLamp: LampId = marketStreamsOk ? 'green' : 'red'
+  const dashboardOpenOrdersLamp: LampId = openOrdersSectionOk ? 'green' : 'red'
 
   const watchlistSymbols = useMemo(
     () => [...new Set([...(status?.live_ui?.subscribed_tickers ?? []), ...Object.keys(quotesMap)])].sort(),
@@ -685,8 +732,8 @@ export default function App() {
     const items: StreamSummaryItem[] = [
       {
         label: 'Market Streams',
-        value: liveLamp === 'green' ? 'Online' : 'Offline',
-        tone: liveLamp === 'green' ? 'positive' : 'negative',
+        value: marketStreamsOk ? 'Online' : 'Offline',
+        tone: marketStreamsOk ? 'positive' : 'negative',
       },
       ...watchlistSymbols.map((symbol, i) => {
         const row = rows[i]
@@ -718,7 +765,7 @@ export default function App() {
       },
     ]
     return items
-  }, [status?.portfolio?.accounts, status?.live_ui?.reference_indices, watchlistSymbols, quotesMap, benchmarks, liveLamp])
+  }, [status?.portfolio?.accounts, status?.live_ui?.reference_indices, watchlistSymbols, quotesMap, benchmarks, marketStreamsOk])
 
   useEffect(() => {
     if (benchmarkSymbols.length === 0) {
@@ -1370,12 +1417,12 @@ export default function App() {
 
       {!isStrategyInstanceDetailMode && (activeTab === 'live' || activeTab === 'strategy' || activeTab === 'replay' || activeTab === 'research') && (
         <DashboardStrip
-          streamLamp={liveLamp}
+          streamLamp={dashboardStreamsLamp}
           streamItems={streamSummaryItems}
           onStreamClick={() => setActiveTab('live')}
           openOrderCount={(status?.portfolio?.open_orders ?? []).length}
           onOpenOrdersClick={() => setActiveTab('live')}
-          openOrdersLamp={status?.daemon?.heartbeat?.daemon_alive === true ? 'green' : 'red'}
+          openOrdersLamp={dashboardOpenOrdersLamp}
         />
       )}
 
@@ -1507,6 +1554,7 @@ export default function App() {
         <LivePage
           status={status}
           onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
+          onNavigateToSubscribe={() => openSettingsSectionById('settings-subscribe')}
         />
       )}
 

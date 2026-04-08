@@ -91,6 +91,36 @@ function fmtProcessInService(aa: StatusSocketIbAccountAgent | null | undefined):
 }
 
 /**
+ * Live-updating message age: takes `last_msg_age_s` from a status poll and adds elapsed seconds since the poll.
+ * Ticks every 1s so the display updates between status polls (which happen every ~5s).
+ */
+function useLiveMsgAge(status: StatusResponse | null, ageAtPoll: number | null | undefined): number | null {
+  const snapshotRef = useRef<{ pollMs: number; age: number } | null>(null)
+  const [liveAge, setLiveAge] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (ageAtPoll == null || !Number.isFinite(Number(ageAtPoll))) {
+      snapshotRef.current = null
+      setLiveAge(null)
+      return
+    }
+    snapshotRef.current = { pollMs: Date.now(), age: Number(ageAtPoll) }
+    setLiveAge(Number(ageAtPoll))
+  }, [status, ageAtPoll])
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (snapshotRef.current == null) return
+      const elapsed = (Date.now() - snapshotRef.current.pollMs) / 1000
+      setLiveAge(snapshotRef.current.age + elapsed)
+    }, 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  return liveAge
+}
+
+/**
  * Estimate msg/s from health-hash msg_count using consecutive GET /status samples
  * (re-fetch gives a new `status` object even when the counter is unchanged).
  */
@@ -211,6 +241,9 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
   const combinedRate =
     ingestorMsgRate != null && accountAgentMsgRate != null ? ingestorMsgRate + accountAgentMsgRate : null
 
+  const liveIngAge = useLiveMsgAge(j, ib?.last_msg_age_s)
+  const liveAaAge = useLiveMsgAge(j, aa?.last_msg_age_s)
+
   const aaSecondaryConfigured = aa?.secondary != null && aa.secondary !== undefined
   const hostLabel = streamHostAccountId ? `Host (${streamHostAccountId})` : 'Host'
   const secondaryLabel = streamSecondaryAccountId ? `Secondary (${streamSecondaryAccountId})` : 'Secondary'
@@ -279,6 +312,28 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
           IB Event Subscribe
           <InfoTooltip text="Market and account-domain data reach the stack via Redis: IB Ingestor (quotes notify + tick hashes) and IB Account Agent (snapshot + notify)." />
         </h2>
+        <div className="event-subscribe-stream-ages" aria-label="Stream last activity">
+          {liveIngAge != null && (
+            <span
+              className={`event-subscribe-age-badge ${liveIngAge < 10 ? 'age-fresh' : liveIngAge < 60 ? 'age-recent' : liveIngAge < 300 ? 'age-stale' : 'age-old'}`}
+              title={`IB Ingestor last message: ${formatMsgAgeS(liveIngAge)}`}
+            >
+              {ACTIVITY_LAMP_SVG}
+              <span className="event-subscribe-age-label">Ingestor</span>
+              <span className="event-subscribe-age-value">{formatMsgAgeS(liveIngAge)}</span>
+            </span>
+          )}
+          {liveAaAge != null && (
+            <span
+              className={`event-subscribe-age-badge ${liveAaAge < 10 ? 'age-fresh' : liveAaAge < 60 ? 'age-recent' : liveAaAge < 300 ? 'age-stale' : 'age-old'}`}
+              title={`IB Account Agent last message: ${formatMsgAgeS(liveAaAge)}`}
+            >
+              {ACTIVITY_LAMP_SVG}
+              <span className="event-subscribe-age-label">Account</span>
+              <span className="event-subscribe-age-value">{formatMsgAgeS(liveAaAge)}</span>
+            </span>
+          )}
+        </div>
         <div className="event-subscribe-buttons">
           <button
             type="button"
@@ -697,11 +752,16 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
               <div className="event-subscribe-summary-card-head">
                 <StreamHealthLamp lamp={ingestLampToBrokerRowLamp(ingLamp.lamp)} title={ingLamp.title} />
                 <span className="event-subscribe-summary-label">IB Ingestor</span>
+                {liveIngAge != null && (
+                  <span className={`event-subscribe-age-badge event-subscribe-age-badge-inline ${liveIngAge < 10 ? 'age-fresh' : liveIngAge < 60 ? 'age-recent' : liveIngAge < 300 ? 'age-stale' : 'age-old'}`}>
+                    {formatMsgAgeS(liveIngAge)}
+                  </span>
+                )}
               </div>
               <p className="event-subscribe-summary-meta">{ingLamp.title}</p>
               <p className="event-subscribe-summary-line">
                 <span className="event-subscribe-summary-k">Last activity</span>
-                <span>{formatMsgAgeS(ib?.last_msg_age_s)}</span>
+                <span>{liveIngAge != null ? formatMsgAgeS(liveIngAge) : formatMsgAgeS(ib?.last_msg_age_s)}</span>
               </p>
               <p className="event-subscribe-summary-line">
                 <span className="event-subscribe-summary-k">Health msg total</span>
@@ -716,11 +776,16 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
               <div className="event-subscribe-summary-card-head">
                 <StreamHealthLamp lamp={ingestLampToBrokerRowLamp(aaLamp.lamp)} title={aaLamp.title} />
                 <span className="event-subscribe-summary-label">IB Account Agent</span>
+                {liveAaAge != null && (
+                  <span className={`event-subscribe-age-badge event-subscribe-age-badge-inline ${liveAaAge < 10 ? 'age-fresh' : liveAaAge < 60 ? 'age-recent' : liveAaAge < 300 ? 'age-stale' : 'age-old'}`}>
+                    {formatMsgAgeS(liveAaAge)}
+                  </span>
+                )}
               </div>
               <p className="event-subscribe-summary-meta">{aaLamp.title}</p>
               <p className="event-subscribe-summary-line">
                 <span className="event-subscribe-summary-k">Last activity (agent-wide)</span>
-                <span>{formatMsgAgeS(aa?.last_msg_age_s)}</span>
+                <span>{liveAaAge != null ? formatMsgAgeS(liveAaAge) : formatMsgAgeS(aa?.last_msg_age_s)}</span>
               </p>
               <p className="event-subscribe-summary-line">
                 <span className="event-subscribe-summary-k">Health msg total</span>
@@ -742,7 +807,7 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
               </tr>
               <tr>
                 <th scope="row">Last message age</th>
-                <td>{formatMsgAgeS(ib?.last_msg_age_s)}</td>
+                <td>{liveIngAge != null ? formatMsgAgeS(liveIngAge) : formatMsgAgeS(ib?.last_msg_age_s)}</td>
               </tr>
               <tr>
                 <th scope="row">Message count (health)</th>
@@ -772,7 +837,7 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
               </tr>
               <tr>
                 <th scope="row">Last message age (agent-wide)</th>
-                <td>{formatMsgAgeS(aa?.last_msg_age_s)}</td>
+                <td>{liveAaAge != null ? formatMsgAgeS(liveAaAge) : formatMsgAgeS(aa?.last_msg_age_s)}</td>
               </tr>
               <tr>
                 <th scope="row">Message count (combined)</th>

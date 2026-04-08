@@ -32,6 +32,12 @@ class IbAccountAgentRedisWriter:
         secondary_connected: Optional[bool] = None,
         secondary_client_id: Optional[int] = None,
         host_alive: bool = True,
+        host_ib_probe_at: float = 0.0,
+        host_ib_probe_ok: bool = False,
+        host_ib_probe_interval_sec: float = 0.0,
+        secondary_ib_probe_at: float = 0.0,
+        secondary_ib_probe_ok: bool = False,
+        secondary_ib_probe_interval_sec: float = 0.0,
     ) -> None:
         # `connected` / `client_id` = Host slot (backward compat with older readers).
         # `host_connected` / `host_client_id` explicit for Monitor /status (same idea as IB Operator).
@@ -46,6 +52,12 @@ class IbAccountAgentRedisWriter:
             "reconnects": str(reconnects),
             "msg_count": str(msg_count),
             "updated_at": str(time.time()),
+            "host_ib_probe_at": str(host_ib_probe_at),
+            "host_ib_probe_ok": "1" if host_ib_probe_ok else "0",
+            "host_ib_probe_interval_sec": str(host_ib_probe_interval_sec),
+            "secondary_ib_probe_at": str(secondary_ib_probe_at),
+            "secondary_ib_probe_ok": "1" if secondary_ib_probe_ok else "0",
+            "secondary_ib_probe_interval_sec": str(secondary_ib_probe_interval_sec),
         }
         if secondary_connected is not None:
             m["secondary_connected"] = "1" if secondary_connected else "0"

@@ -383,9 +383,10 @@ def test_write_health_sync_does_not_delete_hash() -> None:
 
     primary = MagicMock()
     primary.connected = False
+    primary.connected_snapshot = MagicMock(return_value=False)
     ex = IbOperatorExecutor(primary=primary, account_secondary=None)
     r = MagicMock()
-    _write_health_sync(r, ex, "bifrost:health:ws_ib_operator")
+    _write_health_sync(r, ex, "bifrost:health:ws_ib_operator", 5.0)
     r.delete.assert_not_called()
     r.hset.assert_called_once()
     r.hdel.assert_called_once()
@@ -419,11 +420,20 @@ def test_operator_health_hash_writes_secondary_zeros_when_no_secondary() -> None
 
     m = operator_health_dict_to_redis_hash(
         {
-            "host": {"connected": False, "client_id": 120, "last_error": None, "reconnects": 0},
+            "host": {
+                "connected": False,
+                "client_id": 120,
+                "last_error": None,
+                "reconnects": 0,
+                "ib_probe_at": 0.0,
+                "ib_probe_ok": False,
+                "ib_probe_interval_sec": 5.0,
+            },
             "service_alive": True,
             "secondary": None,
         }
     )
+    assert m["host_ib_probe_at"] == "0.0"
     assert m["secondary_present"] == "0"
     assert m["secondary_connected"] == "0"
     assert m["secondary_client_id"] == "0"

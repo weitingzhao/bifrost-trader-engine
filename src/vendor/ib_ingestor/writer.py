@@ -34,18 +34,23 @@ class IbIngestorRedisWriter:
         last_msg_ts: float,
         reconnects: int,
         msg_count: int,
+        *,
+        ib_probe_at: float = 0.0,
+        ib_probe_ok: bool = False,
+        ib_probe_interval_sec: float = 0.0,
     ) -> None:
-        self._rds.hset(
-            IB_INGESTER_META_HEALTH,
-            mapping={
-                "client_id": str(client_id),
-                "connected": "1" if connected else "0",
-                "last_msg_ts": str(last_msg_ts),
-                "reconnects": str(reconnects),
-                "msg_count": str(msg_count),
-                "updated_at": str(time.time()),
-            },
-        )
+        m: Dict[str, str] = {
+            "client_id": str(client_id),
+            "connected": "1" if connected else "0",
+            "last_msg_ts": str(last_msg_ts),
+            "reconnects": str(reconnects),
+            "msg_count": str(msg_count),
+            "updated_at": str(time.time()),
+            "ib_probe_at": str(ib_probe_at),
+            "ib_probe_ok": "1" if ib_probe_ok else "0",
+            "ib_probe_interval_sec": str(ib_probe_interval_sec),
+        }
+        self._rds.hset(IB_INGESTER_META_HEALTH, mapping=m)
 
     def set_subscriptions(self, contract_keys: Set[str]) -> None:
         pipe = self._rds.pipeline()

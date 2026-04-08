@@ -257,8 +257,6 @@ def _quote_payload(contract_key: str, sec_type: str, t: Any) -> Dict[str, Any]:
 
 
 WATCHLIST_POLL_SEC = 60
-RECONNECT_BASE = 2.0
-RECONNECT_MAX = 60.0
 
 
 class IbIngestorApp:
@@ -274,6 +272,13 @@ class IbIngestorApp:
         self._msg_count = 0
         self._last_msg_ts = 0.0
         self._client_id = 0
+        self._session_ib_client: Any = None
+        self._last_ib_probe_at = 0.0
+        self._last_ib_probe_ok = False
+        self._ib_probe_interval_sec = 5.0
+        self._reconnect_base_sec = 2.0
+        self._reconnect_max_sec = 60.0
+        self._reconnect_max_exp = 6
 
     def _max_subscriptions(self) -> int:
         try:
@@ -296,9 +301,14 @@ class IbIngestorApp:
                 pass
 
         from src.app.config import get_effective_ib_config
+        from src.ib.connection_policy import reconnect_delay_s
         from src.monitor.integrations.ib_clients import MarketIbClient
 
         ib_eff = get_effective_ib_config(self._cfg)
+        self._ib_probe_interval_sec = float(ib_eff["ib_probe_interval_sec"])
+        self._reconnect_base_sec = float(ib_eff["ib_reconnect_base_sec"])
+        self._reconnect_max_sec = float(ib_eff["ib_reconnect_max_sec"])
+        self._reconnect_max_exp = int(ib_eff["ib_reconnect_max_exp"])
         self._client_id = int(ib_eff["client_id_ib_ingestor"])
         host = str(ib_eff["host"])
         port = int(ib_eff.get("port_market_data", ib_eff["port"]))
@@ -325,16 +335,22 @@ class IbIngestorApp:
                 break
 
             self._reconnects += 1
-            delay = min(
-                RECONNECT_BASE * (2 ** min(self._reconnects - 1, 6)),
-                RECONNECT_MAX,
+            delay = reconnect_delay_s(
+                self._reconnects,
+                base=self._reconnect_base_sec,
+                max_s=self._reconnect_max_sec,
+                max_exp=self._reconnect_max_exp,
             )
+            now = time.time()
             self._writer.update_health(
                 self._client_id,
                 False,
-                time.time(),
+                now,
                 self._reconnects,
                 self._msg_count,
+                ib_probe_at=0.0,
+                ib_probe_ok=False,
+                ib_probe_interval_sec=self._ib_probe_interval_sec,
             )
             logger.info("Reconnecting in %.1fs (attempt %d)…", delay, self._reconnects)
             try:
@@ -348,6 +364,9 @@ class IbIngestorApp:
             time.time(),
             self._reconnects,
             self._msg_count,
+            ib_probe_at=0.0,
+            ib_probe_ok=False,
+            ib_probe_interval_sec=self._ib_probe_interval_sec,
         )
         logger.info(
             "IB ingestor stopped (messages=%d reconnects=%d)",
@@ -355,10 +374,29 @@ class IbIngestorApp:
             self._reconnects,
         )
 
+    def _push_health(
+        self,
+        *,
+        connected: bool,
+        last_msg_ts: float,
+    ) -> None:
+        self._writer.update_health(
+            self._client_id,
+            connected,
+            last_msg_ts,
+            self._reconnects,
+            self._msg_count,
+            ib_probe_at=self._last_ib_probe_at,
+            ib_probe_ok=self._last_ib_probe_ok,
+            ib_probe_interval_sec=self._ib_probe_interval_sec,
+        )
+
     async def _run_connected_session(self, client: Any) -> None:
         await client.ensure_connected()
         self._reconnects = 0
+        self._session_ib_client = client
         hb_task = asyncio.create_task(self._heartbeat_loop())
+        probe_task = asyncio.create_task(self._ib_probe_loop())
         try:
             while not self._stop.is_set():
                 opt_rows, stk_syms = _watchlist_targets(
@@ -379,13 +417,8 @@ class IbIngestorApp:
                         "No STK/OPT rows in watchlist; retry in %ds",
                         WATCHLIST_POLL_SEC,
                     )
-                    self._writer.update_health(
-                        self._client_id,
-                        True,
-                        time.time(),
-                        self._reconnects,
-                        self._msg_count,
-                    )
+                    wire = client.connected_snapshot()
+                    self._push_health(connected=wire, last_msg_ts=time.time())
                     self._writer.set_subscriptions(set())
                     try:
                         await asyncio.wait_for(
@@ -422,13 +455,8 @@ class IbIngestorApp:
 
                 await client._run_on_client_loop(_apply())
                 self._writer.set_subscriptions(keys)
-                self._writer.update_health(
-                    self._client_id,
-                    True,
-                    time.time(),
-                    self._reconnects,
-                    self._msg_count,
-                )
+                wire = client.connected_snapshot()
+                self._push_health(connected=wire, last_msg_ts=self._last_msg_ts or time.time())
                 logger.info(
                     "Subscribed OPT=%d STK=%d (cap=%d)",
                     len(opt_rows),
@@ -442,9 +470,15 @@ class IbIngestorApp:
                 except asyncio.TimeoutError:
                     pass
         finally:
+            self._session_ib_client = None
             hb_task.cancel()
+            probe_task.cancel()
             try:
                 await hb_task
+            except asyncio.CancelledError:
+                pass
+            try:
+                await probe_task
             except asyncio.CancelledError:
                 pass
             try:
@@ -458,17 +492,40 @@ class IbIngestorApp:
         self._msg_count += 1
         self._writer.write_quote(contract_key, payload)
 
+    async def _ib_probe_loop(self) -> None:
+        """Periodic IB API liveness (connected_snapshot); updates ib_probe_* independently of tick heartbeat."""
+        while not self._stop.is_set():
+            try:
+                await asyncio.wait_for(
+                    self._stop.wait(),
+                    timeout=max(1.0, self._ib_probe_interval_sec),
+                )
+                break
+            except asyncio.TimeoutError:
+                pass
+            cl = self._session_ib_client
+            if cl is None:
+                continue
+            ok = cl.connected_snapshot()
+            now = time.time()
+            self._last_ib_probe_at = now
+            self._last_ib_probe_ok = ok
+            try:
+                self._push_health(
+                    connected=ok,
+                    last_msg_ts=self._last_msg_ts or now,
+                )
+            except Exception as e:
+                logger.debug("ib probe health: %s", e)
+
     async def _heartbeat_loop(self) -> None:
+        """Freshen last_msg_ts / wire connected in Redis without treating meta-only writes as IB probe success."""
         while not self._stop.is_set():
             ts = self._last_msg_ts or time.time()
+            cl = self._session_ib_client
+            wire = cl.connected_snapshot() if cl is not None else False
             try:
-                self._writer.update_health(
-                    self._client_id,
-                    True,
-                    ts,
-                    self._reconnects,
-                    self._msg_count,
-                )
+                self._push_health(connected=wire, last_msg_ts=ts)
             except Exception as e:
                 logger.debug("heartbeat meta: %s", e)
             try:
