@@ -17,6 +17,7 @@ from backend.ops.market_ingest_control_env import (
     normalize_control_profile,
     read_control_env,
     write_control_env,
+    write_trading_engine_ops_lease,
 )
 from backend.ops.market_ingest_health_clear import (
     clear_ingest_health_after_stop,
@@ -219,7 +220,10 @@ async def market_ingest_control(
                     MarketIngestAction.RESET,
                 )
             ):
-                await asyncio.to_thread(write_control_env, rurl, meta_key, ops_profile)
+                if sid == "trading_engine":
+                    await asyncio.to_thread(write_trading_engine_ops_lease, rurl, meta_key, ops_profile)
+                else:
+                    await asyncio.to_thread(write_control_env, rurl, meta_key, ops_profile)
         except Exception as e:
             logger.warning(
                 "market_ingest redis post-action failed: %s %s %s",

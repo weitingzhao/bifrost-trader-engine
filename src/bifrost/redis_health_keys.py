@@ -17,6 +17,10 @@ BIFROST_HEALTH_IB_INGESTOR = "bifrost:health:ws_ib_ingestor"
 BIFROST_HEALTH_IB_OPERATOR = "bifrost:health:ws_ib_operator"
 BIFROST_HEALTH_IB_ACCOUNT_AGENT = "bifrost:health:ws_ib_account_agent"
 
+# Ops Dev/Prod lease for trading_engine (same Redis as Socket); not written by ingest writers.
+BIFROST_OPS_TRADING_ENGINE_META = "bifrost:ops:trading_engine"
+ENGINE_OPS_ACTIVE_REDIS_FIELD = "engine_ops_active"
+
 # Previous bifrost names (read / YAML normalization fallback).
 LEGACY_BIFROST_MASSIVE_WS = "bifrost:health:massive_ws"
 LEGACY_BIFROST_IB_INGESTOR = "bifrost:health:ib_ingestor"

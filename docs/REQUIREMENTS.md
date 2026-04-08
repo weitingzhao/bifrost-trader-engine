@@ -61,7 +61,7 @@
 ### 1.2 一键停止（R-C1）
 
 - **目标**：能在局域网内**停止**守护程序（含优雅退出）；停止后**不再下发任何新单**；须支持通过**监控 Web 界面**发起停止。
-- **范围**：R-C1a 信号/控制文件（阶段 1）；R-C1b 独立应用发停止 + Web UI（阶段 2）。启动守护程序在交易机执行 `run_engine.py`，不在 Web 提供。
+- **范围**：R-C1a 信号/控制文件（阶段 1）；R-C1b 独立应用发停止 + Web UI（阶段 2）。**日常启停（生产）**：与 Socket Services 同源，经 **Ops 控制面**（`GET/POST /ops/market-ingest/*`）对 **`bifrost-engine.service`** 执行 **systemd start/stop/restart**；**systemd stop** 发送 SIGTERM，进程优雅退出并更新 **`daemon_heartbeat`**（如 `graceful_shutdown_at`），与现有一键停止目标一致。**备选**：监控端 **POST /control/stop** 写 `daemon_control`，由 Engine 轮询消费后退出（例如仅 DB 可达、不经 Ops 时）。**开发与排障**：仍可在交易机直接执行 `run_engine.py` 或等价的本地启动方式。
 
 ### 1.3 暂停/恢复（R-C2）
 
@@ -92,7 +92,7 @@
 
 ### 2.4 监控 Web 界面（R-M5）
 
-- **目标**：操作者通过**浏览器**打开监控应用提供的 Web 页面，**直观看到**守护程序的运行状态。界面须包含：红绿灯（R-M3）、自检结论（R-M2）、与 IB 连接状态及 Client ID、状态摘要、操作列表（R-M4）、控制（停止、一键平敞口、重试连接 IB 等）、**当前生效的结构策略与安全边界**（可在 Status 或独立页展示），以及**策略与安全边界的查看与切换**（如 Research → Strategy 页面：结构策略列表、安全边界列表、策略历史、Set active）。启动守护程序在交易机执行，不在 Web 提供。
+- **目标**：操作者通过**浏览器**打开监控应用提供的 Web 页面，**直观看到**守护程序的运行状态。界面须包含：红绿灯（R-M3）、自检结论（R-M2）、与 IB 连接状态及 Client ID、状态摘要、操作列表（R-M4）、控制（停止、一键平敞口、重试连接 IB 等）、**当前生效的结构策略与安全边界**（可在 Status 或独立页展示），以及**策略与安全边界的查看与切换**（如 Research → Strategy 页面：结构策略列表、安全边界列表、策略历史、Set active）。**Engine 进程启停**：在 **Settings → Socket** 与同表 Socket Services 一致，经 Ops 对 **systemd** 发起启停（见 R-C1）；Status / Daemon 页可链向该入口；监控 HTTP API 本身不 exec `run_engine.py`。
 - **范围**：局域网内浏览器访问；不要求公网或手机 App。
 
 ### 2.5 复盘与风控分析页面（R-M7）
@@ -298,6 +298,7 @@
 - **目标**：**两台 Mac Mini** 各运行一套 TWS（Host / Secondary），为 Dev 与 Prod **共享基础设施**（与 R-A4 一致）。
 - **区分**：Dev 与 Prod 通过 **不同 `client_id` 与/或不同 TWS/Gateway 监听端口** 区分连接。
 - **互斥**：**同一 IB 账户同一时刻仅允许一个自动交易 Engine** 对该账户下单，避免双环境双 Engine 实盘冲突。与现有单进程约束（RE-6）及控制语义一致。
+- **Ops 启停 Engine**：Engine 在 Ops 中**不**使用 Socket ingest 的 Redis 租约字段时，Dev/Prod **不得**对同一账户**双启**两个 `bifrost-engine` 进程；互斥仍由运维与 R-DV3 纪律保证。
 
 ### 7.4 共享 Redis 实时行情（调试拓扑，R-DV4）
 
@@ -345,4 +346,4 @@
 
 ---
 
-*最后更新：2026-04-07，新增 **R-IB1～R-IB4**（§3.6）与 IB 边缘服务拆分目标架构；修订 **R-RM***、**R-DV4** 及 R-A/R-C3 相关叙述，与 [ARCHITECTURE.md](ARCHITECTURE.md) §2.11 对齐。*
+*最后更新：2026-04-07，**R-C1 / R-M5 / §7.3**：补充 Engine 经 Ops+systemd 与 Socket 同源启停及 `daemon_heartbeat` 优雅写库；**R-DV3** 补充 Ops 启停 Engine 时互斥纪律。此前：新增 **R-IB1～R-IB4**（§3.6）与 IB 边缘服务拆分目标架构；修订 **R-RM***、**R-DV4** 及 R-A/R-C3 相关叙述，与 [ARCHITECTURE.md](ARCHITECTURE.md) §2.11 对齐。*

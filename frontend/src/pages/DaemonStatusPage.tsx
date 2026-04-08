@@ -4,7 +4,6 @@ import {
   postSuspend,
   postResume,
   postFlatten,
-  postStop,
   fetchDaemonLogs,
   subscribeDaemonLogs,
   clearDaemonLogs,
@@ -17,11 +16,13 @@ import {
   DAEMON_REASON_LABELS,
   DAEMON_SELF_CHECK_LABELS,
   DAEMON_STATE_LABELS,
+  formatDaemonBlockReasonsCompact,
   STATUS_FIELDS,
 } from './status/statusLabels'
 import { useControlAction } from './status/useControlAction'
 import { StatusDaemonPanel, StatusStrategyPanel } from './status/panels'
 import { computeIbBrokerGroupLamp } from './status/daemonIbBrokerLamp'
+import { DaemonEngineOpsSection } from './DaemonEngineOpsSection'
 
 export interface DaemonStatusPageProps {
   status: StatusResponse | null
@@ -120,6 +121,20 @@ export function DaemonStatusPage({
   const hedgeBlockReasons = (j?.daemon?.block_reasons ?? [])
     .map(r => DAEMON_REASON_LABELS[r] ?? r)
     .join('; ') || 'None'
+  const hedgeBlockReasonsCompact = formatDaemonBlockReasonsCompact(j?.daemon?.block_reasons)
+
+  /** One-word / token status for Trading Strategy compact strip. */
+  let hedgeStatusCompact: string
+  if (!j) {
+    hedgeStatusCompact = '—'
+  } else if (hb?.daemon_alive) {
+    hedgeStatusCompact = hb.hedge_running ? 'Run' : 'Pause'
+  } else if (hb) {
+    hedgeStatusCompact = 'Down'
+  } else {
+    hedgeStatusCompact =
+      autoSt?.ts != null && nowSec - (autoSt.ts as number) < 90 ? '1-proc' : 'Down'
+  }
 
   const heartbeatGroupLamp = hb ? (hb.daemon_alive ? 'green' : 'red') : 'none'
   const { lamp: ibGroupLamp, title: ibGroupTitle } = computeIbBrokerGroupLamp(j, hb)
@@ -156,6 +171,8 @@ export function DaemonStatusPage({
   return (
     <div className={`settings-page-card ${embeddedInSettings ? 'daemon-status-page daemon-status-page--embedded' : 'daemon-status-page'}`}>
       <div className="daemon-groups settings-page-groups">
+        <DaemonEngineOpsSection status={j} loadStatus={loadStatus} />
+
         <section className="replay-section" aria-labelledby="daemon-panel-head">
           <StatusDaemonPanel
             status={j}
@@ -177,6 +194,8 @@ export function DaemonStatusPage({
                 hedgeLabel={hedgeLabel}
                 hedgeSelfCheckText={hedgeSelfCheckText}
                 hedgeBlockReasons={hedgeBlockReasons}
+                hedgeStatusCompact={hedgeStatusCompact}
+                hedgeBlockReasonsCompact={hedgeBlockReasonsCompact}
                 hedgeHint={hedgeHint}
                 statusSummaryItems={statusSummaryItems}
                 onFlatten={() => runHedgeAction(postFlatten, { loading: 'Requesting flatten…', success: 'Flatten sent; hedge process will consume and execute.' })}
@@ -189,7 +208,6 @@ export function DaemonStatusPage({
                 onManage={onNavigateToStrategy}
               />
             )}
-            onStop={() => runCtrlAction(postStop, { loading: 'Requesting daemon stop…', success: 'Stop sent; daemon will exit and clear ib_client_id; next start uses client_id=1.' })}
             onNavigateToSocket={onNavigateToSocket}
             ctrlMsg={ctrlMsg}
           />

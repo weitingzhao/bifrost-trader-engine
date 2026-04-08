@@ -111,7 +111,7 @@ def _merged_console_tail_from_keys(r: Any, keys: List[str], tail: int) -> Tuple[
 
 
 def _daemon_log_reader_loop(app_ref) -> None:
-    """Background thread: XREAD Redis stream bifrost:daemon_console, push each line to all SSE queues."""
+    """Background thread: XREAD Redis stream bifrost:console:daemon_trading, push each line to all SSE queues."""
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())

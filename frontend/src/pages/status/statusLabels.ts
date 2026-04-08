@@ -39,6 +39,42 @@ export const DAEMON_REASON_LABELS: Record<string, string> = {
   trading_state_force_hedge: 'Trading state: Force hedge',
 }
 
+/** Short tokens for Trading Strategy compact row (space-saving). */
+export const DAEMON_BLOCK_REASONS_COMPACT: Record<string, string> = {
+  no_heartbeat: 'no HB',
+  daemon_not_running: 'no daemon',
+  heartbeat_stale: 'HB stale',
+  ib_not_connected: 'no IB',
+  status_read_error: 'read err',
+  trading_suspended: 'suspended',
+  no_status: 'no status',
+  data_stale: 'stale',
+  trading_state_pause_cost: 'pause $',
+  trading_state_risk_halt: 'risk halt',
+  trading_state_stale: 'stale T',
+  trading_state_force_hedge: 'force H',
+}
+
+/** Compact status line for embedded Trading Strategy (Daemon card). */
+export function formatDaemonBlockReasonsCompact(blockKeys: string[] | undefined | null): string {
+  if (!blockKeys?.length) return ''
+  return blockKeys
+    .map(k => DAEMON_BLOCK_REASONS_COMPACT[k] ?? k.replace(/_/g, ' '))
+    .slice(0, 4)
+    .join(' · ')
+}
+
+/** Short labels for strategy metrics row (compact panel only). */
+export const STRATEGY_METRIC_LABEL_COMPACT: Record<string, string> = {
+  'Daemon state': 'D.state',
+  'Trading state': 'State',
+  Symbol: 'Sym',
+  'Spot price': 'Spot',
+  'Stock position': 'Pos',
+  'Daily hedge count': 'Hedges',
+  'Updated at': 'At',
+}
+
 export const DAEMON_SELF_CHECK_LABELS: Record<string, string> = {
   ok: 'OK',
   degraded: 'Degraded',

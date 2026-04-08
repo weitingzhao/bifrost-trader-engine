@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from backend.ops.agent.protocol import (
+    ALLOWED_UNIT_PATTERNS,
     AgentRequest,
     AgentResponse,
     validate_action,
@@ -239,6 +240,10 @@ class AgentServer:
         )
         os.chmod(str(sock_path), 0o660)
         logger.info("Agent listening on %s", sock_path)
+        logger.info(
+            "Whitelisted systemd unit patterns: %s",
+            [p.pattern for p in ALLOWED_UNIT_PATTERNS],
+        )
 
         loop = asyncio.get_running_loop()
         stop = loop.create_future()

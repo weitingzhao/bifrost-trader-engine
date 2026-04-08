@@ -30,7 +30,9 @@ _GREEN = "\033[32m"
 _YELLOW = "\033[33m"
 _RED = "\033[31m"
 _CYAN = "\033[36m"
-_DAEMON_LOG_STREAM_KEY = "bifrost:daemon_console"
+
+from src.bifrost.redis_console_streams import BIFROST_CONSOLE_DAEMON_TRADING
+
 _DAEMON_LOG_STREAM_MAXLEN = 50
 
 _LEVEL_COLORS = {
@@ -107,7 +109,7 @@ def setup_logging(debug: bool = False) -> None:
     )
     redis_handler = RedisStreamLogHandler(
         _daemon_log_redis_url(),
-        _DAEMON_LOG_STREAM_KEY,
+        BIFROST_CONSOLE_DAEMON_TRADING,
         maxlen=_DAEMON_LOG_STREAM_MAXLEN,
     )
     redis_handler.setFormatter(

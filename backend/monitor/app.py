@@ -122,7 +122,7 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    # Daemon console log stream (Redis Stream): reader thread + per-connection queues
+    # Daemon console log stream (run_engine.py → bifrost:console:daemon_trading): reader thread + per-connection queues
     app.state.daemon_log_queues: list = []
     app.state.daemon_log_lock = threading.Lock()
     app.state._daemon_log_thread: Optional[threading.Thread] = None

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from src.bifrost.redis_health_keys import ENGINE_OPS_ACTIVE_REDIS_FIELD
+
 from backend.ops.market_ingest_control_env import (
     BIFROST_OPS_CONTROL_ENV_FIELD,
     clear_control_env,
     normalize_control_profile,
     read_control_env,
     write_control_env,
+    write_trading_engine_ops_lease,
 )
 
 
@@ -44,3 +47,16 @@ def test_clear_control_env_hdel(mock_from_url: MagicMock) -> None:
     mock_from_url.return_value = r
     clear_control_env("redis://localhost:6379/0", "my:meta")
     r.hdel.assert_called_once_with("my:meta", BIFROST_OPS_CONTROL_ENV_FIELD)
+
+
+@patch("redis.from_url")
+def test_write_trading_engine_ops_lease_sets_lease_active_updated(mock_from_url: MagicMock) -> None:
+    r = MagicMock()
+    mock_from_url.return_value = r
+    write_trading_engine_ops_lease("redis://localhost:6379/0", "bifrost:ops:trading_engine", "prod")
+    r.hset.assert_called_once()
+    _args, kwargs = r.hset.call_args
+    mapping = kwargs["mapping"]
+    assert mapping[BIFROST_OPS_CONTROL_ENV_FIELD] == "prod"
+    assert mapping[ENGINE_OPS_ACTIVE_REDIS_FIELD] == "1"
+    assert float(mapping["updated_at"]) > 0

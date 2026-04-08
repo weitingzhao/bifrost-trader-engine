@@ -680,7 +680,7 @@
 
 ### 2.5 表 `daemon_run_status`（阶段 2：挂起/恢复状态，监控机写入、交易机轮询）
 
-- **用途**：供监控机设置「挂起/恢复」交易流程（不下新对冲），交易机在每次 heartbeat 及 tick 时**只读**该表并据此决定是否执行 maybe_hedge；与 daemon_control 配合实现 RE-5（监控与交易分离）。启动守护程序仅在交易机执行，监控机不提供 subprocess/start。
+- **用途**：供监控机设置「挂起/恢复」交易流程（不下新对冲），交易机在每次 heartbeat 及 tick 时**只读**该表并据此决定是否执行 maybe_hedge；与 daemon_control 配合实现 RE-5（监控与交易分离）。**Engine 进程**由交易机上的 **systemd**（经 Ops `market-ingest` 控制）或手工 `run_engine.py` 拉起；**Monitor HTTP API 不 exec 引擎**（与「监控机不提供 subprocess/start」一致）。
 - **写入**：监控应用在 POST /control/suspend 时 **UPDATE** `suspended = true`，POST /control/resume 时 **UPDATE** `suspended = false`（单行 id=1）。
 - **列**：
 
@@ -1348,7 +1348,7 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 
 以下为占位说明，具体表结构或字段在对应阶段实现时在本文档中补充。
 
-- **阶段 2**：独立应用**只读** `daemon_auto_status_current`、`daemon_auto_operations`、`daemon_run_status`、`daemon_heartbeat`（GET /status 含 trading_suspended 与守护/对冲分开显示）；控制通道使用表 **daemon_control**（stop/flatten，见 §2.4）与 **daemon_run_status**（挂起/恢复，见 §2.5）。**daemon_heartbeat**（§2.6）由稳定守护进程写入，用于监控端区分守护进程存活与对冲程序是否在跑。启动守护程序仅在交易机执行，监控机不提供 subprocess/start。
+- **阶段 2**：独立应用**只读** `daemon_auto_status_current`、`daemon_auto_operations`、`daemon_run_status`、`daemon_heartbeat`（GET /status 含 trading_suspended 与守护/对冲分开显示）；控制通道使用表 **daemon_control**（stop/flatten，见 §2.4）与 **daemon_run_status**（挂起/恢复，见 §2.5）。**daemon_heartbeat**（§2.6）由稳定守护进程写入，用于监控端区分守护进程存活与对冲程序是否在跑。**Engine 启动**由 Ops+systemd 或交易机手工执行；Monitor 不 subprocess 启动。
 - **阶段 3.1（历史统计）**：只读 `daemon_auto_status_history`、`daemon_auto_operations` 做聚合（按日/周对冲次数、盈亏等）；不新增表，仅查询。
 - **阶段 3 R-A2/R-A3（复盘与风控）**：**account_executions**（§2.11）存账户执行/成交；**stock_day**、**stock_min**、**option_day**、**option_min**（§2.13–§2.16）存股票与期权 K 线；**watchlist**（§2.17）存自选标的。GET /executions、GET /bars、GET/POST/DELETE /watchlist 与复盘/市场数据页读上述表；写入由监控端或独立脚本在阶段 3 实现时接入。
 - **阶段 4（回测）**：若回测结果需要落库，可新增 schema 或表（如 `backtest_runs`、`backtest_ticks`），在本文档 §6 增加。
@@ -1403,6 +1403,7 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-03-20 settings 移除 IB 连接列 | `settings` 表不再包含 `ib_host`、`ib_port_type`、`ib_client_id_*`、`ib2_*` 等列；IB 连接与 client_id 以 YAML `ib.host` / `ib.secondary` 为唯一真源；`pg_ddl` 新建库不含上述列。§2.9。 | 阶段 2 |
 | 2026-03-21 Massive 期权研究数据（R-A6） | option_day / option_min 增加 `source` 列（text, DEFAULT 'ib'）并调整 UNIQUE 包含 source；option_min 周期增加 '1 sec'（Massive 秒聚合）；option_contracts 增加 `massive_option_ticker`（可选）；option_snapshots 扩展为含 Greeks/IV（iv/delta/gamma/theta/vega）+ OI + underlying_price + source；新增表 option_open_interest_daily（§2.16.3）、option_trades（§2.16.4，预留）、job_massive_backfill（§2.16.5）、massive_corporate_action（§2.16.6）。 | 期权研究阶段 |
 | 2026-03-24 Massive/期权研究相关 DB 升级 | `job_massive_backfill` 增加 `payload_hash` 列 + 部分唯一索引（防重复 pending/running）。新增表 `report_option_max_pain_daily`（§2.16.5a，Max Pain 日报表，含 `computation_detail` jsonb）。`option_snapshots` 迁移为 `PARTITION BY RANGE (snapshot_ts)` 按月分区（新库直接分区建表，已有库自动迁移）。新增物化视图 `option_snapshots_latest`（`DISTINCT ON contract_key`，支持 `REFRESH CONCURRENTLY`）。90 天保留策略：旧分区 DETACH + 归档。 | 行为边界见 [ARCHITECTURE.md](ARCHITECTURE.md) §2.10 |
+| 2026-04-07 Engine Ops 启停与文档 | **无 schema 变更**。§2.5、§5 阶段 2 说明修订：Engine 由 Ops+systemd 或手工启动；Monitor 不 exec；`daemon_heartbeat.graceful_shutdown_at` 仍由进程优雅退出时写入（含 systemd SIGTERM）。 | — |
 
 ---
 

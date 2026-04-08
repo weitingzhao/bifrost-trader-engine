@@ -189,7 +189,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 - **Redis meta（逻辑健康）**：Massive 期权 WS 为 `bifrost:health:ws_massive_option`（Monitor 可回退 `bifrost:health:massive_ws` 与 `massive:meta:status`）；IB ingestor / IB Operator 分别为 `bifrost:health:ws_ib_ingestor`、`bifrost:health:ws_ib_operator`（可回退上一版 bifrost 名；不再使用 `ib:ingester:meta:health` / `ib:operator:meta:health` 写健康）。**IB Account Agent** 落地后可增加独立 health 键（如 `bifrost:health:ws_ib_account_agent`，以实现为准）。字段含 `connected`、`last_msg_ts` 等。订阅与 tick 等数据键：`ib:ingester:*`；账户域 **`ib:account:*`**（拟议）；Operator 仅 **`ib:operator:cmd`** 等主动命令通道，**不**维持行情订阅。`GET /status` 的 `socket` 摘要供 UI 展示。
 - **日志**：Socket Services ingest 将控制台日志写入 Redis Stream `bifrost:console:ws_massive_option`（Massive）、`bifrost:console:ws_ib_ingestor`（IB ingestor）、`bifrost:console:ws_ib_operator`（IB Operator）；Massive 对应 Monitor `GET /api/massive-ws/logs` 与 SSE `/api/massive-ws/logs/stream`。
-- **进程控制**：Ops `GET /ops/market-ingest/services`、`POST /ops/market-ingest/control`（需 **operator**，与 `POST /ops/workers/scale` 同级；Redis broker 启停等仍为 admin）；`systemd` unit 须列入 `ops.allowed_units`。示例 unit：`deploy/systemd/bifrost-massive-ws.service`。注册表默认见 `ops.market_ingest_services`（示例见 `config/config.dev.yaml.example`）。
+- **进程控制**：Ops `GET /ops/market-ingest/services`、`POST /ops/market-ingest/control`（需 **operator**，与 `POST /ops/workers/scale` 同级；Redis broker 启停等仍为 admin）；`systemd` unit 须列入 `ops.allowed_units` 与 Agent 白名单。示例 unit：ingest 类 `deploy/systemd/bifrost-massive-ws.service`；**Engine** 为 `deploy/systemd/bifrost-engine.service`（可在 `ops.market_ingest_services` 中配置 **`redis_meta_key` 为空**，则不做 Socket 租约/ingest 健康清理）。注册表默认见 `backend/ops/market_ingest_config.py` 与各环境 YAML（示例见 `config/config.dev.yaml.example`）。
 - **跨机**：Ops 与 ingest 不同机时，使用 `executor_mode=agent`，在 ingest 机运行 Local Control Agent；新增 unit 时同步扩展 `backend/ops/agent/protocol.py` 中的 `ALLOWED_UNIT_PATTERNS`。
 
 #### 2.10.4 UI 行为约定
@@ -453,7 +453,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 - **Prod 主机（Linux 服务器 192.168.10.70）**：
   - **守护进程**（`run_engine.py`）：**目标架构**下**不直连** TWS；从 **Redis** 读行情与账户数据，执行对冲逻辑（Gamma Scalping、FSM、写 status/operations）；下单经 **IB Operator**；轮询 Prod DB（`daemon_control`、`daemon_run_status`）。**运行不依赖直连 IB**（RE-7、§2.6）：若数据或 Operator 不可用则 degraded / WAITING 类状态，持续写心跳、轮询 stop/retry。收到 **stop** 则消费并退出；**suspend** / **resume** 通过 `daemon_run_status.suspended` 切换 Daemon FSM 的 RUNNING_SUSPENDED。
   - **IB Ingestor / IB Operator / IB Account Agent**：长驻边缘服务，见 §2.11；与 Engine 同机或按运维拆分（需共享 Redis 与 PG 访问纪律）。
-  - **HTTP API**（§4.0）：**Monitor**（`run_server.py`）读 Prod DB，提供 GET /status、GET /operations、POST /control/* 等；**不提供**守护进程「启动」。其余域（Ops、Trading、Research 等）按需同机另起进程。守护进程在本机执行 `run_engine.py`（systemd/手动）。
+  - **HTTP API**（§4.0）：**Monitor**（`run_server.py`）读 Prod DB，提供 GET /status、GET /operations、POST /control/* 等；**不**在 Monitor 进程内 exec 守护进程。**Engine 启停**：经 **Ops**（`GET/POST /ops/market-ingest/*`，与 Socket Services 同源）对 **`bifrost-engine.service`** 执行 **systemd** start/stop/restart（须列入 `ops.market_ingest_services` 与 Agent/`ops.allowed_units` 白名单）。其余域（Ops、Trading、Research 等）按需同机另起进程。守护进程本体仍为本机 **`run_engine.py`**（由 systemd 拉起或开发/排障时手动）。
   - **Redis + Celery worker**：同机部署；`bars` / `massive` 等队列见 `scripts/run_celery.py`。
 - **Dev 开发机（Mac）**：运行 Monitor 及各域 API（+ 可选 Engine/Redis/Celery）；连接 **Dev DB**；连接 TWS 时使用与 Prod 不同的 `client_id`。Dev Engine **不得**与 Prod Engine 同时对同一 IB 账户下单（R-DV3，§2.1）。
 - **PostgreSQL（192.168.10.80）**：Prod DB 与 Dev DB 在同一服务器上不同 `database`；守护进程、各 FastAPI 进程、Worker 均连本环境对应库。
@@ -462,12 +462,14 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 | 操作 | 谁处理 | 说明 |
 |------|--------|------|
-| **Stop** | 守护进程轮询并消费 `daemon_control` 中的 stop 后退出 | 监控端 POST /control/stop → 写 DB → 守护进程消费 stop 并退出。 |
+| **Stop**（推荐日常） | **systemd** 对 `bifrost-engine.service` 发 **SIGTERM** | Ops UI → `POST /ops/market-ingest/control`（stop）→ Local Control Agent / 本机 executor → `systemctl stop`；进程走 FSM 清理，退出时写 **`daemon_heartbeat.graceful_shutdown_at`** 等（与 IB Account Agent 同类「优雅停机」宽限期：`TimeoutStopSec` 见 unit 文件）。 |
+| **Stop**（备选） | 守护进程轮询并消费 `daemon_control` 中的 stop 后退出 | 监控端 POST /control/stop → 写 DB → 守护进程消费 stop 并退出；同样可触发优雅写库。 |
+| **Start / Restart** | **systemd** | Ops UI → 同上 API（start/restart）→ `systemctl`；**Monitor 不 subprocess 启动**。 |
 | **Flatten** | 守护进程轮询并消费 flatten | 监控端 POST /control/flatten → 写 DB → 守护进程消费并执行。 |
 | **Suspend** | 守护进程根据 `daemon_run_status.suspended=true` 进入 RUNNING_SUSPENDED | 监控端 POST /control/suspend → 写 DB → 守护进程轮询后不再执行 maybe_hedge。 |
 | **Resume** | 守护进程根据 `daemon_run_status.suspended=false` 回到 RUNNING | 监控端 POST /control/resume → 写 DB → 守护进程轮询后恢复执行 maybe_hedge。 |
 | **Retry IB**（RE-7） | 守护进程立即尝试连接 TWS | 监控端 POST /control/retry_ib → 写 DB → 守护进程消费后执行一次连接尝试；恢复后写回连接状态与 Client ID。 |
-| **Start** | 不通过 status server | 在**守护程序主机**执行 `run_engine.py`（SSH/systemd/手动）。 |
+| **手工启动** | 操作者 / 排障 | 在**守护程序主机**直接执行 `run_engine.py`（不经 Ops）；开发与 SSH 排障仍可用。 |
 
 **拓扑示意（当前选定：两台 Mac Mini TWS + Linux Prod 全栈 + Dev 开发机 + PostgreSQL 独立主机）**：
 
@@ -599,4 +601,4 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 - **[Guard 微调与影响](research/GUARD_TUNING_AND_IMPACT.md)** — 参数调整与后果
 - **§8 本文** — 安全边界配置的存储与版本管理（文件 vs 配置注册表、可追溯性、与回测结果匹配）
 
-*最后更新：2026-04-07 — 新增 §2.11（IB Ingestor / Account Agent / Operator / Engine 目标职责），修订 §2.1、§2.6、§2.8、§4.1、§5、§6.1、§7 映射与 [REQUIREMENTS.md](REQUIREMENTS.md) §3.6、R-RM*、R-DV4 对齐。*
+*最后更新：2026-04-07 — §2.10.3、§6.1：**Engine** 经 Ops `market-ingest` + systemd 启停；启停语义表区分 systemd stop 与 POST /control/stop。此前：新增 §2.11（IB Ingestor / Account Agent / Operator / Engine 目标职责），修订 §2.1、§2.6、§2.8、§4.1、§5、§6.1、§7 映射与 [REQUIREMENTS.md](REQUIREMENTS.md) §3.6、R-RM*、R-DV4 对齐。*

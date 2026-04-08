@@ -13,6 +13,11 @@ def test_validate_unit_ingest_family() -> None:
     assert validate_unit("bifrost-massive-ws.service") is True
 
 
+def test_validate_unit_bifrost_engine() -> None:
+    assert validate_unit("bifrost-engine.service") is True
+    assert validate_unit(" bifrost-engine.service ") is True
+
+
 def test_validate_unit_rejects_unknown() -> None:
     assert validate_unit("random.service") is False
     assert validate_unit("") is False

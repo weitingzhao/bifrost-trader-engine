@@ -2,9 +2,11 @@
 
 import logging
 
+from src.bifrost.redis_console_streams import BIFROST_CONSOLE_DAEMON_TRADING
+
 logger = logging.getLogger(__name__)
 
-DAEMON_LOG_STREAM_KEY = "bifrost:daemon_console"
+DAEMON_LOG_STREAM_KEY = BIFROST_CONSOLE_DAEMON_TRADING
 MASSIVE_LOG_STREAM_KEY = "bifrost:massive_console"
 MASSIVE_WS_LOG_STREAM_KEY = "bifrost:console:ws_massive_option"
 IB_OPERATOR_LOG_STREAM_KEY = "bifrost:console:ws_ib_operator"

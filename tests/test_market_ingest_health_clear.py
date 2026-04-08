@@ -6,6 +6,8 @@ from unittest.mock import MagicMock
 import pytest
 
 import backend.ops.market_ingest_health_clear as health_clear_mod
+from src.bifrost.redis_health_keys import BIFROST_OPS_TRADING_ENGINE_META, ENGINE_OPS_ACTIVE_REDIS_FIELD
+
 from backend.ops.market_ingest_health_clear import (
     clear_ingest_health_after_stop,
     ingest_redis_health_looks_live,
@@ -96,3 +98,31 @@ def test_clear_stop_ib_account_agent(fake_redis) -> None:
     clear_ingest_health_after_stop("redis://unused/0", key, "ib_account_agent")
     assert store[key].get("host_connected") == "0"
     assert store[key].get("host_alive") == "0"
+
+
+def test_looks_live_trading_engine_recent_active(fake_redis) -> None:
+    store = fake_redis
+    key = BIFROST_OPS_TRADING_ENGINE_META
+    store[key] = {
+        ENGINE_OPS_ACTIVE_REDIS_FIELD: "1",
+        "updated_at": str(time.time()),
+    }
+    assert ingest_redis_health_looks_live("redis://unused/0", key, "trading_engine") is True
+
+
+def test_looks_live_trading_engine_inactive(fake_redis) -> None:
+    store = fake_redis
+    key = BIFROST_OPS_TRADING_ENGINE_META
+    store[key] = {
+        ENGINE_OPS_ACTIVE_REDIS_FIELD: "0",
+        "updated_at": str(time.time()),
+    }
+    assert ingest_redis_health_looks_live("redis://unused/0", key, "trading_engine") is False
+
+
+def test_clear_stop_trading_engine(fake_redis) -> None:
+    store = fake_redis
+    key = BIFROST_OPS_TRADING_ENGINE_META
+    store[key] = {ENGINE_OPS_ACTIVE_REDIS_FIELD: "1", "updated_at": str(time.time())}
+    clear_ingest_health_after_stop("redis://unused/0", key, "trading_engine")
+    assert store[key].get(ENGINE_OPS_ACTIVE_REDIS_FIELD) == "0"

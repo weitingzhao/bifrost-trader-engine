@@ -1,5 +1,7 @@
 """Market ingest registry from YAML."""
 
+from src.bifrost.redis_health_keys import BIFROST_OPS_TRADING_ENGINE_META
+
 from backend.ops.market_ingest_config import (
     market_ingest_service_by_id,
     market_ingest_services_from_config,
@@ -8,7 +10,7 @@ from backend.ops.market_ingest_config import (
 
 def test_default_services():
     rows = market_ingest_services_from_config({})
-    assert len(rows) == 4
+    assert len(rows) == 5
     assert rows[0]["id"] == "massive_ws"
     assert rows[0]["systemd_unit"] == "bifrost-massive-ws.service"
     assert rows[0]["redis_meta_key"] == "bifrost:health:ws_massive_option"
@@ -20,6 +22,9 @@ def test_default_services():
     assert rows[3]["id"] == "ib_account_agent"
     assert rows[3]["systemd_unit"] == "bifrost-ib-account-agent.service"
     assert rows[3]["redis_meta_key"] == "bifrost:health:ws_ib_account_agent"
+    assert rows[4]["id"] == "trading_engine"
+    assert rows[4]["systemd_unit"] == "bifrost-engine.service"
+    assert rows[4]["redis_meta_key"] == BIFROST_OPS_TRADING_ENGINE_META
 
 
 def test_custom_services_override():
@@ -45,6 +50,27 @@ def test_service_by_id():
     row = market_ingest_service_by_id({}, "massive_ws")
     assert row is not None
     assert row["id"] == "massive_ws"
+    eng = market_ingest_service_by_id({}, "trading_engine")
+    assert eng is not None
+    assert eng["systemd_unit"] == "bifrost-engine.service"
+    assert eng["redis_meta_key"] == BIFROST_OPS_TRADING_ENGINE_META
+
+
+def test_engine_row_allows_omitted_redis_meta_key():
+    cfg = {
+        "ops": {
+            "market_ingest_services": [
+                {
+                    "id": "trading_engine",
+                    "label": "Engine",
+                    "systemd_unit": "bifrost-engine.service",
+                },
+            ],
+        },
+    }
+    rows = market_ingest_services_from_config(cfg)
+    assert len(rows) == 1
+    assert rows[0]["redis_meta_key"] == BIFROST_OPS_TRADING_ENGINE_META
 
 
 def test_yaml_legacy_redis_meta_keys_normalize_to_bifrost_health():

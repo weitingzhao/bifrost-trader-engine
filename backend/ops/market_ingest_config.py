@@ -1,4 +1,10 @@
-"""YAML-driven registry for market data ingest services (systemd + Redis meta keys)."""
+"""YAML-driven registry for Ops-managed systemd services (Socket ingest + optional Engine).
+
+**trading_engine** uses ``redis_meta_key`` ``bifrost:ops:trading_engine`` by default (Dev/Prod
+Ops lease + ``engine_ops_active``, same exclusivity rules as Socket rows in
+:mod:`backend.ops.routers.market_ingest`). YAML may omit ``redis_meta_key`` for that id and the
+default meta key is applied.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +15,7 @@ from src.bifrost.redis_health_keys import (
     BIFROST_HEALTH_IB_INGESTOR,
     BIFROST_HEALTH_IB_OPERATOR,
     BIFROST_HEALTH_MASSIVE_WS,
+    BIFROST_OPS_TRADING_ENGINE_META,
     LEGACY_BIFROST_IB_ACCOUNT_AGENT,
     LEGACY_BIFROST_IB_INGESTOR,
     LEGACY_BIFROST_IB_OPERATOR,
@@ -43,11 +50,17 @@ DEFAULT_MARKET_INGEST_SERVICES: List[Dict[str, str]] = [
         "systemd_unit": "bifrost-ib-account-agent.service",
         "redis_meta_key": BIFROST_HEALTH_IB_ACCOUNT_AGENT,
     },
+    {
+        "id": "trading_engine",
+        "label": "Trading daemon (Engine)",
+        "systemd_unit": "bifrost-engine.service",
+        "redis_meta_key": BIFROST_OPS_TRADING_ENGINE_META,
+    },
 ]
 
 
 def market_ingest_services_from_config(config: dict) -> List[Dict[str, str]]:
-    """Return service rows; each has id, label, systemd_unit, redis_meta_key."""
+    """Return service rows; each has id, label, systemd_unit, redis_meta_key (may be empty)."""
     ops = config.get("ops") or {}
     raw = ops.get("market_ingest_services")
     if not isinstance(raw, list) or not raw:
@@ -79,6 +92,8 @@ def market_ingest_services_from_config(config: dict) -> List[Dict[str, str]]:
             meta = BIFROST_HEALTH_IB_OPERATOR
         elif sid == "ib_account_agent" and meta == LEGACY_BIFROST_IB_ACCOUNT_AGENT:
             meta = BIFROST_HEALTH_IB_ACCOUNT_AGENT
+        if sid == "trading_engine" and not meta:
+            meta = BIFROST_OPS_TRADING_ENGINE_META
         out.append({
             "id": sid,
             "label": label or sid,

@@ -21,7 +21,7 @@
 | **8** | **状态可观测与历史** | R-M1a/1b，R-H1，阶段 1/2 | ✅ 已实现 | Sink 当前+历史；GET /status；监控页可查看状态与配置摘要。 |
 | **9** | **状态自检与红绿灯** | R-M2，R-M3，阶段 2 | ✅ 已实现 | self_check（ok/degraded/blocked）、block_reasons；GET /status 含 status_lamp；监控页红/黄/绿指示。 |
 | **10** | **操作可查** | R-M4a/4b，阶段 1/2 | ✅ 已实现 | 对冲意图/下单/成交/撤单写入 daemon_auto_operations；GET /operations；监控页可查。 |
-| **11** | **一键停止** | R-C1a/1b，阶段 1/2 | ✅ 已实现 | 信号停止；POST /control/stop；局域网内可发起停止。 |
+| **11** | **一键停止** | R-C1a/1b，阶段 1/2 | ✅ 已实现 | 信号停止；POST /control/stop；局域网内可发起停止。**补充（2026-04-07）**：Settings → Socket 与 ingest 同源 **Ops + systemd** 启停 **`bifrost-engine.service`**（SIGTERM 优雅退出，写 `daemon_heartbeat.graceful_shutdown_at`）；详见 [ARCHITECTURE.md](../ARCHITECTURE.md) §6.1 启停表。 |
 | **12** | **账户执行交易与复盘** | R-A2，R-M7，阶段 3 | ⏳ 部分/待验收 | 执行记录获取、复盘与风控分析页面、Performance 按账户与 Realized/Unrealized 拆分；阶段 3 验收范围。 |
 | **13** | **复盘辅助行情（K 线等）** | R-A3，阶段 3 | ⏳ 部分 | Backfill 队列表+API+Celery Worker；GET /bars；非实时拉取；阶段 3 部分步骤已实现。 |
 | **14** | **历史统计** | R-H2，阶段 3 | ✅ 已实现 | scripts/check/stats_from_history.py；按日/周对冲次数、盈亏汇总；可离线运行。 |

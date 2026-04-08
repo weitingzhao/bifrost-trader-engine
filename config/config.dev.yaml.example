@@ -108,6 +108,7 @@ massive:
 #     - bifrost-ib-operator
 #     - bifrost-ib-ingestor
 #     - bifrost-ib-account-agent
+#     - bifrost-engine
 #   market_ingest_services:
 #     - id: massive_ws
 #       label: "Massive Options WS ingest"
@@ -121,6 +122,14 @@ massive:
 #       label: "IB ingestor"
 #       systemd_unit: bifrost-ib-ingestor.service
 #       redis_meta_key: bifrost:health:ws_ib_ingestor
+#     - id: ib_account_agent
+#       label: "IB Account Agent"
+#       systemd_unit: bifrost-ib-account-agent.service
+#       redis_meta_key: bifrost:health:ws_ib_account_agent
+#     - id: trading_engine
+#       label: "Trading daemon (Engine)"
+#       systemd_unit: bifrost-engine.service
+#       # Omit redis_meta_key for Engine — no Socket ingest lease / health rewrite
 
 # IB ingestor (scripts/run_ib_ingestor.py): Watchlist-driven; caps subscription count. Legacy top-level key ib_market_ingest still read.
 # ib_ingestor:

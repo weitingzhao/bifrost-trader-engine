@@ -16,7 +16,15 @@ import {
   type OpsCapabilities,
 } from '../api/ops/ops'
 import { OpsHostEnvPillBadge } from '../components/OpsHostEnvPillBadge'
-import { opsHostEnvFromConfigProfile, type OpsHostEnvPill } from '../utils/opsHostEnvPill'
+import type { OpsHostEnvPill } from '../utils/opsHostEnvPill'
+import {
+  ingestActionBlock,
+  ingestActionBlockMessage,
+  normalizedPageDevProd,
+  runtimeControlHostDisplay,
+  socketServicesHostColumnDisplay,
+  type IngestActionBlock,
+} from '../utils/ingestOpsShared'
 import {
   aggregateIngestRedisHealthLamp,
   ingestRedisHealthLamp,
@@ -56,7 +64,8 @@ function fmtAge(s: number | null | undefined): string {
   return `${Math.floor(s / 3600)}h`
 }
 
-type IngestCategory = 'Massive' | 'IB' | 'Other'
+/** Table row category (Engine is used only on Daemon page; Socket page never lists trading_engine). */
+export type IngestCategory = 'Massive' | 'IB' | 'Engine' | 'Other'
 
 function categoryForServiceId(id: string): IngestCategory {
   if (id === 'massive_ws') return 'Massive'
@@ -274,93 +283,6 @@ function ibIngestClientIdShouldShow(
   return false
 }
 
-/** Ops /health config_profile → dev|prod for cross-stack action gating (matches opsHostEnvFromConfigProfile). */
-function normalizedPageDevProd(configProfile: string | null): 'dev' | 'prod' | null {
-  const p = (configProfile ?? '').toLowerCase().trim()
-  if (p === 'dev' || p === 'development') return 'dev'
-  if (p === 'prod' || p === 'production') return 'prod'
-  return null
-}
-
-/** Per-row Host: Redis lease (which stack started the service via Ops), not the browser's Ops routing. */
-function runtimeControlHostDisplay(
-  redisControlEnv: string | null | undefined,
-  redisMetaKey: string,
-): { title: string; pill: OpsHostEnvPill } {
-  const r = (redisControlEnv ?? '').toLowerCase().trim()
-  if (r === 'dev' || r === 'prod') {
-    const pill = opsHostEnvFromConfigProfile(r)
-    const keyHint = redisMetaKey ? `${redisMetaKey}` : 'ingest meta hash'
-    return {
-      pill,
-      title: `Ops control lease in Redis (${keyHint}): last start from ${pill.ariaLabel}. Field bifrost_ops_control_env.`,
-    }
-  }
-  return {
-    pill: { shortLabel: '—', pillVariant: 'other', ariaLabel: 'Unclaimed' },
-    title: redisMetaKey.trim()
-      ? `No Ops control lease in Redis yet (${redisMetaKey}). Starting from Ops (Dev or Prod) writes bifrost_ops_control_env.`
-      : 'No redis_meta_key for this row; cross-stack lease is not tracked.',
-  }
-}
-
-type IngestActionBlock = 'none' | 'admin' | 'script' | 'remote_env'
-
-function ingestActionBlock(
-  canOperate: boolean,
-  disableIngestScript: boolean,
-  pageEnv: 'dev' | 'prod' | null,
-  redisControlEnv: string | null | undefined,
-): IngestActionBlock {
-  if (!canOperate) return 'admin'
-  if (disableIngestScript) return 'script'
-  if (pageEnv) {
-    const lease = (redisControlEnv ?? '').toLowerCase().trim()
-    if (lease === 'dev' || lease === 'prod') {
-      if (lease !== pageEnv) return 'remote_env'
-    }
-  }
-  return 'none'
-}
-
-function ingestActionBlockMessage(block: IngestActionBlock): string {
-  switch (block) {
-    case 'admin':
-      return 'Operator role required (Ops token).'
-    case 'script':
-      return 'Control disabled: subprocess Ops without ingest script support (upgrade Ops or use Linux systemd).'
-    case 'remote_env':
-      return 'Control is held by the other stack (Redis). Stop the service from that Ops host first.'
-    default:
-      return ''
-  }
-}
-
-/** Ops /health: config profile + executor — summary for this Ops instance (sidebar / page context). */
-function socketServicesHostColumnDisplay(opts: {
-  configProfile: string | null
-  localControl: string | null
-  marketIngestScriptControl: boolean
-}): { title: string; pill: OpsHostEnvPill } {
-  const pill = opsHostEnvFromConfigProfile(opts.configProfile)
-  const bits: string[] = []
-  if (pill.pillVariant === 'dev') {
-    bits.push('Ops config profile: dev (config.dev.yaml overlay).')
-  } else if (pill.pillVariant === 'prod') {
-    bits.push('Ops config profile: prod (config.prod.yaml overlay).')
-  } else {
-    bits.push('Ops config profile not inferred (custom path or base config.yaml only).')
-  }
-  if (opts.marketIngestScriptControl) {
-    bits.push('Ingest control: local scripts on this Ops host (typical Mac dev).')
-  } else if (opts.localControl === 'subprocess') {
-    bits.push('Subprocess executor without market ingest script control.')
-  } else {
-    bits.push('Ingest control: systemd on this Ops host (typical Linux prod).')
-  }
-  return { title: bits.join(' '), pill }
-}
-
 const SOCKET_SERVICES_LOG_SOURCES: UnifiedLogSourceDefinition[] = [
   { source: 'massive_ws', label: 'Massive WS' },
   { source: 'ib_operator', label: 'IB Operator' },
@@ -539,7 +461,7 @@ function ServiceRow(props: {
   )
 }
 
-function IngestServicesTable(props: {
+export function IngestServicesTable(props: {
   rows: { svc: MarketIngestServiceRow; category: IngestCategory }[]
   status: StatusResponse | null
   pageEnv: 'dev' | 'prod' | null
@@ -706,21 +628,28 @@ export function MarketIngestOpsPage({
     [configProfile, localControl, marketIngestScriptControl],
   )
 
+  const ingestServicesForTable = useMemo(
+    () => services.filter(s => s.id !== 'trading_engine'),
+    [services],
+  )
+
   const unifiedServiceRows = useMemo(() => {
     const byCat: Record<IngestCategory, MarketIngestServiceRow[]> = {
       Massive: [],
       IB: [],
+      Engine: [],
       Other: [],
     }
-    for (const s of services) {
+    for (const s of ingestServicesForTable) {
       byCat[categoryForServiceId(s.id)].push(s)
     }
     const out: { svc: MarketIngestServiceRow; category: IngestCategory }[] = []
     for (const s of byCat.Massive) out.push({ svc: s, category: 'Massive' })
     for (const s of byCat.IB) out.push({ svc: s, category: 'IB' })
+    for (const s of byCat.Engine) out.push({ svc: s, category: 'Engine' })
     for (const s of byCat.Other) out.push({ svc: s, category: 'Other' })
     return out
-  }, [services])
+  }, [ingestServicesForTable])
 
   const socketPageAggregate = useMemo(
     () => aggregateIngestRedisHealthLamp(unifiedServiceRows, status),
@@ -1015,21 +944,19 @@ export function MarketIngestOpsPage({
       ) : null}
 
       <section className="replay-section" aria-label="Socket service units">
-        <>
-          <IngestServicesTable
-            rows={unifiedServiceRows}
-            status={status}
-            pageEnv={normalizedPageDevProd(configProfile)}
-            disableIngestScript={disableIngestActions}
-            emptyHint="No market ingest services in Ops config."
-            logicalSummary={logicalSummary}
-            canOperate={canOperate}
-            onStart={svc => openServiceConfirm(svc, 'start', 'Start')}
-            onStop={svc => openServiceConfirm(svc, 'stop', 'Stop')}
-            onRestart={svc => openServiceConfirm(svc, 'restart', 'Restart')}
-            onReset={openResetConfirm}
-          />
-        </>
+        <IngestServicesTable
+          rows={unifiedServiceRows}
+          status={status}
+          pageEnv={normalizedPageDevProd(configProfile)}
+          disableIngestScript={disableIngestActions}
+          emptyHint="No market ingest services in Ops config."
+          logicalSummary={logicalSummary}
+          canOperate={canOperate}
+          onStart={svc => openServiceConfirm(svc, 'start', 'Start')}
+          onStop={svc => openServiceConfirm(svc, 'stop', 'Stop')}
+          onRestart={svc => openServiceConfirm(svc, 'restart', 'Restart')}
+          onReset={openResetConfirm}
+        />
       </section>
 
       <section className="replay-section" aria-labelledby="socket-logs-heading">

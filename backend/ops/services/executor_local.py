@@ -35,6 +35,8 @@ def _ingest_script_log_for_unit(unit: str) -> Optional[Tuple[str, str]]:
         return ("run_ib_account_agent.py", "ib-account-agent.log")
     if "ib-ingestor" in stem or stem == "bifrost-ib-ingestor":
         return ("run_ib_ingestor.py", "ib-ingestor.log")
+    if stem == "bifrost-engine" or "bifrost-engine" in stem:
+        return ("run_engine.py", "engine.log")
     return None
 
 

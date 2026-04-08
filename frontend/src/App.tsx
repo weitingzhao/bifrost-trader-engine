@@ -46,6 +46,7 @@ import type { SettingsSidebarLampGlyphId } from './pages/settings/settingsSideba
 import { FEED_MASSIVE_OPTION_ID } from './pages/settings/settingsConstants'
 import logoImg from '../img/logo.png'
 import { fmtPctCompact, fmtUsdCompact } from './utils/format'
+import { ingestRedisHealthLamp } from './utils/socketIngestLamp'
 import {
   computeDailyChange,
   mergeQuotesIntoSymbolMap,
@@ -227,7 +228,7 @@ const HEADER_API_SHORTCUTS: {
   },
 ]
 
-function headerApiShortcutLampClass(lamp: 'green' | 'yellow' | 'red' | 'none'): string {
+function headerApiShortcutLampClass(lamp: 'green' | 'yellow' | 'red' | 'none' | 'gray'): string {
   return `title-inline-lamp lamp-icon ${lamp === 'none' ? 'none' : lamp}`
 }
 
@@ -586,7 +587,9 @@ export default function App() {
   }, [loadStatus])
 
   const j = status
-  const dl = (j?.daemon?.lamp as 'green' | 'yellow' | 'red') || 'red'
+  /** Same as Settings → Daemon sidebar + page title: trading_engine / heartbeat via GET /status. */
+  const daemonShortcutLamp = useMemo(() => ingestRedisHealthLamp('trading_engine', j), [j])
+  const dl = daemonShortcutLamp.lamp
   // Strategy tab lamp = Trading Strategy status (same as Settings → Daemon → Trading Strategy)
   const hb = j?.daemon?.heartbeat
   const strategyLamp: LampId =
@@ -1118,7 +1121,7 @@ export default function App() {
                 <button
                   type="button"
                   className={`app-header-api-shortcut-btn${activeTab === 'settings' && isDaemonSettingsHash(urlHash) ? ' active' : ''}`}
-                  title="Daemon process — Settings → Daemon"
+                  title={`${daemonShortcutLamp.title} — Settings → Daemon`}
                   aria-label="Settings → Daemon"
                   onClick={() => openDaemonInSettings()}
                 >
@@ -1209,9 +1212,9 @@ export default function App() {
                 role="menuitem"
                 className={`app-header-menu-item app-header-menu-item-system ${activeTab === 'settings' && isDaemonSettingsHash(urlHash) ? 'active' : ''}`}
                 onClick={() => { openDaemonInSettings(); setHeaderMenuOpen(false) }}
-                title="Settings → Daemon"
+                title={`${daemonShortcutLamp.title} — Settings → Daemon`}
               >
-                <span className={`app-header-menu-system-lamp title-inline-lamp ${dl}`} aria-hidden>
+                <span className={`app-header-menu-system-lamp title-inline-lamp lamp-icon ${dl}`} aria-hidden>
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden>
                     <path d="M8 5v14l11-7L8 5z" />
                   </svg>

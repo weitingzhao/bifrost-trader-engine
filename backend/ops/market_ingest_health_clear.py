@@ -1,7 +1,9 @@
-"""Redis health hash maintenance for Socket Services (Ops market-ingest).
+"""Redis health hash maintenance for Socket Services + trading_engine Ops meta (market-ingest).
 
 - After a successful Ops **stop**, rewrite canonical health fields to a disconnected snapshot so
   Monitor GET /status updates without waiting for TTL or a graceful writer exit.
+- **trading_engine**: Ops meta hash ``bifrost:ops:trading_engine`` uses ``engine_ops_active`` +
+  ``updated_at`` for the same exclusive-start guard as Socket rows.
 - Before **start** when no ``bifrost_ops_control_env`` lease exists, detect a still-fresh connected
   hash so only one Dev/Prod stack runs a writer against the same Redis.
 """
@@ -12,7 +14,10 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
-from src.bifrost.redis_health_keys import redis_hash_field_truthy
+from src.bifrost.redis_health_keys import (
+    ENGINE_OPS_ACTIVE_REDIS_FIELD,
+    redis_hash_field_truthy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +91,10 @@ def ingest_redis_health_looks_live(redis_url: str, meta_key: str, service_id: st
         if redis_hash_field_truthy(m, "host_connected"):
             return True
         return redis_hash_field_truthy(m, "connected")
+    if sid == "trading_engine":
+        if not redis_hash_field_truthy(m, ENGINE_OPS_ACTIVE_REDIS_FIELD):
+            return False
+        return True
     return False
 
 
@@ -157,6 +166,14 @@ def clear_ingest_health_after_stop(redis_url: str, meta_key: str, service_id: st
                     "last_msg_ts": str(now),
                     "reconnects": "0",
                     "msg_count": "0",
+                    "updated_at": str(now),
+                },
+            )
+        elif sid == "trading_engine":
+            r.hset(
+                key,
+                mapping={
+                    ENGINE_OPS_ACTIVE_REDIS_FIELD: "0",
                     "updated_at": str(now),
                 },
             )

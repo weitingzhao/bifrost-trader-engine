@@ -12,7 +12,10 @@ this field may remain after expiry + a subsequent Ops write).
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional
+
+from src.bifrost.redis_health_keys import ENGINE_OPS_ACTIVE_REDIS_FIELD
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +74,31 @@ def write_control_env(redis_url: str, meta_key: str, profile: str) -> None:
         socket_timeout=_REDIS_SOCKET_SEC,
     )
     r.hset(meta_key.strip(), BIFROST_OPS_CONTROL_ENV_FIELD, norm)
+
+
+def write_trading_engine_ops_lease(redis_url: str, meta_key: str, profile: str) -> None:
+    """Lease + ``engine_ops_active`` + ``updated_at`` for Dev/Prod exclusivity (trading_engine only)."""
+    norm = normalize_control_profile(profile)
+    if not norm:
+        raise ValueError(f"invalid control profile: {profile!r}")
+    if not meta_key.strip():
+        raise ValueError("empty redis_meta_key")
+    import redis
+
+    r = redis.from_url(
+        redis_url,
+        decode_responses=True,
+        socket_connect_timeout=_REDIS_SOCKET_SEC,
+        socket_timeout=_REDIS_SOCKET_SEC,
+    )
+    r.hset(
+        meta_key.strip(),
+        mapping={
+            BIFROST_OPS_CONTROL_ENV_FIELD: norm,
+            ENGINE_OPS_ACTIVE_REDIS_FIELD: "1",
+            "updated_at": str(time.time()),
+        },
+    )
 
 
 def clear_control_env(redis_url: str, meta_key: str) -> None:

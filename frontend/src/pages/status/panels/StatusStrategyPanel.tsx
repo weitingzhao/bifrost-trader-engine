@@ -1,7 +1,17 @@
+import { useCallback, useMemo, useState } from 'react'
 import type { StatusResponse } from '../../../types'
 import { InfoTooltip } from '../../../components/InfoTooltip'
+import { STRATEGY_METRIC_LABEL_COMPACT } from '../statusLabels'
 
 type Lamp = 'green' | 'yellow' | 'red' | 'none'
+
+const FLATTEN_ALERT_SVG = (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+    <line x1="12" y1="9" x2="12" y2="13" />
+    <line x1="12" y1="17" x2="12.01" y2="17" />
+  </svg>
+)
 
 export interface StatusStrategyPanelProps {
   status: StatusResponse | null
@@ -9,9 +19,14 @@ export interface StatusStrategyPanelProps {
   hedgeLabel: string
   hedgeSelfCheckText: string
   hedgeBlockReasons: string
+  /** Compact strip: short hedge line (Daemon card). Full text stays in title tooltip. */
+  hedgeStatusCompact?: string
+  /** Compact strip: abbreviated block reasons (omit when empty). */
+  hedgeBlockReasonsCompact?: string
   hedgeHint: string
   statusSummaryItems: { label: string; value: string | number }[]
-  onFlatten: () => void
+  /** Invoked after user confirms in the emergency flatten dialog; may be async (e.g. monitor API). */
+  onFlatten: () => void | Promise<void>
   hedgeCtrlMsg: { text: string; isErr: boolean }
   /** Suspend/Resume (moved from Event); when set, show Suspend/Resume in Trading Strategy section */
   suspended?: boolean
@@ -34,6 +49,8 @@ export function StatusStrategyPanel({
   hedgeLabel,
   hedgeSelfCheckText,
   hedgeBlockReasons,
+  hedgeStatusCompact,
+  hedgeBlockReasonsCompact,
   hedgeHint,
   statusSummaryItems,
   onFlatten,
@@ -49,8 +66,87 @@ export function StatusStrategyPanel({
 }: StatusStrategyPanelProps) {
   const panelClass = `system-tab-panel ${className ?? ''} ${compact ? 'strategy-panel-compact' : ''}`.trim()
 
+  const compactMetricItems = useMemo(
+    () =>
+      statusSummaryItems.filter(
+        ({ label }) => label !== 'Updated at' && label !== 'Daemon state',
+      ),
+    [statusSummaryItems],
+  )
+
+  const [flattenDialogOpen, setFlattenDialogOpen] = useState(false)
+  const [flattenDialogBusy, setFlattenDialogBusy] = useState(false)
+
+  const openFlattenDialog = useCallback(() => setFlattenDialogOpen(true), [])
+
+  const confirmFlatten = useCallback(async () => {
+    setFlattenDialogBusy(true)
+    try {
+      await Promise.resolve(onFlatten())
+      setFlattenDialogOpen(false)
+    } finally {
+      setFlattenDialogBusy(false)
+    }
+  }, [onFlatten])
+
+  const flattenModal =
+    flattenDialogOpen ? (
+      <div
+        className="data-reset-modal-overlay"
+        onClick={() => {
+          if (!flattenDialogBusy) setFlattenDialogOpen(false)
+        }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="strategy-flatten-confirm-title"
+      >
+        <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
+          <h3 id="strategy-flatten-confirm-title">Emergency flatten</h3>
+          <p>
+            You are about to request a <strong>flatten</strong> of strategy hedge exposure. The monitor writes{' '}
+            <code>flatten</code> to the daemon control channel; the daemon is meant to consume it and work toward
+            closing or reducing hedge exposure (actual execution depends on daemon and broker state).
+          </p>
+          <p className="settings-page-msg settings-page-msg--error" style={{ marginTop: 'var(--space-2)' }} role="alert">
+            High risk — only confirm in a real emergency when you accept possible market and account impact.
+          </p>
+          <div className="data-reset-modal-actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setFlattenDialogOpen(false)}
+              disabled={flattenDialogBusy}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-shutdown-all"
+              onClick={() => void confirmFlatten()}
+              disabled={flattenDialogBusy}
+            >
+              {flattenDialogBusy ? 'Sending…' : 'Confirm'}
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null
+
+  const emergencyFlattenButton = (
+    <button
+      type="button"
+      className="strategy-flatten-emergency-btn"
+      title="Emergency: request flatten of hedge exposure (opens confirmation)"
+      aria-label="Emergency flatten exposure"
+      onClick={openFlattenDialog}
+    >
+      {FLATTEN_ALERT_SVG}
+    </button>
+  )
+
   if (compact) {
     return (
+      <>
       <div id="system-panel-strategy" role="tabpanel" aria-labelledby="tab-strategy" className={panelClass}>
         <div className="strategy-compact-header">
           <span className={`title-inline-lamp lamp-icon ${hedgeLamp}`} title="Trading strategy status" aria-hidden>
@@ -58,27 +154,49 @@ export function StatusStrategyPanel({
           </span>
           <span className="strategy-compact-title">Trading Strategy</span>
         </div>
-        <div className="strategy-compact-status">
-          {j ? `${hedgeLabel}` : 'Fetch failed'}
-          {j && hedgeBlockReasons && hedgeBlockReasons !== 'None' ? ` · ${hedgeBlockReasons}` : ''}
-        </div>
-        {(activeStructureName != null || activeGateSafetyName != null) && (
-          <div className="strategy-active-names">
-            <span>Structure: {activeStructureName ?? '—'}</span>
-            <span>Gate safety: {activeGateSafetyName ?? '—'}</span>
+        <div className="strategy-compact-meta-row">
+          <div
+            className="strategy-compact-status"
+            title={
+              j
+                ? `${hedgeLabel}${hedgeBlockReasons && hedgeBlockReasons !== 'None' ? ` · ${hedgeBlockReasons}` : ''}`
+                : 'Fetch failed'
+            }
+          >
+            {j && hedgeStatusCompact != null ? (
+              <>
+                <span className="strategy-compact-status-k">{hedgeStatusCompact}</span>
+                {hedgeBlockReasonsCompact ? (
+                  <span className="strategy-compact-status-blocks"> · {hedgeBlockReasonsCompact}</span>
+                ) : null}
+              </>
+            ) : j ? (
+              <>
+                {hedgeLabel}
+                {hedgeBlockReasons && hedgeBlockReasons !== 'None' ? ` · ${hedgeBlockReasons}` : ''}
+              </>
+            ) : (
+              'Fetch failed'
+            )}
           </div>
-        )}
-        <div className="strategy-compact-summary">
-          {statusSummaryItems
-            .filter(({ label }) => label !== 'Updated at' && label !== 'Daemon state')
-            .map(({ label, value }) => (
-              <span key={label} className="strategy-compact-summary-item">
-                <span className="strategy-compact-label">{label}</span>
+          <div className="strategy-compact-summary strategy-compact-summary--inline" role="list" aria-label="Trading metrics">
+            {compactMetricItems.map(({ label, value }) => (
+              <span key={label} className="strategy-compact-summary-item" role="listitem">
+                <span className="strategy-compact-label">
+                  {STRATEGY_METRIC_LABEL_COMPACT[label] ?? label}
+                </span>
                 <span className="status-summary-value">{value}</span>
               </span>
             ))}
+          </div>
         </div>
-        <div className="controls strategy-compact-controls">
+        {(activeStructureName != null || activeGateSafetyName != null) && (
+          <div className="strategy-active-names strategy-active-names--compact">
+            <span title="Active structure">S:{activeStructureName ?? '—'}</span>
+            <span title="Active gate safety set">G:{activeGateSafetyName ?? '—'}</span>
+          </div>
+        )}
+        <div className="controls strategy-compact-controls strategy-controls-primary-row">
           {onManage && (
             <button
               type="button"
@@ -94,37 +212,35 @@ export function StatusStrategyPanel({
             </button>
           )}
           {onSuspend != null && onResume != null && (
-            <>
+            suspended ? (
               <button
                 type="button"
                 className="section-header-icon-btn strategy-btn-resume"
-                disabled={!suspended}
-                title={!suspended ? 'Already running' : 'Set from monitor; daemon resumes hedging on next heartbeat'}
-                aria-label="Resume"
+                title="Resume — daemon continues hedging on next heartbeat"
+                aria-label="Resume hedging"
                 onClick={onResume}
               >
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden><path d="M8 5v14l11-7L8 5z" /></svg>
               </button>
+            ) : (
               <button
                 type="button"
                 className="section-header-icon-btn strategy-btn-suspend"
-                disabled={suspended}
-                title={suspended ? 'Already suspended' : 'Set from monitor; daemon pauses new hedges on next heartbeat'}
-                aria-label="Suspend"
+                title="Suspend — daemon pauses new hedges on next heartbeat"
+                aria-label="Suspend hedging"
                 onClick={onSuspend}
               >
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" /></svg>
               </button>
-            </>
+            )
           )}
-          <button
-            type="button"
-            className="btn-flatten"
-            title="Flattens strategy hedge exposure"
-            onClick={onFlatten}
-          >
-            Flatten
-          </button>
+        </div>
+        <div className="strategy-emergency-bar" role="group" aria-label="Emergency trading actions">
+          <span className="strategy-emergency-bar-label">
+            Emergency
+            <InfoTooltip text="Flatten requests the daemon control channel to close or reduce hedge exposure. Confirm in the dialog; use only when you understand the risk." />
+          </span>
+          {emergencyFlattenButton}
         </div>
         {hedgeCtrlMsg.text ? (
           <div className={`msg ${hedgeCtrlMsg.isErr ? 'err' : 'ok'} strategy-compact-msg`}>
@@ -132,10 +248,13 @@ export function StatusStrategyPanel({
           </div>
         ) : null}
       </div>
+      {flattenModal}
+      </>
     )
   }
 
   return (
+    <>
     <div id="system-panel-strategy" role="tabpanel" aria-labelledby="tab-strategy" className={panelClass}>
       <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
         <div>
@@ -146,10 +265,24 @@ export function StatusStrategyPanel({
             Trading Strategy
             <InfoTooltip text="Depends on daemon; business logic; may support multiple strategies later." />
           </h2>
-          <div>
-            <strong>Status: {j ? `${hedgeLabel} (${hedgeSelfCheckText})` : 'Fetch failed'}</strong>
-            {j && hedgeBlockReasons && hedgeBlockReasons !== 'None' ? ` Block reasons: ${hedgeBlockReasons}` : ''}
-          </div>
+        </div>
+      </div>
+      <div className="strategy-full-meta-row">
+        <div className="strategy-full-meta-primary">
+          <strong>Status: {j ? `${hedgeLabel} (${hedgeSelfCheckText})` : 'Fetch failed'}</strong>
+          {j && hedgeBlockReasons && hedgeBlockReasons !== 'None' ? ` Block reasons: ${hedgeBlockReasons}` : ''}
+        </div>
+        <div
+          className="strategy-compact-summary strategy-compact-summary--inline strategy-compact-summary--full"
+          role="list"
+          aria-label="Trading metrics"
+        >
+          {statusSummaryItems.map(({ label, value }) => (
+            <span key={label} className="strategy-compact-summary-item" role="listitem">
+              <span className="strategy-compact-label">{label}</span>
+              <span className="status-summary-value">{value}</span>
+            </span>
+          ))}
         </div>
       </div>
       <p className="section-hint">{hedgeHint}</p>
@@ -159,15 +292,7 @@ export function StatusStrategyPanel({
           <div><strong>Active gate safety:</strong> {activeGateSafetyName ?? '—'}</div>
         </div>
       )}
-      <div className="statusSummary" style={{ marginTop: '0.5rem' }}>
-        {statusSummaryItems.map(({ label, value }) => (
-          <div key={label}>
-            <span>{label}</span>{' '}
-            <span className="status-summary-value">{value}</span>
-          </div>
-        ))}
-      </div>
-      <div className="controls" style={{ marginTop: '0.5rem' }}>
+      <div className="controls strategy-controls-primary-row" style={{ marginTop: '0.5rem' }}>
         {onManage && (
           <button
             type="button"
@@ -183,37 +308,35 @@ export function StatusStrategyPanel({
           </button>
         )}
         {onSuspend != null && onResume != null && (
-          <>
+          suspended ? (
             <button
               type="button"
               className="section-header-icon-btn strategy-btn-resume"
-              disabled={!suspended}
-              title={!suspended ? 'Already running' : 'Set from monitor; daemon resumes hedging on next heartbeat'}
-              aria-label="Resume"
+              title="Resume — daemon continues hedging on next heartbeat"
+              aria-label="Resume hedging"
               onClick={onResume}
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden><path d="M8 5v14l11-7L8 5z" /></svg>
             </button>
+          ) : (
             <button
               type="button"
               className="section-header-icon-btn strategy-btn-suspend"
-              disabled={suspended}
-              title={suspended ? 'Already suspended' : 'Set from monitor; daemon pauses new hedges on next heartbeat'}
-              aria-label="Suspend"
+              title="Suspend — daemon pauses new hedges on next heartbeat"
+              aria-label="Suspend hedging"
               onClick={onSuspend}
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" /></svg>
             </button>
-          </>
+          )
         )}
-        <button
-          type="button"
-          className="btn-flatten"
-          title="Hedge process consumes and executes; flattens strategy hedge exposure"
-          onClick={onFlatten}
-        >
-          Flatten exposure
-        </button>
+      </div>
+      <div className="strategy-emergency-bar" role="group" aria-label="Emergency trading actions">
+        <span className="strategy-emergency-bar-label">
+          Emergency
+          <InfoTooltip text="Flatten requests the daemon control channel to close or reduce hedge exposure. Confirm in the dialog; use only when you understand the risk." />
+        </span>
+        {emergencyFlattenButton}
       </div>
       {hedgeCtrlMsg.text ? (
         <div className={`msg ${hedgeCtrlMsg.isErr ? 'err' : 'ok'}`}>
@@ -221,5 +344,7 @@ export function StatusStrategyPanel({
         </div>
       ) : null}
     </div>
+    {flattenModal}
+    </>
   )
 }

@@ -13,6 +13,7 @@ import {
   type MassiveStatusResponse,
 } from '../api'
 import { utilizedEnvFor } from '../utils/utilizedServices'
+import { ingestRedisHealthLamp } from '../utils/socketIngestLamp'
 import { InfoTooltip } from '../components/InfoTooltip'
 import {
   DEFAULT_IB_OPERATOR,
@@ -299,7 +300,9 @@ export function SettingsPage({
   const activeSubId = activeSectionId === 'settings-ib-connection' && IB_CONNECTION_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
   const activeIbStockFeed = activeSectionId === 'settings-feed' && currentHash === 'feed-ib-stock'
   const isMassiveOptionFeedActive = activeSectionId === 'settings-feed' && isMassiveOptionFeedHash(currentHash)
-  const daemonLamp: 'green' | 'yellow' | 'red' = ((status?.daemon?.lamp as string) || 'red') as 'green' | 'yellow' | 'red'
+  /** Same as Daemon page title lamp: trading_engine Redis/heartbeat via GET /status (DaemonEngineOpsSection). */
+  const daemonPageLamp = useMemo(() => ingestRedisHealthLamp('trading_engine', status), [status])
+  const daemonLamp = daemonPageLamp.lamp
   const subscribeLamp: 'none' = 'none'
   const isSubscribeSection = activeSectionId === 'settings-subscribe'
   const isDaemonSection = activeSectionId === 'settings-daemon'
@@ -361,7 +364,8 @@ export function SettingsPage({
     if (ingestServicesFetchError) {
       return { lamp: 'none' as AggregateIngestLamp, title: ingestServicesFetchError }
     }
-    return aggregateIngestRedisHealthLamp(ingestServicesCache.map(svc => ({ svc })), status)
+    const ingestOnly = ingestServicesCache.filter(s => s.id !== 'trading_engine')
+    return aggregateIngestRedisHealthLamp(ingestOnly.map(svc => ({ svc })), status)
   }, [ingestServicesCache, ingestServicesFetchError, status])
 
   useEffect(() => {
@@ -378,7 +382,8 @@ export function SettingsPage({
           : socketIngestLamp === 'green'
             ? 1
             : 0
-    const dRank = daemonLamp === 'red' ? 3 : daemonLamp === 'yellow' ? 2 : 1
+    const dRank =
+      daemonLamp === 'red' ? 3 : daemonLamp === 'yellow' || daemonLamp === 'gray' ? 2 : 1
     const cRank =
       celeryLamp === 'red' ? 3 : celeryLamp === 'yellow' ? 2 : celeryLamp === 'green' ? 1 : 0
     const w = Math.max(socketRank, dRank, cRank)
@@ -668,7 +673,11 @@ export function SettingsPage({
               href="#settings-daemon"
               className={`settings-sidebar-link settings-sidebar-link-sub ${isDaemonSection ? 'active' : ''}`}
             >
-              <span className={`title-inline-lamp lamp-icon ${daemonLamp}`} title="Daemon process" aria-hidden>
+              <span
+                className={`title-inline-lamp lamp-icon ${daemonLamp}`}
+                title={daemonPageLamp.title}
+                aria-hidden
+              >
                 <SettingsSidebarLampGlyph id="daemon" />
               </span>
               Daemon

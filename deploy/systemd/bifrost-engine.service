@@ -12,6 +12,7 @@ Environment=BIFROST_ENV=prod
 ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/run_engine.py --prod
 Restart=on-failure
 RestartSec=10
+TimeoutStopSec=60
 
 [Install]
 WantedBy=multi-user.target

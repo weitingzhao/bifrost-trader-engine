@@ -53,6 +53,7 @@ export function useSocketIngestProbe(enabled: boolean, status: StatusResponse | 
     if (fetchError) {
       return { lamp: 'none' as AggregateIngestLamp, title: fetchError }
     }
-    return aggregateIngestRedisHealthLamp(services.map(svc => ({ svc })), status)
+    const ingestOnly = services.filter(s => s.id !== 'trading_engine')
+    return aggregateIngestRedisHealthLamp(ingestOnly.map(svc => ({ svc })), status)
   }, [services, fetchError, status])
 }
