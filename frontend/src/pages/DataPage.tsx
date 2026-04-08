@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Bar, StatusResponse } from '../types'
-import { fetchBars, fetchBarsJobs, deleteBarsJob, deleteAllBarsJobs } from '../api'
+import { fetchBars, fetchBarsJobs, deleteBarsJob, deleteAllBarsJobs, postRetryBarsJob, postRetryFailedBarsJobs } from '../api'
 import { inspectBarsLimitForPeriod } from './data/dataCoverageUtils'
 import { useBarCandidateSymbols } from './data/useBarCandidateSymbols'
 import { DataBarsPreviewPanel, DataJobsPanel } from './data/panels'
@@ -37,7 +37,11 @@ export function DataPage({
   const [barsJobsSortKey, setBarsJobsSortKey] = useState<'job_id' | 'status' | 'created_ts' | 'updated_ts'>('updated_ts')
   const [barsJobsSortDir, setBarsJobsSortDir] = useState<'asc' | 'desc'>('desc')
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null)
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null)
+  const [retryBatchBusy, setRetryBatchBusy] = useState(false)
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
+  const [confirmRetryFailed, setConfirmRetryFailed] = useState(false)
+  const [retryFailedLimit, setRetryFailedLimit] = useState(50)
 
   const candidateSymbols = useBarCandidateSymbols(status)
 
@@ -128,6 +132,20 @@ export function DataPage({
     finally { setDeletingJobId(null) }
   }, [loadBarsJobs])
 
+  const handleRetryBarsJob = useCallback(async (jobId: string) => {
+    setRetryingJobId(jobId)
+    setBarsJobsError(null)
+    try {
+      const res = await postRetryBarsJob(jobId)
+      if (res.ok) await loadBarsJobs()
+      else setBarsJobsError(res.error || 'Retry failed')
+    } catch (e) {
+      setBarsJobsError(e instanceof Error ? e.message : 'Retry failed')
+    } finally {
+      setRetryingJobId(null)
+    }
+  }, [loadBarsJobs])
+
   return (
     <div className={`card process-section market-data-page${embeddedInSettings ? ' market-data-page--settings-embed' : ''}`}>
       {(onGoToScreener || onBreadcrumbParent) && (
@@ -168,12 +186,16 @@ export function DataPage({
         barsJobsSortKey={barsJobsSortKey}
         barsJobsSortDir={barsJobsSortDir}
         deletingJobId={deletingJobId}
+        retryingJobId={retryingJobId}
+        retryBatchBusy={retryBatchBusy}
         onToggleStatus={toggleBarsJobsStatus}
         onDeleteAllClick={() => setConfirmDeleteAll(true)}
+        onOpenRetryFailedModal={() => setConfirmRetryFailed(true)}
         onLimitChange={setBarsJobsLimit}
         onRefreshJobs={loadBarsJobs}
         onSort={handleBarsJobsSort}
         onDeleteJob={handleDeleteBarsJob}
+        onRetryJob={handleRetryBarsJob}
       />
 
       {confirmDeleteAll && (
@@ -189,6 +211,66 @@ export function DataPage({
                 for (const s of barsJobsStatusSelected) { const res = await deleteAllBarsJobs(s); if (res.ok) deleted += res.deleted ?? 0 }
                 if (deleted > 0) await loadBarsJobs()
               }}>Delete all</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmRetryFailed && (
+        <div className="data-reset-modal-overlay" onClick={() => { if (!retryBatchBusy) setConfirmRetryFailed(false) }} role="dialog" aria-modal="true" aria-labelledby="retry-failed-jobs-title">
+          <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
+            <h3 id="retry-failed-jobs-title">Reset failed jobs</h3>
+            <p>
+              The oldest failed jobs (up to the limit below) will be set to <strong>pending</strong> and submitted to the Celery worker again with the same job IDs.
+              Requires an Ops operator token (same as Delete all).
+            </p>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+              <span>Max jobs:</span>
+              <select value={retryFailedLimit} onChange={e => setRetryFailedLimit(Number(e.target.value))} disabled={retryBatchBusy} aria-label="Maximum failed jobs to reset">
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={200}>200</option>
+                <option value={500}>500</option>
+              </select>
+            </label>
+            <div className="data-reset-modal-actions">
+              <button type="button" className="btn btn-secondary" disabled={retryBatchBusy} onClick={() => setConfirmRetryFailed(false)}>Cancel</button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={retryBatchBusy}
+                onClick={async () => {
+                  setRetryBatchBusy(true)
+                  setBarsJobsError(null)
+                  try {
+                    const res = await postRetryFailedBarsJobs(retryFailedLimit)
+                    if (!res.ok) {
+                      setBarsJobsError(res.error || 'Reset failed')
+                    } else {
+                      await loadBarsJobs()
+                      const n = res.reset ?? 0
+                      const enq = res.enqueued ?? 0
+                      const bad = res.enqueue_errors ?? []
+                      if (n === 0) {
+                        setBarsJobsError('No failed jobs to reset.')
+                      } else if (bad.length > 0) {
+                        setBarsJobsError(
+                          `Reset ${n} to pending; ${enq} re-queued. Re-queue errors: ${bad.map(x => `${x.job_id}: ${x.error}`).join('; ')}`,
+                        )
+                      }
+                    }
+                  } catch (e) {
+                    setBarsJobsError(e instanceof Error ? e.message : 'Reset failed')
+                  } finally {
+                    setRetryBatchBusy(false)
+                    setConfirmRetryFailed(false)
+                  }
+                }}
+              >
+                {retryBatchBusy ? 'Working…' : 'Confirm'}
+              </button>
             </div>
           </div>
         </div>

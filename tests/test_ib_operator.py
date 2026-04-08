@@ -90,6 +90,24 @@ async def test_executor_fetch_bars_delegates() -> None:
 
 
 @pytest.mark.asyncio
+async def test_executor_fetch_bars_range_delegates() -> None:
+    primary = MagicMock()
+    primary.fetch_bars_range = AsyncMock(return_value=[{"open": 2.0}])
+    ex = IbOperatorExecutor(primary=primary, account_secondary=None)
+    out = await ex.execute(
+        "fetch_bars_range",
+        {"symbol": "MSFT", "period": "1 D", "start_ts": 1.0, "end_ts": 2.0, "interval_sec": 5.0},
+    )
+    assert out["ok"] is True
+    assert len(out["data"]["bars"]) == 1
+    primary.fetch_bars_range.assert_awaited_once()
+    call_kw = primary.fetch_bars_range.await_args
+    assert call_kw.kwargs["start_ts"] == 1.0
+    assert call_kw.kwargs["end_ts"] == 2.0
+    assert call_kw.kwargs["interval_sec"] == 5.0
+
+
+@pytest.mark.asyncio
 async def test_executor_place_stock_order_delegates_to_connector() -> None:
     trade = MagicMock()
     trade.order = MagicMock()
@@ -116,6 +134,8 @@ def test_effective_ib_operator_settings_redis_key_defaults() -> None:
     assert s["stream"] == "ib:operator:cmd"
     assert s["result_prefix"] == "ib:operator:result:"
     assert s["health_key"] == "bifrost:health:ws_ib_operator"
+    assert s["bars_backfill_request_timeout_sec"] == 7200
+    assert s["max_result_bytes"] == 4 * 1024 * 1024
 
 
 def test_effective_ib_operator_normalizes_legacy_health_key() -> None:

@@ -435,6 +435,12 @@ export async function fetchMassiveDailyChecklist(params: {
   if (td) q.set('trade_date', td)
   const r = await fetch(massiveUrl(`/research/massive/daily-checklist?${q.toString()}`))
   const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}`,
+    }
+  }
   if (!j.ok) {
     return { ok: false, error: typeof j.error === 'string' ? j.error : 'Request failed' }
   }

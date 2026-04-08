@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request
 
@@ -14,9 +14,12 @@ from src.monitor.reader import (
     delete_job_bars_backfill,
     get_job_bars_backfill,
     get_job_bars_backfill_list,
+    reset_failed_job_bars_backfill_to_pending,
+    reset_failed_jobs_bars_backfill_to_pending_batch,
     trim_job_bars_backfill,
 )
 from src.monitor.services.market_jobs import job_row_to_api as _job_row_to_api
+from src.monitor.services.market_jobs import reenqueue_bars_backfill_from_row
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +54,65 @@ def ops_get_bars_jobs(
         return {"jobs": [], "total": 0, "error": str(e)}
     list_jobs = [_job_row_to_api(r) for r in rows]
     return {"jobs": list_jobs, "total": total}
+
+
+@router.post("/ops/bars/jobs/retry-failed")
+async def ops_retry_failed_bars_jobs(
+    request: Request,
+    limit: int = Query(100, ge=1, le=500, description="Max failed jobs to reset (oldest first)"),
+) -> Any:
+    """Reset failed jobs to pending and re-submit Celery tasks (same job IDs).
+
+    Must be ``async`` so this handler runs on uvicorn's event-loop thread. Sync handlers run in an
+    AnyIO worker thread with no asyncio loop; ``reenqueue_bars_backfill_from_row`` imports
+    ``src.bars.tasks`` (ib_insync / eventkit) which expects a current loop in Python 3.10+.
+    """
+    denied = _require_role(request, "operator")
+    if denied:
+        return denied
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return {"ok": False, "error": "No DB", "reset": 0, "enqueued": 0, "enqueue_errors": []}
+    rows = reset_failed_jobs_bars_backfill_to_pending_batch(control_via_db, limit)
+    enqueued = 0
+    enqueue_errors: List[Dict[str, str]] = []
+    for row in rows:
+        ok, err = reenqueue_bars_backfill_from_row(control_via_db, row)
+        if ok:
+            enqueued += 1
+        else:
+            enqueue_errors.append(
+                {"job_id": str(row.get("job_bars_backfill_id", "")), "error": err or "unknown"}
+            )
+    return {
+        "ok": True,
+        "reset": len(rows),
+        "enqueued": enqueued,
+        "enqueue_errors": enqueue_errors,
+    }
+
+
+@router.post("/ops/bars/jobs/{job_id}/retry")
+async def ops_retry_one_bars_job(request: Request, job_id: str) -> Any:
+    """Reset one failed job to pending and re-submit its Celery task.
+
+    Async for the same reason as ``ops_retry_failed_bars_jobs`` (avoid AnyIO thread pool + ib_insync).
+    """
+    denied = _require_role(request, "operator")
+    if denied:
+        return denied
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return {"ok": False, "error": "No DB"}
+    row = reset_failed_job_bars_backfill_to_pending(control_via_db, job_id)
+    if row is None:
+        return {"ok": False, "error": "Job not found or not in failed status"}
+    row["status"] = "pending"
+    row["result"] = None
+    ok, err = reenqueue_bars_backfill_from_row(control_via_db, row)
+    if not ok:
+        return {"ok": False, "error": err or "Re-enqueue failed"}
+    return {"ok": True, "job": _job_row_to_api(row)}
 
 
 @router.get("/ops/bars/jobs/{job_id}")

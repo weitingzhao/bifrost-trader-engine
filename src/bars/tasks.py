@@ -1,7 +1,8 @@
 """Celery tasks for bars backfill. Task updates job_bars_backfill row when done.
 
-Worker process hosts a single long-lived IB connection (MarketIbClient) in a dedicated asyncio
-loop thread; tasks reuse it to avoid reconnecting every time (which triggers duplicate data pulls).
+When ``IbOperatorClient`` is available from merged config (Redis + ib_operator.enabled), bars jobs
+use IB Operator RPC (``fetch_bars_range``) so the worker does not open a socket to TWS — same as
+Market API. Otherwise the worker keeps a long-lived ``MarketIbClient`` to TWS (``ib_client_id_worker_market``).
 """
 
 from __future__ import annotations
@@ -27,6 +28,9 @@ from src.workers.celery_app import WORKER_IB_STATUS_KEY, WORKER_IB_STATUS_TTL_SE
 from src.workers.celery_app import WORKER_STOP_REQUESTED_KEY  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+# Celery thread waits on the worker asyncio loop; must exceed long IB Operator backfill RPC.
+_BARS_TASK_FUTURE_TIMEOUT_SEC = float(os.environ.get("BIFROST_BARS_TASK_FUTURE_TIMEOUT_SEC", "7200"))
 
 
 def _config_path_for_bars_task() -> Optional[str]:
@@ -76,11 +80,9 @@ def _connect_ib_at_startup() -> None:
     async def _connect() -> None:
         try:
             from src.app.config import read_config
-            from src.monitor.reader import StatusReader
             config, _ = read_config()
-            reader = StatusReader(config)
-            ib_cfg = reader.get_ib_config() or {}
-            await _get_or_create_worker_ib_client(ib_cfg)
+            client = await _get_or_create_bars_ib_client(config)
+            await client.ensure_connected()
         except Exception as e:
             logger.warning("Worker startup IB connect failed: %s (poll loop will retry every 30s)", e)
 
@@ -132,11 +134,9 @@ async def _worker_connect_poll_loop() -> None:
                     last_auto_retry = now
                     try:
                         from src.app.config import read_config
-                        from src.monitor.reader import StatusReader
                         config, _ = read_config()
-                        reader = StatusReader(config)
-                        ib_cfg = reader.get_ib_config() or {}
-                        await _get_or_create_worker_ib_client(ib_cfg)
+                        client = await _get_or_create_bars_ib_client(config)
+                        await client.ensure_connected()
                     except Exception as e:
                         logger.debug("Worker auto-retry IB connect: %s", e)
         except Exception as e:
@@ -232,10 +232,41 @@ def _ensure_worker_loop() -> None:
         raise RuntimeError("Worker IB loop failed to start within 2s")
 
 
+async def _get_or_create_bars_ib_client(control_cfg: Dict[str, Any]) -> Any:
+    """Return IB transport: IbOperatorBarsAdapter (Redis → run_ib_operator on TWS host) or MarketIbClient."""
+    global _worker_ib_client
+    from src.bars.ib_operator_transport import IbOperatorBarsAdapter
+    from src.ib_operator.client import IbOperatorClient
+
+    gw = IbOperatorClient.from_merged_config(control_cfg)
+    if gw is not None:
+        if not isinstance(_worker_ib_client, IbOperatorBarsAdapter):
+            if _worker_ib_client is not None:
+                await _reset_worker_ib_client("switching to IB Operator transport for bars")
+            _worker_ib_client = IbOperatorBarsAdapter.from_merged_config(control_cfg, gw)
+            logger.info(
+                "Celery bars worker uses IB Operator (Redis) for historical bars; no direct TWS socket from this process.",
+            )
+            _start_worker_ib_heartbeat(int(getattr(_worker_ib_client, "client_id", 0)))
+        return _worker_ib_client
+
+    if isinstance(_worker_ib_client, IbOperatorBarsAdapter):
+        await _reset_worker_ib_client("IB Operator disabled or unavailable; using direct TWS")
+    from src.monitor.reader import StatusReader
+
+    reader = StatusReader(control_cfg)
+    ib_cfg = reader.get_ib_config() or {}
+    return await _get_or_create_worker_ib_client(ib_cfg)
+
+
 async def _get_or_create_worker_ib_client(ib_cfg: Dict[str, Any]) -> Any:
     """Create or return the process-wide MarketIbClient. Must run inside worker loop."""
     global _worker_ib_client
+    from src.bars.ib_operator_transport import IbOperatorBarsAdapter
     from src.monitor.integrations.ib_clients import MarketIbClient
+
+    if isinstance(_worker_ib_client, IbOperatorBarsAdapter):
+        await _reset_worker_ib_client("direct TWS path after operator adapter")
     host = (ib_cfg.get("ib_host") or "127.0.0.1").strip()
     port_type = (ib_cfg.get("ib_port_type") or "tws_paper").strip().lower()
     port_map = {"tws_live": 7496, "tws_paper": 7497, "gateway": 4002}
@@ -384,13 +415,12 @@ async def _run_backfill_in_loop(
     if api_interval_sec is not None:
         api_interval_sec = max(0, min(300, int(api_interval_sec)))
 
+    reader = StatusReader(status_cfg)
     last_disconnect_error: Optional[Exception] = None
     for attempt in range(1, 3):
-        reader = StatusReader(status_cfg)
-        ib_cfg = reader.get_ib_config() or {}
         try:
             await _wait_for_bars_job_cooldown(job_id, symbol, period, api_interval_sec)
-            client = await _get_or_create_worker_ib_client(ib_cfg)
+            client = await _get_or_create_bars_ib_client(status_cfg)
             result = await run_one_backfill(
                 reader,
                 client,
@@ -417,7 +447,10 @@ async def _run_backfill_in_loop(
                 attempt,
                 e,
             )
-            await _reset_worker_ib_client(f"connection dropped during backfill job_id={job_id}")
+            from src.bars.ib_operator_transport import IbOperatorBarsAdapter
+
+            if not isinstance(_worker_ib_client, IbOperatorBarsAdapter):
+                await _reset_worker_ib_client(f"connection dropped during backfill job_id={job_id}")
             if attempt < 2:
                 continue
             break
@@ -495,10 +528,17 @@ def backfill_bars(
             ),
             loop,
         )
-        result = future.result(timeout=600)
+        result = future.result(timeout=_BARS_TASK_FUTURE_TIMEOUT_SEC)
     except TimeoutError:
-        logger.exception("Bars task job_id=%s timed out after 600s", job_id)
-        result = {"ok": False, "error": "Job timed out after 600s"}
+        logger.exception(
+            "Bars task job_id=%s timed out after %ss",
+            job_id,
+            _BARS_TASK_FUTURE_TIMEOUT_SEC,
+        )
+        result = {
+            "ok": False,
+            "error": f"Job timed out after {_BARS_TASK_FUTURE_TIMEOUT_SEC:.0f}s",
+        }
         update_job_bars_backfill_result(control_via_db, job_id, "failed", result)
     except Exception as e:
         logger.exception("Bars task job_id=%s failed: %s", job_id, e)

@@ -818,6 +818,94 @@ def update_job_bars_backfill_result(
         return False
 
 
+_JOB_BARS_BACKFILL_SELECT_COLS = (
+    "job_bars_backfill_id, symbol, period, years, days, override_days, span_hours, skip_ib, api_interval_sec, "
+    "status, result, created_at, updated_at"
+)
+
+_JOB_BARS_BACKFILL_RETURNING_J = (
+    "j.job_bars_backfill_id, j.symbol, j.period, j.years, j.days, j.override_days, j.span_hours, j.skip_ib, "
+    "j.api_interval_sec, j.status, j.result, j.created_at, j.updated_at"
+)
+
+
+def reset_failed_job_bars_backfill_to_pending(status_config: dict, job_id: Any) -> Optional[Dict[str, Any]]:
+    """If the row is ``failed``, set ``pending`` and clear ``result``. Returns the row dict for re-enqueue, else None."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return None
+    try:
+        jid = int(job_id)
+    except (TypeError, ValueError):
+        return None
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    f"""
+                    UPDATE job_bars_backfill
+                    SET status = 'pending', result = NULL, updated_at = now()
+                    WHERE job_bars_backfill_id = %s AND status = 'failed'
+                    RETURNING {_JOB_BARS_BACKFILL_SELECT_COLS}
+                    """,
+                    (jid,),
+                )
+                row = cur.fetchone()
+            conn.commit()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("reset_failed_job_bars_backfill_to_pending failed: %s", e)
+        return None
+
+
+def reset_failed_jobs_bars_backfill_to_pending_batch(
+    status_config: dict,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    """Reset up to ``limit`` oldest failed jobs to pending (clears result). Returns rows for Celery re-enqueue."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return []
+    try:
+        lim = max(1, min(500, int(limit)))
+    except (TypeError, ValueError):
+        lim = 100
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    f"""
+                    WITH cte AS (
+                        SELECT job_bars_backfill_id
+                        FROM job_bars_backfill
+                        WHERE status = 'failed'
+                        ORDER BY job_bars_backfill_id ASC
+                        LIMIT %s
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    UPDATE job_bars_backfill j
+                    SET status = 'pending', result = NULL, updated_at = now()
+                    FROM cte
+                    WHERE j.job_bars_backfill_id = cte.job_bars_backfill_id
+                    RETURNING {_JOB_BARS_BACKFILL_RETURNING_J}
+                    """,
+                    (lim,),
+                )
+                # RETURNING list: prefix each column with j. except first replacement is wrong — use explicit list
+                rows = cur.fetchall()
+            conn.commit()
+            return [dict(r) for r in rows] if rows else []
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("reset_failed_jobs_bars_backfill_to_pending_batch failed: %s", e)
+        return []
+
+
 def trim_job_bars_backfill(status_config: dict, keep: int = 200) -> int:
     """Keep only the most recent keep jobs; delete older ones. Returns number of rows deleted."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
@@ -949,6 +1037,8 @@ __all__ = [
     "delete_all_job_bars_backfill",
     "claim_next_pending_job_bars_backfill",
     "update_job_bars_backfill_result",
+    "reset_failed_job_bars_backfill_to_pending",
+    "reset_failed_jobs_bars_backfill_to_pending_batch",
     "trim_job_bars_backfill",
     "get_job_bars_backfill_last_updated",
     "get_is_us_trading_day",

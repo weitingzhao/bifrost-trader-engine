@@ -201,7 +201,7 @@ async def run_one_backfill(
         else:
             start_ts, end_ts = _backfill_resolve_span(period_key, config, years, days, span_hours=span_hours)
         if ib_client is None:
-            return {"ok": False, "error": "MarketIbClient is not initialized."}
+            return {"ok": False, "error": "IB transport is not initialized."}
         if skip_fetch:
             plan = _backfill_ib_request_plan(sym, per, start_ts, end_ts)
             # 打印将要发给 IB 的参数，便于预先查看、避免超限

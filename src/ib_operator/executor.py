@@ -94,6 +94,25 @@ class IbOperatorExecutor:
                 return {"ok": False, "error": "missing_symbol"}
             bars = await self._primary.fetch_bars(symbol, period, duration)
             return {"ok": True, "data": {"bars": bars}}
+        if op == "fetch_bars_range":
+            symbol = str(payload.get("symbol") or "").strip()
+            period = str(payload.get("period") or "1 D").strip()
+            if not symbol:
+                return {"ok": False, "error": "missing_symbol"}
+            start_ts = payload.get("start_ts")
+            end_ts = payload.get("end_ts")
+            interval = payload.get("interval_sec")
+            st = float(start_ts) if start_ts is not None else None
+            et = float(end_ts) if end_ts is not None else None
+            iv = float(interval) if interval is not None and float(interval) > 0 else None
+            bars = await self._primary.fetch_bars_range(
+                symbol,
+                period,
+                start_ts=st,
+                end_ts=et,
+                interval_sec=iv,
+            )
+            return {"ok": True, "data": {"bars": bars}}
         if op == "fetch_option_expirations":
             symbol = str(payload.get("symbol") or "").strip()
             if not symbol:

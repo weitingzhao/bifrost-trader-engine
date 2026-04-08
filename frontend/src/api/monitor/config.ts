@@ -1,5 +1,9 @@
 import type { ControlResponse, IbClient, FlexAccountItem } from '../../types'
-import { apiBase } from '../shared/constants'
+import { apiBase, getMarketApiBase, joinServiceBase } from '../shared/constants'
+
+function marketUrl(path: string): string {
+  return joinServiceBase(getMarketApiBase(), path.startsWith('/') ? path : `/${path}`)
+}
 
 export async function postSetHeartbeatInterval(heartbeat_interval_sec: number): Promise<ControlResponse & { heartbeat_interval_sec?: number }> {
   const r = await fetch(`${apiBase()}/control/set_heartbeat_interval`, {
@@ -59,13 +63,13 @@ export async function fetchMarketHolidays(year?: number, exchange?: string): Pro
   const params = new URLSearchParams()
   if (year != null) params.set('year', String(year))
   if (exchange && exchange.trim()) params.set('exchange', exchange.trim())
-  const r = await fetch(`${apiBase()}/market/holidays?${params}`)
+  const r = await fetch(marketUrl(`/market/holidays?${params}`))
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function postMarketHoliday(payload: { date: string; label?: string; exchange?: string }): Promise<{ date: string; exchange: string; label: string | null }> {
-  const r = await fetch(`${apiBase()}/market/holidays`, {
+  const r = await fetch(marketUrl('/market/holidays'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -81,6 +85,6 @@ export async function postMarketHoliday(payload: { date: string; label?: string;
 export async function deleteMarketHoliday(dateStr: string, exchange?: string): Promise<void> {
   const params = new URLSearchParams({ date: (dateStr || '').trim().slice(0, 10) })
   if (exchange && exchange.trim()) params.set('exchange', exchange.trim())
-  const r = await fetch(`${apiBase()}/market/holidays?${params}`, { method: 'DELETE' })
+  const r = await fetch(marketUrl(`/market/holidays?${params}`), { method: 'DELETE' })
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? r.statusText)
 }

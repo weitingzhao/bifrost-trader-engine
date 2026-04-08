@@ -211,9 +211,9 @@ function resolveBasesFromHealth(health: HealthRoutingFields | null): {
   }
 
   const rows = Array.isArray(health.utilized_services) ? health.utilized_services : []
-  const massEnv = envForService(rows, 'massive')
-  const docsEnv = envForService(rows, 'docs')
-  const opsEnv = envForService(rows, 'ops')
+  let massEnv = envForService(rows, 'massive')
+  let docsEnv = envForService(rows, 'docs')
+  let opsEnv = envForService(rows, 'ops')
   let tradingEnv = envForService(rows, 'trading')
   let strategyEnv = envForService(rows, 'strategy')
   let portfolioEnv = envForService(rows, 'portfolio')
@@ -228,6 +228,9 @@ function resolveBasesFromHealth(health: HealthRoutingFields | null): {
   const splitDevEnv: 'dev' | null =
     health.config_profile === 'dev' && trimEnv(health.frontend_dev_path) ? 'dev' : null
   if (splitDevEnv) {
+    if (!massEnv) massEnv = splitDevEnv
+    if (!docsEnv) docsEnv = splitDevEnv
+    if (!opsEnv) opsEnv = splitDevEnv
     if (!tradingEnv) tradingEnv = splitDevEnv
     if (!strategyEnv) strategyEnv = splitDevEnv
     if (!portfolioEnv) portfolioEnv = splitDevEnv

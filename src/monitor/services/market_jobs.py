@@ -128,3 +128,66 @@ def enqueue_job_bars_backfill(
         update_job_bars_backfill_result(control_via_db, jid, "failed", {"ok": False, "error": str(e)})
         return False, None, f"Celery enqueue failed: {e}"
     return True, str(jid), None
+
+
+def reenqueue_bars_backfill_from_row(control_via_db: Any, row: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Submit Celery ``backfill_bars`` for an existing row (same ``task_id`` as ``job_bars_backfill_id``)."""
+    try:
+        jid = int(row["job_bars_backfill_id"])
+    except (TypeError, ValueError, KeyError):
+        return False, "invalid_job_id"
+    symbol = (row.get("symbol") or "").strip()
+    period = (row.get("period") or "1 D").strip()
+    if not symbol:
+        return False, "missing_symbol"
+
+    def _opt_float(key: str) -> Optional[float]:
+        v = row.get(key)
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    def _opt_int(key: str) -> Optional[int]:
+        v = row.get(key)
+        if v is None:
+            return None
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
+    years = _opt_float("years")
+    days = _opt_int("days")
+    override_days = _opt_float("override_days")
+    span_hours = _opt_float("span_hours")
+    logger.info(
+        "bars/backfill re-enqueue job_id=%s symbol=%s period=%s years=%s days=%s override_days=%s span_hours=%s",
+        jid,
+        symbol,
+        period,
+        years,
+        days,
+        override_days,
+        span_hours,
+    )
+    try:
+        from src.bars.tasks import backfill_bars
+
+        backfill_bars.apply_async(
+            args=[symbol, period],
+            kwargs={
+                "years": years,
+                "days": days,
+                "override_days": override_days,
+                "span_hours": span_hours,
+            },
+            task_id=str(jid),
+        )
+    except Exception as e:
+        logger.exception("Celery re-enqueue failed job_id=%s: %s", jid, e)
+        update_job_bars_backfill_result(control_via_db, jid, "failed", {"ok": False, "error": str(e)})
+        return False, str(e)
+    return True, None

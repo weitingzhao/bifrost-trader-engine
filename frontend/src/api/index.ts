@@ -39,6 +39,8 @@ export {
   deleteBarsJob,
   deleteAllBarsJobs,
   trimBarsJobs,
+  postRetryBarsJob,
+  postRetryFailedBarsJobs,
   fetchBars,
   fetchOptionBars,
   fetchBarStats,

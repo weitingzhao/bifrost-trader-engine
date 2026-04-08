@@ -124,6 +124,15 @@ def get_massive_daily_checklist(
     if not td:
         td = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
     data = get_massive_daily_checklist_data(db, sym_list, td)
+    err = data.get("error") if isinstance(data, dict) else None
+    syms_out = data.get("symbols") if isinstance(data, dict) else None
+    fatal_err = (
+        isinstance(err, str)
+        and err.strip()
+        and (not isinstance(syms_out, dict) or len(syms_out) == 0)
+    )
+    if fatal_err:
+        return {"ok": False, "error": err.strip(), "trade_date": data.get("trade_date", td)}
     return {"ok": True, **data}
 
 
