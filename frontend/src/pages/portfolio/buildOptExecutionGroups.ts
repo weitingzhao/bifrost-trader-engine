@@ -21,7 +21,8 @@ export function buildOptExecutionGroups(sourceExecutions: Execution[]): OptExecu
     const first = trades[0]
     let contract_key = first.contract_key ?? ''
     if (!contract_key && (first.sec_type ?? '').toUpperCase() === 'OPT') {
-      const sym = (first.symbol ?? '').trim()
+      // Take only the ticker before any space (IB sometimes stores full OCC string in symbol)
+      const sym = (first.symbol ?? '').trim().split(/\s+/)[0]?.trim() ?? ''
       const exp = String(first.expiry ?? '').trim().replace(/-/g, '')
       const str = first.strike != null ? String(first.strike) : ''
       const right = ((first.option_right ?? 'C') + '').toUpperCase().slice(0, 1)

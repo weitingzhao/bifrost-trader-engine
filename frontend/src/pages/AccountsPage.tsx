@@ -223,27 +223,34 @@ export function AccountsPage({
       return
     }
     let cancelled = false
-    fetchQuotes(stockSymbols)
-      .then((res) => {
-        if (cancelled || !res.quotes?.length) return
-        setQuotesMap((prev) => {
-          const next = { ...prev }
-          res.quotes.forEach((q) => {
-            next[q.symbol] = q
-          })
-          return next
+    const mergeFetched = (quotes: RealtimeQuote[] | undefined) => {
+      if (cancelled || !quotes?.length) return
+      setQuotesMap((prev) => {
+        const next = { ...prev }
+        quotes.forEach((q) => {
+          const k = (q.symbol ?? '').trim().toUpperCase()
+          if (k) next[k] = { ...q, symbol: k }
         })
+        return next
       })
-      .catch(() => {})
+    }
+    fetchQuotes(stockSymbols).then((res) => mergeFetched(res.quotes)).catch(() => {})
     const symbolSet = new Set(stockSymbols.map((s) => s.toUpperCase()))
     const unsub = subscribeQuotes((q) => {
       const sym = (q.symbol || '').toUpperCase()
       if (!sym || !symbolSet.has(sym)) return
       setQuotesMap((prev) => ({ ...prev, [sym]: { ...q, symbol: sym } }))
     })
+    // Same as Live: periodic GET /quotes so UI stays fresh if SSE drops messages (e.g. strict JSON types).
+    const pollId = window.setInterval(() => {
+      fetchQuotes(stockSymbols)
+        .then((res) => mergeFetched(res.quotes))
+        .catch(() => {})
+    }, 8000)
     return () => {
       cancelled = true
       unsub()
+      window.clearInterval(pollId)
     }
   }, [stockSymbols.join(',')])
 

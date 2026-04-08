@@ -75,24 +75,43 @@ function formatStrike(strike: number | null | undefined): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 4 }).format(n)
 }
 
-/** Same as Live page: Last + Bid/Ask spread vs Last (green if above Last, red if below). */
-function renderLastBidAsk(q: RealtimeQuote | undefined): ReactNode {
+/**
+ * Watchlist: Last as primary figure; Bid/Ask as compact labeled deltas vs Last
+ * (green if above Last, red if below).
+ */
+function renderWatchlistLastBidAsk(q: RealtimeQuote | undefined): ReactNode {
   if (!q) return '—'
   const last = q.last != null && Number.isFinite(q.last) ? q.last : null
   const bid = q.bid != null && Number.isFinite(q.bid) ? q.bid : null
   const ask = q.ask != null && Number.isFinite(q.ask) ? q.ask : null
   const bidDiff = last != null && bid != null ? bid - last : null
   const askDiff = last != null && ask != null ? ask - last : null
+  const hasSpread = bidDiff != null || askDiff != null
   return (
-    <>
-      {last != null ? fmtUsd(last) : '—'}
+    <span className="watchlist-last-bid-ask-cell">
+      <span className="watchlist-quote-last">{last != null ? fmtUsd(last) : '—'}</span>
+      {hasSpread ? <span className="watchlist-quote-sep" aria-hidden>·</span> : null}
       {bidDiff != null && (
-        <span className={`realtime-quote-spread ${bidDiff > 0 ? 'pnl-positive' : bidDiff < 0 ? 'pnl-negative' : ''}`} title="Bid vs Last"> {Math.abs(bidDiff).toFixed(2)}</span>
+        <span className="watchlist-quote-spread" title="Bid vs Last">
+          <span className="watchlist-quote-spread-label">Bid</span>
+          <span
+            className={`watchlist-quote-spread-val ${bidDiff > 0 ? 'pnl-positive' : bidDiff < 0 ? 'pnl-negative' : ''}`}
+          >
+            {Math.abs(bidDiff).toFixed(2)}
+          </span>
+        </span>
       )}
       {askDiff != null && (
-        <span className={`realtime-quote-spread ${askDiff > 0 ? 'pnl-positive' : askDiff < 0 ? 'pnl-negative' : ''}`} title="Ask vs Last"> {Math.abs(askDiff).toFixed(2)}</span>
+        <span className="watchlist-quote-spread" title="Ask vs Last">
+          <span className="watchlist-quote-spread-label">Ask</span>
+          <span
+            className={`watchlist-quote-spread-val ${askDiff > 0 ? 'pnl-positive' : askDiff < 0 ? 'pnl-negative' : ''}`}
+          >
+            {Math.abs(askDiff).toFixed(2)}
+          </span>
+        </span>
       )}
-    </>
+    </span>
   )
 }
 
@@ -168,12 +187,18 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     }
   }, [])
 
-  const quoteBySymbol = useMemo(
-    () => Object.fromEntries(
-      realtimeQuotes.filter(q => !q.contract_key).map(q => [q.symbol, q]),
-    ),
-    [realtimeQuotes],
-  )
+  /** STK / legacy ticks: IB ingestor includes contract_key on every tick; OPT rows use underlying symbol and must not overwrite STK. */
+  const quoteBySymbol = useMemo(() => {
+    const m: Record<string, RealtimeQuote> = {}
+    for (const q of realtimeQuotes) {
+      if (!q.symbol) continue
+      const st = (q.sec_type ?? '').toUpperCase()
+      if (st === 'STK' || (st === '' && !q.contract_key)) {
+        m[q.symbol] = q
+      }
+    }
+    return m
+  }, [realtimeQuotes])
   const quoteByContractKey = useMemo(
     () => Object.fromEntries(
       realtimeQuotes
@@ -477,13 +502,13 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
               </tr>
               {items.map((item) => {
                 const sym = symbolFromItem(item)
-                const q = quoteBySymbol[sym]
+                const q = quoteByContractKey[item.contract_key] ?? quoteBySymbol[sym]
                 const hasHolding = contractKeysWithPosition.has(item.contract_key.trim())
                 const optionableOn = item.optionable === true
                 return (
                   <tr key={item.contract_key}>
                     <td title={item.contract_key} style={{ fontWeight: 'bold' }}>{watchlistItemLabel(item)}</td>
-                    <td className="realtime-quote-num realtime-quote-last-bid-ask">{renderLastBidAsk(q)}</td>
+                    <td className="realtime-quote-num watchlist-quote-last-td">{renderWatchlistLastBidAsk(q)}</td>
                     <td>
                       <span
                         className="watchlist-toggle-switch"
@@ -585,7 +610,7 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
                 return (
                   <tr key={item.contract_key}>
                     <td title={item.contract_key}>{item.symbol || watchlistItemLabel(item)}</td>
-                    <td className="realtime-quote-num realtime-quote-last-bid-ask">{renderLastBidAsk(q)}</td>
+                    <td className="realtime-quote-num watchlist-quote-last-td">{renderWatchlistLastBidAsk(q)}</td>
                     <td>{formatExpiry(item.expiry)}</td>
                     <td>{formatOptionRight(item.option_right)}</td>
                     <td>{item.strike != null ? formatStrike(item.strike) : '—'}</td>
@@ -636,7 +661,7 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
         <InfoTooltip text="Watchlist for quotes and bars; add from positions or enter Symbol." />
       </h2>
 
-      <section className="replay-section" aria-labelledby="watchlist-head">
+      <section className="replay-section watchlist-page" aria-labelledby="watchlist-head">
         <h3 id="watchlist-head" className="page-title-with-tooltip">
           Stocks & options
           <InfoTooltip text="Symbols here are part of the watchlist for monitoring and Market API focus lists. Live ticks come from IB Ingestor (Redis). The daemon syncs this list on heartbeat where applicable; no restart needed when you add or remove symbols." />

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import type { Execution, IbClient, OptExecutionGroup, StatusResponse } from '../../types'
 import type { StrategyOpportunity } from '../../api'
 import type { StrategyInstance } from '../../types'
@@ -36,6 +36,7 @@ import {
   executionStrategyInstanceIds,
   executionStrategyOpportunityKey,
   expandExecutionRowsForStrategyOptView,
+  getInstanceConsistencyState,
   groupExecutionsByStrategyInstanceId,
   getOptGroupKey,
   sliceExecutionForInstanceOptView,
@@ -51,6 +52,15 @@ import type { LedgerMetricExplainKind } from './ledgerMetricExplainKinds'
 import type { LedgerMetricExplainPayload } from './ledgerSummaryExplainPayload'
 import { buildLedgerMetricExplainPayload } from './ledgerSummaryExplainPayload'
 import { LedgerSummaryMetricExplainContent, ledgerMetricExplainTitle } from './ledgerSummaryMetricExplain'
+
+/** Format "YYYY-MM" → "Apr '26" for expiry month bubble labels */
+function fmtExpiryMonthBubble(ym: string): string {
+  const [year, month] = ym.split('-')
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const m = parseInt(month ?? '', 10) - 1
+  if (!year || m < 0 || m > 11 || Number.isNaN(m)) return ym
+  return `${MONTHS[m]} '${year.slice(2)}`
+}
 
 export interface LedgerViewProps {
   status: StatusResponse | null
@@ -134,11 +144,25 @@ export function LedgerView({
   const [ledgerFilterExpiryStart, setLedgerFilterExpiryStart] = useState('')
   const [ledgerFilterAccount, setLedgerFilterAccount] = useState<string>('')
   const [ledgerTab, setLedgerTab] = useState<'strategy' | 'instance' | 'options' | 'stocks'>('strategy')
+  const [ledgerOptInstanceFilter, setLedgerOptInstanceFilter] = useState<'all' | 'has_instance' | 'no_instance' | 'mixed'>('all')
+  const [stocksPage, setStocksPage] = useState(1)
   const [ledgerOptionSubTab, setLedgerOptionSubTab] = useState<'contracts' | 'orphans'>('contracts')
   const [ledgerInstanceSubTab, setLedgerInstanceSubTab] = useState<'with_instance' | 'no_instance'>('with_instance')
   /** With-instance list: filter by whether the instance has any unrealized (open) contract group. */
   const [instanceContainOpenFilter, setInstanceContainOpenFilter] = useState<'all' | 'yes' | 'no'>('all')
   const [instanceExpandedIds, setInstanceExpandedIds] = useState<Set<number>>(new Set())
+  /** Instance tab: structure_name filter (empty = All) */
+  const [instanceTabStructureFilter, setInstanceTabStructureFilter] = useState<string>('')
+  /** Instance tab contract filters */
+  const [instanceTabSymbolFilter, setInstanceTabSymbolFilter] = useState<string>('')
+  const [instanceTabRightFilter, setInstanceTabRightFilter] = useState<'' | 'C' | 'P'>('')
+  const [instanceTabExpiryMonthFilter, setInstanceTabExpiryMonthFilter] = useState<string>('')
+  /** Strategy tab: structure_name filter (empty = All) */
+  const [strategyTabStructureFilter, setStrategyTabStructureFilter] = useState<string>('')
+  /** Strategy tab contract filters */
+  const [strategyTabSymbolFilter, setStrategyTabSymbolFilter] = useState<string>('')
+  const [strategyTabRightFilter, setStrategyTabRightFilter] = useState<'' | 'C' | 'P'>('')
+  const [strategyTabExpiryMonthFilter, setStrategyTabExpiryMonthFilter] = useState<string>('')
   /** Strategy (opportunity) tab: expanded group keys — `id` or `none`. */
   const [strategyOppExpandedKeys, setStrategyOppExpandedKeys] = useState<Set<string>>(new Set())
   /** Strategy tab: per-instance rows under an opportunity — `${oppKey}::${instKey}`, default collapsed. */
@@ -460,6 +484,172 @@ export function LedgerView({
     })
   }, [instanceGroups, instanceContainOpenFilter])
 
+  /** Unique structure names available in with-instance list (after contain-open filter) */
+  const instanceTabStructureOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const ig of filteredInstanceGroups) {
+      const oppId = ig.trades.find(
+        t => t.strategy_opportunity_id != null && Number.isFinite(Number(t.strategy_opportunity_id)),
+      )?.strategy_opportunity_id
+      if (oppId == null) continue
+      const sn = opportunities.find(o => o.strategy_opportunity_id === Number(oppId))?.structure_name?.trim()
+      if (sn) set.add(sn)
+    }
+    return Array.from(set).sort()
+  }, [filteredInstanceGroups, opportunities])
+
+  /** All three contract filter dimensions for the Instance tab */
+  const instanceContractFilterOptions = useMemo(() => {
+    const symbols = new Set<string>()
+    const rights = new Set<'C' | 'P'>()
+    const expiryMonths = new Set<string>()
+    for (const ig of filteredInstanceGroups) {
+      for (const g of ig.groups) {
+        const parts = getContractLabelParts(g.contract_key ?? '')
+        const sym = parts.symbol.split(/\s+/)[0]?.trim() ?? ''
+        if (sym) symbols.add(sym.toUpperCase())
+        const r = (g.contract_key?.split('|')[4] ?? '').toUpperCase().slice(0, 1)
+        if (r === 'C' || r === 'P') rights.add(r)
+        const s = (g.expiry ?? '').replace(/\D/g, '')
+        if (s.length >= 6) expiryMonths.add(`${s.slice(0, 4)}-${s.slice(4, 6)}`)
+      }
+    }
+    return {
+      symbols: Array.from(symbols).sort(),
+      rights: Array.from(rights).sort() as ('C' | 'P')[],
+      expiryMonths: Array.from(expiryMonths).sort().reverse(),
+    }
+  }, [filteredInstanceGroups])
+
+  /** filteredInstanceGroups further filtered by structure, symbol, right, expiry month */
+  const instanceFinalFiltered = useMemo(() => {
+    let list = filteredInstanceGroups
+    if (instanceTabStructureFilter) {
+      list = list.filter(ig => {
+        const oppId = ig.trades.find(
+          t => t.strategy_opportunity_id != null && Number.isFinite(Number(t.strategy_opportunity_id)),
+        )?.strategy_opportunity_id
+        if (oppId == null) return false
+        const sn = opportunities.find(
+          o => o.strategy_opportunity_id === Number(oppId),
+        )?.structure_name?.trim()
+        return sn === instanceTabStructureFilter
+      })
+    }
+    const hasContractFilter = instanceTabSymbolFilter || instanceTabRightFilter || instanceTabExpiryMonthFilter
+    if (hasContractFilter) {
+      const targetSym = instanceTabSymbolFilter.toUpperCase()
+      list = list.filter(ig =>
+        ig.groups.some(g => {
+          if (targetSym) {
+            const parts = getContractLabelParts(g.contract_key ?? '')
+            const sym = (parts.symbol.split(/\s+/)[0]?.trim() ?? '').toUpperCase()
+            if (sym !== targetSym) return false
+          }
+          if (instanceTabRightFilter) {
+            const r = (g.contract_key?.split('|')[4] ?? '').toUpperCase().slice(0, 1)
+            if (r !== instanceTabRightFilter) return false
+          }
+          if (instanceTabExpiryMonthFilter) {
+            const s = (g.expiry ?? '').replace(/\D/g, '')
+            const month = s.length >= 6 ? `${s.slice(0, 4)}-${s.slice(4, 6)}` : ''
+            if (month !== instanceTabExpiryMonthFilter) return false
+          }
+          return true
+        }),
+      )
+    }
+    return list
+  }, [
+    filteredInstanceGroups,
+    instanceTabStructureFilter,
+    instanceTabSymbolFilter,
+    instanceTabRightFilter,
+    instanceTabExpiryMonthFilter,
+    opportunities,
+  ])
+
+  /** Unique structure names available across current strategy opportunity groups */
+  const strategyTabStructureOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const og of strategyOpportunityGroups) {
+      if (og.opportunityId === 'none') continue
+      const opp = opportunities.find(o => o.strategy_opportunity_id === og.opportunityId)
+      const sn = opp?.structure_name?.trim()
+      if (sn) set.add(sn)
+    }
+    return Array.from(set).sort()
+  }, [strategyOpportunityGroups, opportunities])
+
+  /** All three contract filter dimensions for the Strategy tab */
+  const strategyContractFilterOptions = useMemo(() => {
+    const symbols = new Set<string>()
+    const rights = new Set<'C' | 'P'>()
+    const expiryMonths = new Set<string>()
+    for (const og of strategyOpportunityGroups) {
+      for (const sg of og.instanceSubgroups) {
+        for (const g of sg.groups) {
+          const parts = getContractLabelParts(g.contract_key ?? '')
+          const sym = parts.symbol.split(/\s+/)[0]?.trim() ?? ''
+          if (sym) symbols.add(sym.toUpperCase())
+          const r = (g.contract_key?.split('|')[4] ?? '').toUpperCase().slice(0, 1)
+          if (r === 'C' || r === 'P') rights.add(r)
+          const s = (g.expiry ?? '').replace(/\D/g, '')
+          if (s.length >= 6) expiryMonths.add(`${s.slice(0, 4)}-${s.slice(4, 6)}`)
+        }
+      }
+    }
+    return {
+      symbols: Array.from(symbols).sort(),
+      rights: Array.from(rights).sort() as ('C' | 'P')[],
+      expiryMonths: Array.from(expiryMonths).sort().reverse(),
+    }
+  }, [strategyOpportunityGroups])
+
+  const filteredStrategyOpportunityGroups = useMemo(() => {
+    let list = strategyOpportunityGroups
+    if (strategyTabStructureFilter) {
+      list = list.filter(og => {
+        if (og.opportunityId === 'none') return false
+        const opp = opportunities.find(o => o.strategy_opportunity_id === og.opportunityId)
+        return (opp?.structure_name?.trim() ?? '') === strategyTabStructureFilter
+      })
+    }
+    const hasContractFilter = strategyTabSymbolFilter || strategyTabRightFilter || strategyTabExpiryMonthFilter
+    if (hasContractFilter) {
+      const targetSym = strategyTabSymbolFilter.toUpperCase()
+      list = list.filter(og =>
+        og.instanceSubgroups.some(sg =>
+          sg.groups.some(g => {
+            if (targetSym) {
+              const parts = getContractLabelParts(g.contract_key ?? '')
+              const sym = (parts.symbol.split(/\s+/)[0]?.trim() ?? '').toUpperCase()
+              if (sym !== targetSym) return false
+            }
+            if (strategyTabRightFilter) {
+              const r = (g.contract_key?.split('|')[4] ?? '').toUpperCase().slice(0, 1)
+              if (r !== strategyTabRightFilter) return false
+            }
+            if (strategyTabExpiryMonthFilter) {
+              const s = (g.expiry ?? '').replace(/\D/g, '')
+              const month = s.length >= 6 ? `${s.slice(0, 4)}-${s.slice(4, 6)}` : ''
+              if (month !== strategyTabExpiryMonthFilter) return false
+            }
+            return true
+          }),
+        ),
+      )
+    }
+    return list
+  }, [
+    strategyOpportunityGroups,
+    strategyTabStructureFilter,
+    strategyTabSymbolFilter,
+    strategyTabRightFilter,
+    strategyTabExpiryMonthFilter,
+    opportunities,
+  ])
+
   const noInstanceOptGroups = useMemo(
     (): OptExecutionGroup[] => buildOptExecutionGroups(noInstanceExecs),
     [noInstanceExecs],
@@ -774,6 +964,31 @@ export function LedgerView({
     ],
   )
 
+  const metricHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleMetricHoverEnter = useCallback(
+    (kind: LedgerMetricExplainKind, id: string, e: MouseEvent) => {
+      e.stopPropagation()
+      const clientX = e.clientX
+      const clientY = e.clientY
+      if (metricHoverTimerRef.current != null) clearTimeout(metricHoverTimerRef.current)
+      metricHoverTimerRef.current = setTimeout(() => {
+        metricHoverTimerRef.current = null
+        handleMetricExplainEnter(kind, id, {
+          clientX,
+          clientY,
+          stopPropagation: () => {},
+        } as unknown as MouseEvent)
+      }, 700)
+    },
+    [handleMetricExplainEnter],
+  )
+  const handleMetricHoverLeave = useCallback(() => {
+    if (metricHoverTimerRef.current != null) {
+      clearTimeout(metricHoverTimerRef.current)
+      metricHoverTimerRef.current = null
+    }
+  }, [])
+
   const ledgerOptionsSummaryByPeriod = useMemo(
     () => rollupOptionsFromMonthly(ledgerOptionsSummaryByMonth, ledgerSummaryPeriod),
     [ledgerOptionsSummaryByMonth, ledgerSummaryPeriod],
@@ -784,6 +999,18 @@ export function LedgerView({
     [ledgerStocksSummaryByMonth, ledgerSummaryPeriod],
   )
 
+  const filteredClosedOptionGroupsByInstance = useMemo(() => {
+    if (ledgerOptInstanceFilter === 'all') return sortedClosedOptionGroups
+    return sortedClosedOptionGroups.filter(g => {
+      const state = getInstanceConsistencyState(g.trades ?? [])
+      if (ledgerOptInstanceFilter === 'has_instance') return state === 'same' || state === 'multiple'
+      if (ledgerOptInstanceFilter === 'no_instance') return state === 'none'
+      if (ledgerOptInstanceFilter === 'mixed') return state === 'mixed'
+      return true
+    })
+  }, [sortedClosedOptionGroups, ledgerOptInstanceFilter])
+
+  const STOCKS_PAGE_SIZE = 50
   const hasOptionExecutions = optExecutionGroups.length > 0
   const hasStockExecutions = useMemo(
     () => filteredExecutions.some(e => (e.sec_type ?? '').toUpperCase() !== 'OPT'),
@@ -801,6 +1028,10 @@ export function LedgerView({
     })
     return list
   }, [ledgerStockFilteredExecutions, ledgerStockSort])
+
+  useEffect(() => {
+    setStocksPage(1)
+  }, [sortedStockExecutions.length, ledgerStockGroupByPosition, ledgerStockCategoryTab])
 
   useEffect(() => {
     if (ledgerTab === 'strategy' && !hasOptionExecutions && hasStockExecutions) {
@@ -1142,12 +1373,13 @@ export function LedgerView({
                               }`}
                               aria-label="Open calculation details for this period realized PnL"
                               onMouseEnter={e =>
-                                handleMetricExplainEnter(
+                                handleMetricHoverEnter(
                                   'options_period_realized',
                                   `opt-pnl-${key}`,
                                   e,
                                 )
                               }
+                              onMouseLeave={handleMetricHoverLeave}
                               onClick={e => {
                                 e.stopPropagation()
                                 handleMetricExplainEnter(
@@ -1187,8 +1419,9 @@ export function LedgerView({
                           }`}
                           aria-label="Open calculation details for total option realized PnL"
                           onMouseEnter={e =>
-                            handleMetricExplainEnter('options_total_realized', 'opt-pnl-total', e)
+                            handleMetricHoverEnter('options_total_realized', 'opt-pnl-total', e)
                           }
+                          onMouseLeave={handleMetricHoverLeave}
                           onClick={e => {
                             e.stopPropagation()
                             handleMetricExplainEnter('options_total_realized', 'opt-pnl-total', e)
@@ -1227,12 +1460,13 @@ export function LedgerView({
                               }`}
                               aria-label="Open calculation details for this period stock realized PnL"
                               onMouseEnter={e =>
-                                handleMetricExplainEnter(
+                                handleMetricHoverEnter(
                                   'stocks_period_realized',
                                   `stk-rz-${key}`,
                                   e,
                                 )
                               }
+                              onMouseLeave={handleMetricHoverLeave}
                               onClick={e => {
                                 e.stopPropagation()
                                 handleMetricExplainEnter(
@@ -1251,8 +1485,9 @@ export function LedgerView({
                             className="replay-ledger-summary-stocks-notional-line replay-ledger-metric-explain-trigger"
                             aria-label="Open calculation details for notional in this period"
                             onMouseEnter={e =>
-                              handleMetricExplainEnter('stocks_period_notional', `stk-nv-${key}`, e)
+                              handleMetricHoverEnter('stocks_period_notional', `stk-nv-${key}`, e)
                             }
+                            onMouseLeave={handleMetricHoverLeave}
                             onClick={e => {
                               e.stopPropagation()
                               handleMetricExplainEnter('stocks_period_notional', `stk-nv-${key}`, e)
@@ -1285,8 +1520,9 @@ export function LedgerView({
                           }`}
                           aria-label="Open calculation details for total stock realized PnL"
                           onMouseEnter={e =>
-                            handleMetricExplainEnter('stocks_total_realized', 'stk-total-rz', e)
+                            handleMetricHoverEnter('stocks_total_realized', 'stk-total-rz', e)
                           }
+                          onMouseLeave={handleMetricHoverLeave}
                           onClick={e => {
                             e.stopPropagation()
                             handleMetricExplainEnter('stocks_total_realized', 'stk-total-rz', e)
@@ -1303,8 +1539,9 @@ export function LedgerView({
                           className="replay-ledger-summary-stocks-notional replay-ledger-metric-explain-trigger"
                           aria-label="Open calculation details for total stock notional"
                           onMouseEnter={e =>
-                            handleMetricExplainEnter('stocks_total_notional', 'stk-total-nv', e)
+                            handleMetricHoverEnter('stocks_total_notional', 'stk-total-nv', e)
                           }
+                          onMouseLeave={handleMetricHoverLeave}
                           onClick={e => {
                             e.stopPropagation()
                             handleMetricExplainEnter('stocks_total_notional', 'stk-total-nv', e)
@@ -1326,11 +1563,144 @@ export function LedgerView({
                 >
                   {hasOptionExecutions ? (
                     <>
+                      {/* Strategy tab in-panel filters */}
+                      {strategyOpportunityGroups.length > 0 && (
+                        <div className="ledger-strategy-tab-filters">
+                          {strategyTabStructureOptions.length > 0 && (
+                            <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by structure">
+                              <span className="ledger-strategy-filter-label">Structure</span>
+                              <div className="ledger-strategy-filter-bubbles">
+                                <button
+                                  type="button"
+                                  className={`replay-bubble-switch-btn ${strategyTabStructureFilter === '' ? 'active' : ''}`}
+                                  onClick={() => setStrategyTabStructureFilter('')}
+                                >
+                                  All
+                                </button>
+                                {strategyTabStructureOptions.map(s => (
+                                  <button
+                                    key={s}
+                                    type="button"
+                                    className={`replay-bubble-switch-btn ${strategyTabStructureFilter === s ? 'active' : ''}`}
+                                    onClick={() =>
+                                      setStrategyTabStructureFilter(prev => (prev === s ? '' : s))
+                                    }
+                                  >
+                                    {s}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {strategyContractFilterOptions.symbols.length > 0 && (
+                            <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by symbol">
+                              <span className="ledger-strategy-filter-label">Symbol</span>
+                              <div className="ledger-strategy-filter-bubbles">
+                                <button
+                                  type="button"
+                                  className={`replay-bubble-switch-btn ${strategyTabSymbolFilter === '' ? 'active' : ''}`}
+                                  onClick={() => setStrategyTabSymbolFilter('')}
+                                >
+                                  All
+                                </button>
+                                {strategyContractFilterOptions.symbols.map(sym => (
+                                  <button
+                                    key={sym}
+                                    type="button"
+                                    className={`replay-bubble-switch-btn ${strategyTabSymbolFilter === sym ? 'active' : ''}`}
+                                    onClick={() =>
+                                      setStrategyTabSymbolFilter(prev => (prev === sym ? '' : sym))
+                                    }
+                                  >
+                                    {sym}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {strategyContractFilterOptions.rights.length > 1 && (
+                            <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by call or put">
+                              <span className="ledger-strategy-filter-label">Type</span>
+                              <div className="ledger-strategy-filter-bubbles">
+                                <button
+                                  type="button"
+                                  className={`replay-bubble-switch-btn ${strategyTabRightFilter === '' ? 'active' : ''}`}
+                                  onClick={() => setStrategyTabRightFilter('')}
+                                >
+                                  All
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`replay-bubble-switch-btn ${strategyTabRightFilter === 'C' ? 'active' : ''}`}
+                                  onClick={() => setStrategyTabRightFilter(prev => (prev === 'C' ? '' : 'C'))}
+                                >
+                                  Call
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`replay-bubble-switch-btn ${strategyTabRightFilter === 'P' ? 'active' : ''}`}
+                                  onClick={() => setStrategyTabRightFilter(prev => (prev === 'P' ? '' : 'P'))}
+                                >
+                                  Put
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          {strategyContractFilterOptions.expiryMonths.length > 1 && (
+                            <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by expiry month">
+                              <span className="ledger-strategy-filter-label">Expiry</span>
+                              <div className="ledger-strategy-filter-bubbles">
+                                <button
+                                  type="button"
+                                  className={`replay-bubble-switch-btn ${strategyTabExpiryMonthFilter === '' ? 'active' : ''}`}
+                                  onClick={() => setStrategyTabExpiryMonthFilter('')}
+                                >
+                                  All
+                                </button>
+                                {strategyContractFilterOptions.expiryMonths.map(m => (
+                                  <button
+                                    key={m}
+                                    type="button"
+                                    className={`replay-bubble-switch-btn ledger-expiry-month-btn ${strategyTabExpiryMonthFilter === m ? 'active' : ''}`}
+                                    onClick={() =>
+                                      setStrategyTabExpiryMonthFilter(prev => (prev === m ? '' : m))
+                                    }
+                                    title={m}
+                                  >
+                                    {fmtExpiryMonthBubble(m)}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {(strategyTabStructureFilter || strategyTabSymbolFilter || strategyTabRightFilter || strategyTabExpiryMonthFilter) && (
+                            <div className="ledger-strategy-filter-meta">
+                              <span>
+                                Showing {filteredStrategyOpportunityGroups.length} of {strategyOpportunityGroups.length} opportunities
+                              </span>
+                              <button
+                                type="button"
+                                className="ledger-strategy-filter-clear"
+                                onClick={() => {
+                                  setStrategyTabStructureFilter('')
+                                  setStrategyTabSymbolFilter('')
+                                  setStrategyTabRightFilter('')
+                                  setStrategyTabExpiryMonthFilter('')
+                                }}
+                              >
+                                Clear filters
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                       {strategyOpportunityGroups.length === 0 ? (
                         <p className="section-hint">No option trades under the current filters.</p>
+                      ) : filteredStrategyOpportunityGroups.length === 0 ? (
+                        <p className="section-hint">No opportunities match the current filters.</p>
                       ) : (
                         <div>
-                          {strategyOpportunityGroups.map(og => {
+                          {filteredStrategyOpportunityGroups.map(og => {
                             const closedAll = og.instanceSubgroups.flatMap(sg =>
                               sg.groups.filter(g => g.status === 'realized'),
                             )
@@ -1650,14 +2020,150 @@ export function LedgerView({
 
                       {ledgerInstanceSubTab === 'with_instance' && (
                         <div>
+                          {/* Instance tab in-panel filters */}
+                          {filteredInstanceGroups.length > 0 && (
+                            instanceTabStructureOptions.length > 0 ||
+                            instanceContractFilterOptions.symbols.length > 0
+                          ) && (
+                            <div className="ledger-strategy-tab-filters">
+                              {instanceTabStructureOptions.length > 0 && (
+                                <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by structure">
+                                  <span className="ledger-strategy-filter-label">Structure</span>
+                                  <div className="ledger-strategy-filter-bubbles">
+                                    <button
+                                      type="button"
+                                      className={`replay-bubble-switch-btn ${instanceTabStructureFilter === '' ? 'active' : ''}`}
+                                      onClick={() => setInstanceTabStructureFilter('')}
+                                    >
+                                      All
+                                    </button>
+                                    {instanceTabStructureOptions.map(s => (
+                                      <button
+                                        key={s}
+                                        type="button"
+                                        className={`replay-bubble-switch-btn ${instanceTabStructureFilter === s ? 'active' : ''}`}
+                                        onClick={() =>
+                                          setInstanceTabStructureFilter(prev => (prev === s ? '' : s))
+                                        }
+                                      >
+                                        {s}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {instanceContractFilterOptions.symbols.length > 0 && (
+                                <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by symbol">
+                                  <span className="ledger-strategy-filter-label">Symbol</span>
+                                  <div className="ledger-strategy-filter-bubbles">
+                                    <button
+                                      type="button"
+                                      className={`replay-bubble-switch-btn ${instanceTabSymbolFilter === '' ? 'active' : ''}`}
+                                      onClick={() => setInstanceTabSymbolFilter('')}
+                                    >
+                                      All
+                                    </button>
+                                    {instanceContractFilterOptions.symbols.map(sym => (
+                                      <button
+                                        key={sym}
+                                        type="button"
+                                        className={`replay-bubble-switch-btn ${instanceTabSymbolFilter === sym ? 'active' : ''}`}
+                                        onClick={() =>
+                                          setInstanceTabSymbolFilter(prev => (prev === sym ? '' : sym))
+                                        }
+                                      >
+                                        {sym}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {instanceContractFilterOptions.rights.length > 1 && (
+                                <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by call or put">
+                                  <span className="ledger-strategy-filter-label">Type</span>
+                                  <div className="ledger-strategy-filter-bubbles">
+                                    <button
+                                      type="button"
+                                      className={`replay-bubble-switch-btn ${instanceTabRightFilter === '' ? 'active' : ''}`}
+                                      onClick={() => setInstanceTabRightFilter('')}
+                                    >
+                                      All
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={`replay-bubble-switch-btn ${instanceTabRightFilter === 'C' ? 'active' : ''}`}
+                                      onClick={() => setInstanceTabRightFilter(prev => (prev === 'C' ? '' : 'C'))}
+                                    >
+                                      Call
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={`replay-bubble-switch-btn ${instanceTabRightFilter === 'P' ? 'active' : ''}`}
+                                      onClick={() => setInstanceTabRightFilter(prev => (prev === 'P' ? '' : 'P'))}
+                                    >
+                                      Put
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                              {instanceContractFilterOptions.expiryMonths.length > 1 && (
+                                <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by expiry month">
+                                  <span className="ledger-strategy-filter-label">Expiry</span>
+                                  <div className="ledger-strategy-filter-bubbles">
+                                    <button
+                                      type="button"
+                                      className={`replay-bubble-switch-btn ${instanceTabExpiryMonthFilter === '' ? 'active' : ''}`}
+                                      onClick={() => setInstanceTabExpiryMonthFilter('')}
+                                    >
+                                      All
+                                    </button>
+                                    {instanceContractFilterOptions.expiryMonths.map(m => (
+                                      <button
+                                        key={m}
+                                        type="button"
+                                        className={`replay-bubble-switch-btn ledger-expiry-month-btn ${instanceTabExpiryMonthFilter === m ? 'active' : ''}`}
+                                        onClick={() =>
+                                          setInstanceTabExpiryMonthFilter(prev => (prev === m ? '' : m))
+                                        }
+                                        title={m}
+                                      >
+                                        {fmtExpiryMonthBubble(m)}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {(instanceTabStructureFilter || instanceTabSymbolFilter || instanceTabRightFilter || instanceTabExpiryMonthFilter) && (
+                                <div className="ledger-strategy-filter-meta">
+                                  <span>
+                                    Showing {instanceFinalFiltered.length} of {filteredInstanceGroups.length} instances
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="ledger-strategy-filter-clear"
+                                    onClick={() => {
+                                      setInstanceTabStructureFilter('')
+                                      setInstanceTabSymbolFilter('')
+                                      setInstanceTabRightFilter('')
+                                      setInstanceTabExpiryMonthFilter('')
+                                    }}
+                                  >
+                                    Clear filters
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
                           {instanceGroups.length === 0 ? (
                             <p className="section-hint">No option trades with a strategy instance under the current filters.</p>
                           ) : filteredInstanceGroups.length === 0 ? (
                             <p className="section-hint">
                               No instances match Contain open = {instanceContainOpenFilter === 'yes' ? 'Yes' : 'No'}. Change the filter or clear it (All).
                             </p>
+                          ) : instanceFinalFiltered.length === 0 ? (
+                            <p className="section-hint">No instances match the current filters.</p>
                           ) : (
-                            filteredInstanceGroups.map(ig => {
+                            instanceFinalFiltered.map(ig => {
                               const closed = ig.groups.filter(g => g.status === 'realized')
                               const open = ig.groups.filter(g => g.status === 'unrealized')
                               const pnl = closed.reduce((s, g) => s + (Number(g.realized_pnl) || 0), 0)
@@ -1854,36 +2360,70 @@ export function LedgerView({
                 >
                   {hasOptionExecutions ? (
                     <>
-                      <div
-                        className="system-tabs replay-stock-group-tabs"
-                        role="tablist"
-                        aria-label="Closed Option and Open Option"
-                        style={{ marginBottom: '0.5rem' }}
-                      >
-                        <button
-                          type="button"
-                          role="tab"
-                          aria-selected={ledgerOptionSubTab === 'contracts'}
-                          className={`system-tab ${ledgerOptionSubTab === 'contracts' ? 'active' : ''}`}
-                          onClick={() => setLedgerOptionSubTab('contracts')}
-                          disabled={sortedClosedOptionGroups.length === 0}
+                      <div className="ledger-options-subtab-row">
+                        <div
+                          className="system-tabs replay-stock-group-tabs"
+                          role="tablist"
+                          aria-label="Closed Option and Open Option"
                         >
-                          Closed Option
-                        </button>
-                        <button
-                          type="button"
-                          role="tab"
-                          aria-selected={ledgerOptionSubTab === 'orphans'}
-                          className={`system-tab ${ledgerOptionSubTab === 'orphans' ? 'active' : ''}`}
-                          onClick={() => setLedgerOptionSubTab('orphans')}
-                          disabled={orphanOptionCount === 0}
-                        >
-                          Open Option ({orphanOptionCount} / {orphanOptionDetailsCount})
-                        </button>
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={ledgerOptionSubTab === 'contracts'}
+                            className={`system-tab ${ledgerOptionSubTab === 'contracts' ? 'active' : ''}`}
+                            onClick={() => setLedgerOptionSubTab('contracts')}
+                            disabled={sortedClosedOptionGroups.length === 0}
+                          >
+                            Closed Option
+                          </button>
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={ledgerOptionSubTab === 'orphans'}
+                            className={`system-tab ${ledgerOptionSubTab === 'orphans' ? 'active' : ''}`}
+                            onClick={() => setLedgerOptionSubTab('orphans')}
+                            disabled={orphanOptionCount === 0}
+                          >
+                            Open Option ({orphanOptionCount} / {orphanOptionDetailsCount})
+                          </button>
+                        </div>
+                        {ledgerOptionSubTab === 'contracts' && sortedClosedOptionGroups.length > 0 && (
+                          <div
+                            className="ledger-opt-instance-filter"
+                            role="radiogroup"
+                            aria-label="Filter contracts by strategy instance status"
+                          >
+                            <span className="ledger-opt-instance-filter-label">Instance</span>
+                            {(
+                              [
+                                { v: 'all', label: 'All' },
+                                { v: 'has_instance', label: 'Has instance' },
+                                { v: 'no_instance', label: 'No instance' },
+                                { v: 'mixed', label: 'Mixed' },
+                              ] as const
+                            ).map(({ v, label }) => (
+                              <button
+                                key={v}
+                                type="button"
+                                role="radio"
+                                aria-checked={ledgerOptInstanceFilter === v}
+                                className={`replay-bubble-switch-btn ${ledgerOptInstanceFilter === v ? 'active' : ''}`}
+                                onClick={() => setLedgerOptInstanceFilter(v)}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                            {ledgerOptInstanceFilter !== 'all' && (
+                              <span className="ledger-opt-instance-filter-count">
+                                {filteredClosedOptionGroupsByInstance.length} / {sortedClosedOptionGroups.length}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                       {ledgerOptionSubTab === 'contracts' && (
                       <LedgerClosedOptionContractsSection
-                        sortedClosedGroups={sortedClosedOptionGroups}
+                        sortedClosedGroups={filteredClosedOptionGroupsByInstance}
                         closedExpandedGroups={closedExpandedOptionGroups}
                         closedPnlSum={closedOptGroupsPnlSum}
                         detailsTotalPnl={ledgerDetailsTotalPnl}
@@ -1975,7 +2515,11 @@ export function LedgerView({
                           {(() => {
                             const stockExecs = sortedStockExecutions
                             if (!ledgerStockGroupByPosition) {
-                              return stockExecs.map((ex, i) => {
+                              const pagedStockExecs = stockExecs.slice(
+                                (stocksPage - 1) * STOCKS_PAGE_SIZE,
+                                stocksPage * STOCKS_PAGE_SIZE,
+                              )
+                              return pagedStockExecs.map((ex, i) => {
                                 const s = (ex.side ?? '').toUpperCase()
                                 const sideLabel =
                                   s === 'BUY' || s === 'BOT' || s === 'B'
@@ -2067,7 +2611,7 @@ export function LedgerView({
                               if (!groups.has(key)) groups.set(key, [])
                               groups.get(key)!.push(ex)
                             }
-                            const groupEntries = Array.from(
+                            const allGroupEntries = Array.from(
                               groups.entries(),
                             ).sort(([a], [b]) => {
                               const [accA, symA] = a.split('|')
@@ -2076,6 +2620,10 @@ export function LedgerView({
                                 return (symA || '').localeCompare(symB || '')
                               return (accA || '').localeCompare(accB || '')
                             })
+                            const groupEntries = allGroupEntries.slice(
+                              (stocksPage - 1) * STOCKS_PAGE_SIZE,
+                              stocksPage * STOCKS_PAGE_SIZE,
+                            )
                             const rows: JSX.Element[] = []
                             let rowIdx = 0
                             for (const [groupKey, execs] of groupEntries) {
@@ -2188,6 +2736,32 @@ export function LedgerView({
                           })()}
                         </tbody>
                       </table>
+                      {(() => {
+                        const totalItems = ledgerStockGroupByPosition
+                          ? Array.from(
+                              new Set(
+                                sortedStockExecutions.map(
+                                  ex =>
+                                    `${(ex.account_id ?? '').trim()}|${(ex.symbol ?? '').toString().trim().toUpperCase()}`,
+                                ),
+                              ),
+                            ).length
+                          : sortedStockExecutions.length
+                        const totalStockPages = Math.max(1, Math.ceil(totalItems / STOCKS_PAGE_SIZE))
+                        if (totalStockPages <= 1) return null
+                        return (
+                          <div className="ledger-pagination-bar" role="navigation" aria-label="Stocks pagination">
+                            <button type="button" className="ledger-pagination-btn" onClick={() => setStocksPage(1)} disabled={stocksPage === 1} aria-label="First page">«</button>
+                            <button type="button" className="ledger-pagination-btn" onClick={() => setStocksPage(p => Math.max(1, p - 1))} disabled={stocksPage === 1} aria-label="Previous page">‹</button>
+                            <span className="ledger-pagination-info">
+                              {stocksPage} / {totalStockPages}
+                              <span className="ledger-pagination-total"> ({totalItems})</span>
+                            </span>
+                            <button type="button" className="ledger-pagination-btn" onClick={() => setStocksPage(p => Math.min(totalStockPages, p + 1))} disabled={stocksPage === totalStockPages} aria-label="Next page">›</button>
+                            <button type="button" className="ledger-pagination-btn" onClick={() => setStocksPage(totalStockPages)} disabled={stocksPage === totalStockPages} aria-label="Last page">»</button>
+                          </div>
+                        )
+                      })()}
                     </div>
                   ) : (
                     <p className="section-hint">

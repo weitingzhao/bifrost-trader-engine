@@ -24,8 +24,10 @@ export function normalizeBenchmarkMap(
 /** Display price for streams: last trade if present, else mid (ingestor often has bid/ask only). */
 export function quoteDisplayLast(q: { last?: number | null; mid?: number | null } | undefined | null): number | null {
   if (!q) return null
-  if (q.last != null && Number.isFinite(q.last)) return q.last
-  if (q.mid != null && Number.isFinite(q.mid)) return q.mid
+  const last = q.last != null ? Number(q.last) : NaN
+  if (Number.isFinite(last) && last > 0) return last
+  const mid = q.mid != null ? Number(q.mid) : NaN
+  if (Number.isFinite(mid) && mid > 0) return mid
   return null
 }
 
@@ -128,15 +130,15 @@ export function resolvePreferredPrice(args: {
   daemonSpot?: number | null
   daemonUpdatedAt?: number | null
 }): { price: number | null; source: PriceSource; updatedAtSec: number | null } {
-  const liveLast = args.liveQuote?.last
-  if (liveLast != null && Number.isFinite(liveLast) && liveLast > 0) {
+  // Match Live / dashboard: use mid when last is absent (ingestor often has bid/ask only).
+  const livePx = quoteDisplayLast(args.liveQuote)
+  if (livePx != null && Number.isFinite(livePx) && livePx > 0) {
+    const tsRaw = args.liveQuote?.ts
+    const tsNum = tsRaw != null ? Number(tsRaw) : NaN
     return {
-      price: liveLast,
+      price: livePx,
       source: 'live',
-      updatedAtSec:
-        args.liveQuote?.ts != null && Number.isFinite(args.liveQuote.ts)
-          ? args.liveQuote.ts
-          : null,
+      updatedAtSec: Number.isFinite(tsNum) ? tsNum : null,
     }
   }
   if (args.dbPrice != null && Number.isFinite(args.dbPrice) && args.dbPrice > 0) {

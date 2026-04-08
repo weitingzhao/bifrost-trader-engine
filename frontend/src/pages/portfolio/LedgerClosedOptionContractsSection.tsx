@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from 'react'
+import { useState, useEffect, type Dispatch, type SetStateAction } from 'react'
 import type { Execution, OptExecutionGroup } from '../../types'
 import ExecSourceBadge from '../../components/ExecSourceBadge'
 import { InfoTooltip } from '../../components/InfoTooltip'
@@ -16,6 +16,67 @@ import {
   getOptGroupKey,
 } from './ledgerOptHelpers'
 import { LedgerStgInsCell } from './LedgerStgInsCell'
+
+const CLOSED_PAGE_SIZE = 50
+
+function PaginationBar({
+  page,
+  total,
+  pageSize,
+  onPage,
+}: {
+  page: number
+  total: number
+  pageSize: number
+  onPage: (p: number) => void
+}) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  if (totalPages <= 1) return null
+  return (
+    <div className="ledger-pagination-bar" role="navigation" aria-label="Table pagination">
+      <button
+        type="button"
+        className="ledger-pagination-btn"
+        onClick={() => onPage(1)}
+        disabled={page === 1}
+        aria-label="First page"
+      >
+        «
+      </button>
+      <button
+        type="button"
+        className="ledger-pagination-btn"
+        onClick={() => onPage(page - 1)}
+        disabled={page === 1}
+        aria-label="Previous page"
+      >
+        ‹
+      </button>
+      <span className="ledger-pagination-info">
+        {page} / {totalPages}
+        <span className="ledger-pagination-total"> ({total})</span>
+      </span>
+      <button
+        type="button"
+        className="ledger-pagination-btn"
+        onClick={() => onPage(page + 1)}
+        disabled={page === totalPages}
+        aria-label="Next page"
+      >
+        ›
+      </button>
+      <button
+        type="button"
+        className="ledger-pagination-btn"
+        onClick={() => onPage(totalPages)}
+        disabled={page === totalPages}
+        aria-label="Last page"
+      >
+        »
+      </button>
+    </div>
+  )
+}
 
 function LinkStrategyIconButton({ onClick, title }: { onClick: () => void; title: string }) {
   return (
@@ -107,6 +168,18 @@ export function LedgerClosedOptionContractsSection({
   detailPlaceholder = 'Click a closed trade row above to load details',
   sectionAriaLabel = 'Closed option positions and details',
 }: LedgerClosedOptionContractsSectionProps) {
+  const [closedPage, setClosedPage] = useState(1)
+
+  useEffect(() => {
+    setClosedPage(1)
+  }, [sortedClosedGroups.length])
+
+  const totalClosedPages = Math.max(1, Math.ceil(sortedClosedGroups.length / CLOSED_PAGE_SIZE))
+  const pagedClosedGroups = sortedClosedGroups.slice(
+    (closedPage - 1) * CLOSED_PAGE_SIZE,
+    closedPage * CLOSED_PAGE_SIZE,
+  )
+
   return (
     <section aria-label={sectionAriaLabel}>
       <div className="replay-portfolio-table-wrap">
@@ -197,7 +270,7 @@ export function LedgerClosedOptionContractsSection({
             </tr>
           </thead>
           <tbody>
-            {sortedClosedGroups.map(g => {
+            {pagedClosedGroups.map(g => {
               const uniqueAccounts = Array.from(
                 new Set((g.trades ?? []).map(t => (t.account_id ?? '').trim()).filter(Boolean)),
               )
@@ -368,6 +441,12 @@ export function LedgerClosedOptionContractsSection({
             </tr>
           </tfoot>
         </table>
+        <PaginationBar
+          page={closedPage}
+          total={sortedClosedGroups.length}
+          pageSize={CLOSED_PAGE_SIZE}
+          onPage={p => setClosedPage(Math.max(1, Math.min(p, totalClosedPages)))}
+        />
       </div>
 
       <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">

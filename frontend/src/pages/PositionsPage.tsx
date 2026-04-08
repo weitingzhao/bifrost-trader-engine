@@ -51,6 +51,13 @@ function buildLiveOptExecutionMap(executions: Execution[]): Map<string, Executio
   return map
 }
 
+/**
+ * Attribution / instance matching: prefer performance_book (Final); if none for this contract, use tws_raw (TWS).
+ */
+function positionExecsForAttribution(full: { final: Execution[]; tws: Execution[] }): Execution[] {
+  return full.final.length > 0 ? full.final : full.tws
+}
+
 function mergeExecsUniqueById(a: Execution[], b: Execution[]): Execution[] {
   const seen = new Set<number>()
   const out: Execution[] = []
@@ -922,7 +929,7 @@ export function PositionsPage({
     ],
   )
 
-  /** Instance row: per option, abs execution qtys joined by comma; Final book only when any Final matches (else TWS). Option groups separated by fullwidth | */
+  /** Instance row: per option, abs execution qtys joined by comma; Final when present else TWS. Option groups separated by fullwidth | */
   const formatInstanceOptExecQtyCell = useCallback(
     (allGroup: InstanceAllGroup): string => {
       const instId = allGroup.strategy_instance_id
@@ -933,17 +940,15 @@ export function PositionsPage({
           if (pos.filtered_exec_lists) return true
           return executionMatchesInstanceGroup(ex, instId, oppId)
         }
-        let final: Execution[] = []
-        let tws: Execution[] = []
+        let src: Execution[] = []
         if (pos.filtered_exec_lists) {
-          final = pos.filtered_exec_lists.final.filter(execMatchesInstance)
-          tws = pos.filtered_exec_lists.tws.filter(execMatchesInstance)
+          const final = pos.filtered_exec_lists.final.filter(execMatchesInstance)
+          const tws = pos.filtered_exec_lists.tws.filter(execMatchesInstance)
+          src = final.length > 0 ? final : tws
         } else {
           const lists = getPositionExecLists(pos)
-          final = lists.final.filter(execMatchesInstance)
-          tws = lists.tws.filter(execMatchesInstance)
+          src = positionExecsForAttribution(lists).filter(execMatchesInstance)
         }
-        const src = final.length > 0 ? final : tws
         const qtyStrs =
           src.length > 0
             ? src.map(ex => {
@@ -1302,7 +1307,7 @@ export function PositionsPage({
       }
       for (const p of bucket.options) {
         if (p.filtered_exec_lists) continue
-        const execs = getPositionExecLists(p).merged
+        const execs = positionExecsForAttribution(getPositionExecLists(p))
         for (const e of execs) {
           if (e.strategy_opportunity_id != null) return e.strategy_opportunity_id
         }
@@ -1310,7 +1315,10 @@ export function PositionsPage({
       return null
     }
 
-    /** Fills that do not match this instance row → separate Uncategorized rows under Unassigned. */
+    /**
+     * Fills that do not match this instance row → separate Uncategorized rows under Unassigned.
+     * Prefer Final (performance_book) for matching; if no Final rows for this contract, use TWS (tws_raw).
+     */
     const unassignedKey = '__unassigned__'
     for (const [, b] of map) {
       if (b.id == null) continue
@@ -1324,7 +1332,9 @@ export function PositionsPage({
         const unscopedTws = full.tws.filter(
           ex => !executionMatchesInstanceGroup(ex, b.id, oppIdForMatch),
         )
-        if (unscopedFinal.length === 0 && unscopedTws.length === 0) continue
+        const useFinal = full.final.length > 0
+        const hasUnscoped = useFinal ? unscopedFinal.length > 0 : unscopedTws.length > 0
+        if (!hasUnscoped) continue
         let u = map.get(unassignedKey)
         if (!u) {
           u = { id: null, label: null, oppName: null, oppId: null, openedAt: null, options: [] }
@@ -1332,7 +1342,9 @@ export function PositionsPage({
         }
         u.options.push({
           ...p,
-          filtered_exec_lists: { final: unscopedFinal, tws: unscopedTws },
+          filtered_exec_lists: useFinal
+            ? { final: unscopedFinal, tws: [] }
+            : { final: [], tws: unscopedTws },
           attribution_type: 'unassigned',
         })
       }
@@ -1411,7 +1423,7 @@ export function PositionsPage({
           }
           continue
         }
-        const matchedExecs = getPositionExecLists(p).merged.filter(ex =>
+        const matchedExecs = positionExecsForAttribution(getPositionExecLists(p)).filter(ex =>
           executionMatchesInstanceGroup(ex, b.id, oppId),
         )
         if (matchedExecs.length > 0) {
@@ -2628,8 +2640,13 @@ export function PositionsPage({
                                                     allGroup.strategy_opportunity_id,
                                                   )
                                                 }
-                                                const scopedFinalExecs = execLists.final.filter(execMatchesInstance)
-                                                const scopedTwsExecs = execLists.tws.filter(execMatchesInstance)
+                                                const authFromFinal = execLists.final.length > 0
+                                                const scopedFinalExecs = authFromFinal
+                                                  ? execLists.final.filter(execMatchesInstance)
+                                                  : []
+                                                const scopedTwsExecs = authFromFinal
+                                                  ? []
+                                                  : execLists.tws.filter(execMatchesInstance)
                                                 const execCount = scopedFinalExecs.length + scopedTwsExecs.length
                                                 const hasExecutions = execCount > 0
                                                 const isPosExpanded = expandedPositionKeys.includes(posKey)
@@ -3157,8 +3174,10 @@ export function PositionsPage({
                             const value = (pos.avg_cost ?? 0) * absQty * 100
                             const ts = getPositionTime(pos)
                             const execLists = getPositionExecLists(pos)
-                            const execCount = execLists.final.length + execLists.tws.length
+                            const authExecs = positionExecsForAttribution(execLists)
+                            const execCount = authExecs.length
                             const hasExecutions = execCount > 0
+                            const authFromFinal = execLists.final.length > 0
                             const isPosExpanded = expandedPositionKeys.includes(posKey)
                             const posRow = (
                               <tr
@@ -3181,7 +3200,7 @@ export function PositionsPage({
                                   {(() => {
                                     const p = getContractLabelParts(pos.contract_key)
                                     const strikeStr = pos.strike != null ? ` ${pos.strike}` : ''
-                                    const fill = instanceIconFillFromMergedExecutions(execLists.merged)
+                                    const fill = instanceIconFillFromMergedExecutions(authExecs)
                                     const instanceIcon =
                                       fill === 'empty'
                                         ? null
@@ -3283,14 +3302,13 @@ export function PositionsPage({
                               </tr>
                             )
                             const execRows = isPosExpanded
-                              ? [
-                                  ...execLists.final.map((ex, ei) =>
+                              ? authFromFinal
+                                ? execLists.final.map((ex, ei) =>
                                     renderOpenOptionExecutionRow(pos, posKey, ex, ei, 'final', execLists.final, execLists.tws, false),
-                                  ),
-                                  ...execLists.tws.map((ex, ei) =>
+                                  )
+                                : execLists.tws.map((ex, ei) =>
                                     renderOpenOptionExecutionRow(pos, posKey, ex, ei, 'tws', execLists.final, execLists.tws, false),
-                                  ),
-                                ]
+                                  )
                               : []
                             return [posRow, ...execRows]
                       })}

@@ -99,6 +99,7 @@ class RedisQuotesWriter:
                 db=self._params.db,
                 password=self._params.password if self._params.password else None,
                 socket_connect_timeout=self._params.socket_connect_timeout,
+                socket_timeout=self._params.socket_connect_timeout,
                 decode_responses=True,
             )
             self._client.ping()
@@ -239,6 +240,7 @@ class RedisQuotesReader:
                 db=self._params.db,
                 password=self._params.password if self._params.password else None,
                 socket_connect_timeout=self._params.socket_connect_timeout,
+                socket_timeout=self._params.socket_connect_timeout,
                 decode_responses=True,
             )
             self._client.ping()
