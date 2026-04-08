@@ -65,8 +65,6 @@ def market_ingest_services_from_config(config: dict) -> List[Dict[str, str]]:
         if sid == "ib_market":
             sid = "ib_ingestor"
         norm_unit = unit if unit.endswith(".service") else f"{unit}.service"
-        if norm_unit == "bifrost-ib-market-ingest.service":
-            norm_unit = "bifrost-ib-ingestor.service"
         if sid == "massive_ws" and meta == LEGACY_BIFROST_MASSIVE_WS:
             meta = BIFROST_HEALTH_MASSIVE_WS
         elif sid == "ib_ingestor" and meta in (

@@ -31,12 +31,15 @@ class IbAccountAgentRedisWriter:
         *,
         secondary_connected: Optional[bool] = None,
         secondary_client_id: Optional[int] = None,
+        host_alive: bool = True,
     ) -> None:
         # `connected` / `client_id` = Host slot (backward compat with older readers).
         # `host_connected` / `host_client_id` explicit for Monitor /status (same idea as IB Operator).
+        # `host_alive` = process in service (false on graceful shutdown); drives /status service_alive for lamps.
         m: Dict[str, str] = {
             "connected": "1" if connected else "0",
             "host_connected": "1" if connected else "0",
+            "host_alive": "1" if host_alive else "0",
             "client_id": str(client_id),
             "host_client_id": str(client_id),
             "last_msg_ts": str(last_msg_ts),

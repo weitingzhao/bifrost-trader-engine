@@ -32,6 +32,28 @@ def test_parse_redis_realtime_subscribe_channel_override() -> None:
     assert p.subscribe_channel == "custom:quotes"
 
 
+def test_get_quote_prefers_ingester_tick_over_legacy_quote_key() -> None:
+    p = RedisRealtimeParams(
+        host="127.0.0.1",
+        port=6379,
+        db=0,
+        password=None,
+        socket_connect_timeout=5.0,
+        quote_ttl_sec=300,
+        channel=PUB_CHANNEL,
+        subscribe_channel=SUBSCRIBE_CHANNEL_DEFAULT,
+    )
+    r = RedisQuotesReader(p)
+    r._client = MagicMock()
+    r._available = True
+    ing_val = '{"symbol":"AAPL","contract_key":"AAPL|STK|||","ts":2.0,"bid":101.0}'
+    r._client.get.side_effect = lambda k: ing_val if k == "ib:ingester:tick:AAPL|STK|||" else None
+    out = r.get_quote("AAPL")
+    assert out is not None
+    assert out["bid"] == 101.0
+    r._client.get.assert_called_with("ib:ingester:tick:AAPL|STK|||")
+
+
 def test_get_ingester_tick_reads_and_parses() -> None:
     p = RedisRealtimeParams(
         host="127.0.0.1",

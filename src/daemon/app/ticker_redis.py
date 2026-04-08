@@ -39,21 +39,7 @@ def on_ticker_for_symbol(app: Any, symbol: str, ticker: Any) -> None:
                             app.store.set_underlying_price(L)
                     except (TypeError, ValueError):
                         pass
-        # R-RM*: write quote to Redis and publish (daemon sole writer; failures do not affect hedge)
-        if getattr(app, "_redis_quotes", None) and app._redis_quotes.available:
-            try:
-                payload = (
-                    quote_payload(app)
-                    if symbol == app.symbol
-                    else quote_payload_from_ticker(symbol, ticker)
-                )
-                if payload:
-                    app._redis_quotes.set_quote(symbol, payload)
-                    # SSE uses IB ingestor pub/sub (ib:ingester:channel); daemon does not PUBLISH.
-            except Exception as e:
-                logger.warning(
-                    "Redis quote write/publish in _on_ticker_for_symbol: %s", e
-                )
+        # Live quotes to Redis are written by IB Ingestor; daemon does not write quote keys.
         # Hedge evaluation is driven only by heartbeat (control_heartbeat), not by every ticker update.
     except Exception as e:
         logger.debug("ticker callback error for %s: %s", symbol, e)

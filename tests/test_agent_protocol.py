@@ -10,7 +10,6 @@ def test_validate_unit_ib_account_agent() -> None:
 
 def test_validate_unit_ingest_family() -> None:
     assert validate_unit("bifrost-ib-ingestor.service") is True
-    assert validate_unit("bifrost-ib-market-ingest.service") is True
     assert validate_unit("bifrost-massive-ws.service") is True
 
 

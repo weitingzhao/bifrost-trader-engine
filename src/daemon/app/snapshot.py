@@ -1,10 +1,9 @@
 """Snapshot and heartbeat dict building for TradingFSM and StatusSink. Used by GsTrading."""
 
 import logging
+import math
 import time
 from typing import Any, Optional, Tuple
-
-from src.portfolio.accounts import _connector_for_read
 from src.config.settings import get_state_space_config
 from src.daemon.core.state.classifier import StateClassifier
 from src.daemon.core.state.composite import CompositeState
@@ -184,11 +183,38 @@ async def refresh_and_build_snapshot(
     stock_shares = app.store.get_stock_position()
     spot = app.store.get_underlying_price()
     if spot is None or spot <= 0:
-        conn = _connector_for_read(app)
-        if conn:
-            spot = await conn.get_underlying_price(app.symbol)
-        if spot is not None and spot > 0:
-            app.store.set_underlying_price(spot)
+        rq = getattr(app, "_redis_quotes_reader", None)
+        sym = (app.symbol or "").strip()
+        if rq and getattr(rq, "available", False) and sym:
+            q = rq.get_quote(sym)
+            if q:
+                try:
+                    last = q.get("last")
+                    bid = q.get("bid")
+                    ask = q.get("ask")
+                    last_f = float(last) if last is not None else None
+                    if last_f is not None and math.isfinite(last_f) and last_f > 0:
+                        spot = last_f
+                        app.store.set_underlying_price(spot)
+                    bid_f = float(bid) if bid is not None else None
+                    ask_f = float(ask) if ask is not None else None
+                    if (
+                        bid_f is not None
+                        and math.isfinite(bid_f)
+                        and ask_f is not None
+                        and math.isfinite(ask_f)
+                    ):
+                        app.store.set_underlying_quote(bid_f, ask_f)
+                    qts = q.get("ts")
+                    if qts is not None:
+                        try:
+                            app._market_data.set_last_ts(float(qts))
+                        except (TypeError, ValueError):
+                            app._market_data.touch_ts()
+                    else:
+                        app._market_data.touch_ts()
+                except (TypeError, ValueError):
+                    pass
     if spot is None or spot <= 0:
         return None
     # 1.c. Get option legs

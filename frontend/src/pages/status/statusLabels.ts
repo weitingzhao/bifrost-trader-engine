@@ -60,7 +60,7 @@ export const DAEMON_STATE_LABELS: Record<string, string> = {
   running: 'Running',
   running_suspended: 'Running (hedge suspended)',
   connecting: 'Connecting',
-  waiting_ib: 'Waiting for IB (auto-retry)',
+  waiting_ib: 'Waiting (legacy state)',
   connected: 'Connected',
   stopping: 'Stopping',
   stopped: 'Stopped',

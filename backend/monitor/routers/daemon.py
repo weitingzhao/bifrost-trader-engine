@@ -1,4 +1,4 @@
-"""Daemon control: POST /control/* (stop, flatten, suspend, resume, retry_ib, release_ib, refresh_*, set_heartbeat_interval, monitor_stop, monitor_release_ib, celery_stop, monitor_connect)."""
+"""Daemon control: POST /control/* (stop, flatten, suspend, resume, retry_ib, release_ib, refresh_*, set_heartbeat_interval, monitor_stop, monitor_release_ib, celery_stop, monitor_connect). Engine has no IB socket; retry_ib/release_ib are legacy queue drains for the daemon."""
 
 import asyncio
 import json
@@ -206,35 +206,43 @@ def post_control_suspend(request: Request) -> JSONResponse:
 
 @router.post("/control/resume")
 def post_control_resume(request: Request) -> JSONResponse:
-    """Set daemon_run_status.suspended=false; daemon will resume hedging. Also write retry_ib so daemon in WAITING_IB reconnects Trading Client."""
+    """Set daemon_run_status.suspended=false; daemon will resume hedging on next heartbeat."""
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
     if not write_run_status(control_via_db, suspended=False):
         return JSONResponse(status_code=500, content={"error": "failed to set run status"})
-    write_control_command(control_via_db, "retry_ib")
-    return JSONResponse(status_code=200, content={"ok": True, "message": "trading resumed; retry_ib written for daemon to reconnect IB Trading Client"})
+    return JSONResponse(
+        status_code=200,
+        content={"ok": True, "message": "trading resumed; daemon will leave RUNNING_SUSPENDED on next heartbeat"},
+    )
 
 
 @router.post("/control/retry_ib")
 def post_control_retry_ib(request: Request) -> JSONResponse:
-    """Insert 'retry_ib' into daemon_control; daemon will attempt IB connect on next poll (RE-7)."""
+    """Insert 'retry_ib' into daemon_control; daemon consumes it as a legacy no-op (no in-process IB)."""
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
     if write_control_command(control_via_db, "retry_ib"):
-        return JSONResponse(status_code=200, content={"ok": True, "message": "retry_ib written to daemon_control"})
+        return JSONResponse(
+            status_code=200,
+            content={"ok": True, "message": "retry_ib written (daemon clears queue; no IB reconnect)"},
+        )
     return JSONResponse(status_code=500, content={"error": "failed to write control command"})
 
 
 @router.post("/control/release_ib")
 def post_control_release_ib(request: Request) -> JSONResponse:
-    """Insert 'release_ib' into daemon_control; daemon will release IB connection on next heartbeat (disconnect → WAITING_IB)."""
+    """Insert 'release_ib' into daemon_control; daemon consumes it as a legacy no-op (no IB in daemon)."""
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
     if write_control_command(control_via_db, "release_ib"):
-        return JSONResponse(status_code=200, content={"ok": True, "message": "release_ib written to daemon_control"})
+        return JSONResponse(
+            status_code=200,
+            content={"ok": True, "message": "release_ib written (daemon clears queue; use monitor_release_ib for Operator)"},
+        )
     return JSONResponse(status_code=500, content={"error": "failed to write control command"})
 
 

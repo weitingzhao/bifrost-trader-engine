@@ -18,6 +18,10 @@ from backend.ops.market_ingest_control_env import (
     read_control_env,
     write_control_env,
 )
+from backend.ops.market_ingest_health_clear import (
+    clear_ingest_health_after_stop,
+    ingest_redis_health_looks_live,
+)
 from backend.ops.models.schemas import MarketIngestAction, MarketIngestControlRequest
 from backend.ops.routers.workers import _audit, _require_role
 
@@ -100,8 +104,10 @@ async def market_ingest_control(
     meta_key = (svc.get("redis_meta_key") or "").strip()
     rurl = meta_redis_url_from_ops_config(cfg)
     ops_profile = _ops_control_profile(request)
-    if rurl and meta_key and ops_profile:
+    claimed: Optional[str] = None
+    if rurl and meta_key:
         claimed = await asyncio.to_thread(read_control_env, rurl, meta_key)
+    if rurl and meta_key and ops_profile:
         if claimed and claimed != ops_profile:
             msg = (
                 f"Ingest control is held by the {claimed.upper()} stack (Redis). "
@@ -113,6 +119,43 @@ async def market_ingest_control(
                 f"{body.service_id}:{unit}",
                 "rejected",
                 detail=f"redis_control_env={claimed} ops_profile={ops_profile}",
+            )
+            return JSONResponse(
+                status_code=409,
+                content={"ok": False, "error": msg},
+            )
+
+    # Exclusive writer: no lease but Redis health still shows a fresh connected snapshot (other stack).
+    if (
+        action
+        in (
+            MarketIngestAction.START,
+            MarketIngestAction.RESTART,
+            MarketIngestAction.RESET,
+        )
+        and rurl
+        and meta_key
+        and ops_profile
+        and claimed is None
+    ):
+        looks_live = await asyncio.to_thread(
+            ingest_redis_health_looks_live,
+            rurl,
+            meta_key,
+            sid,
+        )
+        if looks_live:
+            msg = (
+                "Redis health still shows an active Socket Services writer (no control lease). "
+                "Only one of Dev or Prod may run this service against this Redis. "
+                "Stop the other stack's process or wait for health to go stale, then retry."
+            )
+            _audit(
+                request,
+                f"market_ingest_{body.action.value}",
+                f"{body.service_id}:{unit}",
+                "rejected",
+                detail="redis_health_looks_live without bifrost_ops_control_env",
             )
             return JSONResponse(
                 status_code=409,
@@ -156,19 +199,30 @@ async def market_ingest_control(
             content={"ok": False, "error": str(e)},
         )
 
-    if rurl and meta_key and ops_profile:
+    if rurl and meta_key:
         try:
             if action == MarketIngestAction.STOP:
-                await asyncio.to_thread(clear_control_env, rurl, meta_key)
-            elif action in (
-                MarketIngestAction.START,
-                MarketIngestAction.RESTART,
-                MarketIngestAction.RESET,
+                if ops_profile:
+                    await asyncio.to_thread(clear_control_env, rurl, meta_key)
+                await asyncio.to_thread(
+                    clear_ingest_health_after_stop,
+                    rurl,
+                    meta_key,
+                    sid,
+                )
+            elif (
+                ops_profile
+                and action
+                in (
+                    MarketIngestAction.START,
+                    MarketIngestAction.RESTART,
+                    MarketIngestAction.RESET,
+                )
             ):
                 await asyncio.to_thread(write_control_env, rurl, meta_key, ops_profile)
         except Exception as e:
             logger.warning(
-                "market_ingest redis_control_env post-action failed: %s %s %s",
+                "market_ingest redis post-action failed: %s %s %s",
                 body.service_id,
                 action.value,
                 e,
@@ -178,14 +232,14 @@ async def market_ingest_control(
                 f"market_ingest_{body.action.value}",
                 f"{body.service_id}:{unit}",
                 "failed",
-                detail=f"redis_control_env: {e}",
+                detail=f"redis_control_env_or_health: {e}",
             )
             return JSONResponse(
                 status_code=500,
                 content={
                     "ok": False,
                     "error": (
-                        "systemd action succeeded but updating Redis control lease failed: "
+                        "systemd action succeeded but updating Redis (lease or health) failed: "
                         f"{e}"
                     ),
                 },

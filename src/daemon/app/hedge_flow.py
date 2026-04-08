@@ -194,8 +194,9 @@ async def hedge(
         order_status="sent", side=intent.side, quantity=intent.quantity
     )
     trade_ok = False
-    if getattr(app, "_use_ib_edge", False) and getattr(app, "_operator_client", None):
-        op_res = await app._operator_client.request_async(
+    op = getattr(app, "_operator_client", None)
+    if op is not None:
+        op_res = await op.request_async(
             "place_stock_order",
             {
                 "symbol": app.symbol,
@@ -209,13 +210,9 @@ async def hedge(
         if not trade_ok:
             logger.warning("IB Operator place_stock_order failed: %s", op_res.get("error"))
     else:
-        trade = await app.connector.place_order(
-            app.symbol,
-            intent.side,
-            intent.quantity,
-            order_type=app.order_type,
+        logger.warning(
+            "Hedge order skipped: IB Operator client unavailable (configure operator / engine)"
         )
-        trade_ok = trade is not None
     if trade_ok:
         app._fsm_hedge.on_ack_ok()
         app.guard.record_hedge_sent()

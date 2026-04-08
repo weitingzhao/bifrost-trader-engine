@@ -55,17 +55,14 @@ def run_subscribe_loop(
             try:
                 data = json.loads(msg["data"])
                 contract_key = (data.get("contract_key") or "").strip()
+                if not contract_key:
+                    sym = (data.get("symbol") or "").strip()
+                    if sym:
+                        contract_key = f"{sym}|STK|||"
                 if contract_key:
                     quote = reader.get_ingester_tick(contract_key)
                     if quote:
                         on_quote(quote)
-                    continue
-                symbol = (data.get("symbol") or "").strip()
-                if not symbol:
-                    continue
-                quote = reader.get_quote(symbol)
-                if quote:
-                    on_quote(quote)
             except (json.JSONDecodeError, TypeError) as e:
                 logger.debug("Redis subscribe message parse skip: %s", e)
     finally:

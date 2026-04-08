@@ -1,7 +1,30 @@
-import type { DaemonHeartbeat, IbClient, StatusResponse } from '../../../types'
+import type { ReactNode } from 'react'
+import type { DaemonHeartbeat, StatusResponse } from '../../../types'
 import { fmtTs } from '../../../utils/format'
+import { ingestRedisHealthLamp } from '../../../utils/socketIngestLamp'
+import { ingestLampToBrokerRowLamp } from '../daemonIbBrokerLamp'
 
 type Lamp = 'green' | 'yellow' | 'red' | 'none'
+
+/** Same glyph as Heartbeat / IB broker header lamps (stroke/fill). */
+const ACTIVITY_LAMP_SVG = (
+  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M22 12h-4l-3 9L9 3 6 12H2" />
+  </svg>
+)
+
+function IbBrokerServiceLamp({ lamp, title }: { lamp: Lamp; title: string }) {
+  return (
+    <span
+      className={`title-inline-lamp lamp-icon ib-broker-service-lamp ${lamp}`}
+      title={title}
+      role="img"
+      aria-label={title}
+    >
+      {ACTIVITY_LAMP_SVG}
+    </span>
+  )
+}
 
 export interface StatusDaemonPanelProps {
   status: StatusResponse | null
@@ -13,15 +36,12 @@ export interface StatusDaemonPanelProps {
   daemonLamp: Lamp
   heartbeatGroupLamp: Lamp
   ibGroupLamp: Lamp
-  strategyGroupLamp: Lamp
+  ibGroupTitle: string
   secondsUntilNextHeartbeat: number | null
-  runStatusLabel: string
-  suspended: boolean
-  ibConnected: boolean
-  daemonIbLine: string
-  ibConfig: IbClient | null | undefined
+  /** Compact Trading Strategy panel (controls + summary) — core daemon trading surface */
+  strategyPanel: ReactNode
   onStop: () => void
-  onReleaseIb: () => void
+  onNavigateToSocket?: () => void
   ctrlMsg: { text: string; isErr: boolean }
   className?: string
 }
@@ -36,19 +56,18 @@ export function StatusDaemonPanel({
   daemonLamp,
   heartbeatGroupLamp,
   ibGroupLamp,
-  strategyGroupLamp,
+  ibGroupTitle,
   secondsUntilNextHeartbeat,
-  runStatusLabel,
-  suspended: _suspended,
-  ibConnected,
-  daemonIbLine,
-  ibConfig,
+  strategyPanel,
   onStop,
-  onReleaseIb,
+  onNavigateToSocket,
   ctrlMsg,
   className,
 }: StatusDaemonPanelProps) {
-  const anyIbConnection = Boolean(ibConnected || hb?.listener_connected || hb?.listener_2_connected)
+  const opLamp = ingestRedisHealthLamp('ib_operator', j)
+  const ingLamp = ingestRedisHealthLamp('ib_ingestor', j)
+  const aaLamp = ingestRedisHealthLamp('ib_account_agent', j)
+
   return (
     <div id="system-panel-daemon" role="tabpanel" aria-labelledby="tab-daemon" className={className ? `system-tab-panel ${className}` : 'system-tab-panel'}>
       <div className="daemon-header">
@@ -83,7 +102,7 @@ export function StatusDaemonPanel({
           <div className="daemon-group daemon-group-heartbeat">
           <div className="daemon-group-header">
             <span className={`title-inline-lamp lamp-icon ${heartbeatGroupLamp}`} title="Heartbeat status" aria-hidden>
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
+              {ACTIVITY_LAMP_SVG}
             </span>
             <span className="daemon-group-title">Heartbeat</span>
           </div>
@@ -102,113 +121,61 @@ export function StatusDaemonPanel({
                 Next heartbeat: <span className="countdown-num">{secondsUntilNextHeartbeat}</span> s
               </p>
             )}
-            {/* Database/Redis under Heartbeat to save space */}
-            {!hb?.daemon_alive ? (
-              <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>Redis: —</p>
-            ) : hb.redis_quotes_connected ? (
-              <p className="section-hint countdown-line" style={{ marginTop: 'var(--space-2)' }}>
-                Redis: <span className="countdown-num">Connected</span>
-              </p>
-            ) : (
-              <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>Redis: Not connected or not configured</p>
-            )}
           </div>
         </div>
         <div className="daemon-group daemon-group-ib">
-          <div className="daemon-group-header daemon-group-header-with-action">
-            <div className="daemon-group-header-left">
-              <span className={`title-inline-lamp lamp-icon ${ibGroupLamp}`} title="IB connection status" aria-hidden>
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
-              </span>
-              <span className="daemon-group-title">IB connection</span>
-            </div>
-            <button
-              type="button"
-              className="section-header-icon-btn"
-              title={anyIbConnection && hb?.daemon_alive
-                ? 'Release IB connection on next daemon heartbeat (daemon will go to WAITING_IB and can retry later)'
-                : 'Reset is available when daemon is running and at least one of Trading or Listener (Host/Secondary) is connected'}
-              aria-label="Reset IB connection"
-              disabled={!anyIbConnection || !hb?.daemon_alive}
-              onClick={onReleaseIb}
-            >
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                <path d="M3 3v5h5" />
-                <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
-                <path d="M16 21h5v-5" />
-              </svg>
-            </button>
+          <div className="daemon-group-header">
+            <span className={`title-inline-lamp lamp-icon ${ibGroupLamp}`} title={ibGroupTitle} aria-hidden>
+              {ACTIVITY_LAMP_SVG}
+            </span>
+            <span className="daemon-group-title">IB broker</span>
           </div>
           <div className="daemon-group-body">
-            <table className="ib-connection-table" aria-label="Daemon IB connection status by Host and type">
+            <table className="ib-connection-table" aria-label="IB broker path services">
               <thead>
                 <tr>
-                  <th scope="col" className="ib-connection-th-corner" />
-                  <th scope="col" className="ib-connection-th">Host</th>
-                  <th scope="col" className="ib-connection-th">Secondary</th>
+                  <th scope="col" className="ib-connection-th">Service</th>
+                  <th scope="col" className="ib-connection-th">Status</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <th scope="row" className="ib-connection-row-label">Trading</th>
-                  <td className="ib-connection-cell">
-                    {!hb?.daemon_alive ? (
-                      '—'
-                    ) : ibConnected ? (
-                      <span className="countdown-num">Connected @ {hb?.ib_client_id ?? '?'}</span>
-                    ) : (
-                      daemonIbLine || '—'
-                    )}
+                  <th scope="row" className="ib-connection-row-label">IB Operator</th>
+                  <td className="ib-connection-cell ib-connection-cell--lamp">
+                    <IbBrokerServiceLamp lamp={ingestLampToBrokerRowLamp(opLamp.lamp)} title={opLamp.title} />
                   </td>
-                  <td className="ib-connection-cell">Not supported</td>
                 </tr>
                 <tr>
-                  <th scope="row" className="ib-connection-row-label">Listener</th>
-                  <td className="ib-connection-cell">
-                    {!hb?.daemon_alive ? (
-                      '—'
-                    ) : ibConfig?.port?.listener_host == null ? (
-                      '—'
-                    ) : hb?.listener_connected ? (
-                      <span className="countdown-num">Connected @ {hb?.listener_client_id ?? ibConfig.port.listener_host}</span>
-                    ) : (
-                      'Not connected'
-                    )}
+                  <th scope="row" className="ib-connection-row-label">IB Ingestor</th>
+                  <td className="ib-connection-cell ib-connection-cell--lamp">
+                    <IbBrokerServiceLamp lamp={ingestLampToBrokerRowLamp(ingLamp.lamp)} title={ingLamp.title} />
                   </td>
-                  <td className="ib-connection-cell">
-                    {!hb?.daemon_alive ? (
-                      '—'
-                    ) : (ibConfig?.client?.secondary_host_ip ?? ibConfig?.port?.listener_secondary != null) ? (
-                      hb?.listener_2_connected ? (
-                        <span className="countdown-num">Connected @ {hb?.listener_2_client_id ?? ibConfig?.port?.listener_secondary ?? '?'}</span>
-                      ) : (
-                        'Not connected'
-                      )
-                    ) : (
-                      'Not configured'
-                    )}
+                </tr>
+                <tr>
+                  <th scope="row" className="ib-connection-row-label">IB Account Agent</th>
+                  <td className="ib-connection-cell ib-connection-cell--lamp">
+                    <IbBrokerServiceLamp lamp={ingestLampToBrokerRowLamp(aaLamp.lamp)} title={aaLamp.title} />
                   </td>
                 </tr>
               </tbody>
             </table>
-            {hb?.daemon_alive && !ibConnected && (
-              <p className="section-hint section-hint--retry" style={{ marginTop: 'var(--space-2)' }}>Will retry connection on next heartbeat.</p>
-            )}
+            <a
+              href="#settings-ws-connector"
+              className="daemon-ib-broker-socket-link section-hint"
+              onClick={e => {
+                if (onNavigateToSocket) {
+                  e.preventDefault()
+                  onNavigateToSocket()
+                }
+              }}
+            >
+              Open Socket services…
+            </a>
           </div>
         </div>
-        <div className="daemon-group daemon-group-event">
-          <div className="daemon-group-header">
-            <span className={`title-inline-lamp lamp-icon ${strategyGroupLamp}`} title="Event: green when Trading Strategy running and IB Event Subscribe (Settings → Subscribe) green; red when suspended or IB Event Subscribe red" aria-hidden>
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
-            </span>
-            <span className="daemon-group-title">Event</span>
-          </div>
-          <div className="daemon-group-body">
-            <p className="section-hint daemon-event-run-status-hint">
-              Current: <span>{runStatusLabel}</span>{' '}
-              (set by monitor; daemon syncs via PostgreSQL)
-            </p>
+        <div className="daemon-group daemon-group-strategy">
+          <div className="daemon-group-body daemon-group-strategy-body">
+            {strategyPanel}
           </div>
         </div>
       </div>

@@ -359,9 +359,8 @@
   overflow-wrap: break-word;
 }
 
-/* Daemon Event card + compact strategy: long status lines wrap instead of stretching layout */
-.daemon-group-event .daemon-group-body .section-hint,
-.daemon-event-run-status-hint,
+/* Trading Strategy card (embedded compact panel): long status lines wrap */
+.daemon-group-strategy .daemon-group-body .section-hint,
 .strategy-compact-status {
   max-width: 100%;
   overflow-wrap: anywhere;
@@ -505,6 +504,34 @@
 .settings-page-groups > .daemon-group .daemon-group-body,
 .settings-page-groups > .settings-ib-connection-group > .daemon-group .daemon-group-body {
   padding: 0;
+}
+
+/* Daemon card header lamps (Heartbeat / IB broker): win over inherited text color in Settings layout */
+.settings-page-groups > .daemon-group .daemon-group-header .title-inline-lamp.green,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group .daemon-group-header .title-inline-lamp.green {
+  color: var(--color-lamp-green);
+  filter: drop-shadow(0 0 5px var(--color-lamp-green)) drop-shadow(0 0 10px rgba(74, 222, 128, 0.3));
+  animation: lamp-pulse-green 2.5s ease-in-out infinite;
+}
+
+.settings-page-groups > .daemon-group .daemon-group-header .title-inline-lamp.yellow,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group .daemon-group-header .title-inline-lamp.yellow {
+  color: var(--color-lamp-yellow);
+  filter: drop-shadow(0 0 5px var(--color-lamp-yellow)) drop-shadow(0 0 10px rgba(250, 204, 21, 0.3));
+}
+
+.settings-page-groups > .daemon-group .daemon-group-header .title-inline-lamp.red,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group .daemon-group-header .title-inline-lamp.red {
+  color: var(--color-lamp-red);
+  filter: drop-shadow(0 0 5px var(--color-lamp-red)) drop-shadow(0 0 10px rgba(248, 113, 113, 0.3));
+  animation: lamp-pulse-red 1.5s ease-in-out infinite;
+}
+
+.settings-page-groups > .daemon-group .daemon-group-header .title-inline-lamp.none,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group .daemon-group-header .title-inline-lamp.none {
+  color: var(--color-lamp-none);
+  filter: none;
+  animation: none;
 }
 
 /* Scroll margin so anchor targets aren't under header */

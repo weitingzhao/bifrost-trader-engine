@@ -1,21 +1,10 @@
-"""Ticker subscriptions and R-M6 contract_quote_live (IB + Redis). Used by GsTrading.
-Ticker subscribe/unsubscribe use Host Listener (listener_connector), not Host Trading."""
+"""R-M6 contract_quote_live from Redis quotes (IB Ingestor). No in-process IB subscriptions in daemon."""
 
 import logging
 import math
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
-
-# Max Watchlist OPT contracts to subscribe (IB ~100 lines total; reserve room for STK).
-MAX_OPTION_TICKER_CONTRACTS = 50
-
-
-def _ticker_connector(app: Any) -> Any:
-    """Connector used for Real-time ticker: Host Listener."""
-    return getattr(app, "listener_connector", None)
-
-STALE_TICKER_SEC = 30.0
 
 
 def _clear_control_message(app: Any) -> None:
@@ -23,64 +12,11 @@ def _clear_control_message(app: Any) -> None:
         app._status_sink.write_daemon_control_message(None)
 
 
-def _redis_add_subscribed(app: Any, symbols: Set[str]) -> None:
-    """Add symbols to Redis ticker:subscribed set after subscribing."""
-    if not getattr(app, "_redis_quotes", None) or not app._redis_quotes.available:
-        return
-    for sym in symbols:
-        app._redis_quotes.add_symbol_subscribed(sym)
-
-
-def _redis_remove_subscribed_and_quote(app: Any, symbol: str) -> None:
-    """Remove symbol from Redis set and delete quote (on unsubscribe)."""
-    if not getattr(app, "_redis_quotes", None) or not app._redis_quotes.available:
-        return
-    app._redis_quotes.remove_symbol_subscribed(symbol)
-    app._redis_quotes.delete_quote(symbol)
-
-
 async def release_ticker_subscriptions(app: Any) -> None:
-    """Unsubscribe all Real-time ticker subscriptions (STK + OPT); clear Redis quotes and ticker:subscribed set. Clears last_control_message."""
-    conn = _ticker_connector(app)
-    if not conn or not conn.is_connected:
-        return
-    current_stk = set(conn.get_subscribed_ticker_symbols())
-    for sym in sorted(current_stk):
-        conn.unsubscribe_ticker(sym)
-        _redis_remove_subscribed_and_quote(app, sym)
-        logger.info("[Daemon] Real-time ticker unsubscribed: %s", sym)
-    current_opt = list(conn.get_subscribed_option_contract_keys())
-    for ck in current_opt:
-        conn.unsubscribe_option_ticker(ck)
-        logger.info("[Daemon] Real-time option ticker unsubscribed: %s", ck)
-    if getattr(app, "_redis_quotes", None) and app._redis_quotes.available:
-        app._redis_quotes.clear_subscribed_set()
+    """Clear status reporting; IB Ingestor owns market subscriptions."""
     _clear_control_message(app)
-
-
-def _build_init_desired_symbols(app: Any) -> set:
-    """Ideal set for Init: Watchlist STK + strategy symbol + all position STK symbols (deduplicated)."""
-    desired: set = set()
-    if app.symbol:
-        desired.add(app.symbol.strip())
-    if app._status_sink and hasattr(app._status_sink, "get_watchlist_stk_symbols"):
-        for s in getattr(app._status_sink, "get_watchlist_stk_symbols")() or []:
-            if s and str(s).strip():
-                desired.add(str(s).strip())
-    instruments = get_position_stk_instruments(app)
-    for meta in instruments.values():
-        sym = (meta.get("symbol") or "").strip()
-        if sym:
-            desired.add(sym)
-    return desired
-
-
-def _build_desired_option_contracts(app: Any) -> List[Dict[str, Any]]:
-    """Watchlist OPT contracts for ticker subscription; truncated to MAX_OPTION_TICKER_CONTRACTS."""
-    if not app._status_sink or not hasattr(app._status_sink, "get_watchlist_opt_contracts"):
-        return []
-    contracts = getattr(app._status_sink, "get_watchlist_opt_contracts")() or []
-    return contracts[:MAX_OPTION_TICKER_CONTRACTS]
+    if app._status_sink and hasattr(app._status_sink, "write_daemon_subscribed_tickers"):
+        app._status_sink.write_daemon_subscribed_tickers([])
 
 
 def _parse_contract_key(contract_key: str) -> dict:
@@ -149,124 +85,13 @@ def on_ticker_for_contract_key(app: Any, contract_key: str, ticker: Any) -> None
 
 
 async def init_ticker_subscriptions(app: Any) -> None:
-    """If no subscriptions (per Redis set): build desired set (watchlist + all positions) and subscribe. If Redis set non-empty, write error and return."""
-    conn = _ticker_connector(app)
-    if not conn or not conn.is_connected:
-        return
-    subscribed: Set[str] = set()
-    rq_read = getattr(app, "_redis_quotes_reader", None)
-    if rq_read and rq_read.available:
-        subscribed = rq_read.get_subscribed_symbols()
-    elif getattr(app, "_redis_quotes", None) and app._redis_quotes.available:
-        logger.warning(
-            "[Daemon] init_ticker_subscriptions: Redis reader unavailable; skipping subscribed-set guard"
-        )
-    if subscribed:
-        msg = "Clear subscriptions first (Redis ticker subscribed set is non-empty)."
-        if app._status_sink and hasattr(app._status_sink, "write_daemon_control_message"):
-            app._status_sink.write_daemon_control_message(msg)
-        logger.warning("[Daemon] init_ticker_subscriptions: Redis subscribed set non-empty (%s), %s", len(subscribed), msg)
-        return
+    """No-op: STK/OPT market data subscriptions are owned by IB Ingestor."""
     _clear_control_message(app)
-    desired = _build_init_desired_symbols(app)
-    if desired:
-        added = await conn.subscribe_tickers(
-            sorted(desired), app._on_ticker_for_symbol
-        )
-        if added:
-            _redis_add_subscribed(app, set(added.keys()))
-            logger.info(
-                "[Daemon] Real-time ticker (init) subscribed: %s",
-                sorted(added.keys()),
-            )
-    opt_contracts = _build_desired_option_contracts(app)
-    if opt_contracts:
-        opt_added = await conn.subscribe_option_tickers(
-            opt_contracts, app._on_ticker_for_contract_key
-        )
-        if opt_added:
-            logger.info(
-                "[Daemon] Real-time option ticker (init) subscribed: %s",
-                sorted(opt_added.keys()),
-            )
-
-
-async def sync_ticker_subscriptions_from_redis(
-    app: Any, stale_sec: float = STALE_TICKER_SEC
-) -> None:
-    """Sync ticker subscriptions using Redis as source of truth.
-    Get subscribed set and per-symbol last-update age from Redis; target set = watchlist + all positions.
-    a) In target and subscribed: refresh (unsub+sub) if last update > stale_sec or missing.
-    b) In target but not subscribed: subscribe.
-    c) Subscribed but not in target: unsubscribe.
-    """
-    conn = _ticker_connector(app)
-    if not conn or not conn.is_connected:
-        return
-    rq = getattr(app, "_redis_quotes_reader", None)
-    if not rq or not rq.available:
-        logger.debug("[Daemon] sync_ticker_subscriptions_from_redis: Redis reader unavailable, skip")
-        return
-    desired = _build_init_desired_symbols(app)
-    subscribed, ages = rq.get_subscribed_symbols_with_ages_sec()
-    a = desired & subscribed
-    b = desired - subscribed
-    c = subscribed - desired
-    to_refresh: Set[str] = set()
-    for sym in a:
-        age = ages.get(sym)
-        if age is None or age > stale_sec:
-            to_refresh.add(sym)
-    # (c) Unsubscribe and remove from Redis
-    for sym in sorted(c):
-        conn.unsubscribe_ticker(sym)
-        _redis_remove_subscribed_and_quote(app, sym)
-        logger.info("[Daemon] Real-time ticker unsubscribed (not in target): %s", sym)
-    # (a) Refresh: unsub then sub (do not change Redis set)
-    for sym in sorted(to_refresh):
-        conn.unsubscribe_ticker(sym)
-    if to_refresh:
-        added = await conn.subscribe_tickers(
-            sorted(to_refresh), app._on_ticker_for_symbol
-        )
-        if added:
-            logger.info("[Daemon] Real-time ticker refreshed (stale >%ss): %s", stale_sec, sorted(added.keys()))
-    # (b) Subscribe and add to Redis set
-    if b:
-        added = await conn.subscribe_tickers(
-            sorted(b), app._on_ticker_for_symbol
-        )
-        if added:
-            _redis_add_subscribed(app, set(added.keys()))
-            logger.info("[Daemon] Real-time ticker subscribed (new): %s", sorted(added.keys()))
-    # OPT: sync desired OPT contracts (watchlist) vs currently subscribed OPT
-    desired_opt_list = _build_desired_option_contracts(app)
-    desired_opt = {c["contract_key"] for c in desired_opt_list if c.get("contract_key")}
-    subscribed_opt = set(conn.get_subscribed_option_contract_keys())
-    opt_unsub = subscribed_opt - desired_opt
-    opt_sub = desired_opt - subscribed_opt
-    for ck in sorted(opt_unsub):
-        conn.unsubscribe_option_ticker(ck)
-        logger.info("[Daemon] Real-time option ticker unsubscribed (not in target): %s", ck)
-    if opt_sub:
-        opt_contracts_by_key = {c["contract_key"]: c for c in desired_opt_list if c.get("contract_key") in opt_sub}
-        to_add = [opt_contracts_by_key[ck] for ck in sorted(opt_sub) if ck in opt_contracts_by_key]
-        if to_add:
-            opt_added = await conn.subscribe_option_tickers(to_add, app._on_ticker_for_contract_key)
-            if opt_added:
-                logger.info("[Daemon] Real-time option ticker subscribed (new): %s", sorted(opt_added.keys()))
 
 
 async def refresh_ticker_subscriptions(app: Any) -> None:
-    """Sync: use Redis subscription state and per-symbol age; refresh stale (>30s), subscribe new, unsubscribe removed. If Redis unavailable, fallback to Release then Init."""
-    if not _ticker_connector(app) or not _ticker_connector(app).is_connected:
-        return
-    rq = getattr(app, "_redis_quotes_reader", None)
-    if rq and rq.available:
-        await sync_ticker_subscriptions_from_redis(app, stale_sec=STALE_TICKER_SEC)
-    else:
-        await release_ticker_subscriptions(app)
-        await init_ticker_subscriptions(app)
+    """No-op; heartbeat reports subscribed symbols from Redis reader to status sink."""
+    return
 
 
 def get_position_stk_instruments(app: Any) -> dict:
@@ -307,60 +132,12 @@ def get_position_stk_instruments(app: Any) -> dict:
 
 
 async def refresh_position_prices(app: Any) -> None:
-    """R-M6：根据当前 accounts_data 按 contract_key 聚合标的，逐标的向 IB 拉价并写入 contract_quote_live。"""
-    if not app._status_sink or not hasattr(
-        app._status_sink, "write_contract_quote_live"
-    ):
-        return
-    conn = _ticker_connector(app)
-    if not conn or not conn.is_connected:
-        return
-    instruments = get_position_stk_instruments(app)
-    if not instruments:
-        return
-    rows = []
-    for ck, meta in instruments.items():
-        price = await conn.get_instrument_price(
-            symbol=meta["symbol"],
-            sec_type=meta["sec_type"],
-            expiry=meta["expiry"],
-            strike=meta["strike"],
-            right=meta["option_right"],
-            exchange=meta["exchange"],
-            currency=meta["currency"],
-        )
-        if not price:
-            logger.debug(
-                "[R-M6] get_instrument_price returned no data for %s (%s)",
-                ck,
-                meta["symbol"],
-            )
-            continue
-        rows.append(
-            {
-                "contract_key": ck,
-                "symbol": meta["symbol"],
-                "sec_type": meta["sec_type"],
-                "expiry": meta["expiry"],
-                "strike": meta["strike"],
-                "option_right": meta["option_right"],
-                "last": price.get("last"),
-                "bid": price.get("bid"),
-                "ask": price.get("ask"),
-                "mid": price.get("mid"),
-            }
-        )
-    logger.info(
-        "[R-M6] refresh_position_prices: %s stock instruments, %s rows to write",
-        len(instruments),
-        len(rows),
-    )
-    if rows:
-        app._status_sink.write_contract_quote_live(rows)
+    """R-M6: update contract_quote_live from Redis quotes for position STK symbols."""
+    sync_contract_quote_live_from_redis(app)
 
 
 def sync_contract_quote_live_from_redis(app: Any) -> None:
-    """R-M6：用 Redis 中 Event 已写入的行情更新 contract_quote_live，仅更新有 Redis 数据的持仓标的。"""
+    """R-M6: refresh contract_quote_live from Redis STK quotes (IB Ingestor tick keys via reader.get_quotes)."""
     if not app._status_sink or not hasattr(
         app._status_sink, "write_contract_quote_live"
     ):

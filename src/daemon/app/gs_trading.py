@@ -13,7 +13,6 @@ from src.config.settings import (
     get_structure_config,
     get_risk_config,
 )
-from src.connector.ib import IBConnector
 from src.daemon.core.metrics import get_metrics
 from src.daemon.core.state.composite import CompositeState
 from src.daemon.core.state.snapshot import StateSnapshot
@@ -27,8 +26,9 @@ from src.portfolio.positions.position_book import PositionBook
 from src.daemon.guards.execution_guard import ExecutionGuard
 from src.persistence.postgres.postgres_sink import PostgreSQLSink
 from src.persistence.status_sink import StatusSink
-from src.core.realtime import create_reader_from_config, create_writer_from_config
-from src.app.config import read_config, get_effective_ib_config
+from src.core.realtime import create_reader_from_config
+from src.app.config import read_config
+from src.ib_operator.client import IbOperatorClient
 from src.portfolio import accounts as _accounts
 from src.daemon.app import snapshot as _snapshot
 from src.portfolio import symbol_position as _symbol_position
@@ -49,7 +49,7 @@ class GsTrading:
         self.config = config
         self._config_path = config_path
 
-        # 1.a PostgreSQL sink early (so we can read last ib_client_id before connecting to IB)
+        # 1.a PostgreSQL sink early (daemon_control, snapshots, settings)
         postgres_cfg = config.get("postgres", {}) or {}
         self._status_sink: Optional[StatusSink] = None
         if postgres_cfg or os.environ.get("PGHOST"):
@@ -58,73 +58,18 @@ class GsTrading:
             except Exception as e:
                 logger.warning("PostgreSQL sink init failed: %s", e)
 
-        # 1.b IB Connector: host/port/client_id from config.yaml (single source of truth).
-        # engine.use_ib_edge: no in-process IB; accounts from Redis (IB Account Agent); hedge orders via IB Operator RPC.
-        engine_cfg = config.get("engine") or {}
-        self._use_ib_edge = bool(engine_cfg.get("use_ib_edge", False))
-        self._operator_client = None
-        ib_eff = get_effective_ib_config(config)
-        if self._use_ib_edge:
-            from src.ib_operator.client import IbOperatorClient
-
+        # 1.b No in-process IB: Redis (Ingestor + Account Agent) + IB Operator RPC for orders.
+        try:
             self._operator_client = IbOperatorClient.from_merged_config(config)
-            self.connector = None
-            self.listener_connector = None
-            self.listener_connector_2 = None
-            logger.info(
-                "Engine IB edge mode: no in-process IBConnector; data from Redis; orders via IB Operator"
-            )
-        else:
-            host = ib_eff["host"]
-            port = ib_eff["port"]
-            timeout = ib_eff["connect_timeout"]
-
-            last_ib = None
-            if hasattr(self._status_sink, "get_last_ib_client_id"):
-                last_ib = self._status_sink.get_last_ib_client_id()
-            client_id_daemon = ib_eff["client_id_daemon"]
-            client_id = (last_ib + 1) if last_ib is not None else client_id_daemon
-            if last_ib is not None:
-                logger.info(
-                    "IB client_id from DB last_ib_client_id=%s → using %s (avoid in-use after crash)",
-                    last_ib,
-                    client_id,
-                )
-            logger.info(
-                "IB connection from config: host=%s port=%s (port_type=%s)",
-                host,
-                port,
-                ib_eff["port_type"],
-            )
-            self.connector = IBConnector(
-                host=host,
-                port=port,
-                client_id=client_id,
-                connect_timeout=timeout,
-            )
-            self.listener_connector = IBConnector(
-                host=host,
-                port=port,
-                client_id=ib_eff["client_id_listener"],
-                connect_timeout=timeout,
-            )
-            # Secondary IB (Second TWS): Listener on Secondary host with its own client_id
-            ib2_host = ib_eff.get("ib2_host") or ""
-            if ib2_host:
-                self.listener_connector_2 = IBConnector(
-                    host=ib2_host,
-                    port=ib_eff["ib2_port"],
-                    client_id=ib_eff["ib2_client_id_listener"],
-                    connect_timeout=timeout,
-                )
-                logger.info(
-                    "IB Listener (Secondary): host=%s port=%s client_id=%s",
-                    ib2_host,
-                    ib_eff["ib2_port"],
-                    ib_eff["ib2_client_id_listener"],
-                )
-            else:
-                self.listener_connector_2 = None
+        except Exception as e:
+            logger.warning("IB Operator client init failed: %s", e)
+            self._operator_client = None
+        self.connector = None
+        self.listener_connector = None
+        self.listener_connector_2 = None
+        logger.info(
+            "Engine: no in-process IBConnector; data from Redis; orders via IB Operator"
+        )
 
         # Host account for hedging/market data (R-A4). Still from DB settings (not a client_id).
         self._host_account_id: Optional[str] = None
@@ -186,44 +131,33 @@ class GsTrading:
         )
         self._market_data = MarketData(self.store)
         self._order_manager = OrderManager()
-        # _status_sink already created in 1.a (for get_last_ib_client_id and Phase 1/2)
+        # _status_sink already created in 1.a
         # Phase 2: control via PostgreSQL daemon_control table when sink is postgres (RE-5: monitoring can run on another host)
         self._order_manager.set_hedge_fsm(self._fsm_hedge)
         self._metrics = get_metrics()
 
-        # 3. Static Defaults (RE-7: IB retry when not connected)
+        # 3. Static Defaults
         daemon_cfg = config.get("daemon") or {}
         self._heartbeat_interval = float(daemon_cfg.get("heartbeat_interval", 10.0))
         self._heartbeat_interval_from_db: Optional[float] = (
             None  # overrides when set via monitoring
         )
-        # IB retry timing: actually uses _effective_heartbeat_interval() (retry at next heartbeat); kept for optional future use
-        self._ib_retry_interval = float(daemon_cfg.get("ib_retry_interval_sec", 30.0))
         self._config_reload_interval = 30.0
         # R-A1: 账户/持仓拉取（监控与对冲）不需每心跳拉取；每小时拉一次即可
         self._accounts_refresh_interval_sec = 3600.0
         self._last_accounts_refresh_ts = 0.0
-        self._last_positions_refresh_ts = (
-            0.0  # 对冲用持仓也按同一间隔，避免每心跳请求 IB positions
-        )
-        # R-M6: 首次有持仓时全量 IB 拉价一次；之后心跳用 Redis（Event）更新，仅 Refresh 时再全量拉价
+        self._last_positions_refresh_ts = 0.0
+        # R-M6: contract_quote_live from Redis quotes (IB Ingestor)
         self._contract_quote_live_initialized = False
-        # R-RM*: optional Redis real-time quotes (daemon is sole writer; reader for GET/sync paths)
-        self._redis_quotes = create_writer_from_config(config)
-        self._redis_quotes_reader = (
-            create_reader_from_config(config) if self._redis_quotes else None
-        )
-        if self._redis_quotes_reader is None and self._redis_quotes:
-            logger.warning(
-                "Redis quotes writer connected but reader failed; subscribe/read paths in daemon may be incomplete"
-            )
-        if getattr(self, "_redis_quotes", None) and self._redis_quotes.available:
+        # Redis quotes: reader only — IB Ingestor writes ticks; daemon reads quote:/ib:ingester:tick:* (no daemon writer).
+        self._redis_quotes_reader = create_reader_from_config(config)
+        if getattr(self, "_redis_quotes_reader", None) and self._redis_quotes_reader.available:
             logger.info(
-                "Redis quotes: connected (Event ticker → quote:{symbol}; SSE uses IB ingestor ib:ingester:channel)"
+                "Redis quotes reader: connected (live ticks from IB Ingestor in Redis)"
             )
         else:
             logger.info(
-                "Redis quotes: disabled or unavailable (config redis.enabled and Redis server required for ticker→Redis)"
+                "Redis quotes reader: disabled or unavailable (redis.enabled and Redis required to read ingestor ticks)"
             )
 
     @staticmethod
@@ -265,23 +199,14 @@ class GsTrading:
             blackout_days_after=self._hedge_cfg["blackout_days_after"],
             trading_hours_only=self._hedge_cfg["trading_hours_only"],
         )
-        # R-RM*: try to (re)create Redis quotes writer/reader on config reload (e.g. Redis was down at daemon start)
+        # Recreate Redis quotes reader on config reload (e.g. Redis was down at daemon start)
         if getattr(self, "_redis_quotes_reader", None) is not None:
             try:
                 self._redis_quotes_reader.close()
             except Exception:
                 pass
             self._redis_quotes_reader = None
-        if getattr(self, "_redis_quotes", None) is not None:
-            try:
-                self._redis_quotes.close()
-            except Exception:
-                pass
-            self._redis_quotes = None
-        self._redis_quotes = create_writer_from_config(config)
-        self._redis_quotes_reader = (
-            create_reader_from_config(config) if self._redis_quotes else None
-        )
+        self._redis_quotes_reader = create_reader_from_config(config)
 
     async def _reload_config_loop(self) -> None:
         """Periodically check config file mtime and reload if changed."""
@@ -403,12 +328,8 @@ class GsTrading:
         return _control_heartbeat.effective_heartbeat_interval(self)
 
     def _redis_quotes_connected(self) -> bool:
-        """Whether daemon is connected to Redis and writing real-time quotes."""
+        """Whether the Redis quotes reader is connected (ingestor-fed keys; DB column redis_quotes_connected)."""
         return _control_heartbeat.redis_quotes_connected(self)
-
-    def _event_subscribe_flags(self) -> dict:
-        """IB event subscription status for System page."""
-        return _control_heartbeat.event_subscribe_flags(self)
 
     def _listener_heartbeat_kwargs(self) -> dict:
         """Listener connection status for daemon_heartbeat."""
@@ -453,19 +374,15 @@ class GsTrading:
         return await _daemon_handlers.handle_idle(self)
 
     async def _handle_connecting(self) -> DaemonState:
-        """CONNECTING: try IB connect; if fail → WAITING_IB (RE-7)."""
+        """CONNECTING: proceed to CONNECTED (no IB socket)."""
         return await _daemon_handlers.handle_connecting(self)
-
-    async def _handle_waiting_ib(self) -> DaemonState:
-        """WAITING_IB (RE-7): daemon running, IB not connected; poll stop/retry_ib; auto-retry."""
-        return await _daemon_handlers.handle_waiting_ib(self)
 
     async def _handle_connected(self) -> DaemonState:
         """CONNECTED: fetch positions + spot, bootstrap TradingFSM. Transition to RUNNING."""
         return await _daemon_handlers.handle_connected(self)
 
     async def _handle_running(self) -> DaemonState:
-        """RUNNING: subscribe tickers, start heartbeat; loop until stop or WAITING_IB."""
+        """RUNNING: heartbeat loop until stop."""
         return await _daemon_handlers.handle_running(self)
 
     async def _handle_stopping(self) -> DaemonState:

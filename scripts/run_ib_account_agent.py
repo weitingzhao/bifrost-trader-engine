@@ -265,6 +265,7 @@ class IbAccountAgentApp:
             self._msg_count,
             secondary_connected=False if secondary is not None else None,
             secondary_client_id=self._sec_cid,
+            host_alive=False,
         )
         logger.info("IB Account Agent stopped")
 
@@ -294,6 +295,18 @@ class IbAccountAgentApp:
         sc = secondary.connector if secondary else None
         host_ok = bool(primary.connected_snapshot())
         sec_ok = bool(secondary.connected_snapshot()) if secondary is not None else False
+
+        # Redis health before reqAllOpenOrders / subscriptions — those calls can block a long time
+        # while TWS is busy, leaving connected flags at 0 until they return.
+        self._writer.update_health(
+            self._host_cid,
+            host_ok,
+            time.time(),
+            self._reconnects,
+            self._msg_count,
+            secondary_connected=sec_ok if secondary is not None else None,
+            secondary_client_id=self._sec_cid,
+        )
 
         def on_orders_update() -> None:
             self._bump()
@@ -330,16 +343,6 @@ class IbAccountAgentApp:
                 await sc.get_open_orders_async(include_all_from_tws=True)
             except Exception as e:
                 logger.warning("Secondary subscriptions: %s", e)
-
-        self._writer.update_health(
-            self._host_cid,
-            host_ok,
-            time.time(),
-            self._reconnects,
-            self._msg_count,
-            secondary_connected=sec_ok if secondary is not None else None,
-            secondary_client_id=self._sec_cid,
-        )
 
         while not self._stop.is_set():
             try:

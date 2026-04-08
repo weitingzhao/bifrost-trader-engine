@@ -2534,19 +2534,19 @@ tr:hover .realtime-quote-drag-handle {
   margin-top: 0;
 }
 
-/* Daemon panel: IB 1/2, Heartbeat 1/4, Event 1/4 */
+/* Daemon panel: Heartbeat 1/4, IB broker 1/4, Trading Strategy 2/4 */
 .daemon-groups-layout {
   flex-wrap: nowrap;
 }
 
+.daemon-groups-layout .daemon-group-heartbeat,
 .daemon-groups-layout .daemon-group-ib {
-  flex: 2;
+  flex: 1;
   min-width: 0;
 }
 
-.daemon-groups-layout .daemon-group-heartbeat,
-.daemon-groups-layout .daemon-group-event {
-  flex: 1;
+.daemon-groups-layout .daemon-group-strategy {
+  flex: 2;
   min-width: 0;
 }
 
@@ -3324,6 +3324,94 @@ tr:hover .realtime-quote-drag-handle {
 
 .daemon-group-body .ib-connection-table .ib-connection-cell .countdown-num {
   white-space: nowrap;
+}
+
+.daemon-group-body .daemon-ib-broker-socket-link {
+  display: inline-block;
+  margin-top: var(--space-2);
+  text-decoration: underline;
+  cursor: pointer;
+  color: inherit;
+}
+
+/* Reinforce header lamp colors inside Settings-embedded daemon cards (nested color can dilute currentColor). */
+.daemon-group-header .title-inline-lamp.green {
+  color: var(--color-lamp-green);
+  filter: drop-shadow(0 0 5px var(--color-lamp-green)) drop-shadow(0 0 10px rgba(74, 222, 128, 0.3));
+  animation: lamp-pulse-green 2.5s ease-in-out infinite;
+}
+
+.daemon-group-header .title-inline-lamp.yellow {
+  color: var(--color-lamp-yellow);
+  filter: drop-shadow(0 0 5px var(--color-lamp-yellow)) drop-shadow(0 0 10px rgba(250, 204, 21, 0.3));
+}
+
+.daemon-group-header .title-inline-lamp.red {
+  color: var(--color-lamp-red);
+  filter: drop-shadow(0 0 5px var(--color-lamp-red)) drop-shadow(0 0 10px rgba(248, 113, 113, 0.3));
+  animation: lamp-pulse-red 1.5s ease-in-out infinite;
+}
+
+.daemon-group-header .title-inline-lamp.none {
+  color: var(--color-lamp-none);
+  filter: none;
+  animation: none;
+}
+
+/* Trading Strategy column (compact panel header inside daemon card) */
+.daemon-group-strategy .strategy-compact-header .title-inline-lamp.green {
+  color: var(--color-lamp-green);
+  filter: drop-shadow(0 0 5px var(--color-lamp-green)) drop-shadow(0 0 10px rgba(74, 222, 128, 0.3));
+  animation: lamp-pulse-green 2.5s ease-in-out infinite;
+}
+
+.daemon-group-strategy .strategy-compact-header .title-inline-lamp.yellow {
+  color: var(--color-lamp-yellow);
+  filter: drop-shadow(0 0 5px var(--color-lamp-yellow)) drop-shadow(0 0 10px rgba(250, 204, 21, 0.3));
+}
+
+.daemon-group-strategy .strategy-compact-header .title-inline-lamp.red {
+  color: var(--color-lamp-red);
+  filter: drop-shadow(0 0 5px var(--color-lamp-red)) drop-shadow(0 0 10px rgba(248, 113, 113, 0.3));
+  animation: lamp-pulse-red 1.5s ease-in-out infinite;
+}
+
+.daemon-group-strategy .strategy-compact-header .title-inline-lamp.none {
+  color: var(--color-lamp-none);
+  filter: none;
+  animation: none;
+}
+
+.daemon-group-body .ib-connection-cell--lamp {
+  vertical-align: middle;
+}
+
+.daemon-group-body .ib-broker-service-lamp.title-inline-lamp {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.daemon-group-body .ib-broker-service-lamp.title-inline-lamp.green {
+  color: var(--color-lamp-green);
+  filter: drop-shadow(0 0 4px var(--color-lamp-green)) drop-shadow(0 0 8px rgba(74, 222, 128, 0.25));
+  animation: lamp-pulse-green 2.5s ease-in-out infinite;
+}
+
+.daemon-group-body .ib-broker-service-lamp.title-inline-lamp.yellow {
+  color: var(--color-lamp-yellow);
+  filter: drop-shadow(0 0 4px var(--color-lamp-yellow)) drop-shadow(0 0 8px rgba(250, 204, 21, 0.25));
+}
+
+.daemon-group-body .ib-broker-service-lamp.title-inline-lamp.red {
+  color: var(--color-lamp-red);
+  filter: drop-shadow(0 0 4px var(--color-lamp-red)) drop-shadow(0 0 8px rgba(248, 113, 113, 0.25));
+  animation: lamp-pulse-red 1.5s ease-in-out infinite;
+}
+
+.daemon-group-body .ib-broker-service-lamp.title-inline-lamp.none {
+  color: var(--color-lamp-none);
+  filter: none;
+  animation: none;
 }
 
 .daemon-group-body .open-orders-table-wrap {

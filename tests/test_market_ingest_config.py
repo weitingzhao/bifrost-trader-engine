@@ -110,7 +110,7 @@ def test_legacy_ib_market_yaml_row_normalizes():
                 {
                     "id": "ib_market",
                     "label": "Legacy",
-                    "systemd_unit": "bifrost-ib-market-ingest",
+                    "systemd_unit": "bifrost-ib-ingestor",
                     "redis_meta_key": "bifrost:health:ib_ingestor",
                 }
             ]

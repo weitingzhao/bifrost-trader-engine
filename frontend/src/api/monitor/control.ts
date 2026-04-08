@@ -25,7 +25,7 @@ export async function postRetryIb(): Promise<ControlResponse> {
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
 
-/** Write daemon_control release_ib; daemon releases IB on next heartbeat and enters WAITING_IB. */
+/** Write daemon_control release_ib; daemon consumes as no-op (no IB socket). Use monitor_release_ib for Operator TWS. */
 export async function postReleaseIb(): Promise<ControlResponse> {
   const r = await fetch(`${apiBase()}/control/release_ib`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))

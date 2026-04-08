@@ -93,8 +93,9 @@ export function aggregateIngestServicesLamp(
 }
 
 /**
- * Lamp from Redis-backed health in Monitor GET /status (same view for Dev and Prod stacks).
- * Green when the ingest writer reports healthy in Redis; red when explicitly unhealthy; gray when unknown.
+ * Lamp from Redis-backed health in Monitor GET /status.
+ * Same Redis is shared across Dev/Prod ingest when configured that way: if either stack runs a writer,
+ * health updates — do not tie this lamp to systemd on the Ops host that served GET /ops/market-ingest/services.
  */
 export function ingestRedisHealthLamp(
   serviceId: string,
@@ -144,9 +145,18 @@ export function ingestRedisHealthLamp(
         title: 'IB Account Agent block missing from /status socket (Redis health unavailable).',
       }
     }
-    const hostUp =
+    // Same roll-up pattern as `ib_operator`: host slot + explicit process-alive (Redis `host_alive`).
+    const hostSlotUp =
       ingestRedisTruthyConnected(aa.connected)
       || ingestRedisTruthyConnected(aa.host?.connected)
+    const procDead =
+      ingestRedisExplicitlyOff(aa.service_alive) || ingestRedisExplicitlyOff(aa.operator_alive)
+    const hasAliveField =
+      (aa.service_alive !== undefined && aa.service_alive !== null)
+      || (aa.operator_alive !== undefined && aa.operator_alive !== null)
+    const serviceAlive = hasAliveField
+      ? (ingestRedisTruthyConnected(aa.service_alive) || ingestRedisTruthyConnected(aa.operator_alive))
+      : true
     const secConfigured = aa.secondary !== undefined && aa.secondary !== null
     const secUp = ingestRedisTruthyConnected(aa.secondary?.connected)
     const lastAge = aa.last_msg_age_s
@@ -155,6 +165,7 @@ export function ingestRedisHealthLamp(
       && typeof lastAge === 'number'
       && Number.isFinite(lastAge)
       && lastAge <= IB_OPERATOR_HEALTH_FRESH_MAX_S
+    const hostUp = hostSlotUp && !procDead
     if (hostUp) {
       if (secConfigured && !secUp) {
         return {
@@ -168,11 +179,25 @@ export function ingestRedisHealthLamp(
         title: 'IB Account Agent healthy (Host + Secondary if configured; Redis ws_ib_account_agent).',
       }
     }
-    if (healthFresh) {
+    if (procDead) {
+      return {
+        lamp: 'red',
+        title:
+          'IB Account Agent process reports stopped (Redis host_alive / service_alive); Host slot not in service.',
+      }
+    }
+    if (serviceAlive && !hostSlotUp && healthFresh) {
       return {
         lamp: 'yellow',
         title:
-          'IB Account Agent Host not connected yet; Redis health is fresh — API may still be handshaking.',
+          'IB Account Agent process is running; IB Host not connected yet (Redis bifrost:health:ws_ib_account_agent). Green when Host connects.',
+      }
+    }
+    if (serviceAlive && !hostSlotUp && !healthFresh) {
+      return {
+        lamp: 'red',
+        title:
+          'IB Account Agent Host not connected; Redis health is stale or missing timestamp (process may be stopped without shutdown, or not updating).',
       }
     }
     return {

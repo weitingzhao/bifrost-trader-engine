@@ -68,7 +68,6 @@ import { useDeferredStart } from '../hooks/useDeferredStart'
 import type { SettingsApiHealthProbesState } from '../hooks/useSettingsApiHealthProbes'
 import { fetchMarketIngestServices, type MarketIngestServiceRow } from '../api/ops/ops'
 import { aggregateIngestRedisHealthLamp, type AggregateIngestLamp } from '../utils/socketIngestLamp'
-import { computeEventSubscribeLamp } from './status/ibEventSubscribeLamp'
 
 const API_SETTINGS_DETAIL_HASHES = [
   'settings-api-architecture',
@@ -103,6 +102,7 @@ export interface SettingsPageProps {
   loadStatus: () => Promise<StatusResponse | null>
   operations?: Operation[]
   onNavigateToStrategy?: () => void
+  onNavigateToSocket?: () => void
   /** Celery runtime lamp (same source as header / System aggregate). */
   celeryLamp?: 'green' | 'yellow' | 'red' | 'none'
   /** API sidebar lamps + utilized services (from App `useSettingsApiHealthProbes`, same as header shortcuts). */
@@ -114,6 +114,7 @@ export function SettingsPage({
   loadStatus,
   operations = [],
   onNavigateToStrategy,
+  onNavigateToSocket,
   celeryLamp = 'none',
   apiHealthProbes,
 }: SettingsPageProps) {
@@ -299,10 +300,7 @@ export function SettingsPage({
   const activeIbStockFeed = activeSectionId === 'settings-feed' && currentHash === 'feed-ib-stock'
   const isMassiveOptionFeedActive = activeSectionId === 'settings-feed' && isMassiveOptionFeedHash(currentHash)
   const daemonLamp: 'green' | 'yellow' | 'red' = ((status?.daemon?.lamp as string) || 'red') as 'green' | 'yellow' | 'red'
-  const subscribeLamp = useMemo(
-    () => computeEventSubscribeLamp(status?.daemon?.heartbeat),
-    [status?.daemon?.heartbeat],
-  )
+  const subscribeLamp: 'none' = 'none'
   const isSubscribeSection = activeSectionId === 'settings-subscribe'
   const isDaemonSection = activeSectionId === 'settings-daemon'
   const isApiSection = activeSectionId === 'settings-api'
@@ -622,7 +620,7 @@ export function SettingsPage({
         >
           <span
             className={`title-inline-lamp lamp-icon ${subscribeLamp}`}
-            title="IB event subscriptions (ticker, positions, fills, commission)"
+            title="Subscribe page (legacy layout; daemon does not report IB event subscription flags)"
             aria-hidden
           >
             <SettingsSidebarLampGlyph id="websocket" />
@@ -869,6 +867,7 @@ export function SettingsPage({
           loadStatus={loadStatus}
           operations={operations}
           onNavigateToStrategy={onNavigateToStrategy}
+          onNavigateToSocket={onNavigateToSocket}
           embeddedInSettings
         />
       ) : isSubscribeSection ? (

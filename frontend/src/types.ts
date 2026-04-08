@@ -235,6 +235,10 @@ export interface StatusSocketIbIngestor {
 export interface StatusSocketIbAccountAgent {
   /** Roll-up: Host IB API connected (Redis `host_connected` / `connected`). */
   connected?: boolean
+  /** From Redis `host_alive`; false after graceful stop / Ops clear (same lamp semantics as `socket.ib_operator`). */
+  service_alive?: boolean
+  /** Alias of `service_alive` for shared ingest lamp helpers. */
+  operator_alive?: boolean
   last_msg_age_s?: number | null
   reconnects?: number | null
   msg_count?: number | null
@@ -313,9 +317,9 @@ export interface DaemonHeartbeat {
   graceful_shutdown_at?: number | null
   /** Interval in seconds used by daemon (5–120); for countdown. */
   heartbeat_interval_sec?: number | null
-  /** 守护进程是否连接 Redis 并写入行情（R-RM*） */
+  /** Daemon Redis quotes reader connected (reads ingestor tick keys; column name unchanged). */
   redis_quotes_connected?: boolean
-  /** Daemon IB 事件订阅状态（Settings → Subscribe → IB Event Subscribe） */
+  /** Legacy DB columns; daemon heartbeat no longer updates these (always false on write). */
   event_subscribe_ticker?: boolean
   event_subscribe_positions?: boolean
   event_subscribe_fills?: boolean

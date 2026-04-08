@@ -18,6 +18,10 @@ from backend.ops.services.executor_local import (
 
 logger = logging.getLogger(__name__)
 
+# systemd units use TimeoutStopSec=60 for several ingest agents; Ops UDS client must outlive `systemctl stop`.
+_SYSTEMCTL_TIMEOUT_START_SEC = 45
+_SYSTEMCTL_TIMEOUT_STOP_RESTART_SEC = 95
+
 
 class AgentExecutor:
     """Execute whitelisted systemd unit actions via the Local Control Agent.
@@ -77,7 +81,14 @@ class AgentExecutor:
         except Exception as e:
             raise RuntimeError(f"Redis-based Celery stop failed: {e}") from e
 
-    async def _systemctl(self, action: str, unit: str, timeout: int = 30) -> Dict[str, Any]:
+    async def _systemctl(self, action: str, unit: str, timeout: int | None = None) -> Dict[str, Any]:
+        if timeout is None:
+            if action in ("stop", "restart"):
+                timeout = _SYSTEMCTL_TIMEOUT_STOP_RESTART_SEC
+            elif action == "start":
+                timeout = _SYSTEMCTL_TIMEOUT_START_SEC
+            else:
+                timeout = 30
         resp = await self._client.systemctl(action, unit, timeout=timeout)
         if not resp.ok:
             raise RuntimeError(

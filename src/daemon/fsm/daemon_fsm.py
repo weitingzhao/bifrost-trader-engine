@@ -1,22 +1,17 @@
 """Daemon lifecycle FSM: IDLE -> CONNECTING -> CONNECTED -> RUNNING <-> RUNNING_SUSPENDED -> STOPPING -> STOPPED.
-RE-7: CONNECTING fail -> WAITING_IB (daemon keeps running, retry IB periodically); never STOPPED solely due to IB fail.
 
-Transition implementation (gs_trading.py):
-- IDLE -> CONNECTING: _handle_idle (when daemon_run_status.suspended=false)
-- IDLE -> WAITING_IB: _handle_idle (when daemon_run_status.suspended=true, default; no Trading Client until Resume)
+Engine uses Redis (IB Ingestor / IB Account Agent) and IB Operator RPC only; no in-process IB connection or WAITING_IB.
+
+Transition implementation (daemon_handlers.py):
+- IDLE -> CONNECTING: _handle_idle (always)
 - IDLE -> STOPPED: request_stop() when IDLE
-- CONNECTING -> CONNECTED: _handle_connecting (connect success)
-- CONNECTING -> WAITING_IB: _handle_connecting (connect fail; daemon stays up, retry later)
+- CONNECTING -> CONNECTED: _handle_connecting (immediate; no IB socket)
 - CONNECTING -> STOPPING: request_stop() during connect
-- WAITING_IB -> CONNECTING: on retry timer or retry_ib; then success -> CONNECTED
-- WAITING_IB -> STOPPING: request_stop()
 - CONNECTED -> RUNNING: _handle_connected
 - CONNECTED -> STOPPING: request_stop() or exception in _handle_connected
 - RUNNING -> RUNNING_SUSPENDED: when daemon_run_status.suspended is true (poll in heartbeat)
-- RUNNING -> WAITING_IB: when IB disconnects during RUNNING (heartbeat detects, writes DB, then handler returns WAITING_IB)
 - RUNNING -> STOPPING: _handle_running (loop exit) or request_stop()
 - RUNNING_SUSPENDED -> RUNNING: when daemon_run_status.suspended is false (poll in heartbeat)
-- RUNNING_SUSPENDED -> WAITING_IB: when IB disconnects during RUNNING_SUSPENDED (same as RUNNING)
 - RUNNING_SUSPENDED -> STOPPING: request_stop()
 - STOPPING -> STOPPED: _handle_stopping
 """
@@ -29,12 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 class DaemonState(str, enum.Enum):
-    """Daemon lifecycle states. RUNNING_SUSPENDED = running but hedging paused (daemon_run_status.suspended).
-    WAITING_IB = daemon running, IB not connected; will retry connect (RE-7)."""
+    """Daemon lifecycle states. RUNNING_SUSPENDED = running but hedging paused (daemon_run_status.suspended)."""
 
     IDLE = "idle"
     CONNECTING = "connecting"
-    WAITING_IB = "waiting_ib"  # RE-7: daemon up, IB not connected; write heartbeat, retry periodically
     CONNECTED = "connected"
     RUNNING = "running"
     RUNNING_SUSPENDED = "running_suspended"  # Same as RUNNING but hedge suspended by monitoring
@@ -44,19 +37,14 @@ class DaemonState(str, enum.Enum):
 
 # Valid transitions: from_state -> set of allowed to_states
 _TRANSITIONS: dict[DaemonState, set[DaemonState]] = {
-    DaemonState.IDLE: {DaemonState.CONNECTING, DaemonState.WAITING_IB, DaemonState.STOPPED},
-    DaemonState.CONNECTING: {
-        DaemonState.CONNECTED,
-        DaemonState.WAITING_IB,
-        DaemonState.STOPPING,
-    },
-    DaemonState.WAITING_IB: {DaemonState.CONNECTING, DaemonState.CONNECTED, DaemonState.STOPPING},
+    DaemonState.IDLE: {DaemonState.CONNECTING, DaemonState.STOPPED},
+    DaemonState.CONNECTING: {DaemonState.CONNECTED, DaemonState.STOPPING},
     DaemonState.CONNECTED: {
         DaemonState.RUNNING,
         DaemonState.STOPPING,
     },
-    DaemonState.RUNNING: {DaemonState.STOPPING, DaemonState.RUNNING_SUSPENDED, DaemonState.WAITING_IB},
-    DaemonState.RUNNING_SUSPENDED: {DaemonState.RUNNING, DaemonState.STOPPING, DaemonState.WAITING_IB},
+    DaemonState.RUNNING: {DaemonState.STOPPING, DaemonState.RUNNING_SUSPENDED},
+    DaemonState.RUNNING_SUSPENDED: {DaemonState.RUNNING, DaemonState.STOPPING},
     DaemonState.STOPPING: {DaemonState.STOPPED},
     DaemonState.STOPPED: set(),
 }
@@ -118,7 +106,6 @@ class DaemonFSM:
             DaemonState.RUNNING,
             DaemonState.RUNNING_SUSPENDED,
             DaemonState.CONNECTING,
-            DaemonState.WAITING_IB,
             DaemonState.CONNECTED,
         ):
             return self.transition(DaemonState.STOPPING)

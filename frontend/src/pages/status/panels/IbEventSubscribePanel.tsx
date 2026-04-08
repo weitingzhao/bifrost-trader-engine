@@ -3,8 +3,6 @@ import type { StatusResponse } from '../../../types'
 import { postReleaseTickerSubscriptions } from '../../../api'
 import { InfoTooltip } from '../../../components/InfoTooltip'
 import { scheduleMsgClear, setMsg } from '../messageUtils'
-import { computeEventSubscribeLamp } from '../ibEventSubscribeLamp'
-
 export interface IbEventSubscribePanelProps {
   status: StatusResponse | null
   loadStatus: () => Promise<StatusResponse | null>
@@ -36,8 +34,6 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
     j?.config?.ib_client?.client?.secondary_host_ip ?? j?.config?.ib_client?.port?.listener_secondary != null
   )
 
-  const eventSubscribeLamp = computeEventSubscribeLamp(hb)
-
   const onReleaseTickers = useCallback(async () => {
     setReleaseTickerLoading(true)
     try {
@@ -58,8 +54,8 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
       <div className="event-subscribe-header-row">
         <h2 className="daemon-card-title page-title-with-tooltip" style={{ margin: 0 }}>
           <span
-            className={`title-inline-lamp lamp-icon ${eventSubscribeLamp}`}
-            title="IB Event Subscribe"
+            className="title-inline-lamp lamp-icon none"
+            title="Daemon does not publish IB event subscription state"
             aria-hidden
           >
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -67,7 +63,7 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
             </svg>
           </span>
           IB Event Subscribe
-          <InfoTooltip text="Daemon IB event subscription status and subscribed tickers." />
+          <InfoTooltip text="Legacy table: daemon heartbeat no longer updates subscription flags. Use Daemon → IB broker and Socket services for Ingestor/Account Agent health." />
         </h2>
         <div className="event-subscribe-buttons">
           <button
@@ -86,6 +82,9 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
           </button>
         </div>
       </div>
+      <p className="section-hint" style={{ marginBottom: 'var(--space-3)' }}>
+        The daemon focuses on consuming Redis (Ingestor/Account Agent) for trading; it does not report IB event subscription status here.
+      </p>
       <div className="event-subscribe-body">
         <table className="table-operations table-event-subscribe table-event-subscribe-horizontal">
           <thead>

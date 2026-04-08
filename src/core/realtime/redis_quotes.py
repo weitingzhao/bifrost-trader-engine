@@ -1,4 +1,4 @@
-"""Redis quote cache: writer (daemon) and reader (monitor/API). No FastAPI."""
+"""Redis quote cache: optional writer (legacy/other) and reader (daemon, monitor/API). IB Ingestor writes tick keys."""
 
 from __future__ import annotations
 
@@ -266,16 +266,23 @@ class RedisQuotesReader:
         return self._available and self._client is not None
 
     def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Latest STK quote: prefer IB Ingestor tick key, then legacy ``quote:{symbol}``."""
         if not self._client:
             return None
-        key = get_quote_key(symbol)
+        sym = (symbol or "").strip()
+        if not sym:
+            return None
+        ing = self.get_ingester_tick(f"{sym}|STK|||")
+        if ing is not None:
+            return ing
+        key = get_quote_key(sym)
         try:
             val = self._client.get(key)
             if val is None:
                 return None
             return json.loads(val)
         except Exception as e:
-            logger.debug("Redis get_quote failed symbol=%s: %s", symbol, e)
+            logger.debug("Redis get_quote failed symbol=%s: %s", sym, e)
             return None
 
     def get_quotes(self, symbols: List[str]) -> List[Dict[str, Any]]:

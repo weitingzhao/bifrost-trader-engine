@@ -9,7 +9,7 @@ function marketUrl(path: string): string {
   return joinServiceBase(apiBase(), path)
 }
 
-/** R-RM*: Get real-time quotes from API (GET /quotes). Empty symbols = server watchlist. */
+/** GET /quotes: STK from IB Ingestor Redis ticks; empty symbols = server watchlist. */
 export async function fetchQuotes(symbols?: string[]): Promise<QuotesResponse> {
   const params = new URLSearchParams()
   if (symbols?.length) params.set('symbols', symbols.join(','))
@@ -18,7 +18,7 @@ export async function fetchQuotes(symbols?: string[]): Promise<QuotesResponse> {
   return r.json()
 }
 
-/** R-RM*: SSE subscribe to quote stream. Returns unsubscribe. No Redis = connection fails. */
+/** SSE /quotes/stream: IB Ingestor pub/sub channel; payloads load ib:ingester:tick:*. */
 export function subscribeQuotes(onQuote: (q: RealtimeQuote) => void): () => void {
   const url = marketUrl('/quotes/stream')
   const es = new EventSource(url)

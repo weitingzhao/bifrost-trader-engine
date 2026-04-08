@@ -1473,6 +1473,7 @@ export default function App() {
           loadStatus={loadStatus}
           operations={operations}
           onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
+          onNavigateToSocket={openSocketInSettings}
           celeryLamp={celeryLamp}
           apiHealthProbes={apiHealthProbes}
         />

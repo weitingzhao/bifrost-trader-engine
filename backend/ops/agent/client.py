@@ -12,7 +12,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SOCKET = "/run/bifrost-agent/bifrost-agent.sock"
 _CONNECT_TIMEOUT = 5
-_READ_TIMEOUT = 35
+# Must exceed longest AgentRequest.timeout (stop waits for systemd TimeoutStopSec, often 60s).
+_READ_TIMEOUT_MIN = 35
+_READ_TIMEOUT_PADDING = 15
 
 
 class AgentClient:
@@ -40,7 +42,8 @@ class AgentClient:
             await writer.drain()
             writer.write_eof()
 
-            data = await asyncio.wait_for(reader.read(65536), timeout=_READ_TIMEOUT)
+            read_deadline = max(_READ_TIMEOUT_MIN, int(req.timeout) + _READ_TIMEOUT_PADDING)
+            data = await asyncio.wait_for(reader.read(65536), timeout=read_deadline)
             if not data:
                 return AgentResponse(
                     request_id=req.request_id,
@@ -50,10 +53,11 @@ class AgentClient:
             resp_dict = json.loads(data.decode())
             return AgentResponse.from_dict(resp_dict)
         except asyncio.TimeoutError:
+            _rd = max(_READ_TIMEOUT_MIN, int(req.timeout) + _READ_TIMEOUT_PADDING)
             return AgentResponse(
                 request_id=req.request_id,
                 ok=False,
-                error=f"Agent response timed out after {_READ_TIMEOUT}s",
+                error=f"Agent response timed out after {_rd}s (UDS read; increase request timeout if needed)",
             )
         except Exception as e:
             return AgentResponse(
@@ -65,6 +69,7 @@ class AgentClient:
             writer.close()
 
     async def systemctl(self, action: str, unit: str, timeout: int = 30) -> AgentResponse:
+        """Send systemctl to agent. Use long timeouts for stop/restart via :class:`AgentExecutor`."""
         req = AgentRequest(action=action, unit=unit, timeout=timeout)
         return await self.send(req)
 

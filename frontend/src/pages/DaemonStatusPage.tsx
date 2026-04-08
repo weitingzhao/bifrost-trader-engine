@@ -4,7 +4,6 @@ import {
   postSuspend,
   postResume,
   postFlatten,
-  postReleaseIb,
   postStop,
   fetchDaemonLogs,
   subscribeDaemonLogs,
@@ -22,13 +21,14 @@ import {
 } from './status/statusLabels'
 import { useControlAction } from './status/useControlAction'
 import { StatusDaemonPanel, StatusStrategyPanel } from './status/panels'
-import { computeEventSubscribeLamp } from './status/ibEventSubscribeLamp'
+import { computeIbBrokerGroupLamp } from './status/daemonIbBrokerLamp'
 
 export interface DaemonStatusPageProps {
   status: StatusResponse | null
   loadStatus: () => Promise<StatusResponse | null>
   operations?: Operation[]
   onNavigateToStrategy?: () => void
+  onNavigateToSocket?: () => void
   embeddedInSettings?: boolean
 }
 
@@ -37,6 +37,7 @@ export function DaemonStatusPage({
   loadStatus,
   operations = [],
   onNavigateToStrategy,
+  onNavigateToSocket,
   embeddedInSettings,
 }: DaemonStatusPageProps) {
   const [ctrlMsg, setCtrlMsg] = useState({ text: '', isErr: false })
@@ -80,7 +81,6 @@ export function DaemonStatusPage({
   }, [hb?.daemon_alive])
 
   const suspended = j?.daemon?.trading?.trading_suspended === true
-  const ibConnected = hb?.ib_connected === true
   let daemonLabel = 'Not running (or single-process mode)'
   let daemonHint = 'Run run_engine.py on the trading machine to see "Running" here'
   const autoSt = j?.daemon?.trading?.auto_status
@@ -88,8 +88,6 @@ export function DaemonStatusPage({
   let hedgeHint = (autoSt?.ts != null && nowSec - (autoSt.ts as number) < 90)
     ? 'Single-process mode (run_engine.py); status written by hedge logic'
     : ''
-  let daemonIbLine = ''
-
   if (hb?.daemon_alive) {
     daemonLabel = 'Running'
     daemonHint = hb.last_ts != null ? `Last heartbeat: ${fmtTs(hb.last_ts)}` : ''
@@ -97,7 +95,6 @@ export function DaemonStatusPage({
     hedgeHint = hb.hedge_running
       ? 'Single-process: daemon and hedge in same process'
       : 'Click "Resume" on monitor to resume'
-    daemonIbLine = `Trading Client: ${ibConnected ? `Connected @ ${hb.ib_client_id ?? '?'}` : 'Not connected'}`
   } else if (hb) {
     daemonLabel = 'Not running'
     if (hb.graceful_shutdown_at != null) {
@@ -124,27 +121,11 @@ export function DaemonStatusPage({
     .map(r => DAEMON_REASON_LABELS[r] ?? r)
     .join('; ') || 'None'
 
-  const runStatusLabel = suspended ? 'Suspended (no new hedges)' : 'Running'
   const heartbeatGroupLamp = hb ? (hb.daemon_alive ? 'green' : 'red') : 'none'
-  const listenerHost = hb?.listener_connected === true
-  const listenerSecondary = hb?.listener_2_connected === true
-  const ibGroupLamp: 'green' | 'yellow' | 'red' | 'none' =
-    !hb?.daemon_alive
-      ? 'none'
-      : listenerHost && listenerSecondary
-        ? 'green'
-        : !listenerHost && !listenerSecondary
-          ? 'red'
-          : 'yellow'
+  const { lamp: ibGroupLamp, title: ibGroupTitle } = computeIbBrokerGroupLamp(j, hb)
   const tradingStrategyLamp: 'green' | 'yellow' | 'red' | 'none' =
     !hb || !hb.daemon_alive ? 'red' : suspended ? 'yellow' : 'green'
-  const eventSubscribeLamp = computeEventSubscribeLamp(hb)
-  const strategyGroupLamp: 'green' | 'yellow' | 'red' | 'none' =
-    tradingStrategyLamp === 'green' && eventSubscribeLamp === 'green'
-      ? 'green'
-      : tradingStrategyLamp === 'red' || eventSubscribeLamp === 'red'
-        ? 'red'
-        : 'yellow'
+  const strategyGroupLamp: 'green' | 'yellow' | 'red' | 'none' = tradingStrategyLamp
   const daemonLamp: 'green' | 'yellow' | 'red' | 'none' = (() => {
     const asRyg = (v: string): 'green' | 'yellow' | 'red' => (v === 'none' ? 'red' : v as 'green' | 'yellow' | 'red')
     const h = asRyg(heartbeatGroupLamp)
@@ -186,28 +167,9 @@ export function DaemonStatusPage({
             daemonLamp={daemonLamp}
             heartbeatGroupLamp={heartbeatGroupLamp}
             ibGroupLamp={ibGroupLamp}
-            strategyGroupLamp={strategyGroupLamp}
+            ibGroupTitle={ibGroupTitle}
             secondsUntilNextHeartbeat={secondsUntilNextHeartbeat}
-            runStatusLabel={runStatusLabel}
-            suspended={suspended}
-            ibConnected={ibConnected}
-            daemonIbLine={daemonIbLine}
-            ibConfig={j?.config?.ib_client}
-            onStop={() => runCtrlAction(postStop, { loading: 'Requesting daemon stop…', success: 'Stop sent; daemon will exit and clear ib_client_id; next start uses client_id=1.' })}
-            onReleaseIb={() => runCtrlAction(postReleaseIb, { loading: 'Requesting release IB…', success: 'Reset sent. Daemon will release both Trading and Listener IB connections on its next heartbeat, then enter WAITING_IB.' })}
-            ctrlMsg={ctrlMsg}
-          />
-        </section>
-
-        <section className="replay-section" aria-label="Daemon Event">
-          <div className="status-section-heading-row" style={{ marginBottom: 'var(--space-3)' }}>
-            <h3 className="page-title-with-tooltip">
-              Daemon Event
-              <InfoTooltip text="Trading strategy status. IB event subscription detail is under Settings → Subscribe (IB Event Subscribe)." />
-            </h3>
-          </div>
-          <div className="status-management-celery-row status-management-celery-row--monitor-only">
-            <div className="status-panel-section status-management-celery-half">
+            strategyPanel={(
               <StatusStrategyPanel
                 compact
                 status={j}
@@ -226,8 +188,11 @@ export function DaemonStatusPage({
                 activeGateSafetyName={status?.strategy?.active?.gate_safety?.name}
                 onManage={onNavigateToStrategy}
               />
-            </div>
-          </div>
+            )}
+            onStop={() => runCtrlAction(postStop, { loading: 'Requesting daemon stop…', success: 'Stop sent; daemon will exit and clear ib_client_id; next start uses client_id=1.' })}
+            onNavigateToSocket={onNavigateToSocket}
+            ctrlMsg={ctrlMsg}
+          />
         </section>
 
         <section className="replay-section" aria-labelledby="daemon-console-head">

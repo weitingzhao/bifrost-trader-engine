@@ -575,7 +575,7 @@ function IngestServicesTable(props: {
           <th>Status</th>
           <th>
             Host
-            <InfoTooltip text="Runtime stack from Redis field bifrost_ops_control_env on the ingest meta hash (set when you start a service from Ops). Shows Dev or Prod for the stack that owns control. If it differs from this page's Ops config profile, Actions are disabled until that stack stops the service." />
+            <InfoTooltip text="Only one of Dev or Prod may run each service against the same Redis: bifrost_ops_control_env on the meta hash records who started it from Ops. Starting elsewhere is rejected if the lease differs or if health still shows a fresh active writer. After Stop, Ops clears that lease and rewrites health to disconnected so Status updates." />
           </th>
           <th>Category</th>
           <th className="massive-api-kv-label">Service</th>
@@ -899,11 +899,25 @@ export function MarketIngestOpsPage({
                 <SettingsSidebarLampGlyph id="websocket" />
               </span>
               <span>Socket Services</span>
-              <InfoTooltip text="Roll-up from Monitor GET /status `socket`: Massive meta; IB ingestor uses `ib_ingestor.connected`. IB Operator: green only when Redis `host_connected` — the Operator process (`run_ib_operator.py`) has an IB API socket to TWS/Gateway (API port + client_id from YAML). TWS showing a logged-in session is not the same as that API connection; enable API in TWS and fix host/port/client_id if the lamp stays yellow. `host_client_id` in Redis is always filled and does not imply API. Yellow when host not connected but health is fresh; red when stale/stopped. Gray when unknown. Local systemd is Start/Stop only; not Local Control Agent health." />
             </span>
           </h2>
-          <p className="settings-page-subtitle">
-            Row lamps use Redis-backed health from Monitor /status (not local Ops systemd). IB Operator: TWS UI login ≠ IB API `host_connected` — the lamp reflects whether `run_ib_operator.py` has connected to the API port. Ops Start/Stop still targets processes on this Ops host. When executor_mode=agent, Local Control Agent is below.
+          <p
+            className="massive-api-doc-hint"
+            style={{
+              marginTop: 'var(--space-2)',
+              marginBottom: 0,
+              display: 'flex',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 'var(--space-2)',
+            }}
+          >
+            <span title={hostColumn.title}>
+              This Ops instance (config / executor)
+              <span style={{ marginLeft: 6, display: 'inline-flex', verticalAlign: 'middle' }}>
+                <OpsHostEnvPillBadge pill={hostColumn.pill} />
+              </span>
+            </span>
           </p>
         </div>
         <div className="dashboard-auth-bar dashboard-auth-bar--celery-header">
@@ -1000,20 +1014,8 @@ export function MarketIngestOpsPage({
         </section>
       ) : null}
 
-      <section className="replay-section" aria-labelledby="socket-services-heading">
-        <h3 id="socket-services-heading" className="daemon-group-title" style={{ marginBottom: 'var(--space-2)' }}>
-          Ingest services
-            <InfoTooltip text="Each row lamp reflects Redis health from Monitor GET /status `socket` for that service. Ops process column is for control only." />
-        </h3>
+      <section className="replay-section" aria-label="Socket service units">
         <>
-          <p className="massive-api-doc-hint" style={{ marginBottom: 'var(--space-3)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-            <span title={hostColumn.title}>
-              This Ops instance (config / executor)
-              <span style={{ marginLeft: 6, display: 'inline-flex', verticalAlign: 'middle' }}>
-                <OpsHostEnvPillBadge pill={hostColumn.pill} />
-              </span>
-            </span>
-          </p>
           <IngestServicesTable
             rows={unifiedServiceRows}
             status={status}

@@ -787,7 +787,7 @@ class PostgreSQLSink(StatusSink):
             logger.warning("write_ohlc_bars failed: %s", e, exc_info=True)
 
     # Control commands older than this are ignored (consumed but not executed), to avoid executing
-    # a stop from a previous run when the daemon restarts and immediately polls (e.g. after IB timeout → WAITING_IB).
+    # a stop from a previous run when the daemon restarts and immediately polls.
     CONTROL_CMD_MAX_AGE_SEC = 60
 
     def poll_and_consume_control(
@@ -862,13 +862,6 @@ class PostgreSQLSink(StatusSink):
         seconds_until_retry: Optional[int] = None,
         heartbeat_interval_sec: Optional[float] = None,
         redis_quotes_connected: bool = False,
-        event_subscribe_ticker: bool = False,
-        event_subscribe_positions: bool = False,
-        event_subscribe_fills: bool = False,
-        event_subscribe_commission: bool = False,
-        event_subscribe_positions_ib2: bool = False,
-        event_subscribe_fills_ib2: bool = False,
-        event_subscribe_commission_ib2: bool = False,
         listener_connected: bool = False,
         listener_client_id: Optional[int] = None,
         listener_2_connected: bool = False,
@@ -878,9 +871,8 @@ class PostgreSQLSink(StatusSink):
         """Update daemon_heartbeat row (id=1). RE-6: daemon vs hedge; RE-7: ib_connected, ib_client_id, next_retry_ts.
         seconds_until_retry: relative countdown from daemon clock, avoids clock skew on UI (optional).
         heartbeat_interval_sec: interval in use by daemon, for monitor countdown.
-        redis_quotes_connected: whether daemon is writing real-time quotes to Redis (R-RM*).
-        event_subscribe_*: daemon IB event subscription status for System page (ticker, positions, fills, commission).
-        event_subscribe_*_ib2: Secondary (listener_connector_2) subscription status.
+        redis_quotes_connected: whether daemon Redis quotes reader is connected (reads IB Ingestor tick keys).
+        event_subscribe_* columns are forced to false (daemon does not publish subscription state).
         listener_connected/listener_client_id: daemon Listener on Host (config YAML ib.client_id_listener).
         listener_2_connected/listener_2_client_id: Secondary listener (config YAML ib2_host / ib2_client_id_listener)."""
         if not self._ensure_conn():
@@ -900,9 +892,9 @@ class PostgreSQLSink(StatusSink):
                             SET last_ts = now(), hedge_running = %s, ib_connected = %s, ib_client_id = %s,
                                 next_retry_ts = to_timestamp(%s) AT TIME ZONE 'UTC', seconds_until_retry = %s,
                                 graceful_shutdown_at = NULL, heartbeat_interval_sec = %s, redis_quotes_connected = %s,
-                                event_subscribe_ticker = %s, event_subscribe_positions = %s,
-                                event_subscribe_fills = %s, event_subscribe_commission = %s,
-                                event_subscribe_positions_ib2 = %s, event_subscribe_fills_ib2 = %s, event_subscribe_commission_ib2 = %s,
+                                event_subscribe_ticker = false, event_subscribe_positions = false,
+                                event_subscribe_fills = false, event_subscribe_commission = false,
+                                event_subscribe_positions_ib2 = false, event_subscribe_fills_ib2 = false, event_subscribe_commission_ib2 = false,
                                 listener_connected = %s, listener_client_id = %s,
                                 listener_2_connected = %s, listener_2_client_id = %s,
                                 mock_hedging = %s
@@ -916,13 +908,6 @@ class PostgreSQLSink(StatusSink):
                                 seconds_until_retry,
                                 iv,
                                 redis_quotes_connected,
-                                event_subscribe_ticker,
-                                event_subscribe_positions,
-                                event_subscribe_fills,
-                                event_subscribe_commission,
-                                event_subscribe_positions_ib2,
-                                event_subscribe_fills_ib2,
-                                event_subscribe_commission_ib2,
                                 listener_connected,
                                 listener_client_id,
                                 listener_2_connected,
@@ -937,17 +922,15 @@ class PostgreSQLSink(StatusSink):
                             SET last_ts = now(), hedge_running = %s, ib_connected = %s, ib_client_id = %s,
                                 next_retry_ts = NULL, seconds_until_retry = NULL, graceful_shutdown_at = NULL,
                                 heartbeat_interval_sec = %s, redis_quotes_connected = %s,
-                                event_subscribe_ticker = %s, event_subscribe_positions = %s,
-                                event_subscribe_fills = %s, event_subscribe_commission = %s,
-                                event_subscribe_positions_ib2 = %s, event_subscribe_fills_ib2 = %s, event_subscribe_commission_ib2 = %s,
+                                event_subscribe_ticker = false, event_subscribe_positions = false,
+                                event_subscribe_fills = false, event_subscribe_commission = false,
+                                event_subscribe_positions_ib2 = false, event_subscribe_fills_ib2 = false, event_subscribe_commission_ib2 = false,
                                 listener_connected = %s, listener_client_id = %s,
                                 listener_2_connected = %s, listener_2_client_id = %s,
                                 mock_hedging = %s
                             WHERE id = 1
                             """,
                             (hedge_running, ib_connected, ib_client_id, iv, redis_quotes_connected,
-                             event_subscribe_ticker, event_subscribe_positions, event_subscribe_fills, event_subscribe_commission,
-                             event_subscribe_positions_ib2, event_subscribe_fills_ib2, event_subscribe_commission_ib2,
                              listener_connected, listener_client_id, listener_2_connected, listener_2_client_id,
                              mock_hedging),
                         )

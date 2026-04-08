@@ -5,48 +5,44 @@ DaemonFSM defines valid transitions; GsTrading handlers + run() must cover them.
 This test ensures no transition is "orphaned" (defined but never used).
 """
 
-import pytest
-
 from src.daemon.fsm.daemon_fsm import DaemonFSM, DaemonState
 
-# Export transitions for verification (add to daemon_fsm if not already)
-# We import the module to access _TRANSITIONS via getattr
 import src.daemon.fsm.daemon_fsm as daemon_fsm_module
 
 _TRANSITIONS = daemon_fsm_module._TRANSITIONS
+
+_MINIMAL_CONFIG = {
+    "server": {"skip_monitor_ib": True},
+    "ib": {
+        "host": {
+            "ip": "127.0.0.1",
+            "port_type": "tws_paper",
+            "client_id": {
+                "daemon": 1,
+                "listener": 2,
+                "account": 100,
+                "markets": 101,
+                "worker_market": 500,
+            },
+        },
+    },
+    "structure": {},
+    "risk": {"paper_trade": True},
+    "greeks": {},
+    "earnings": {},
+}
 
 
 def test_all_non_terminal_states_have_handlers_in_gs_trading():
     """Every state except STOPPED must have a handler in GsTrading._get_state_handlers()."""
     from src.daemon.app.gs_trading import GsTrading
 
-    # Create minimal config to instantiate GsTrading
-    config = {
-        "ib": {
-            "host": {
-                "ip": "127.0.0.1",
-                "port_type": "tws_paper",
-                "client_id": {
-                    "daemon": 1,
-                    "listener": 2,
-                    "account": 100,
-                    "markets": 101,
-                    "worker_market": 500,
-                },
-            },
-        },
-        "structure": {},
-        "risk": {"paper_trade": True},
-        "greeks": {},
-        "earnings": {},
-    }
-    app = GsTrading(config)
+    app = GsTrading(_MINIMAL_CONFIG)
     handlers = app._get_state_handlers()
 
     # STOPPED is terminal - no handler needed.
     # RUNNING_SUSPENDED is never dispatched: we stay inside _handle_running() and the FSM
-    # flips to RUNNING_SUSPENDED in heartbeat (_apply_run_status_transition); we only return
-    # from _handle_running when going to STOPPING or WAITING_IB.
+    # flips to RUNNING_SUSPENDED in heartbeat (_apply_run_status_transition).
     states_needing_handlers = [
         s for s in DaemonState
         if s not in (DaemonState.STOPPED, DaemonState.RUNNING_SUSPENDED)
@@ -58,30 +54,18 @@ def test_all_non_terminal_states_have_handlers_in_gs_trading():
 def test_every_valid_transition_has_implementation_path():
     """
     For each (from_state, to_state) in _TRANSITIONS, document how it is reached.
-    This is a documentation test: we enumerate all transitions and assert
-    we have a known implementation path for each.
     """
-    # Map: (from, to) -> "how it's implemented"
-    # Handlers return next_state; request_stop() triggers STOPPING; run() finally triggers STOPPED.
-    # RUNNING <-> RUNNING_SUSPENDED and RUNNING->WAITING_IB happen inside _handle_running (heartbeat).
     implementation_paths = {
-        (DaemonState.IDLE, DaemonState.CONNECTING): "_handle_idle returns CONNECTING",
-        (DaemonState.IDLE, DaemonState.WAITING_IB): "_handle_idle returns WAITING_IB when suspended (no Trading Client until Resume)",
+        (DaemonState.IDLE, DaemonState.CONNECTING): "_handle_idle always returns CONNECTING",
         (DaemonState.IDLE, DaemonState.STOPPED): "request_stop() when IDLE",
-        (DaemonState.CONNECTING, DaemonState.CONNECTED): "_handle_connecting returns CONNECTED on success",
-        (DaemonState.CONNECTING, DaemonState.WAITING_IB): "_handle_connecting returns WAITING_IB on connect fail (RE-7)",
+        (DaemonState.CONNECTING, DaemonState.CONNECTED): "_handle_connecting returns CONNECTED",
         (DaemonState.CONNECTING, DaemonState.STOPPING): "request_stop() during connect",
-        (DaemonState.WAITING_IB, DaemonState.CONNECTING): "retry timer or retry_ib control; then _handle_waiting_ib",
-        (DaemonState.WAITING_IB, DaemonState.CONNECTED): "_handle_waiting_ib reconnect success returns CONNECTED",
-        (DaemonState.WAITING_IB, DaemonState.STOPPING): "request_stop() when WAITING_IB",
         (DaemonState.CONNECTED, DaemonState.RUNNING): "_handle_connected returns RUNNING",
         (DaemonState.CONNECTED, DaemonState.STOPPING): "request_stop() when CONNECTED",
         (DaemonState.RUNNING, DaemonState.STOPPING): "_handle_running returns STOPPING when loop exits, or request_stop()",
         (DaemonState.RUNNING, DaemonState.RUNNING_SUSPENDED): "heartbeat _apply_run_status_transition when daemon_run_status.suspended=true",
-        (DaemonState.RUNNING, DaemonState.WAITING_IB): "IB disconnect in heartbeat; _handle_running returns WAITING_IB",
         (DaemonState.RUNNING_SUSPENDED, DaemonState.RUNNING): "heartbeat _apply_run_status_transition when suspended=false",
         (DaemonState.RUNNING_SUSPENDED, DaemonState.STOPPING): "request_stop() during RUNNING_SUSPENDED",
-        (DaemonState.RUNNING_SUSPENDED, DaemonState.WAITING_IB): "IB disconnect in heartbeat during RUNNING_SUSPENDED",
         (DaemonState.STOPPING, DaemonState.STOPPED): "_handle_stopping returns STOPPED",
     }
 
@@ -103,7 +87,7 @@ def test_transition_table_completeness():
 
 
 def test_request_stop_covers_expected_transitions():
-    """request_stop() implements IDLE->STOPPED and *->STOPPING for CONNECTING/CONNECTED/RUNNING."""
+    """request_stop() implements IDLE->STOPPED and *->STOPPING for active states."""
     fsm = DaemonFSM()
     assert fsm.current == DaemonState.IDLE
     assert fsm.request_stop()  # IDLE -> STOPPED
@@ -118,5 +102,9 @@ def test_request_stop_covers_expected_transitions():
     assert fsm.current == DaemonState.STOPPING
 
     fsm._current = DaemonState.RUNNING
+    assert fsm.request_stop()
+    assert fsm.current == DaemonState.STOPPING
+
+    fsm._current = DaemonState.RUNNING_SUSPENDED
     assert fsm.request_stop()
     assert fsm.current == DaemonState.STOPPING

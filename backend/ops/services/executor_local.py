@@ -35,8 +35,6 @@ def _ingest_script_log_for_unit(unit: str) -> Optional[Tuple[str, str]]:
         return ("run_ib_account_agent.py", "ib-account-agent.log")
     if "ib-ingestor" in stem or stem == "bifrost-ib-ingestor":
         return ("run_ib_ingestor.py", "ib-ingestor.log")
-    if "ib-market-ingest" in stem or stem == "bifrost-ib-market-ingest":
-        return ("run_ib_ingestor.py", "ib-ingestor.log")
     return None
 
 
@@ -457,8 +455,6 @@ class SubprocessLocalExecutor:
         u = unit.replace(".service", "").strip()
         if "ib-ingestor" in u:
             return "ib-ingestor"
-        if "ib-market-ingest" in u:
-            return "ib-market-ingest"
         if "ib-operator" in u:
             return "ib-operator"
         if "ib-account-agent" in u:

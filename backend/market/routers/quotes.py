@@ -31,7 +31,7 @@ def get_quotes(
     request: Request,
     symbols: Optional[str] = Query(None, description="Comma-separated symbols; if omitted, use focus list (positions + watchlist)"),
 ) -> Dict[str, Any]:
-    """R-RM*: STK from Redis ``quote:{symbol}`` (daemon) with fallback ``ib:ingester:tick:{SYM|STK|||}`` (ingestor); OPT from contract_quote_live. Combined list; OPT items include contract_key."""
+    """STK from Redis ``ib:ingester:tick:{symbol}|STK|||`` (IB Ingestor); OPT from contract_quote_live. Combined list."""
     app = request.app
     reader = app.state.reader
     rq = getattr(app.state, "redis_quotes", None)
@@ -63,9 +63,7 @@ def get_quotes(
                 s = (sym or "").strip()
                 if not s:
                     continue
-                q = rq.get_quote(s)
-                if q is None:
-                    q = rq.get_ingester_tick(f"{s}|STK|||")
+                q = rq.get_ingester_tick(f"{s}|STK|||")
                 if q is not None:
                     quotes.append(q)
         except Exception as e:

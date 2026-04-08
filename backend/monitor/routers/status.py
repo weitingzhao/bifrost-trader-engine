@@ -543,6 +543,13 @@ def get_status(request: Request) -> Dict[str, Any]:
                         ib_account_agent_info["msg_count"] = int(_ah.get("msg_count") or 0)
                     except (TypeError, ValueError):
                         ib_account_agent_info["msg_count"] = 0
+                    # Mirror IB Operator: explicit host_alive in Redis; missing key = legacy writer (assume running).
+                    if "host_alive" in _ah:
+                        _alive = redis_hash_field_truthy(_ah, "host_alive")
+                    else:
+                        _alive = True
+                    ib_account_agent_info["service_alive"] = _alive
+                    ib_account_agent_info["operator_alive"] = _alive
                     _recon = ib_account_agent_info["reconnects"]
                     ib_account_agent_info["host"] = {
                         "connected": _host_on,
