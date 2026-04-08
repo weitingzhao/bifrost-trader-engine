@@ -34,6 +34,8 @@ export type SettingsSidebarLampGlyphId =
   | 'daily-oi'
   | 'trades-quotes'
   | 'corporate-actions'
+  /** IB event subscriptions (ticker, positions, fills): distinct from Socket ingest WebSocket glyph */
+  | 'event-subscribe'
   | 'websocket'
   | 'ws-aggregates-s'
   | 'ws-aggregates-m'
@@ -238,6 +240,14 @@ export function SettingsSidebarLampGlyph({ id }: { id: SettingsSidebarLampGlyphI
         <svg {...SVG_COMMON}>
           <path d="M3 3v18h18" />
           <path d="m7 15 3-4 3 2 4-6" />
+        </svg>
+      )
+    /** Event subscribe: bell (IB streaming subscriptions; not Socket connector) */
+    case 'event-subscribe':
+      return (
+        <svg {...SVG_COMMON}>
+          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+          <path d="M9 21a3 3 0 0 0 6 0" />
         </svg>
       )
     /** WebSocket: radiating signal */

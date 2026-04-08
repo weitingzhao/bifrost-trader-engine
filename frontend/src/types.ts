@@ -185,9 +185,15 @@ export interface StatusPortfolio {
   open_orders?: OpenOrder[]
 }
 
+/** GET /status `config.redis` — quote notify channel (Monitor reads from app config). */
+export interface StatusConfigRedis {
+  subscribe_channel?: string | null
+}
+
 export interface StatusConfig {
   ib_client?: IbClient | null
   ib_flex?: StatusIbFlex | null
+  redis?: StatusConfigRedis | null
 }
 
 export interface StrategyActiveRef {
@@ -319,21 +325,6 @@ export interface DaemonHeartbeat {
   heartbeat_interval_sec?: number | null
   /** Daemon Redis quotes reader connected (reads ingestor tick keys; column name unchanged). */
   redis_quotes_connected?: boolean
-  /** Legacy DB columns; daemon heartbeat no longer updates these (always false on write). */
-  event_subscribe_ticker?: boolean
-  event_subscribe_positions?: boolean
-  event_subscribe_fills?: boolean
-  event_subscribe_commission?: boolean
-  /** Daemon second IB connection (YAML client_id.listener); shown as this Client ID in TWS */
-  listener_connected?: boolean
-  listener_client_id?: number | null
-  /** Listener on Secondary TWS (YAML ib.secondary; status ib_client.client / port.listener_secondary) */
-  listener_2_connected?: boolean
-  listener_2_client_id?: number | null
-  /** Secondary IB event subscribe: positions, fills, commission (no ticker). */
-  event_subscribe_positions_ib2?: boolean
-  event_subscribe_fills_ib2?: boolean
-  event_subscribe_commission_ib2?: boolean
   /** Mock hedging mode: treat as live for Status lamp (green when running). */
   mock_hedging?: boolean
   /** Last control message (e.g. init_ticker error: clear subscriptions first). Cleared on success. */

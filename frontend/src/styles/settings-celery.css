@@ -359,6 +359,259 @@
   overflow-wrap: break-word;
 }
 
+/* IB Event Subscribe: Summary grid, metric tables, data flow <details> */
+.event-subscribe-page-hint {
+  margin-bottom: var(--space-3);
+}
+
+.event-subscribe-socket-link {
+  display: inline-block;
+  margin-left: var(--space-2);
+  font-weight: 500;
+}
+
+.event-subscribe-subheading {
+  margin: var(--space-5) 0 var(--space-2);
+  font-size: var(--font-size-sm, 0.875rem);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--color-text-muted, inherit);
+}
+
+.event-subscribe-subheading:first-of-type {
+  margin-top: var(--space-2);
+}
+
+.event-subscribe-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.event-subscribe-summary-card {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 6px);
+  background: var(--color-surface-raised, transparent);
+}
+
+.event-subscribe-summary-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.event-subscribe-summary-label {
+  font-weight: 600;
+}
+
+.event-subscribe-summary-meta {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-sm, 0.8125rem);
+  line-height: 1.4;
+  color: var(--color-text-muted, inherit);
+}
+
+.event-subscribe-summary-line {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0;
+  font-size: var(--font-size-sm, 0.8125rem);
+}
+
+.event-subscribe-summary-k {
+  color: var(--color-text-muted, inherit);
+}
+
+/* Same tab chrome as Portfolio Positions (Instance / Options / Stocks): .system-tabs.replay-portfolio-tabs + .system-tab.active */
+
+.event-subscribe-body .system-tab-panel {
+  min-height: 0;
+}
+
+.event-subscribe-tab-panel-first-heading {
+  margin-top: var(--space-2);
+}
+
+.event-subscribe-redis-paths-hint {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-sm, 0.8125rem);
+  line-height: 1.45;
+  color: var(--color-text-muted, inherit);
+}
+
+.event-subscribe-redis-paths-scroll {
+  margin-bottom: var(--space-4);
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.event-subscribe-redis-paths-table {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 42rem;
+  font-size: var(--font-size-sm, 0.8125rem);
+}
+
+.event-subscribe-redis-paths-table thead th {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.event-subscribe-redis-paths-table th[scope='row'] {
+  width: 8.75rem;
+  max-width: 8.75rem;
+  font-weight: 600;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.event-subscribe-redis-paths-table td {
+  vertical-align: middle;
+}
+
+.event-subscribe-redis-col-path {
+  width: 9rem;
+}
+
+.event-subscribe-redis-col-key {
+  width: auto;
+}
+
+.event-subscribe-redis-col-metric {
+  width: 4.25rem;
+}
+
+.event-subscribe-redis-paths-table td.event-subscribe-redis-paths-key-cell {
+  overflow: hidden;
+  max-width: 0;
+}
+
+.event-subscribe-redis-path-key-clip {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.event-subscribe-redis-path-key-clip .event-subscribe-inline-code {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.event-subscribe-redis-paths-table .event-subscribe-redis-paths-metric-cell {
+  white-space: nowrap;
+  text-align: right;
+  width: 4.5rem;
+}
+
+.event-subscribe-ticker-block {
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 6px);
+  background: var(--color-surface-raised, transparent);
+}
+
+.event-subscribe-ticker-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.event-subscribe-ticker-chip {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  font-size: var(--font-size-sm, 0.8125rem);
+  font-weight: 600;
+  font-family: ui-monospace, monospace;
+  border-radius: 4px;
+  background: var(--color-surface, rgba(0, 0, 0, 0.06));
+  border: 1px solid var(--color-border);
+}
+
+.event-subscribe-ticker-ref-list {
+  margin: var(--space-2) 0 0;
+  padding-left: 1.1rem;
+  font-size: var(--font-size-sm, 0.8125rem);
+}
+
+.event-subscribe-positions-table .event-subscribe-contract-cell {
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-subscribe-executions-table {
+  font-size: var(--font-size-sm, 0.8125rem);
+}
+
+.event-subscribe-redis-paths-total-row th,
+.event-subscribe-redis-paths-total-row td {
+  font-weight: 600;
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-2);
+  vertical-align: middle;
+}
+
+.event-subscribe-metric-table th[scope='row'] {
+  width: 12rem;
+  max-width: 40%;
+  font-weight: 500;
+  text-align: left;
+}
+
+.event-subscribe-slots-table {
+  margin-top: var(--space-3);
+}
+
+.event-subscribe-agent-wide-hint {
+  margin-top: 0;
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-sm, 0.8125rem);
+}
+
+.event-subscribe-dataflow {
+  margin: var(--space-3) 0 var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 6px);
+}
+
+.event-subscribe-dataflow > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: var(--font-size-sm, 0.875rem);
+}
+
+.event-subscribe-dataflow-list {
+  margin: var(--space-2) 0 0;
+  padding-left: 1.25rem;
+  font-size: var(--font-size-sm, 0.8125rem);
+  line-height: 1.5;
+}
+
+.event-subscribe-inline-code {
+  font-size: 0.85em;
+  word-break: break-all;
+}
+
 /* Trading Strategy card (embedded compact panel): long status lines wrap */
 .daemon-group-strategy .daemon-group-body .section-hint,
 .strategy-compact-status {

@@ -43,7 +43,12 @@ import { useSocketIngestProbe } from './hooks/useSocketIngestProbe'
 import { FEED_MASSIVE_DAILY_DATA_ID, isMassiveOptionFeedHash } from './pages/massive/feedMassiveTabUtils'
 import { SettingsSidebarLampGlyph } from './pages/settings/settingsSidebarLampGlyphs'
 import type { SettingsSidebarLampGlyphId } from './pages/settings/settingsSidebarLampGlyphs'
-import { FEED_MASSIVE_OPTION_ID } from './pages/settings/settingsConstants'
+import {
+  COVERAGE_SUBSECTIONS,
+  FEED_MASSIVE_OPTION_ID,
+  FEED_SUBSECTIONS,
+} from './pages/settings/settingsConstants'
+import { SettingsSectionIcon } from './pages/settings/SettingsSectionIcon'
 import logoImg from '../img/logo.png'
 import { fmtPctCompact, fmtUsdCompact } from './utils/format'
 import { ingestRedisHealthLamp } from './utils/socketIngestLamp'
@@ -254,6 +259,11 @@ function isSocketSettingsHash(hash: string): boolean {
 function isCelerySettingsHash(hash: string): boolean {
   const h = settingsHashKey(hash)
   return h === 'settings-celery' || h === 'settings-system-celery' || h === 'settings-dashboard-celery'
+}
+
+function isCoverageOptionHash(hash: string): boolean {
+  const h = settingsHashKey(hash)
+  return h === 'coverage-option' || h === FEED_MASSIVE_DAILY_DATA_ID
 }
 
 type LampId = 'green' | 'yellow' | 'red' | 'none'
@@ -839,6 +849,11 @@ export default function App() {
     window.location.hash = '#settings-ws-connector'
   }, [])
 
+  const openSettingsSectionById = useCallback((id: string) => {
+    setActiveTab('settings')
+    window.location.hash = `#${id.replace(/^#/, '')}`
+  }, [])
+
   const runQuickStop = async (
     api: () => Promise<{ ok?: boolean; error?: string }>,
     label: string,
@@ -1166,6 +1181,7 @@ export default function App() {
           </button>
           {headerMenuOpen && (
             <div className="app-header-menu" role="menu" aria-label="App menu">
+              <div className="app-header-menu-label" role="presentation">API</div>
               {HEADER_API_SHORTCUTS.map(({ hash, glyph, title, menuLabel, lampPicker }) => {
                 const lamp =
                   lampPicker === 'architecture'
@@ -1210,7 +1226,7 @@ export default function App() {
               <button
                 type="button"
                 role="menuitem"
-                className={`app-header-menu-item app-header-menu-item-system ${activeTab === 'settings' && isDaemonSettingsHash(urlHash) ? 'active' : ''}`}
+                className={`app-header-menu-item app-header-menu-item-massive app-header-menu-item-system ${activeTab === 'settings' && isDaemonSettingsHash(urlHash) ? 'active' : ''}`}
                 onClick={() => { openDaemonInSettings(); setHeaderMenuOpen(false) }}
                 title={`${daemonShortcutLamp.title} — Settings → Daemon`}
               >
@@ -1224,7 +1240,7 @@ export default function App() {
               <button
                 type="button"
                 role="menuitem"
-                className={`app-header-menu-item app-header-menu-item-system ${activeTab === 'settings' && isCelerySettingsHash(urlHash) ? 'active' : ''}`}
+                className={`app-header-menu-item app-header-menu-item-massive app-header-menu-item-system ${activeTab === 'settings' && isCelerySettingsHash(urlHash) ? 'active' : ''}`}
                 onClick={() => { openCeleryInSettings(); setHeaderMenuOpen(false) }}
                 title="Settings → Celery"
               >
@@ -1235,6 +1251,34 @@ export default function App() {
                 </span>
                 Celery
               </button>
+              <div className="app-header-menu-label" role="presentation">Data Coverage</div>
+              {COVERAGE_SUBSECTIONS.map((sub) => (
+                <button
+                  key={sub.id}
+                  type="button"
+                  role="menuitem"
+                  className={`app-header-menu-item ${activeTab === 'settings' && (sub.id === 'coverage-option' ? isCoverageOptionHash(urlHash) : settingsHashKey(urlHash) === sub.id) ? 'active' : ''}`}
+                  onClick={() => { openSettingsSectionById(sub.id); setHeaderMenuOpen(false) }}
+                  title={`Settings → Data Coverage → ${sub.label}`}
+                >
+                  <SettingsSectionIcon name={sub.icon} />
+                  {sub.label}
+                </button>
+              ))}
+              <div className="app-header-menu-label" role="presentation">Feed</div>
+              {FEED_SUBSECTIONS.map((sub) => (
+                <button
+                  key={sub.id}
+                  type="button"
+                  role="menuitem"
+                  className={`app-header-menu-item ${activeTab === 'settings' && settingsHashKey(urlHash) === sub.id ? 'active' : ''}`}
+                  onClick={() => { openSettingsSectionById(sub.id); setHeaderMenuOpen(false) }}
+                  title={`Settings → Feed → ${sub.label}`}
+                >
+                  <SettingsSectionIcon name={sub.icon} />
+                  {sub.label}
+                </button>
+              ))}
               <button
                 type="button"
                 role="menuitem"
@@ -1246,11 +1290,7 @@ export default function App() {
                 }}
                 title="Settings → Feed → Massive Option"
               >
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
-                  <path d="M3 3v18h18" />
-                  <path d="m7 16 3-4 3 2 5-8 3 4" />
-                  <path d="M17 8h4v4" />
-                </svg>
+                <SettingsSectionIcon name="feed-massive" />
                 Massive Option
               </button>
               <button

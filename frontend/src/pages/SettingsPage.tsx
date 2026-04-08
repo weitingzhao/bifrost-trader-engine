@@ -625,10 +625,10 @@ export function SettingsPage({
         >
           <span
             className={`title-inline-lamp lamp-icon ${subscribeLamp}`}
-            title="Subscribe page (legacy layout; daemon does not report IB event subscription flags)"
+            title="IB Event Subscribe: Redis Ingestor and Account Agent stream health; daemon ticker release"
             aria-hidden
           >
-            <SettingsSidebarLampGlyph id="websocket" />
+            <SettingsSidebarLampGlyph id="event-subscribe" />
           </span>
           Subscribe
         </a>

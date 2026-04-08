@@ -1158,13 +1158,12 @@ body::before {
   font-style: italic;
 }
 
-/* Event Subscribe section: constrain height so it doesn’t overflow the page */
+/* Event Subscribe: single column flow; page / settings-main scrolls (no nested 50vh panel). */
 .event-subscribe-section {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  max-height: 50vh;
-  overflow: hidden;
+  max-width: 100%;
   overflow-x: hidden;
 }
 
@@ -1192,7 +1191,6 @@ body::before {
 .event-subscribe-body {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
   overflow-x: hidden;
 }
 

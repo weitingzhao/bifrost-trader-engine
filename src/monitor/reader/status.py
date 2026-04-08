@@ -14,10 +14,13 @@ from src.persistence.postgres.connection import _get_conn_params
 
 logger = logging.getLogger(__name__)
 
+# Row layout from SELECT (no legacy listener / event_subscribe columns):
+# 0-8 core + redis_quotes_connected, 9 last_control_message, 10 subscribed_tickers, 11 mock_hedging
+
 
 def _row_to_heartbeat(row: tuple) -> Dict[str, Any]:
-    """Build daemon_heartbeat dict from (last_ts, hedge_running, ib_connected, ...)."""
-    out = {
+    """Build daemon_heartbeat dict from compact SELECT (see module docstring)."""
+    out: Dict[str, Any] = {
         "last_ts": float(row[0]) if row[0] is not None else None,
         "hedge_running": bool(row[1]),
         "ib_connected": bool(row[2]) if row[2] is not None else False,
@@ -25,27 +28,28 @@ def _row_to_heartbeat(row: tuple) -> Dict[str, Any]:
         "next_retry_ts": float(row[4]) if row[4] is not None else None,
         "seconds_until_retry": int(row[5]) if row[5] is not None else None,
         "graceful_shutdown_at": float(row[6]) if len(row) > 6 and row[6] is not None else None,
+        "heartbeat_interval_sec": int(row[7]) if len(row) > 7 and row[7] is not None else None,
+        "redis_quotes_connected": bool(row[8]) if len(row) > 8 and row[8] is not None else False,
     }
-    out["heartbeat_interval_sec"] = int(row[7]) if len(row) > 7 and row[7] is not None else None
-    out["redis_quotes_connected"] = bool(row[8]) if len(row) > 8 and row[8] is not None else False
-    out["event_subscribe_ticker"] = bool(row[9]) if len(row) > 9 and row[9] is not None else False
-    out["event_subscribe_positions"] = bool(row[10]) if len(row) > 10 and row[10] is not None else False
-    out["event_subscribe_fills"] = bool(row[11]) if len(row) > 11 and row[11] is not None else False
-    out["event_subscribe_commission"] = bool(row[12]) if len(row) > 12 and row[12] is not None else False
-    out["listener_connected"] = bool(row[13]) if len(row) > 13 and row[13] is not None else False
-    out["listener_client_id"] = int(row[14]) if len(row) > 14 and row[14] is not None else None
-    out["listener_2_connected"] = bool(row[15]) if len(row) > 15 and row[15] is not None else False
-    out["listener_2_client_id"] = int(row[16]) if len(row) > 16 and row[16] is not None else None
-    out["event_subscribe_positions_ib2"] = bool(row[17]) if len(row) > 17 and row[17] is not None else False
-    out["event_subscribe_fills_ib2"] = bool(row[18]) if len(row) > 18 and row[18] is not None else False
-    out["event_subscribe_commission_ib2"] = bool(row[19]) if len(row) > 19 and row[19] is not None else False
-    out["last_control_message"] = str(row[20]).strip() if len(row) > 20 and row[20] else None
-    # subscribed_tickers: actual list from daemon (daemon_heartbeat.subscribed_tickers)
-    if len(row) > 21 and row[21] is not None:
-        out["subscribed_tickers"] = list(row[21]) if hasattr(row[21], "__iter__") and not isinstance(row[21], str) else []
+    if len(row) > 9 and row[9] is not None:
+        s = str(row[9]).strip()
+        out["last_control_message"] = s if s else None
+    else:
+        out["last_control_message"] = None
+    if len(row) > 10:
+        r10 = row[10]
+        if r10 is not None:
+            out["subscribed_tickers"] = (
+                list(r10) if hasattr(r10, "__iter__") and not isinstance(r10, str) else []
+            )
+        else:
+            out["subscribed_tickers"] = None
     else:
         out["subscribed_tickers"] = None
-    out["mock_hedging"] = bool(row[22]) if len(row) > 22 and row[22] is not None else True
+    if len(row) > 11 and row[11] is not None:
+        out["mock_hedging"] = bool(row[11])
+    else:
+        out["mock_hedging"] = True
     return out
 
 
@@ -80,237 +84,113 @@ def get_run_status(conn: Any) -> Optional[bool]:
 
 def get_daemon_heartbeat(conn: Any) -> Optional[Dict[str, Any]]:
     """Return daemon_heartbeat row id=1. None if table missing.
-    Single source of truth for heartbeat read logic; fallbacks for older DB schemas (missing
-    listener_*, event_subscribe_*, etc.) are handled here only."""
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
-                       ib_connected, ib_client_id,
-                       extract(epoch from next_retry_ts) AS next_retry_ts,
-                       seconds_until_retry,
-                       extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
-                       heartbeat_interval_sec,
-                       redis_quotes_connected,
-                       event_subscribe_ticker, event_subscribe_positions,
-                       event_subscribe_fills, event_subscribe_commission,
-                       listener_connected, listener_client_id,
-                       listener_2_connected, listener_2_client_id,
-                       event_subscribe_positions_ib2, event_subscribe_fills_ib2, event_subscribe_commission_ib2,
-                       last_control_message,
-                       subscribed_tickers,
-                       mock_hedging
-                FROM daemon_heartbeat WHERE id = 1
-                """
-            )
-            row = cur.fetchone()
-        if row is None:
-            return None
-        return _row_to_heartbeat(row)
-    except Exception as e:
-        err = str(e).lower()
-        if "mock_hedging" in err:
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
-                               ib_connected, ib_client_id,
-                               extract(epoch from next_retry_ts) AS next_retry_ts,
-                               seconds_until_retry,
-                               extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
-                               heartbeat_interval_sec,
-                               redis_quotes_connected,
-                               event_subscribe_ticker, event_subscribe_positions,
-                               event_subscribe_fills, event_subscribe_commission,
-                               listener_connected, listener_client_id,
-                               listener_2_connected, listener_2_client_id,
-                               event_subscribe_positions_ib2, event_subscribe_fills_ib2, event_subscribe_commission_ib2,
-                               last_control_message,
-                               subscribed_tickers
-                        FROM daemon_heartbeat WHERE id = 1
-                        """
-                    )
-                    row = cur.fetchone()
-                if row is None:
-                    return None
-                return _row_to_heartbeat(row)  # mock_hedging defaults to True when len(row) <= 22
-            except Exception as e2:
-                logger.debug("get_daemon_heartbeat (fallback no mock_hedging) failed: %s", e2)
-        if "event_subscribe_positions_ib2" in err or "event_subscribe_fills_ib2" in err or "event_subscribe_commission_ib2" in err:
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
-                               ib_connected, ib_client_id,
-                               extract(epoch from next_retry_ts) AS next_retry_ts,
-                               seconds_until_retry,
-                               extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
-                               heartbeat_interval_sec,
-                               redis_quotes_connected,
-                               event_subscribe_ticker, event_subscribe_positions,
-                               event_subscribe_fills, event_subscribe_commission,
-                               listener_connected, listener_client_id,
-                               listener_2_connected, listener_2_client_id,
-                               last_control_message,
-                               subscribed_tickers
-                        FROM daemon_heartbeat WHERE id = 1
-                        """
-                    )
-                    row = cur.fetchone()
-                if row is None:
-                    return None
-                # Pad with False for the three ib2 columns so indices 20,21 stay last_control_message, subscribed_tickers
-                row_padded = row[:17] + (False, False, False) + row[17:]
-                return _row_to_heartbeat(row_padded)
-            except Exception as e2:
-                logger.debug("get_daemon_heartbeat (fallback no event_subscribe_*_ib2) failed: %s", e2)
-        if "subscribed_tickers" in err:
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
-                               ib_connected, ib_client_id,
-                               extract(epoch from next_retry_ts) AS next_retry_ts,
-                               seconds_until_retry,
-                               extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
-                               heartbeat_interval_sec,
-                               redis_quotes_connected,
-                               event_subscribe_ticker, event_subscribe_positions,
-                               event_subscribe_fills, event_subscribe_commission,
-                               listener_connected, listener_client_id,
-                               listener_2_connected, listener_2_client_id,
-                               event_subscribe_positions_ib2, event_subscribe_fills_ib2, event_subscribe_commission_ib2,
-                               last_control_message
-                        FROM daemon_heartbeat WHERE id = 1
-                        """
-                    )
-                    row = cur.fetchone()
-                if row is None:
-                    return None
-                # Row has 21 cols (no subscribed_tickers); pad with None for index 21
-                return _row_to_heartbeat(row + (None,))
-            except Exception as e2:
-                logger.debug("get_daemon_heartbeat (fallback no subscribed_tickers) failed: %s", e2)
-        if "last_control_message" in err:
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
-                               ib_connected, ib_client_id,
-                               extract(epoch from next_retry_ts) AS next_retry_ts,
-                               seconds_until_retry,
-                               extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
-                               heartbeat_interval_sec,
-                               redis_quotes_connected,
-                               event_subscribe_ticker, event_subscribe_positions,
-                               event_subscribe_fills, event_subscribe_commission,
-                               listener_connected, listener_client_id,
-                               listener_2_connected, listener_2_client_id
-                        FROM daemon_heartbeat WHERE id = 1
-                        """
-                    )
-                    row = cur.fetchone()
-                if row is None:
-                    return None
-                # Pad: 16 cols + event_subscribe_*_ib2 (3) + last_control_message + subscribed_tickers
-                return _row_to_heartbeat(row + (False, False, False, None, None))
-            except Exception as e2:
-                logger.debug("get_daemon_heartbeat (fallback no last_control_message) failed: %s", e2)
-        if "listener_2_connected" in err or "listener_2_client_id" in err:
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
-                               ib_connected, ib_client_id,
-                               extract(epoch from next_retry_ts) AS next_retry_ts,
-                               seconds_until_retry,
-                               extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
-                               heartbeat_interval_sec,
-                               redis_quotes_connected,
-                               event_subscribe_ticker, event_subscribe_positions,
-                               event_subscribe_fills, event_subscribe_commission,
-                               listener_connected, listener_client_id
-                        FROM daemon_heartbeat WHERE id = 1
-                        """
-                    )
-                    row = cur.fetchone()
-                if row is None:
-                    return None
-                # Pad: 15 cols + listener_2_connected, listener_2_client_id + ib2 flags (3) + last_control_message, subscribed_tickers
-                return _row_to_heartbeat(row + (False, None, False, False, False, None, None))
-            except Exception as e2:
-                logger.debug("get_daemon_heartbeat (fallback no listener_2_*) failed: %s", e2)
-        if "listener_connected" in err or "listener_client_id" in err:
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
-                               ib_connected, ib_client_id,
-                               extract(epoch from next_retry_ts) AS next_retry_ts,
-                               seconds_until_retry,
-                               extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
-                               heartbeat_interval_sec,
-                               redis_quotes_connected,
-                               event_subscribe_ticker, event_subscribe_positions,
-                               event_subscribe_fills, event_subscribe_commission
-                        FROM daemon_heartbeat WHERE id = 1
-                        """
-                    )
-                    row = cur.fetchone()
-                if row is None:
-                    return None
-                return _row_to_heartbeat(row + (None, None))
-            except Exception as e2:
-                logger.debug("get_daemon_heartbeat (fallback no listener_*) failed: %s", e2)
-        if "event_subscribe" in err or "redis_quotes_connected" in err:
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
-                               ib_connected, ib_client_id,
-                               extract(epoch from next_retry_ts) AS next_retry_ts,
-                               seconds_until_retry,
-                               extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
-                               heartbeat_interval_sec,
-                               redis_quotes_connected
-                        FROM daemon_heartbeat WHERE id = 1
-                        """
-                    )
-                    row = cur.fetchone()
-                if row is None:
-                    return None
-                extra = (None,) * (15 - len(row))
-                return _row_to_heartbeat(row + extra)
-            except Exception as e2:
-                logger.debug("get_daemon_heartbeat (fallback no event_subscribe/redis_quotes) failed: %s", e2)
-        if "graceful_shutdown_at" in err or "column" in err:
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT extract(epoch from last_ts), hedge_running,
-                               ib_connected, ib_client_id,
-                               extract(epoch from next_retry_ts), seconds_until_retry,
-                               NULL, NULL, NULL, NULL, NULL, NULL, NULL
-                        FROM daemon_heartbeat WHERE id = 1
-                        """
-                    )
-                    row = cur.fetchone()
-                if row is None:
-                    return None
-                return _row_to_heartbeat(row)
-            except Exception as e2:
-                logger.debug("get_daemon_heartbeat (fallback) failed: %s", e2)
-        logger.debug("get_daemon_heartbeat failed: %s", e)
-        return None
+    Tries compact column sets in order (newest schema first); pads tuple for _row_to_heartbeat."""
+    attempts: List[tuple[str, str, tuple]] = [
+        (
+            "full",
+            """
+            SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
+                   ib_connected, ib_client_id,
+                   extract(epoch from next_retry_ts) AS next_retry_ts,
+                   seconds_until_retry,
+                   extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
+                   heartbeat_interval_sec,
+                   redis_quotes_connected,
+                   last_control_message,
+                   subscribed_tickers,
+                   mock_hedging
+            FROM daemon_heartbeat WHERE id = 1
+            """,
+            (),
+        ),
+        (
+            "no_mock_hedging",
+            """
+            SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
+                   ib_connected, ib_client_id,
+                   extract(epoch from next_retry_ts) AS next_retry_ts,
+                   seconds_until_retry,
+                   extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
+                   heartbeat_interval_sec,
+                   redis_quotes_connected,
+                   last_control_message,
+                   subscribed_tickers
+            FROM daemon_heartbeat WHERE id = 1
+            """,
+            (True,),
+        ),
+        (
+            "no_subscribed_tickers",
+            """
+            SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
+                   ib_connected, ib_client_id,
+                   extract(epoch from next_retry_ts) AS next_retry_ts,
+                   seconds_until_retry,
+                   extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
+                   heartbeat_interval_sec,
+                   redis_quotes_connected,
+                   last_control_message
+            FROM daemon_heartbeat WHERE id = 1
+            """,
+            (None, True),
+        ),
+        (
+            "no_last_control_message",
+            """
+            SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
+                   ib_connected, ib_client_id,
+                   extract(epoch from next_retry_ts) AS next_retry_ts,
+                   seconds_until_retry,
+                   extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
+                   heartbeat_interval_sec,
+                   redis_quotes_connected
+            FROM daemon_heartbeat WHERE id = 1
+            """,
+            (None, None, True),
+        ),
+        (
+            "no_redis_quotes_connected",
+            """
+            SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
+                   ib_connected, ib_client_id,
+                   extract(epoch from next_retry_ts) AS next_retry_ts,
+                   seconds_until_retry,
+                   extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
+                   heartbeat_interval_sec
+            FROM daemon_heartbeat WHERE id = 1
+            """,
+            (False, None, None, True),
+        ),
+        (
+            "minimal_core",
+            """
+            SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
+                   ib_connected, ib_client_id,
+                   extract(epoch from next_retry_ts) AS next_retry_ts,
+                   seconds_until_retry
+            FROM daemon_heartbeat WHERE id = 1
+            """,
+            (None, None, False, None, None, True),
+        ),
+    ]
+    last_err: Optional[Exception] = None
+    for label, sql, pad in attempts:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                row = cur.fetchone()
+            if row is None:
+                return None
+            if pad:
+                row = row + pad
+            return _row_to_heartbeat(row)
+        except Exception as e:
+            last_err = e
+            logger.debug("get_daemon_heartbeat try %s failed: %s", label, e)
+            continue
+    if last_err is not None:
+        logger.debug("get_daemon_heartbeat failed after all attempts: %s", last_err)
+    return None
 
 
 def get_operations(

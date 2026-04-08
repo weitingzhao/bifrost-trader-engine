@@ -10,6 +10,7 @@ export interface IbEventSubscribePageProps {
 export function IbEventSubscribePage({ status, loadStatus, embeddedInSettings }: IbEventSubscribePageProps) {
   return (
     <div
+      id={embeddedInSettings ? 'settings-subscribe' : undefined}
       className={`settings-page-card ${embeddedInSettings ? 'daemon-status-page daemon-status-page--embedded' : 'daemon-status-page'}`}
     >
       <div className="daemon-groups settings-page-groups">

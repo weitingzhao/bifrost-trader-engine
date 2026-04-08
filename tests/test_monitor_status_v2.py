@@ -12,7 +12,9 @@ from backend.monitor.routers.status import (
 def _assert_config_shape(body: dict) -> None:
     assert body["status_schema_version"] == STATUS_SCHEMA_VERSION == 9
     cfg = body["config"]
-    assert set(cfg.keys()) >= {"ib_client", "ib_flex"}
+    assert set(cfg.keys()) >= {"ib_client", "ib_flex", "redis"}
+    assert "subscribe_channel" in cfg["redis"]
+    assert isinstance(cfg["redis"]["subscribe_channel"], str)
     assert "ib_config" not in cfg
     assert "flex" not in cfg
     assert "flex_config" not in cfg
@@ -88,6 +90,7 @@ def test_assemble_status_v8_config_shape() -> None:
             "flex_init_range_days": 360,
         },
         flex_config={"host_token": "t", "secondary_token": None, "rows": []},
+        redis_subscribe_channel="ib:ingester:channel",
         open_orders=[],
         active_structure_id=None,
         active_structure_name=None,
@@ -120,6 +123,7 @@ def test_assemble_status_v8_config_shape() -> None:
     assert ic["port"]["trading"] == 1
     assert ic["account"]["trading"] == "U1"
     assert ic["account"]["event_host"] == "U2"
+    assert body["config"]["redis"]["subscribe_channel"] == "ib:ingester:channel"
     assert body["config"]["ib_flex"]["default_range_days"] == 30
     assert body["config"]["ib_flex"]["host_token"] == "t"
     assert body["socket"]["ib_operator"]["connected"] is True

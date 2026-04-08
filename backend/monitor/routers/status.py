@@ -16,6 +16,7 @@ from src.monitor.reader.ib_config_public import (
     ib_flex_public_defaults,
 )
 from src.monitor.self_check import derive_daemon_self_check, derive_health_roll_up
+from src.core.realtime.redis_keys import SUBSCRIBE_CHANNEL_DEFAULT
 from src.bifrost.redis_health_keys import (
     hgetall_ib_account_agent_health,
     redis_hash_field_truthy,
@@ -90,7 +91,11 @@ def _status_error_payload() -> Dict[str, Any]:
             "accounts_fetched_at": None,
             "open_orders": [],
         },
-        "config": {"ib_client": ib_c, "ib_flex": flex_b},
+        "config": {
+            "ib_client": ib_c,
+            "ib_flex": flex_b,
+            "redis": {"subscribe_channel": SUBSCRIBE_CHANNEL_DEFAULT},
+        },
         "strategy": _strategy_status_block(
             active_structure_id=None,
             active_structure_name=None,
@@ -134,6 +139,7 @@ def _assemble_status_v3(
     accounts_fetched_at: Any,
     ib_config: Dict[str, Any],
     flex_config: Any,
+    redis_subscribe_channel: str,
     open_orders: Any,
     active_structure_id: Any,
     active_structure_name: Any,
@@ -197,6 +203,7 @@ def _assemble_status_v3(
         "config": {
             "ib_client": ib_client_for_api(ib_config),
             "ib_flex": ib_flex_for_status_api(ib_config, flex_config),
+            "redis": {"subscribe_channel": redis_subscribe_channel},
         },
         "strategy": _strategy_status_block(
             active_structure_id=active_structure_id,
@@ -254,22 +261,11 @@ def get_status(request: Request) -> Dict[str, Any]:
                 "daemon_alive": (last_ts is not None and (now_ts - last_ts) < 35),
                 "ib_connected": hb.get("ib_connected", False),
                 "ib_client_id": hb.get("ib_client_id"),
-                "listener_connected": hb.get("listener_connected", False),
-                "listener_client_id": hb.get("listener_client_id"),
-                "listener_2_connected": hb.get("listener_2_connected", False),
-                "listener_2_client_id": hb.get("listener_2_client_id"),
                 "next_retry_ts": hb.get("next_retry_ts"),
                 "seconds_until_retry": hb.get("seconds_until_retry"),
                 "graceful_shutdown_at": hb.get("graceful_shutdown_at"),
                 "heartbeat_interval_sec": hb.get("heartbeat_interval_sec"),
                 "redis_quotes_connected": hb.get("redis_quotes_connected", False),
-                "event_subscribe_ticker": hb.get("event_subscribe_ticker", False),
-                "event_subscribe_positions": hb.get("event_subscribe_positions", False),
-                "event_subscribe_fills": hb.get("event_subscribe_fills", False),
-                "event_subscribe_commission": hb.get("event_subscribe_commission", False),
-                "event_subscribe_positions_ib2": hb.get("event_subscribe_positions_ib2", False),
-                "event_subscribe_fills_ib2": hb.get("event_subscribe_fills_ib2", False),
-                "event_subscribe_commission_ib2": hb.get("event_subscribe_commission_ib2", False),
                 "last_control_message": hb.get("last_control_message"),
             }
             dsc = derive_daemon_self_check(
@@ -593,6 +589,14 @@ def get_status(request: Request) -> Dict[str, Any]:
             ib_account_agent=ib_account_agent,
         )
 
+        _rcfg = (getattr(reader, "_config", None) or {}).get("redis") or {}
+        _sub_ch_raw = _rcfg.get("subscribe_channel")
+        redis_subscribe_channel = (
+            str(_sub_ch_raw).strip()
+            if _sub_ch_raw is not None and str(_sub_ch_raw).strip() != ""
+            else SUBSCRIBE_CHANNEL_DEFAULT
+        )
+
         payload = _assemble_status_v3(
             health_self_check=hc["self_check"],
             health_block_reasons=hc["block_reasons"],
@@ -609,6 +613,7 @@ def get_status(request: Request) -> Dict[str, Any]:
             accounts_fetched_at=accounts_fetched_at,
             ib_config=ib_config,
             flex_config=flex_config,
+            redis_subscribe_channel=redis_subscribe_channel,
             open_orders=open_orders,
             active_structure_id=active_strategy_structure_id,
             active_structure_name=active_strategy_structure_name,
