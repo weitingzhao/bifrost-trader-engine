@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+_ACCOUNT_SYNC_DAEMON_ENABLED = os.environ.get("ACCOUNT_SYNC_DAEMON_ENABLED", "").strip().lower() in ("1", "true", "yes")
 
 
 def _redis_sync_client(cfg: dict):
@@ -102,18 +105,21 @@ async def refresh_accounts_from_redis_edge(app: Any) -> None:
         app._set_active_symbol(app._infer_active_symbol(flat))
 
     oo = data.get("open_orders") or []
-    if app._status_sink and hasattr(app._status_sink, "write_open_orders"):
-        try:
-            app._status_sink.write_open_orders(oo)
-        except Exception as e:
-            logger.debug("[ib_edge] write_open_orders: %s", e)
+    if not _ACCOUNT_SYNC_DAEMON_ENABLED:
+        if app._status_sink and hasattr(app._status_sink, "write_open_orders"):
+            try:
+                app._status_sink.write_open_orders(oo)
+            except Exception as e:
+                logger.debug("[ib_edge] write_open_orders: %s", e)
 
-    rows = data.get("last_execution_rows") or []
-    if rows and app._status_sink and hasattr(app._status_sink, "write_account_executions"):
-        try:
-            app._status_sink.write_account_executions(rows)
-        except Exception as e:
-            logger.debug("[ib_edge] write_account_executions: %s", e)
+        rows = data.get("last_execution_rows") or []
+        if rows and app._status_sink and hasattr(app._status_sink, "write_account_executions"):
+            try:
+                app._status_sink.write_account_executions(rows)
+            except Exception as e:
+                logger.debug("[ib_edge] write_account_executions: %s", e)
+    else:
+        logger.debug("[ib_edge] ACCOUNT_SYNC_DAEMON_ENABLED — skipping PG writes (Account Sync Daemon handles persistence)")
 
     logger.info(
         "[ib_edge] snapshot applied accounts=%s open_orders=%s",

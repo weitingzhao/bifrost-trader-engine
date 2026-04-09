@@ -104,6 +104,13 @@ class StatusReader:
         self._end_read_txn()
         return result
 
+    def get_account_sync_heartbeat(self) -> Optional[Dict[str, Any]]:
+        if not self._connect():
+            return None
+        result = status_module.get_account_sync_heartbeat(self._conn)
+        self._end_read_txn()
+        return result
+
     def get_operations(
         self,
         since_ts: Optional[float] = None,

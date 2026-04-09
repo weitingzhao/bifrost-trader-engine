@@ -3,21 +3,35 @@ export type { ChecklistRow, CapabilityGroup }
 export { CAPABILITY_GROUP_LABELS, CAPABILITY_GROUP_ORDER } from './massiveFeedChecklistRows'
 
 const rows: ChecklistRow[] = [
-  // ── REST API (6 Sections, matching coverage CSV order) ──
+  // ── REST API — matching Massive / Polygon Stocks website menu order ──────
   {
-    id: 'stock-reference',
-    service: 'Reference Data',
+    id: 'stock-tickers',
+    service: 'Tickers',
     group: 'rest',
     description:
-      'Stock ticker universe, company details, ticker types, news, and financial statements via Massive REST reference endpoints.',
+      'Four Massive REST reference endpoints: All Tickers (universe search and discovery with market, type, exchange, search, and active filters — up to 1,000 results per page with cursor pagination), '
+      + 'Ticker Overview (single-ticker fundamental data: SIC code, market cap, total employees, address, branding logo and icon URLs, CIK, composite FIGI, list date, ticker_root), '
+      + 'Ticker Types (reference classification: returns all supported instrument type codes with descriptions, filterable by asset_class and locale), '
+      + 'and Related Tickers (peer and competitor discovery via Massive news-coverage and returns-based similarity analysis).',
     tierMin: 'starter',
     projectStatus: 'not-implemented',
     verification: 'N/A — not yet implemented.',
     purpose:
-      'Browse and look up stock tickers, company metadata, news, and fundamentals from Massive. Foundation for screening and research.',
+      'Foundation layer for stock research: discover and filter the full Massive ticker universe, enrich any ticker with company '
+      + 'fundamentals and branding assets, populate type filter dropdowns from the canonical Ticker Types reference, '
+      + 'and identify thematically related peers for comparative analysis and portfolio construction.',
     helpVerification:
-      'Not yet implemented. Target endpoints: GET /v3/reference/tickers, GET /v3/reference/tickers/{ticker}, '
-      + 'GET /v3/reference/tickers/types, GET /v2/reference/news, GET /vX/reference/financials.',
+      'All Tickers: GET /v3/reference/tickers — optional params: ticker, type (use Ticker Types API for valid codes), market (stocks|crypto|fx|otc|indices), '
+      + 'exchange (ISO 10383 MIC), cusip, cik, date (YYYY-MM-DD), search (name/ticker keyword), active (bool), limit (max 1000), sort, order. '
+      + 'Response: results[].ticker, name, market, locale, primary_exchange, type, active, currency_name, composite_figi, cik, last_updated_utc. '
+      + 'Ticker Overview: GET /v3/reference/tickers/{ticker} — path: ticker (required, case-sensitive, e.g. AAPL). Query: date (optional). '
+      + 'Response: active, address (address1/city/state/postal_code), branding (logo_url, icon_url), cik, composite_figi, currency_name, description, '
+      + 'homepage_url, list_date, locale, market, market_cap, name, phone_number, primary_exchange, round_lot, share_class_figi, '
+      + 'share_class_shares_outstanding, sic_code, sic_description, ticker, ticker_root, ticker_suffix, total_employees, weighted_shares_outstanding. '
+      + 'Ticker Types: GET /v3/reference/tickers/types — optional params: asset_class (stocks|options|crypto|fx|indices), locale (us|global). '
+      + 'Response: results[].code (e.g. CS, ETF, ADRC, WARRANT), description, asset_class, locale. '
+      + 'Related Tickers: GET /v1/related-companies/{ticker} — path: ticker (required). '
+      + 'Response: ticker (query subject), results[].ticker (related symbols ranked by news/returns similarity analysis).',
   },
   {
     id: 'stock-aggregates',
@@ -102,11 +116,10 @@ const rows: ChecklistRow[] = [
       'Use the existing Market Ops UI in Massive Option. Condition codes support asset_class filter; '
       + 'exchanges cover all asset classes; holidays and status are market-wide.',
   },
-  // ── Project (derived workflows) ──
   {
     id: 'stock-corporate-actions',
     service: 'Corporate Actions',
-    group: 'project',
+    group: 'rest',
     description:
       'Dividends and stock splits synced via Massive REST to massive_corporate_action table. '
       + 'Already implemented and shared with Massive Option.',
@@ -120,7 +133,50 @@ const rows: ChecklistRow[] = [
       + 'Then GET /research/massive/corporate-actions?symbol=AAPL&limit=50. '
       + 'UI: Massive Option → Corporate actions → Enqueue sync, then Load from DB.',
   },
-  // ── WebSocket ──
+  {
+    id: 'stock-fundamentals',
+    service: 'Fundamentals',
+    group: 'rest',
+    description:
+      'Financial statements and fundamental data: income statement, balance sheet, cash flow, and key metrics via Massive vX financials endpoint.',
+    tierMin: 'starter',
+    projectStatus: 'not-implemented',
+    verification: 'N/A — not yet implemented.',
+    purpose:
+      'Pull structured financial statements for stocks from Massive to support fundamental screening and valuation research.',
+    helpVerification:
+      'Not yet implemented. Target endpoints: GET /vX/reference/financials (query by ticker, timeframe, include_sources).',
+  },
+  {
+    id: 'stock-filings',
+    service: 'Filings & Disclosures',
+    group: 'rest',
+    description:
+      'SEC filings and regulatory disclosures: 8-K, 10-K, 10-Q, and insider transaction filings via Massive reference endpoints.',
+    tierMin: 'starter',
+    projectStatus: 'not-implemented',
+    verification: 'N/A — not yet implemented.',
+    purpose:
+      'Access and store SEC filing metadata and insider disclosure data for stocks. Useful for event-driven research and compliance monitoring.',
+    helpVerification:
+      'Not yet implemented. Target endpoints: GET /vX/reference/sec/filings, GET /vX/reference/sec/filings/{accession_number} '
+      + '(filter by ticker, type, period_of_report).',
+  },
+  {
+    id: 'stock-news',
+    service: 'News',
+    group: 'rest',
+    description:
+      'Market news articles for stocks via Massive REST news endpoint, filterable by ticker, publisher, and date range.',
+    tierMin: 'starter',
+    projectStatus: 'not-implemented',
+    verification: 'N/A — not yet implemented.',
+    purpose:
+      'Fetch and display news articles relevant to a stock ticker from Massive. Supports event correlation and sentiment research.',
+    helpVerification:
+      'Not yet implemented. Target endpoints: GET /v2/reference/news (query by ticker, published_utc range, limit, sort).',
+  },
+  // ── WebSocket ──────────────────────────────────────────────────────────────
   {
     id: 'stock-ws-aggregates-s',
     service: 'Aggregates (Per Second)',
@@ -169,7 +225,7 @@ const rows: ChecklistRow[] = [
     helpVerification:
       'Not yet implemented. Target: wss://socket.polygon.io/stocks, subscribe to Q.{ticker}.',
   },
-  // ── Flat Files ──
+  // ── Flat Files ─────────────────────────────────────────────────────────────
   {
     id: 'stock-flat-file-day-aggs',
     service: 'Day aggregates',

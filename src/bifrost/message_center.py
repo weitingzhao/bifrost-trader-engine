@@ -19,6 +19,7 @@ MESSAGE_CENTER_CONSUMER_PREFIX = "bifrost:msg:center:consumer:"
 MESSAGE_CENTER_DEDUPE_PREFIX = "bifrost:msg:center:dedupe:"
 
 MESSAGE_CENTER_TOPIC_IB_CONNECTION = "ib.connection"
+MESSAGE_CENTER_TOPIC_PORTFOLIO_TWS_EXECUTIONS = "portfolio.tws_executions"
 MESSAGE_CENTER_TTL_SEC = 3600
 MESSAGE_CENTER_DEDUPE_WINDOW_SEC = 30
 MESSAGE_CENTER_STREAM_MAXLEN = 4000
@@ -213,6 +214,36 @@ def build_ib_connection_event(
         reason=reason,
         occurred_at=float(occurred_at or time.time()),
         dedupe_key=f"{MESSAGE_CENTER_TOPIC_IB_CONNECTION}:{service}:{slot_name}:{client_id or 0}:{status_to}",
+    )
+
+
+def build_portfolio_tws_executions_fetch_event(
+    *,
+    ok: bool,
+    title: str,
+    message: str,
+    reason: Optional[str] = None,
+    level: Optional[str] = None,
+    occurred_at: Optional[float] = None,
+) -> SystemMessageEvent:
+    """User-facing summary for POST /executions/fetch (TWS); detail goes in ``message`` / ``reason``."""
+    lv = level or ("error" if not ok else "success")
+    status_to = "complete" if ok else "failed"
+    return SystemMessageEvent(
+        message_id=uuid.uuid4().hex,
+        topic=MESSAGE_CENTER_TOPIC_PORTFOLIO_TWS_EXECUTIONS,
+        level=lv,
+        service="ib_operator",
+        slot="host",
+        client_id=None,
+        account=None,
+        status_from="unknown",
+        status_to=status_to,
+        title=title,
+        message=message,
+        reason=reason,
+        occurred_at=float(occurred_at or time.time()),
+        dedupe_key=f"{MESSAGE_CENTER_TOPIC_PORTFOLIO_TWS_EXECUTIONS}:{uuid.uuid4().hex}",
     )
 
 

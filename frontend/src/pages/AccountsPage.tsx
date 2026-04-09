@@ -87,6 +87,8 @@ export function AccountsPage({
   const [replaySyncing, setReplaySyncing] = useState(false)
   const [flexSyncing, setFlexSyncing] = useState(false)
   const [flexMessage, setFlexMessage] = useState<string | null>(null)
+  const [twsFetchMessage, setTwsFetchMessage] = useState<string | null>(null)
+  const [twsFetchIsError, setTwsFetchIsError] = useState(false)
   const [flexUseUpload, setFlexUseUpload] = useState(false)
   const [execFreshness, setExecFreshness] = useState<ExecutionFreshnessItem[]>([])
   // Reserved for future Flex range preset UI (currently unused).
@@ -195,6 +197,31 @@ export function AccountsPage({
       ),
     ].map((s) => s.toUpperCase())
   }, [acc])
+  const runTwsRefresh = async () => {
+    setReplaySyncing(true)
+    setTwsFetchMessage(null)
+    setTwsFetchIsError(false)
+    try {
+      const res = await postExecutionsFetch(replayFetchDays)
+      if (res.ok) {
+        await onRefreshAccounts()
+        setTwsFetchMessage(
+          res.message ??
+            `Fetched ${res.fetched_total ?? res.count ?? 0} execution(s) from IB.`,
+        )
+        setTwsFetchIsError(false)
+      } else {
+        setTwsFetchMessage(res.error ?? 'Failed to fetch executions from TWS.')
+        setTwsFetchIsError(true)
+      }
+    } catch (e) {
+      setTwsFetchMessage(e instanceof Error ? e.message : 'Failed to fetch executions from TWS.')
+      setTwsFetchIsError(true)
+    } finally {
+      setReplaySyncing(false)
+    }
+  }
+
   const benchmarkSymbols = useMemo(
     () =>
       [...new Set([...stockSymbols, ...(status?.live_ui?.reference_indices?.map((r) => r.symbol) ?? [])])].sort(),
@@ -282,6 +309,23 @@ export function AccountsPage({
             </button>
             {' / Accounts'}
             <InfoTooltip text="Multi-account summary & positions from DB; auto-refresh every 1h." />
+            {(() => {
+              const asdHb = (status as any)?.account_sync_daemon?.heartbeat
+              if (!asdHb) return null
+              const alive = asdHb.daemon_alive === true
+              const lastTs = asdHb.last_ts
+              const agoSec = lastTs != null ? Math.round(Date.now() / 1000 - lastTs) : null
+              const freshLabel = agoSec != null ? (agoSec < 10 ? 'just now' : agoSec < 60 ? `${agoSec}s ago` : `${Math.round(agoSec / 60)}m ago`) : ''
+              return (
+                <span
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', marginLeft: '0.5rem', fontSize: '0.72rem', padding: '0.1rem 0.45rem', borderRadius: '6px', background: alive ? 'rgba(56,176,0,0.12)' : 'rgba(220,53,69,0.10)', color: alive ? '#38b000' : '#dc3545' }}
+                  title={`Account Sync Daemon: ${alive ? 'running' : 'not running'}${freshLabel ? ` — last sync ${freshLabel}` : ''}`}
+                >
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: alive ? '#38b000' : '#dc3545', flexShrink: 0 }} />
+                  {alive ? `Synced ${freshLabel}` : 'Sync offline'}
+                </span>
+              )
+            })()}
           </h2>
           <div className="accounts-page-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
             <span
@@ -333,10 +377,8 @@ export function AccountsPage({
                 type="button"
                 className={`replay-fetch-refresh-btn${replaySyncing ? ' replay-fetch-refresh-btn--busy' : ''}`}
                 disabled={replaySyncing}
-                onClick={async () => {
-                  setReplaySyncing(true)
-                  await postExecutionsFetch(replayFetchDays)
-                  setReplaySyncing(false)
+                onClick={() => {
+                  void runTwsRefresh()
                 }}
                 aria-label="Fetch executions from IB Tws and write to DB"
               >
@@ -345,6 +387,18 @@ export function AccountsPage({
               </button>
             </div>
             {replaySyncing && <span className="replay-sync-hint">Fetching executions from IB…</span>}
+            {twsFetchMessage && (
+              <p
+                className="section-hint"
+                style={{
+                  marginTop: '0.25rem',
+                  marginBottom: 0,
+                  color: twsFetchIsError ? 'var(--color-danger, #c00)' : 'var(--color-success, #16a34a)',
+                }}
+              >
+                {twsFetchMessage}
+              </p>
+            )}
           </div>
         </section>
         {refreshFeedback != null && refreshFeedback !== '' && (
@@ -620,15 +674,9 @@ export function AccountsPage({
               type="button"
               className={`replay-fetch-refresh-btn${replaySyncing ? ' replay-fetch-refresh-btn--busy' : ''}`}
               disabled={replaySyncing || flexSyncing}
-              onClick={async () => {
-                setReplaySyncing(true)
+              onClick={() => {
                 setFlexMessage(null)
-                try {
-                  const res = await postExecutionsFetch(replayFetchDays)
-                  if (res.ok) await onRefreshAccounts()
-                } finally {
-                  setReplaySyncing(false)
-                }
+                void runTwsRefresh()
               }}
               aria-label="Fetch executions from IB Tws and write to DB"
             >
@@ -847,6 +895,18 @@ export function AccountsPage({
             </span>
           )}
         </div>
+        {twsFetchMessage && (
+          <p
+            className="section-hint"
+            style={{
+              marginTop: '0.25rem',
+              marginBottom: 0,
+              color: twsFetchIsError ? 'var(--color-danger, #c00)' : 'var(--color-success, #16a34a)',
+            }}
+          >
+            {twsFetchMessage}
+          </p>
+        )}
         {flexMessage && (
           <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
             {flexMessage}

@@ -30,21 +30,29 @@ function overviewDotClass(eff: EffectiveServiceStatus): string {
 }
 
 const REST_SECTION_ORDER = [
-  'stock-reference',
+  'stock-tickers',
   'stock-aggregates',
   'stock-snapshots',
   'stock-trades-quotes',
   'stock-technical-indicators',
   'stock-market-ops',
+  'stock-corporate-actions',
+  'stock-fundamentals',
+  'stock-filings',
+  'stock-news',
 ] as const
 
 const REST_SECTION_LABELS: Record<string, string> = {
-  'stock-reference': 'Reference Data',
+  'stock-tickers': 'Tickers',
   'stock-aggregates': 'Aggregate Bars (OHLC)',
   'stock-snapshots': 'Snapshots',
   'stock-trades-quotes': 'Trades & Quotes',
   'stock-technical-indicators': 'Technical Indicators',
   'stock-market-ops': 'Market Operations',
+  'stock-corporate-actions': 'Corporate Actions',
+  'stock-fundamentals': 'Fundamentals',
+  'stock-filings': 'Filings & Disclosures',
+  'stock-news': 'News',
 }
 
 // ── Capability Panel (mirrors FeedMassiveCapabilityPanel from Options page) ─
@@ -138,6 +146,32 @@ export function FeedMassiveStockPage({
   const [apiCoverageSyncBusy, setApiCoverageSyncBusy] = useState(false)
   const [apiCoverageSyncMsg, setApiCoverageSyncMsg] = useState<string | null>(null)
 
+  // ── Tickers sub-tab state ─────────────────────────────────────────────────
+  const [tkSubTab, setTkSubTab] = useState<
+    'all_tickers' | 'ticker_overview' | 'ticker_types' | 'related_tickers'
+  >('all_tickers')
+
+  // All Tickers form fields
+  const [tkAllTicker, setTkAllTicker] = useState('')
+  const [tkAllMarket, setTkAllMarket] = useState('')
+  const [tkAllType, setTkAllType] = useState('')
+  const [tkAllExchange, setTkAllExchange] = useState('')
+  const [tkAllSearch, setTkAllSearch] = useState('')
+  const [tkAllActive, setTkAllActive] = useState('')
+  const [tkAllDate, setTkAllDate] = useState('')
+  const [tkAllLimit, setTkAllLimit] = useState('100')
+
+  // Ticker Overview form fields
+  const [tkOvTicker, setTkOvTicker] = useState('AAPL')
+  const [tkOvDate, setTkOvDate] = useState('')
+
+  // Ticker Types form fields
+  const [tkTypesAssetClass, setTkTypesAssetClass] = useState('')
+  const [tkTypesLocale, setTkTypesLocale] = useState('')
+
+  // Related Tickers form fields
+  const [tkRelTicker, setTkRelTicker] = useState('AAPL')
+
   const loadStatus = useCallback(async () => {
     try { setMassiveStatus(await fetchMassiveStatus()) } catch { /* ignore */ }
   }, [])
@@ -220,6 +254,424 @@ export function FeedMassiveStockPage({
       <span className="feed-massive-svc-evidence-pending">
         Not yet implemented for stocks. See coverage sheet for target endpoints.
       </span>
+    )
+  }
+
+  // ── Render Tickers section with 4 sub-tabs ───────────────────────────────
+  function renderTickersCap() {
+    const id = 'stock-tickers'
+    const row = rowById(id)
+    const eff = rowEff(row)
+    return (
+      <StockCapabilityPanel
+        key={id}
+        capId={id}
+        checklistRow={row}
+        effectiveStatus={eff}
+        expanded={capExpanded[id] === true}
+        onToggle={() => toggleCap(id)}
+        highlight={highlightedCapabilityId === id}
+        ariaLabel={row.service}
+      >
+        <FeedMassiveServiceBlock effectiveStatus={eff} checklistRow={row} evidence={evidenceFor(row)}>
+          <div className="feed-massive-card-head">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <span className="feed-massive-card-icon" aria-hidden>
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="2" y="3" width="16" height="14" rx="2" stroke="currentColor" strokeWidth="1.5" />
+                  <path d="M6 7h8M6 10h5M6 13h7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                </svg>
+              </span>
+              <h3>{row.service}</h3>
+            </div>
+          </div>
+          <p className="feed-massive-card-lead">{row.description}</p>
+        </FeedMassiveServiceBlock>
+
+        <div className="feed-massive-agg-tabs-wrap">
+          <div className="feed-massive-agg-tabs" role="tablist" aria-label="Tickers API endpoints">
+            <button
+              type="button" role="tab"
+              id="feed-massive-stk-tk-tab-all"
+              className={`feed-massive-agg-tab${tkSubTab === 'all_tickers' ? ' feed-massive-agg-tab--active' : ''}`}
+              aria-selected={tkSubTab === 'all_tickers'}
+              tabIndex={tkSubTab === 'all_tickers' ? 0 : -1}
+              onClick={() => setTkSubTab('all_tickers')}
+            >
+              All Tickers
+              <span className="feed-massive-agg-tab-badge">REST</span>
+            </button>
+            <button
+              type="button" role="tab"
+              id="feed-massive-stk-tk-tab-overview"
+              className={`feed-massive-agg-tab${tkSubTab === 'ticker_overview' ? ' feed-massive-agg-tab--active' : ''}`}
+              aria-selected={tkSubTab === 'ticker_overview'}
+              tabIndex={tkSubTab === 'ticker_overview' ? 0 : -1}
+              onClick={() => setTkSubTab('ticker_overview')}
+            >
+              Ticker Overview
+              <span className="feed-massive-agg-tab-badge">REST</span>
+            </button>
+            <button
+              type="button" role="tab"
+              id="feed-massive-stk-tk-tab-types"
+              className={`feed-massive-agg-tab${tkSubTab === 'ticker_types' ? ' feed-massive-agg-tab--active' : ''}`}
+              aria-selected={tkSubTab === 'ticker_types'}
+              tabIndex={tkSubTab === 'ticker_types' ? 0 : -1}
+              onClick={() => setTkSubTab('ticker_types')}
+            >
+              Ticker Types
+              <span className="feed-massive-agg-tab-badge">REST</span>
+            </button>
+            <button
+              type="button" role="tab"
+              id="feed-massive-stk-tk-tab-related"
+              className={`feed-massive-agg-tab${tkSubTab === 'related_tickers' ? ' feed-massive-agg-tab--active' : ''}`}
+              aria-selected={tkSubTab === 'related_tickers'}
+              tabIndex={tkSubTab === 'related_tickers' ? 0 : -1}
+              onClick={() => setTkSubTab('related_tickers')}
+            >
+              Related Tickers
+              <span className="feed-massive-agg-tab-badge">REST</span>
+            </button>
+          </div>
+
+          <div className="feed-massive-agg-tab-panels">
+
+            {/* ── All Tickers ─────────────────────────────────────────────── */}
+            {tkSubTab === 'all_tickers' ? (
+              <div
+                className="feed-massive-agg-tab-panel"
+                role="tabpanel"
+                id="feed-massive-stk-tk-panel-all"
+                aria-labelledby="feed-massive-stk-tk-tab-all"
+              >
+                <div className="feed-massive-agg-sub-doc">
+                  <p>
+                    <strong>Use case:</strong> Retrieve a comprehensive list of ticker symbols supported by Massive
+                    across all asset classes — stocks, indices, forex, crypto. Filter by market type, instrument type,
+                    exchange MIC, keyword search, or active status. Supports cursor pagination up to 1,000 results per page.
+                  </p>
+                  <p>
+                    <strong>When to use:</strong> Building a ticker universe for screening, asset discovery pipelines,
+                    or populating reference tables with the full Massive coverage set.
+                  </p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /v3/reference/tickers</code></p>
+                </div>
+
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Ticker</span>
+                    <input
+                      className="form-input"
+                      value={tkAllTicker}
+                      onChange={e => setTkAllTicker(e.target.value)}
+                      disabled={!configured}
+                      placeholder="AAPL"
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Market</span>
+                    <select
+                      className="form-input"
+                      value={tkAllMarket}
+                      onChange={e => setTkAllMarket(e.target.value)}
+                      disabled={!configured}
+                    >
+                      <option value="">All markets</option>
+                      <option value="stocks">Stocks</option>
+                      <option value="crypto">Crypto</option>
+                      <option value="fx">FX</option>
+                      <option value="otc">OTC</option>
+                      <option value="indices">Indices</option>
+                    </select>
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Type</span>
+                    <input
+                      className="form-input"
+                      value={tkAllType}
+                      onChange={e => setTkAllType(e.target.value)}
+                      disabled={!configured}
+                      placeholder="CS (Common Stock)"
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Exchange (MIC)</span>
+                    <input
+                      className="form-input"
+                      value={tkAllExchange}
+                      onChange={e => setTkAllExchange(e.target.value)}
+                      disabled={!configured}
+                      placeholder="XNAS"
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Search</span>
+                    <input
+                      className="form-input"
+                      value={tkAllSearch}
+                      onChange={e => setTkAllSearch(e.target.value)}
+                      disabled={!configured}
+                      placeholder="Apple"
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Active</span>
+                    <select
+                      className="form-input"
+                      value={tkAllActive}
+                      onChange={e => setTkAllActive(e.target.value)}
+                      disabled={!configured}
+                    >
+                      <option value="">Default (active)</option>
+                      <option value="true">Active only</option>
+                      <option value="false">Delisted only</option>
+                    </select>
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Date</span>
+                    <input
+                      className="form-input"
+                      value={tkAllDate}
+                      onChange={e => setTkAllDate(e.target.value)}
+                      disabled={!configured}
+                      placeholder="YYYY-MM-DD"
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Limit</span>
+                    <input
+                      className="form-input"
+                      type="number"
+                      value={tkAllLimit}
+                      onChange={e => setTkAllLimit(e.target.value)}
+                      disabled={!configured}
+                      min={1}
+                      max={1000}
+                    />
+                  </label>
+                </div>
+
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-3)' }}>
+                  <p>
+                    <strong>Key response fields:</strong>{' '}
+                    <code>ticker</code>, <code>name</code>, <code>market</code>, <code>locale</code>,{' '}
+                    <code>primary_exchange</code>, <code>type</code>, <code>active</code>,{' '}
+                    <code>currency_name</code>, <code>composite_figi</code>, <code>cik</code>,{' '}
+                    <code>last_updated_utc</code>, <code>delisted_utc</code>
+                  </p>
+                </div>
+
+                <p className="feed-massive-svc-evidence-pending" style={{ marginTop: 'var(--space-3)' }}>
+                  Not yet implemented. Target backend endpoint: <code>GET /research/massive/tickers</code>
+                </p>
+              </div>
+            ) : null}
+
+            {/* ── Ticker Overview ──────────────────────────────────────────── */}
+            {tkSubTab === 'ticker_overview' ? (
+              <div
+                className="feed-massive-agg-tab-panel"
+                role="tabpanel"
+                id="feed-massive-stk-tk-panel-overview"
+                aria-labelledby="feed-massive-stk-tk-tab-overview"
+              >
+                <div className="feed-massive-agg-sub-doc">
+                  <p>
+                    <strong>Use case:</strong> Retrieve comprehensive details for a single ticker: primary exchange,
+                    standardized identifiers (CIK, composite FIGI, share class FIGI), market capitalization, SIC
+                    industry classification, headquarters address, employee count, and branding assets (logo and
+                    icon URLs). Also returns <code>ticker_root</code> and <code>ticker_suffix</code> for share-class
+                    disambiguation (e.g. BRK.A vs BRK.B).
+                  </p>
+                  <p>
+                    <strong>When to use:</strong> Company due diligence, enriching UI with logos, validating
+                    fundamental metadata, or cross-referencing SEC/EDGAR data by CIK.
+                  </p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /v3/reference/tickers/&#123;ticker&#125;</code></p>
+                </div>
+
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">
+                      Ticker <span style={{ color: 'var(--clr-error, #e05)' }}>*</span>
+                    </span>
+                    <input
+                      className="form-input"
+                      value={tkOvTicker}
+                      onChange={e => setTkOvTicker(e.target.value)}
+                      disabled={!configured}
+                      placeholder="AAPL"
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Date</span>
+                    <input
+                      className="form-input"
+                      value={tkOvDate}
+                      onChange={e => setTkOvDate(e.target.value)}
+                      disabled={!configured}
+                      placeholder="YYYY-MM-DD (optional)"
+                      autoComplete="off"
+                    />
+                  </label>
+                </div>
+
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-3)' }}>
+                  <p>
+                    <strong>Key response fields:</strong>{' '}
+                    <code>active</code>, <code>address</code> (address1 / city / state / postal_code),{' '}
+                    <code>branding</code> (logo_url, icon_url), <code>cik</code>, <code>composite_figi</code>,{' '}
+                    <code>currency_name</code>, <code>description</code>, <code>homepage_url</code>,{' '}
+                    <code>list_date</code>, <code>locale</code>, <code>market</code>, <code>market_cap</code>,{' '}
+                    <code>name</code>, <code>phone_number</code>, <code>primary_exchange</code>,{' '}
+                    <code>round_lot</code>, <code>share_class_figi</code>,{' '}
+                    <code>share_class_shares_outstanding</code>, <code>sic_code</code>,{' '}
+                    <code>sic_description</code>, <code>ticker</code>, <code>ticker_root</code>,{' '}
+                    <code>ticker_suffix</code>, <code>total_employees</code>,{' '}
+                    <code>weighted_shares_outstanding</code>
+                  </p>
+                </div>
+
+                <p className="feed-massive-svc-evidence-pending" style={{ marginTop: 'var(--space-3)' }}>
+                  Not yet implemented. Target backend endpoint:{' '}
+                  <code>GET /research/massive/tickers/&#123;ticker&#125;</code>
+                </p>
+              </div>
+            ) : null}
+
+            {/* ── Ticker Types ─────────────────────────────────────────────── */}
+            {tkSubTab === 'ticker_types' ? (
+              <div
+                className="feed-massive-agg-tab-panel"
+                role="tabpanel"
+                id="feed-massive-stk-tk-panel-types"
+                aria-labelledby="feed-massive-stk-tk-tab-types"
+              >
+                <div className="feed-massive-agg-sub-doc">
+                  <p>
+                    <strong>Use case:</strong> Retrieve a reference list of all ticker types supported by Massive,
+                    categorized by asset class and locale. Each entry includes a short code (e.g. <code>CS</code> for
+                    Common Stock, <code>ETF</code>, <code>ADRC</code> for ADR Common) and a human-readable description.
+                  </p>
+                  <p>
+                    <strong>When to use:</strong> Populate type filter dropdowns for the All Tickers query, understand
+                    asset classifications before building screening pipelines, or construct lookup tables that map
+                    type codes to descriptions.
+                  </p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /v3/reference/tickers/types</code></p>
+                </div>
+
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Asset Class</span>
+                    <select
+                      className="form-input"
+                      value={tkTypesAssetClass}
+                      onChange={e => setTkTypesAssetClass(e.target.value)}
+                      disabled={!configured}
+                    >
+                      <option value="">All</option>
+                      <option value="stocks">Stocks</option>
+                      <option value="options">Options</option>
+                      <option value="crypto">Crypto</option>
+                      <option value="fx">FX</option>
+                      <option value="indices">Indices</option>
+                    </select>
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Locale</span>
+                    <select
+                      className="form-input"
+                      value={tkTypesLocale}
+                      onChange={e => setTkTypesLocale(e.target.value)}
+                      disabled={!configured}
+                    >
+                      <option value="">All</option>
+                      <option value="us">US</option>
+                      <option value="global">Global</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-3)' }}>
+                  <p>
+                    <strong>Key response fields (per result):</strong>{' '}
+                    <code>code</code> (e.g. <code>CS</code>, <code>ETF</code>, <code>ADRC</code>,{' '}
+                    <code>WARRANT</code>, <code>UNIT</code>), <code>description</code>,{' '}
+                    <code>asset_class</code>, <code>locale</code>
+                  </p>
+                </div>
+
+                <p className="feed-massive-svc-evidence-pending" style={{ marginTop: 'var(--space-3)' }}>
+                  Not yet implemented. Target backend endpoint:{' '}
+                  <code>GET /research/massive/tickers/types</code>
+                </p>
+              </div>
+            ) : null}
+
+            {/* ── Related Tickers ──────────────────────────────────────────── */}
+            {tkSubTab === 'related_tickers' ? (
+              <div
+                className="feed-massive-agg-tab-panel"
+                role="tabpanel"
+                id="feed-massive-stk-tk-panel-related"
+                aria-labelledby="feed-massive-stk-tk-tab-related"
+              >
+                <div className="feed-massive-agg-sub-doc">
+                  <p>
+                    <strong>Use case:</strong> Discover tickers related to a specified stock through Massive's
+                    analysis of news coverage and historical returns data. Returns a ranked list of peers,
+                    competitors, and thematically similar companies.
+                  </p>
+                  <p>
+                    <strong>When to use:</strong> Peer identification for sector/comparable analysis, building a
+                    competitor watchlist, discovering correlated instruments for hedging or diversification research.
+                  </p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /v1/related-companies/&#123;ticker&#125;</code></p>
+                </div>
+
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">
+                      Ticker <span style={{ color: 'var(--clr-error, #e05)' }}>*</span>
+                    </span>
+                    <input
+                      className="form-input"
+                      value={tkRelTicker}
+                      onChange={e => setTkRelTicker(e.target.value)}
+                      disabled={!configured}
+                      placeholder="AAPL"
+                      autoComplete="off"
+                    />
+                  </label>
+                </div>
+
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-3)' }}>
+                  <p>
+                    <strong>Key response fields:</strong>{' '}
+                    <code>ticker</code> (the queried symbol),{' '}
+                    <code>results[].ticker</code> (related ticker symbols ranked by news/returns similarity)
+                  </p>
+                </div>
+
+                <p className="feed-massive-svc-evidence-pending" style={{ marginTop: 'var(--space-3)' }}>
+                  Not yet implemented. Target backend endpoint:{' '}
+                  <code>GET /research/massive/related-companies/&#123;ticker&#125;</code>
+                </p>
+              </div>
+            ) : null}
+
+          </div>
+        </div>
+      </StockCapabilityPanel>
     )
   }
 
@@ -434,7 +886,7 @@ export function FeedMassiveStockPage({
           return (
             <div key={id}>
               <h4 className="feed-massive-section-header">{REST_SECTION_LABELS[id]}</h4>
-              {renderCap(id)}
+              {id === 'stock-tickers' ? renderTickersCap() : renderCap(id)}
             </div>
           )
         })}
@@ -451,11 +903,15 @@ export function FeedMassiveStockPage({
           .filter(r => r.group === 'flat')
           .map(row => renderCap(row.id))}
 
-        {/* Project */}
-        <h3 className="feed-massive-group-header" id="feed-massive-stock-group-project">Project</h3>
-        {stockChecklistRows
-          .filter(r => r.group === 'project')
-          .map(row => renderCap(row.id))}
+        {/* Project — only rendered if rows exist in this group */}
+        {stockChecklistRows.some(r => r.group === 'project') && (
+          <>
+            <h3 className="feed-massive-group-header" id="feed-massive-stock-group-project">Project</h3>
+            {stockChecklistRows
+              .filter(r => r.group === 'project')
+              .map(row => renderCap(row.id))}
+          </>
+        )}
 
       </div>
     </div>

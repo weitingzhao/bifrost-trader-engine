@@ -12,6 +12,7 @@ from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from backend.monitor.routers.deps import (
+    ACCOUNT_SYNC_DAEMON_LOG_STREAM_KEY,
     IB_ACCOUNT_AGENT_LOG_STREAM_KEY,
     IB_OPERATOR_LOG_STREAM_KEY,
     IB_INGESTOR_LOG_STREAM_KEY,
@@ -1269,6 +1270,95 @@ async def get_ib_account_agent_logs_stream(request: Request):
             with app.state.ib_account_agent_log_lock:
                 if queue in app.state.ib_account_agent_log_queues:
                     app.state.ib_account_agent_log_queues.remove(queue)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# --- Account Sync Daemon logs (run_account_sync_daemon.py → Redis stream bifrost:console:account_sync_daemon) ---
+
+
+def _account_sync_daemon_log_reader_loop(app_ref) -> None:
+    """Background thread: XREAD Redis stream for Account Sync Daemon console."""
+    try:
+        import redis
+
+        r = redis.from_url(daemon_log_redis_url())
+        last_id = "$"
+        while True:
+            try:
+                result = r.xread(
+                    block=5000,
+                    streams={ACCOUNT_SYNC_DAEMON_LOG_STREAM_KEY: last_id},
+                    count=100,
+                )
+                if not result:
+                    continue
+                for _stream_name, entries in result:
+                    for eid, fields in entries:
+                        last_id = eid
+                        line = _redis_stream_line(fields)
+                        with app_ref.state.account_sync_daemon_log_lock:
+                            queues = list(app_ref.state.account_sync_daemon_log_queues)
+                        loop = getattr(app_ref.state, "_account_sync_daemon_log_loop", None)
+                        for q in queues:
+                            if loop and not loop.is_closed():
+                                loop.call_soon_threadsafe(put_nowait_drop_oldest, q, line)
+            except redis.ConnectionError:
+                time.sleep(2)
+            except Exception as e:
+                logger.debug("account_sync_daemon_log_reader_loop: %s", e)
+    except Exception as e:
+        logger.warning("account_sync_daemon_log_reader_loop fatal: %s", e)
+
+
+@router.get("/api/account-sync-daemon/logs/stream")
+async def get_account_sync_daemon_logs_stream(request: Request):
+    try:
+        import redis
+
+        r = redis.from_url(daemon_log_redis_url())
+        r.ping()
+    except Exception as e:
+        logger.warning("account_sync_daemon_logs_stream check failed: %s", e)
+        return JSONResponse(status_code=503, content={"detail": str(e)})
+
+    app = request.app
+    queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+    with app.state.account_sync_daemon_log_lock:
+        app.state.account_sync_daemon_log_queues.append(queue)
+        if app.state._account_sync_daemon_log_loop is None:
+            app.state._account_sync_daemon_log_loop = asyncio.get_running_loop()
+        if app.state._account_sync_daemon_log_thread is None or not app.state._account_sync_daemon_log_thread.is_alive():
+            app.state._account_sync_daemon_log_thread = threading.Thread(
+                target=_account_sync_daemon_log_reader_loop,
+                args=(app,),
+                name="account-sync-daemon-log-reader",
+                daemon=True,
+            )
+            app.state._account_sync_daemon_log_thread.start()
+
+    async def event_gen():
+        try:
+            while True:
+                try:
+                    line = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield f"data: {json.dumps({'line': line})}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            with app.state.account_sync_daemon_log_lock:
+                if queue in app.state.account_sync_daemon_log_queues:
+                    app.state.account_sync_daemon_log_queues.remove(queue)
 
     return StreamingResponse(
         event_gen(),

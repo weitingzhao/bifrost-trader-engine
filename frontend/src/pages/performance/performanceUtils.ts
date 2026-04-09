@@ -74,6 +74,24 @@ export function executionLegPnlToneClass(e: Execution, ep: number): string {
   return ep >= 0 ? 'tone-positive' : 'tone-negative'
 }
 
+/**
+ * On-the-fly STK row: Total = quantity × price (no contract multiplier).
+ * Same display convention as option leg PnL: BUY shows signed outflow, SELL shows abs(inflow).
+ */
+export function stockFillTotalDisplay(e: Execution): number | null {
+  if ((e.sec_type ?? '').toUpperCase() !== 'STK') return null
+  const q = Math.abs(Number(e.quantity) || 0)
+  const p = Number(e.price) || 0
+  if (!Number.isFinite(q) || q <= 0 || !Number.isFinite(p)) return null
+  const s = (e.side ?? '').toString().trim().toUpperCase()
+  const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
+  const isSell = s === 'SELL' || s === 'SLD' || s === 'S'
+  const raw = isBuy ? -q * p : isSell ? q * p : q * p
+  if (isSell) return Math.abs(raw)
+  if (isBuy) return raw
+  return raw
+}
+
 export function matchPnl(p: { quantity: number; c_side: string; p_side: string; c_price: number; p_price: number; commission: number }): number {
   const qty = Number(p.quantity) || 0
   const cPrice = Number(p.c_price) || 0

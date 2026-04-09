@@ -317,6 +317,102 @@ def write_heartbeat_interval(status_config: dict, heartbeat_interval_sec: int) -
         return False
 
 
+def get_account_sync_heartbeat(conn: Any) -> Optional[Dict[str, Any]]:
+    """Return account_sync_heartbeat row id=1. None if table missing."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT extract(epoch from last_ts) AS last_ts,
+                       last_sync_version, accounts_synced, positions_synced,
+                       executions_synced, open_orders_synced, stream_lag
+                FROM account_sync_heartbeat WHERE id = 1
+                """
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            return {
+                "last_ts": row[0],
+                "last_sync_version": row[1],
+                "accounts_synced": row[2],
+                "positions_synced": row[3],
+                "executions_synced": row[4],
+                "open_orders_synced": row[5],
+                "stream_lag": row[6],
+            }
+    except Exception:
+        return None
+
+
+def write_account_sync_control(status_config: dict, command: str) -> bool:
+    """Insert a command into account_sync_control."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO account_sync_control (command) VALUES (%s)", (command,))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("write_account_sync_control failed: %s", e)
+        return False
+
+
+def write_account_sync_run_status(status_config: dict, *, suspended: bool) -> bool:
+    """Update account_sync_run_status row id=1."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO account_sync_run_status (id, suspended, updated_at)
+                    VALUES (1, %s, now())
+                    ON CONFLICT (id) DO UPDATE SET suspended = %s, updated_at = now()
+                    """,
+                    (suspended, suspended),
+                )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("write_account_sync_run_status failed: %s", e)
+        return False
+
+
+def write_account_sync_heartbeat_interval(status_config: dict, interval_sec: float) -> bool:
+    """Update account_sync_run_status.heartbeat_interval_sec (clamped 2-60)."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    sec = max(2.0, min(60.0, float(interval_sec)))
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE account_sync_run_status SET heartbeat_interval_sec = %s, updated_at = now() WHERE id = 1",
+                    (sec,),
+                )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("write_account_sync_heartbeat_interval failed: %s", e)
+        return False
+
+
 def get_risk_summary(conn: Any) -> Dict[str, Any]:
     """Return risk/post-mortem summary: daemon_auto_status_current (daily_hedge_count, daily_pnl) + daemon_auto_operations count in last 24h + block_reasons."""
     out: Dict[str, Any] = {

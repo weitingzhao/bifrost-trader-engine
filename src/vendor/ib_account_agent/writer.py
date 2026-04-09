@@ -11,6 +11,8 @@ from src.vendor.ib_account_agent.redis_keys import (
     IB_ACCOUNT_AGENT_META_HEALTH,
     IB_ACCOUNT_NOTIFY_CHANNEL,
     IB_ACCOUNT_SNAPSHOT_KEY,
+    IB_ACCOUNT_STREAM_KEY,
+    IB_ACCOUNT_STREAM_MAXLEN,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,6 +96,19 @@ class IbAccountAgentRedisWriter:
                 self._r.publish(IB_ACCOUNT_NOTIFY_CHANNEL, str(body["version"]))
         except Exception as e:
             logger.warning("account agent snapshot set failed: %s", e)
+        try:
+            self._r.xadd(
+                IB_ACCOUNT_STREAM_KEY,
+                {
+                    "version": str(body["version"]),
+                    "updated_at": str(body["updated_at"]),
+                    "payload": raw,
+                },
+                maxlen=IB_ACCOUNT_STREAM_MAXLEN,
+                approximate=True,
+            )
+        except Exception as e:
+            logger.warning("account agent stream xadd failed: %s", e)
 
     def set_subscriptions_meta(self, keys: List[str]) -> None:
         try:

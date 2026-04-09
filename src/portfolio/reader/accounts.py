@@ -533,10 +533,24 @@ def sync_accounts_snapshot_to_db(
 _WRITE_LEGACY = os.environ.get("EXECUTIONS_WRITE_LEGACY", "false").strip().lower() != "false"
 
 
-def write_account_executions_to_db(status_config: dict, rows: List[Dict[str, Any]]) -> bool:
-    """R-A2: 写入执行记录到 account_executions；CommissionReport 写入 account_execution_commissions。按 exec_id 去重。"""
+def write_account_executions_to_db(
+    status_config: dict,
+    rows: List[Dict[str, Any]],
+    *,
+    stats_out: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """R-A2: 写入执行记录到 account_executions；CommissionReport 写入 account_execution_commissions。按 exec_id 去重。
+
+    If ``stats_out`` is provided, it is cleared and filled with TWS raw table stats (executions_raw_tws only):
+    ``tws_raw_inserted``, ``tws_raw_skipped_duplicate``, ``tws_raw_missing_table`` (bool).
+    """
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
+    if stats_out is not None:
+        stats_out.clear()
+        stats_out["tws_raw_inserted"] = 0
+        stats_out["tws_raw_skipped_duplicate"] = 0
+        stats_out["tws_raw_missing_table"] = False
     try:
         params = _get_conn_params(status_config)
         conn = psycopg2.connect(**params)
@@ -824,6 +838,12 @@ def write_account_executions_to_db(status_config: dict, rows: List[Dict[str, Any
                                     """,
                                     vals,
                                 )
+                                if stats_out is not None and raw_table == "executions_raw_tws":
+                                    rc = int(cur.rowcount or 0)
+                                    if rc >= 1:
+                                        stats_out["tws_raw_inserted"] += 1
+                                    else:
+                                        stats_out["tws_raw_skipped_duplicate"] += 1
                         else:
                             cur.execute(
                                 f"""
@@ -832,9 +852,14 @@ def write_account_executions_to_db(status_config: dict, rows: List[Dict[str, Any
                                 """,
                                 vals,
                             )
+                            if stats_out is not None and raw_table == "executions_raw_tws":
+                                if int(cur.rowcount or 0) >= 1:
+                                    stats_out["tws_raw_inserted"] += 1
                     except Exception as _raw_e:
                         # Older deployments without split raw tables: ignore missing relation only.
                         if getattr(_raw_e, "pgcode", None) == "42P01":
+                            if stats_out is not None:
+                                stats_out["tws_raw_missing_table"] = True
                             pass
                         else:
                             logger.warning(

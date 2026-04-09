@@ -1,5 +1,6 @@
 """Executions and transactions: CRUD, Flex fetch, IB fetch, performance."""
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -20,6 +21,40 @@ from src.monitor.reader import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["executions"])
+
+
+def _publish_tws_fetch_system_message(
+    config: dict,
+    *,
+    ok: bool,
+    title: str,
+    message: str,
+    reason: Optional[str] = None,
+    level: Optional[str] = None,
+) -> None:
+    """Best-effort Redis message center (Monitor materializes for SSE)."""
+    try:
+        import redis as redis_mod
+
+        from src.bifrost.message_center import (
+            build_portfolio_tws_executions_fetch_event,
+            publish_system_message_event,
+        )
+        from src.core.redis_url import effective_redis_dict, format_redis_url
+
+        url = format_redis_url(effective_redis_dict(config, default_db=0))
+        if not url:
+            return
+        r = redis_mod.from_url(url, decode_responses=True)
+        try:
+            ev = build_portfolio_tws_executions_fetch_event(
+                ok=ok, title=title, message=message, reason=reason, level=level
+            )
+            publish_system_message_event(r, ev)
+        finally:
+            r.close()
+    except Exception as e:
+        logger.debug("tws fetch message center publish failed: %s", e)
 
 
 @router.get("/executions")
@@ -252,6 +287,7 @@ async def post_executions_fetch(
     """Fetch executions from IB via IB Gateway and write to account_executions."""
     app = request.app
     reader = app.state.reader
+    cfg = reader._config
     control_via_db = app.state.control_via_db
     if not control_via_db:
         return {"ok": False, "error": "PostgreSQL is required to write account_executions.", "count": 0}
@@ -266,9 +302,23 @@ async def post_executions_fetch(
         caller="trading_executions_fetch",
     )
     if not env.get("ok"):
-        return {"ok": False, "error": str(env.get("error") or "IB gateway error"), "count": 0}
+        err = str(env.get("error") or "IB gateway error")
+        await asyncio.to_thread(
+            _publish_tws_fetch_system_message,
+            cfg,
+            ok=False,
+            title="TWS executions fetch failed",
+            message=f"Primary slot: {err}",
+            reason=err,
+            level="error",
+        )
+        return {"ok": False, "error": err, "count": 0, "days": days, "fetched_primary": 0, "fetched_secondary": 0, "fetched_total": 0}
     data = env.get("data") or {}
-    all_execs = list(data.get("executions") or [])
+    primary_execs = list(data.get("executions") or [])
+    fetched_primary = len(primary_execs)
+    all_execs = primary_execs
+    fetched_secondary = 0
+    secondary_error: Optional[str] = None
     from src.app.config import get_effective_ib_config
 
     try:
@@ -282,18 +332,107 @@ async def post_executions_fetch(
             if env2.get("ok"):
                 d2 = env2.get("data") or {}
                 ex2 = list(d2.get("executions") or [])
+                fetched_secondary = len(ex2)
                 if ex2:
                     all_execs = (all_execs or []) + ex2
             else:
-                logger.warning("executions/fetch secondary: %s", env2.get("error"))
+                secondary_error = str(env2.get("error") or "secondary fetch failed")
+                logger.warning("executions/fetch secondary: %s", secondary_error)
     except Exception as e2:
         logger.warning("executions/fetch secondary check: %s", e2)
+        secondary_error = str(e2)
+    fetched_total = len(all_execs)
     if not all_execs:
-        return {
+        msg = (
+            f"IB returned no executions (range: last {days} day(s); for a multi-day range ensure TWS Trade Log includes those days)."
+        )
+        if secondary_error:
+            msg = f"{msg} Secondary slot error: {secondary_error}"
+        detail_parts = [
+            f"days={days}",
+            f"fetched_primary={fetched_primary}",
+            f"fetched_secondary={fetched_secondary}",
+            f"fetched_total=0",
+        ]
+        if secondary_error:
+            detail_parts.append(f"secondary_error={secondary_error}")
+        await asyncio.to_thread(
+            _publish_tws_fetch_system_message,
+            cfg,
+            ok=True,
+            title="TWS executions fetch: no rows",
+            message=msg + " " + " ".join(detail_parts),
+            reason=None,
+            level="warning",
+        )
+        out: Dict[str, Any] = {
             "ok": True,
-            "message": f"IB returned no executions (range: last {days} day(s); for a multi-day range ensure TWS Trade Log includes those days).",
+            "message": msg,
             "count": 0,
+            "days": days,
+            "fetched_primary": fetched_primary,
+            "fetched_secondary": fetched_secondary,
+            "fetched_total": 0,
         }
-    if not write_account_executions_to_db(control_via_db, all_execs):
-        return {"ok": False, "error": "Failed to write account_executions.", "count": 0}
-    return {"ok": True, "count": len(all_execs), "message": f"Wrote {len(all_execs)} execution record(s)."}
+        if secondary_error:
+            out["secondary_error"] = secondary_error
+        return out
+
+    stats_out: Dict[str, Any] = {}
+    if not write_account_executions_to_db(control_via_db, all_execs, stats_out=stats_out):
+        await asyncio.to_thread(
+            _publish_tws_fetch_system_message,
+            cfg,
+            ok=False,
+            title="TWS executions write failed",
+            message="PostgreSQL write failed after IB returned executions.",
+            reason="write_account_executions_to_db",
+            level="error",
+        )
+        return {
+            "ok": False,
+            "error": "Failed to write account_executions.",
+            "count": 0,
+            "days": days,
+            "fetched_primary": fetched_primary,
+            "fetched_secondary": fetched_secondary,
+            "fetched_total": fetched_total,
+        }
+
+    ins = int(stats_out.get("tws_raw_inserted") or 0)
+    skip = int(stats_out.get("tws_raw_skipped_duplicate") or 0)
+    missing_raw = bool(stats_out.get("tws_raw_missing_table"))
+    msg = (
+        f"Fetched {fetched_total} execution(s) from IB (primary {fetched_primary}, secondary {fetched_secondary}). "
+        f"New rows in executions_raw_tws: {ins}; skipped duplicate exec_id: {skip}."
+    )
+    if missing_raw:
+        msg += " (executions_raw_tws missing or unavailable; stats may be incomplete.)"
+    if secondary_error:
+        msg += f" Secondary slot error (merged primary only): {secondary_error}"
+
+    await asyncio.to_thread(
+        _publish_tws_fetch_system_message,
+        cfg,
+        ok=True,
+        title="TWS executions imported",
+        message=msg,
+        reason=None,
+        level="success",
+    )
+
+    result: Dict[str, Any] = {
+        "ok": True,
+        "count": fetched_total,
+        "days": days,
+        "fetched_primary": fetched_primary,
+        "fetched_secondary": fetched_secondary,
+        "fetched_total": fetched_total,
+        "tws_raw_inserted": ins,
+        "tws_raw_skipped_duplicate": skip,
+        "tws_raw_missing_table": missing_raw,
+        "message": msg,
+    }
+    if secondary_error:
+        result["secondary_error"] = secondary_error
+    return result

@@ -674,12 +674,23 @@ body::before {
 .msc-toast-content {
   flex: 1;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  align-content: flex-start;
   gap: 5px;
   font-size: 12px;
   font-weight: 500;
   overflow: hidden;
   min-width: 0;
+}
+.msc-toast-detail {
+  flex: 1 1 100%;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--color-text-dim);
+  line-height: 1.35;
+  max-height: 3.2em;
+  overflow: hidden;
 }
 
 .msc-toast-svc {
@@ -872,6 +883,15 @@ body::before {
 .msc-drawer-item-status.level-success { color: var(--color-lamp-green); }
 .msc-drawer-item-status.level-warning { color: var(--color-lamp-yellow); }
 .msc-drawer-item-status.level-error   { color: var(--color-lamp-red); }
+
+.msc-drawer-item-detail {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 .msc-drawer-item-reason {
   font-size: 10.5px;
@@ -10390,6 +10410,11 @@ th {
 
 .performance-page .performance-on-the-fly-summary-kv strong {
   font-weight: 600;
+}
+
+/* STK on-the-fly aggregate: unrealized uses orange (warning), not green/red PnL */
+.performance-page .performance-on-the-fly-summary-kv strong.performance-on-the-fly-stk-unrealized.tone-unrealized {
+  color: var(--color-warning);
 }
 
 .performance-page .performance-on-the-fly-hint {

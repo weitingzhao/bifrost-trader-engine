@@ -12,6 +12,7 @@ import {
   type MarketHolidayRow,
   type MassiveStatusResponse,
 } from '../api'
+import { postAccountSyncSetHeartbeatInterval } from '../api/monitor/accountSync'
 import { utilizedEnvFor } from '../utils/utilizedServices'
 import { ingestRedisHealthLamp } from '../utils/socketIngestLamp'
 import { InfoTooltip } from '../components/InfoTooltip'
@@ -148,6 +149,7 @@ export function SettingsPage({
   const [ib2ClientIdListener, setIb2ClientIdListener] = useState(3)
   const [ib2ClientIdOperator, setIb2ClientIdOperator] = useState(102)
   const [heartbeatIntervalSec, setHeartbeatIntervalSec] = useState(DEFAULT_HEARTBEAT_SEC)
+  const [accountSyncIntervalSec, setAccountSyncIntervalSec] = useState(5)
   const [ibConfigInitialized, setIbConfigInitialized] = useState(false)
   const [heartbeatInitialized, setHeartbeatInitialized] = useState(false)
 
@@ -281,7 +283,7 @@ export function SettingsPage({
   })
   const [ibConnectionExpanded, setIbConnectionExpanded] = useState(true)
   const [massiveOptionExpanded, setMassiveOptionExpanded] = useState(false)
-  const [massiveStockExpanded, setMassiveStockExpanded] = useState(true)
+  const [massiveStockExpanded, setMassiveStockExpanded] = useState(false)
   const [massiveStockCapGroupExpanded, setMassiveStockCapGroupExpanded] = useState<Record<CapabilityGroup, boolean>>(() =>
     CAPABILITY_GROUP_ORDER.reduce(
       (acc, g) => { acc[g] = false; return acc },
@@ -291,7 +293,7 @@ export function SettingsPage({
   const [massiveCapGroupExpanded, setMassiveCapGroupExpanded] = useState<Record<CapabilityGroup, boolean>>(() =>
     CAPABILITY_GROUP_ORDER.reduce(
       (acc, g) => {
-        acc[g] = true
+        acc[g] = false
         return acc
       },
       {} as Record<CapabilityGroup, boolean>,
@@ -530,7 +532,8 @@ export function SettingsPage({
       query_host_id: (a.query_host_id || '').trim(),
       query_secondary_id: (a.query_secondary_id || '').trim() || undefined,
     }))
-    const [resIb, resHb, resFlex] = await Promise.all([
+    const asSec = Math.max(2, Math.min(60, Number(accountSyncIntervalSec) || 5))
+    const [resIb, resHb, resFlex, resAs] = await Promise.all([
       postIbConfig({
         ib_host_account_id: hostAccountId.trim() || null,
         stream_host_account_id: streamHostAccountId.trim() || null,
@@ -538,9 +541,10 @@ export function SettingsPage({
       }),
       postSetHeartbeatInterval(sec),
       postFlexConfig(flexHostToken.trim() || undefined, flexSecondaryToken.trim() || undefined, flexToSave, defaultFlexRangeDays, initFlexRangeDays),
+      postAccountSyncSetHeartbeatInterval(asSec),
     ])
-    const ok = resIb.ok && resHb.ok && resFlex.ok
-    const err = !resIb.ok ? resIb.error : !resHb.ok ? resHb.error : !resFlex.ok ? resFlex.error : undefined
+    const ok = resIb.ok && resHb.ok && resFlex.ok && resAs.ok
+    const err = !resIb.ok ? resIb.error : !resHb.ok ? resHb.error : !resFlex.ok ? resFlex.error : !resAs.ok ? resAs.error : undefined
     setMsg({
       text: ok
         ? 'Settings saved. IB host/port/client IDs are in config.yaml (restart processes after file changes). Account/stream IDs and heartbeat apply as before.'
@@ -1065,6 +1069,8 @@ export function SettingsPage({
             <HeartbeatSection
               heartbeatIntervalSec={heartbeatIntervalSec}
               setHeartbeatIntervalSec={setHeartbeatIntervalSec}
+              accountSyncIntervalSec={accountSyncIntervalSec}
+              setAccountSyncIntervalSec={setAccountSyncIntervalSec}
             />
             <IbConnectionSection
               ibHost={ibHost}

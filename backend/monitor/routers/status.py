@@ -18,6 +18,7 @@ from src.monitor.reader.ib_config_public import (
 from src.monitor.self_check import derive_daemon_self_check, derive_health_roll_up
 from src.core.realtime.redis_keys import SUBSCRIBE_CHANNEL_DEFAULT
 from src.bifrost.redis_health_keys import (
+    hgetall_account_sync_daemon_health,
     hgetall_ib_account_agent_health,
     redis_hash_field_truthy,
     hgetall_ib_ingestor_health,
@@ -683,6 +684,41 @@ def get_status(request: Request) -> Dict[str, Any]:
             ib_ingestor=ib_ingestor,
             ib_account_agent=ib_account_agent,
         )
+        account_sync_hb = reader.get_account_sync_heartbeat()
+        account_sync_block: Optional[Dict[str, Any]] = None
+        if account_sync_hb is not None:
+            _as_last_ts = account_sync_hb.get("last_ts")
+            _as_alive = _as_last_ts is not None and (time.time() - _as_last_ts) < 35
+            account_sync_block = {
+                "heartbeat": {
+                    "last_ts": _as_last_ts,
+                    "daemon_alive": _as_alive,
+                    "last_sync_version": account_sync_hb.get("last_sync_version", 0),
+                    "accounts_synced": account_sync_hb.get("accounts_synced", 0),
+                    "positions_synced": account_sync_hb.get("positions_synced", 0),
+                    "executions_synced": account_sync_hb.get("executions_synced", 0),
+                    "open_orders_synced": account_sync_hb.get("open_orders_synced", 0),
+                    "stream_lag": account_sync_hb.get("stream_lag", 0),
+                },
+            }
+        else:
+            try:
+                if _rurl:
+                    _asd_h = hgetall_account_sync_daemon_health(_r)
+                    if _asd_h:
+                        _asd_alive = redis_hash_field_truthy(_asd_h, "alive")
+                        account_sync_block = {
+                            "heartbeat": {
+                                "last_ts": None,
+                                "daemon_alive": _asd_alive,
+                                "last_sync_version": 0,
+                                "stream_lag": int(_asd_h.get("stream_lag") or 0),
+                            },
+                        }
+            except Exception:
+                pass
+        payload["account_sync_daemon"] = account_sync_block
+
         with _status_cache_lock:
             _status_cache = payload
             _status_cache_ts = time.monotonic()

@@ -147,8 +147,10 @@ class PostgreSQLSink(StatusSink):
                         (structure_id, ts_val, json.dumps(state_summary)),
                     )
             # R-A1: sync multi-account snapshot into normalized tables (account + account_positions)
+            # When Account Sync Daemon is enabled, it handles this persistence independently.
             if isinstance(raw_accounts, list) and raw_accounts:
-                sync_accounts_snapshot_to_tables(self._conn, raw_accounts)
+                if not os.environ.get("ACCOUNT_SYNC_DAEMON_ENABLED", "").strip().lower() in ("1", "true", "yes"):
+                    sync_accounts_snapshot_to_tables(self._conn, raw_accounts)
             self._conn.commit()
         except Exception as e:
             self._conn.rollback()

@@ -60,7 +60,7 @@ import logoImg from '../img/logo.png'
 import { fmtPctCompact, fmtUsdCompact } from './utils/format'
 import { ingestRedisHealthLamp } from './utils/socketIngestLamp'
 import {
-  aggregateLiveNavLamp,
+  computeLiveNavLamp,
   computeMarketStreamsOk,
   computeOpenOrdersSectionOk,
   OPEN_ORDERS_POLL_FRESH_MAX_S,
@@ -80,6 +80,8 @@ const THEME_KEY = 'bifrost-monitor-theme'
 // handles the 10-second toast window internally.
 const SYSTEM_MESSAGE_BACKEND_TTL_SEC = 3600
 const SYSTEM_MESSAGE_BOOTSTRAP_LIMIT = 50
+// IB connection status messages auto-dismiss after this window (they are high-frequency events).
+const IB_CONNECTION_MSG_AUTO_DISMISS_SEC = 30
 
 type StreamTone = 'neutral' | 'positive' | 'negative'
 
@@ -341,6 +343,7 @@ export default function App() {
   const headerMenuRef = useRef<HTMLDivElement>(null)
   const messageCenterRef = useRef<MessageCenterHandle>(null) as RefObject<MessageCenterHandle>
   const [msgDismissedIds, setMsgDismissedIds] = useState<Set<string>>(() => new Set())
+  const ibAutoDismissTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   const dismissMessage = useCallback((id: string) => {
     setMsgDismissedIds((prev) => new Set([...prev, id]))
@@ -674,6 +677,31 @@ export default function App() {
     return () => clearTimeout(t)
   }, [systemMessages])
 
+  // Auto-dismiss ib.connection messages 30 s after they occur.
+  // Uses a ref-keyed timer map so each message is scheduled only once.
+  useEffect(() => {
+    const timers = ibAutoDismissTimersRef.current
+    const now = Date.now() / 1000
+    for (const m of systemMessages) {
+      if (m.topic !== 'ib.connection') continue
+      if (timers.has(m.message_id)) continue
+      const age = now - Number(m.occurred_at || 0)
+      const delayMs = Math.max(0, (IB_CONNECTION_MSG_AUTO_DISMISS_SEC - age) * 1000)
+      const id = m.message_id
+      timers.set(id, setTimeout(() => {
+        setMsgDismissedIds((prev) => new Set([...prev, id]))
+        timers.delete(id)
+      }, delayMs))
+    }
+    // Cancel timers for messages that have been pruned from state
+    for (const [id, timer] of timers) {
+      if (!systemMessages.some((m) => m.message_id === id)) {
+        clearTimeout(timer)
+        timers.delete(id)
+      }
+    }
+  }, [systemMessages])
+
   const onRefreshAccounts = useCallback(async () => {
     setIbAccountsRefreshing(true)
     setAccountsRefreshFeedback(null)
@@ -727,7 +755,12 @@ export default function App() {
     () => computeOpenOrdersSectionOk(openOrdersPollAtSec),
     [openOrdersPollAtSec, liveLampClock],
   )
-  const liveLamp: LampId = aggregateLiveNavLamp(marketStreamsOk, openOrdersSectionOk)
+  /** Live nav lamp: IB Broker Services + Daemon liveness (Open Orders requires daemon). */
+  const liveNavLamp = useMemo(
+    () => computeLiveNavLamp(j, hb?.daemon_alive === true),
+    [j, hb?.daemon_alive],
+  )
+  const liveLamp: LampId = liveNavLamp.lamp
   const dashboardStreamsLamp: LampId = marketStreamsOk ? 'green' : 'red'
   const dashboardOpenOrdersLamp: LampId = openOrdersSectionOk ? 'green' : 'red'
 
@@ -856,8 +889,8 @@ export default function App() {
     }
   }, [benchmarkSymbols.join(',')])
 
-  const tabList: { id: TabId; label: string; group: TabGroup; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
-    { id: 'live', label: 'Live', group: 'market', lamp: liveLamp },
+  const tabList: { id: TabId; label: string; group: TabGroup; lamp?: 'green' | 'yellow' | 'red' | 'none'; lampTitle?: string }[] = [
+    { id: 'live', label: 'Live', group: 'market', lamp: liveLamp, lampTitle: liveLamp !== 'green' ? liveNavLamp.title : undefined },
     { id: 'strategy', label: 'Strategy', group: 'strategy', lamp: strategyLamp },
     { id: 'replay', label: 'Portfolio', group: 'portfolio' },
     { id: 'research', label: 'Research', group: 'research' },
@@ -986,13 +1019,15 @@ export default function App() {
     setTimeout(() => setQuickCtrlMsg({ text: '', isErr: false }), 3000)
   }
 
-  const renderTabButton = (id: TabId, label: string, lamp?: 'green' | 'yellow' | 'red' | 'none') => (
+  const renderTabButton = (id: TabId, label: string, lamp?: 'green' | 'yellow' | 'red' | 'none', lampTitle?: string) => (
     <button
       key={id}
       type="button"
       className={`app-tab ${activeTab === id ? 'active' : ''}`}
       onClick={() => setActiveTab(id)}
       aria-current={activeTab === id ? 'page' : undefined}
+      title={lampTitle}
+      aria-label={lampTitle ? `${label} — ${lampTitle}` : undefined}
     >
       {id !== 'live' && <MainTabIcon id={id} />}
       {lamp != null && id === 'live' && (
@@ -1014,7 +1049,7 @@ export default function App() {
         <div className="app-header-left">
           <img src={logoImg} alt="Bifrost Trader" className="app-logo" />
           <nav className="app-tabs" aria-label="Live, Strategy, Portfolio, Research">
-            {tabList.map(({ id, label, group, lamp }, idx) => {
+            {tabList.map(({ id, label, group, lamp, lampTitle }, idx) => {
               const showDivider = idx > 0 && tabList[idx - 1].group !== group
               const divider = showDivider ? <NavGroupDivider key={`div-${group}`} /> : null
               if (id === 'replay') {
@@ -1178,7 +1213,7 @@ export default function App() {
               return (
                 <Fragment key={id}>
                   {divider}
-                  {renderTabButton(id, label, lamp)}
+                  {renderTabButton(id, label, lamp, lampTitle)}
                 </Fragment>
               )
             })}

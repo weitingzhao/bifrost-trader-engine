@@ -65,8 +65,9 @@ for _u in "${BIFROST_HTTP_UNITS[@]}"; do
   BIFROST_FULL_STACK_UNITS+=("${_u}")
 done
 BIFROST_FULL_STACK_UNITS+=(bifrost-agent)
+BIFROST_FULL_STACK_UNITS+=(bifrost-account-sync)
 BIFROST_FULL_STACK_UNITS+=("${BIFROST_CATEGORY_SOCKET_SERVICES[@]}")
-# TUI status / --status: HTTP by category order, Socket Services, then Daemon (engine+agent; no bifrost-celery — use Ops UI).
+# TUI status / --status: HTTP by category order, Socket Services, then Daemon (engine+agent+account-sync; no bifrost-celery — use Ops UI).
 BIFROST_STATUS_ROWS=(
   "${BIFROST_CATEGORY_ARCHITECTURE[@]}"
   "${BIFROST_CATEGORY_ACCOUNT[@]}"
@@ -75,12 +76,14 @@ BIFROST_STATUS_ROWS=(
   "${BIFROST_CATEGORY_SOCKET_SERVICES[@]}"
   bifrost-engine
   bifrost-agent
+  bifrost-account-sync
 )
 # Remote --remote-services-status / menu (p): sectioned scan (see _cli_remote_services_systemd_scan); flat list for reference only.
 BIFROST_REMOTE_SCAN_UNITS=(
   bifrost-server bifrost-engine bifrost-celery
   "${BIFROST_HTTP_UNITS[@]}"
   bifrost-agent
+  bifrost-account-sync
   "${BIFROST_CATEGORY_SOCKET_SERVICES[@]}"
 )
 declare -a RESTART_UNITS=()
@@ -89,6 +92,8 @@ declare -a RESTART_UNITS=()
 BIFROST_SSH_TUI=0
 BIFROST_SSH_LAST_LOG=""
 BIFROST_SSH_RESULT_LINES=20
+# Persistent deploy log — survives between sessions; overwritten on each deploy/pipeline run.
+BIFROST_PERSIST_DEPLOY_LOG="${PROJECT_ROOT}/logs/.bifrost-deploy-last.log"
 # TUI "Last output" tail count; after menu (4) systemd install set high so log + summaries fit (cleared on other menu keys).
 BIFROST_SSH_LAST_OUTPUT_LINES=""
 # Interactive: systemd snapshot for header (menu 3 refreshes all bifrost-* on DEPLOY_HOST).
@@ -166,6 +171,7 @@ _bifrost_unit_display_label() {
     bifrost-ib-operator) printf '%s' 'IB-Op' ;;
     bifrost-ib-ingestor) printf '%s' 'IB-Ingest' ;;
     bifrost-ib-account-agent) printf '%s' 'IB-Acct' ;;
+    bifrost-account-sync) printf '%s' 'AccSync' ;;
     *) printf '%s' "$1" ;;
   esac
 }
@@ -292,7 +298,7 @@ _bifrost_cli_print_status_grouped() {
   _emit_section "Research (market+research+strategy)" "${BIFROST_CATEGORY_RESEARCH[@]}"
   _emit_section "Feed (massive)" "${BIFROST_CATEGORY_FEED[@]}"
   _emit_section "Socket Services (ingest/IB edge)" "${BIFROST_CATEGORY_SOCKET_SERVICES[@]}"
-  _emit_section "Daemon (trading engine + agent)" bifrost-engine bifrost-agent
+  _emit_section "Daemon (trading engine + agent + account sync)" bifrost-engine bifrost-agent bifrost-account-sync
 }
 
 # Paint one unit row from BIFROST_INTERACTIVE_STATUS_RAW (unit name $1).
@@ -337,9 +343,10 @@ _interactive_paint_remote_status_block() {
   for u in "${BIFROST_CATEGORY_FEED[@]}"; do _bifrost_status_paint_one_row "${u}"; done
   echo "${C_MAGENTA}${C_BOLD}  Socket Services${C_RESET} ${C_DIM}(ingest/IB edge)${C_RESET}"
   for u in "${BIFROST_CATEGORY_SOCKET_SERVICES[@]}"; do _bifrost_status_paint_one_row "${u}"; done
-  echo "${C_MAGENTA}${C_BOLD}  Daemon${C_RESET} ${C_DIM}(trading engine + agent)${C_RESET}"
+  echo "${C_MAGENTA}${C_BOLD}  Daemon${C_RESET} ${C_DIM}(trading engine + agent + account sync)${C_RESET}"
   _bifrost_status_paint_one_row bifrost-engine
   _bifrost_status_paint_one_row bifrost-agent
+  _bifrost_status_paint_one_row bifrost-account-sync
 }
 
 _interactive_paint_main_menu() {
@@ -354,6 +361,7 @@ _interactive_paint_main_menu() {
   echo "  ${C_GREEN}${C_BOLD}9)${C_RESET} Reconnect SSH master ${C_DIM}(password again)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}l)${C_RESET} ${C_BOLD}Local Mac:${C_RESET} Socket ingest + Celery ${C_DIM}(pgrep + logs/.ops-ingest-*.pid on this repo)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}p)${C_RESET} ${C_BOLD}Remote Prod:${C_RESET} systemd scan on ${DEPLOY_HOST} ${C_DIM}(same units as deploy + worker@*)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}v)${C_RESET} ${C_BOLD}View last deploy log${C_RESET} ${C_DIM}(full output in less; saved to logs/.bifrost-deploy-last.log)${C_RESET}"
   echo "  ${C_YELLOW}${C_BOLD}q)${C_RESET} Quit"
 }
 
@@ -459,6 +467,10 @@ Usage (from repo root):
     --db-release-locks-terminate  Remote: db_release_dblock.py --prod --yes.
     --db-release-locks-terminate-dev  Local: db_release_dblock.py --dev --yes.
 
+    --show-last-deploy            print the full output of the last deploy/pipeline run (saved to
+                                  logs/.bifrost-deploy-last.log) using less -R (or cat if less is absent).
+                                  Does not SSH or deploy. Use after a failed deploy to see the full log.
+
     --local-mac-services          this machine only: pgrep + pidfiles for run_massive_ws / run_ib_ingestor /
                                   run_ib_operator / run_celery (see Examples).
 
@@ -517,6 +529,10 @@ Examples:
 
   ./scripts/bifrost_ssh.sh --install-systemd-units
   ./scripts/bifrost_ssh.sh -p 'SUDO' --install-systemd-units
+
+  ./scripts/bifrost_ssh.sh --show-last-deploy
+      View the full output of the last deploy run (no SSH required).
+      Log is saved at logs/.bifrost-deploy-last.log every time a pipeline runs.
 
 systemctl over SSH uses ssh -t when stdin is a TTY so sudo can prompt; non-interactive needs NOPASSWD for systemctl.
 With --password, --status uses sudo -S like start/stop/restart; without it, status runs as the SSH user (often sufficient for is-active).
@@ -764,6 +780,22 @@ POST_DEPLOY_SYSTEMD_EOF
   return "${_ec}"
 }
 
+# Save deploy output to a persistent log file (overwrite). Args: $1=label, $2=exit_code, $3=source_log_file.
+# Strips ANSI escape codes so the saved file is grep/less friendly in non-color terminals too.
+_bifrost_save_persist_deploy_log() {
+  local _label="$1" _ec="$2" _src="$3"
+  mkdir -p "$(dirname "${BIFROST_PERSIST_DEPLOY_LOG}")" 2>/dev/null || true
+  {
+    printf '=== Deploy log: %s | %s | exit %d ===\n' \
+      "${_label}" "$(date '+%Y-%m-%d %H:%M:%S')" "${_ec}"
+    if [[ -f "${_src}" ]]; then
+      # Strip ANSI color codes so the log is clean when viewed outside a color terminal.
+      sed 's/\x1b\[[0-9;]*[mKHJfABCDGsu]//g; s/\x1b(B//g' "${_src}"
+    fi
+    printf '=== end (exit %d) ===\n' "${_ec}"
+  } > "${BIFROST_PERSIST_DEPLOY_LOG}" 2>/dev/null || true
+}
+
 _run_pipeline() {
   _bifrost_restore_session_sudo
   # Uses globals: DO_DEPLOY, DO_DEPLOY_ONLY, DO_MIGRATE, SYNC_PROD_CONFIG, ACTION, RESTART_UNITS, RESTART_ALL*, BIFROST_*_UNITS
@@ -931,16 +963,22 @@ REMOTE_EOF
     _run_pipeline_inner > >(tee "${BIFROST_SSH_LAST_LOG}") 2>&1
     _ec=$?
     _emit_result_banner "${_ec}" "${_pipeline_label}" "${BIFROST_SSH_LAST_LOG}"
+    _bifrost_save_persist_deploy_log "${_pipeline_label}" "${_ec}" "${BIFROST_SSH_LAST_LOG}"
     if [[ "${_ec}" -eq 0 ]]; then
       _msg_info "${C_GREEN}${C_BOLD}${_pipeline_label} — SUCCESS${C_RESET} Redrawing menu…"
     else
-      _msg_err "${_pipeline_label} — ${C_RED}${C_BOLD}FAILED (exit ${_ec})${C_RESET}. Check Last output below."
+      _msg_err "${_pipeline_label} — ${C_RED}${C_BOLD}FAILED (exit ${_ec})${C_RESET}. Check Last output below (or press v to view full log)."
     fi
   else
     _run_pipeline_inner >"${_log}" 2>&1
     _ec=$?
+    _bifrost_save_persist_deploy_log "${_pipeline_label}" "${_ec}" "${_log}"
     _show_result "Command output (exit ${_ec})" < "${_log}"
     _emit_result_banner "${_ec}" "${_pipeline_label}"
+    if [[ "${_ec}" -ne 0 ]]; then
+      _msg_info "Full log saved to: ${BIFROST_PERSIST_DEPLOY_LOG}"
+      _msg_info "View with: ./scripts/bifrost_ssh.sh --show-last-deploy"
+    fi
   fi
   set -e
   rm -f "${_log}"
@@ -1187,7 +1225,7 @@ _block "HTTP · Account (trading+portfolio)" ${_acct}
 _block "HTTP · Research (market+research+strategy)" ${_res}
 _block "HTTP · Feed (massive)" ${_feed}
 _block "Socket Services (ingest/IB edge)" ${_socket}
-_block "Daemon (trading engine + agent)" bifrost-engine bifrost-agent
+_block "Daemon (trading engine + agent + account sync)" bifrost-engine bifrost-agent bifrost-account-sync
 echo ""
 echo "--- bifrost-celery-worker@*.service (template instances) ---"
 if out=\$(systemctl list-units 'bifrost-celery-worker@*.service' --all --no-legend --no-pager 2>/dev/null); then
@@ -1961,7 +1999,7 @@ interactive_mode() {
 
   while true; do
     _interactive_paint_full
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-7|9|l|p|q]${C_RESET} "
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-7|9|l|p|v|q]${C_RESET} "
     read -r _ch
     case "${_ch}" in
       1)
@@ -2033,6 +2071,18 @@ interactive_mode() {
           echo "--- exit code: ${_ec_p} ---"
         } >>"${BIFROST_SSH_LAST_LOG}"
         ;;
+      v|V)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        if [[ -f "${BIFROST_PERSIST_DEPLOY_LOG}" ]] && [[ -s "${BIFROST_PERSIST_DEPLOY_LOG}" ]]; then
+          if command -v less >/dev/null 2>&1; then
+            less -R -F "${BIFROST_PERSIST_DEPLOY_LOG}" || true
+          else
+            cat "${BIFROST_PERSIST_DEPLOY_LOG}"
+          fi
+        else
+          echo "[INFO] No deploy log saved yet. Run a deploy first (menu 2)." >"${BIFROST_SSH_LAST_LOG}"
+        fi
+        ;;
       q|Q)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
         echo "[INFO] Bye." >"${BIFROST_SSH_LAST_LOG}"
@@ -2041,7 +2091,7 @@ interactive_mode() {
         ;;
       *)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
-        echo "[WARN] Unknown choice — try 1–7, 9, l, p, or q. (systemd install = 4)" >"${BIFROST_SSH_LAST_LOG}"
+        echo "[WARN] Unknown choice — try 1–7, 9, l, p, v, or q. (systemd install = 4; view deploy log = v)" >"${BIFROST_SSH_LAST_LOG}"
         ;;
     esac
   done
@@ -2111,9 +2161,11 @@ CLI_DB_REL_YES_DEV=0
 CLI_LOCAL_MAC_SERVICES=0
 CLI_REMOTE_SERVICES_STATUS=0
 CLI_INSTALL_SYSTEMD=0
+CLI_SHOW_LAST_DEPLOY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --show-last-deploy) CLI_SHOW_LAST_DEPLOY=1 ;;
     --db-refresh) CLI_DB_REFRESH=1 ;;
     --db-refresh-dev) CLI_DB_REFRESH_DEV=1 ;;
     --db-release-locks)
@@ -2188,6 +2240,22 @@ while [[ $# -gt 0 ]]; do
   esac
   shift || true
 done
+
+# View last deploy log (no SSH; local file only).
+if [[ "${CLI_SHOW_LAST_DEPLOY}" == "1" ]]; then
+  if [[ -f "${BIFROST_PERSIST_DEPLOY_LOG}" ]] && [[ -s "${BIFROST_PERSIST_DEPLOY_LOG}" ]]; then
+    _msg_info "Last deploy log: ${BIFROST_PERSIST_DEPLOY_LOG}"
+    if command -v less >/dev/null 2>&1; then
+      less -R -F "${BIFROST_PERSIST_DEPLOY_LOG}"
+    else
+      cat "${BIFROST_PERSIST_DEPLOY_LOG}"
+    fi
+  else
+    _msg_warn "No deploy log found at ${BIFROST_PERSIST_DEPLOY_LOG}. Run a deploy first."
+    exit 1
+  fi
+  exit 0
+fi
 
 # DB-only: schema refresh or lock release (local or remote; no rsync / systemctl).
 _db_cli_count=$((CLI_DB_REFRESH + CLI_DB_REFRESH_DEV + CLI_DB_REL_DRY + CLI_DB_REL_DRY_DEV + CLI_DB_REL_YES + CLI_DB_REL_YES_DEV))

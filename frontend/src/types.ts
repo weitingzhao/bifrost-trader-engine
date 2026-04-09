@@ -408,6 +408,19 @@ export interface ControlResponse {
   statusText?: string
 }
 
+/** POST /executions/fetch (TWS via IB Operator) */
+export interface ExecutionsFetchTwsResponse extends ControlResponse {
+  count?: number
+  days?: number
+  fetched_primary?: number
+  fetched_secondary?: number
+  fetched_total?: number
+  tws_raw_inserted?: number
+  tws_raw_skipped_duplicate?: number
+  tws_raw_missing_table?: boolean
+  secondary_error?: string
+}
+
 /** Risk/post-mortem summary for replay & risk page (GET /risk_summary) */
 export interface RiskSummaryResponse {
   daily_hedge_count?: number | null

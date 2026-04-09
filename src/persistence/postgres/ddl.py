@@ -176,6 +176,62 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
         """
         )
+        _log("account_sync_control, account_sync_run_status, account_sync_heartbeat")
+        _log_table("account_sync_control", "Account Sync Daemon control commands")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS account_sync_control (
+                id bigserial PRIMARY KEY,
+                command text NOT NULL,
+                created_at timestamptz DEFAULT now(),
+                consumed_at timestamptz
+            )
+        """
+        )
+        _log_table(
+            "account_sync_run_status",
+            "Account Sync Daemon run status (single row). Default suspended=false.",
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS account_sync_run_status (
+                id integer PRIMARY KEY DEFAULT 1,
+                suspended boolean NOT NULL DEFAULT false,
+                heartbeat_interval_sec real DEFAULT 5.0,
+                updated_at timestamptz DEFAULT now()
+            )
+        """
+        )
+        cur.execute(
+            """
+            INSERT INTO account_sync_run_status (id, suspended, heartbeat_interval_sec)
+            VALUES (1, false, 5.0)
+            ON CONFLICT (id) DO NOTHING
+        """
+        )
+        _log_table("account_sync_heartbeat", "Account Sync Daemon heartbeat and sync stats")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS account_sync_heartbeat (
+                id integer PRIMARY KEY DEFAULT 1,
+                last_ts timestamptz,
+                last_sync_version bigint DEFAULT 0,
+                accounts_synced integer DEFAULT 0,
+                positions_synced integer DEFAULT 0,
+                executions_synced integer DEFAULT 0,
+                open_orders_synced integer DEFAULT 0,
+                stream_lag bigint DEFAULT 0,
+                updated_at timestamptz DEFAULT now()
+            )
+        """
+        )
+        cur.execute(
+            """
+            INSERT INTO account_sync_heartbeat (id, last_ts) VALUES (1, now())
+            ON CONFLICT (id) DO NOTHING
+        """
+        )
+
         _log("settings (account/stream + flex + active strategy refs; IB host/port/client IDs in config YAML)")
         _log_table("settings", "App settings (account IDs, stream accounts, Flex, active strategy refs)")
         cur.execute(

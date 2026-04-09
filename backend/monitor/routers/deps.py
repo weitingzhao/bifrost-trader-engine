@@ -9,6 +9,7 @@ MASSIVE_WS_LOG_STREAM_KEY = "bifrost:console:ws_massive_option"
 IB_OPERATOR_LOG_STREAM_KEY = "bifrost:console:ws_ib_operator"
 IB_INGESTOR_LOG_STREAM_KEY = "bifrost:console:ws_ib_ingestor"
 IB_ACCOUNT_AGENT_LOG_STREAM_KEY = "bifrost:console:ws_ib_account_agent"
+ACCOUNT_SYNC_DAEMON_LOG_STREAM_KEY = "bifrost:console:account_sync_daemon"
 
 
 def daemon_log_redis_url() -> str:

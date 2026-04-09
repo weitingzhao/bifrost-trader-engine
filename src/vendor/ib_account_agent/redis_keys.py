@@ -22,3 +22,8 @@ from src.bifrost.redis_health_keys import BIFROST_HEALTH_IB_ACCOUNT_AGENT
 IB_ACCOUNT_AGENT_META_HEALTH = BIFROST_HEALTH_IB_ACCOUNT_AGENT
 IB_ACCOUNT_SNAPSHOT_KEY = "ib:account:snapshot:v1"
 IB_ACCOUNT_NOTIFY_CHANNEL = "ib:account:notify"
+
+# Redis Stream for incremental consumption by Account Sync Daemon.
+# The Agent XADD-s each snapshot alongside the existing SET; consumers use XREADGROUP.
+IB_ACCOUNT_STREAM_KEY = "ib:account:stream:v1"
+IB_ACCOUNT_STREAM_MAXLEN = 1000

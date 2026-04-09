@@ -1,6 +1,7 @@
 import type {
   ControlResponse,
   Execution,
+  ExecutionsFetchTwsResponse,
   ExecutionsResponse,
   ExecutionsResponseWithPairs,
   ExecutionsFreshnessResponse,
@@ -17,12 +18,17 @@ function tradingUrl(path: string): string {
   return joinServiceBase(apiBase(), path)
 }
 
-/** R-A2: API fetches executions from IB and writes to DB; no daemon. days: 1=today, 3=3d, 7=7d */
-export async function postExecutionsFetch(days: 1 | 3 | 7 = 1): Promise<ControlResponse & { count?: number }> {
+/** R-A2: API fetches executions from IB via IB Operator and writes to DB. days: 1=today, 3=3d, 7=7d */
+export async function postExecutionsFetch(days: 1 | 3 | 7 = 1): Promise<ExecutionsFetchTwsResponse> {
   const params = new URLSearchParams({ days: String(days) })
   const r = await fetch(tradingUrl(`/executions/fetch?${params}`), { method: 'POST' })
   const j = await r.json().catch(() => ({}))
-  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText), count: j.count }
+  return {
+    ...j,
+    ok: r.ok && j.ok !== false,
+    error: j.error || (r.ok ? undefined : r.statusText),
+    count: j.count,
+  }
 }
 
 /** R-A2: Fetch executions via IB Flex Trades report and write to DB. Range from backend (Flex + Settings). */

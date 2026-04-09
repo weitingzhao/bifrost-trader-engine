@@ -11,6 +11,7 @@ import {
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
 import { useDeferredStart } from '../hooks/useDeferredStart'
+import { computeAccountSyncLamp } from '../utils/livePageLamps'
 import { fmtTs, fmtUsd } from '../utils/format'
 import {
   DAEMON_REASON_LABELS,
@@ -228,6 +229,34 @@ export function DaemonStatusPage({
             clearTitle="Clear displayed log and Redis streams"
           />
         </section>
+
+        {(() => {
+          const asd = (status as any)?.account_sync_daemon
+          const asdHb = asd?.heartbeat
+          const asdL = computeAccountSyncLamp(status)
+          if (!asdHb) return null
+          return (
+            <section className="replay-section" aria-labelledby="daemon-account-sync-head">
+              <h3 id="daemon-account-sync-head" className="page-title-with-tooltip">
+                <span className={`title-inline-lamp lamp-icon ${asdL.lamp}`} title={asdL.title} aria-hidden>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
+                </span>
+                Account Sync Daemon
+                <InfoTooltip text="Independent daemon that syncs Account / Position / Execution data from IB Account Agent (Redis Stream) to PostgreSQL." />
+              </h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem 1.5rem', fontSize: '0.85rem', lineHeight: 1.5 }}>
+                <div><span style={{ opacity: 0.65 }}>Status:</span>{' '}<strong>{asdHb.daemon_alive ? 'Running' : 'Not running'}</strong></div>
+                <div><span style={{ opacity: 0.65 }}>Last heartbeat:</span>{' '}{asdHb.last_ts != null ? fmtTs(asdHb.last_ts) : '—'}</div>
+                <div><span style={{ opacity: 0.65 }}>Stream lag:</span>{' '}{asdHb.stream_lag ?? '—'}</div>
+                <div><span style={{ opacity: 0.65 }}>Sync version:</span>{' '}{asdHb.last_sync_version ?? '—'}</div>
+                <div><span style={{ opacity: 0.65 }}>Accounts synced:</span>{' '}{asdHb.accounts_synced ?? '—'}</div>
+                <div><span style={{ opacity: 0.65 }}>Positions synced:</span>{' '}{asdHb.positions_synced ?? '—'}</div>
+                <div><span style={{ opacity: 0.65 }}>Executions synced:</span>{' '}{asdHb.executions_synced ?? '—'}</div>
+                <div><span style={{ opacity: 0.65 }}>Open orders synced:</span>{' '}{asdHb.open_orders_synced ?? '—'}</div>
+              </div>
+            </section>
+          )
+        })()}
 
         <section className="replay-section" aria-labelledby="daemon-ops-head">
           <h3 id="daemon-ops-head" className="page-title-with-tooltip">

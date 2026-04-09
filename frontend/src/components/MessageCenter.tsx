@@ -60,9 +60,17 @@ interface ToastProps {
   msg: SystemMessage
   onClose: () => void
 }
+function truncateDetail(s: string, maxLen: number) {
+  const t = s.trim()
+  if (t.length <= maxLen) return t
+  return `${t.slice(0, maxLen)}…`
+}
+
 function Toast({ msg, onClose }: ToastProps) {
   const statusText = msg.status_to ? statusLabel(msg.status_to) : msg.title
   const slotText = msg.slot ? slotLabel(msg.slot) : ''
+  const showDetail =
+    Boolean(msg.message && msg.message.trim()) && msg.topic && msg.topic !== 'ib.connection'
   return (
     <div className={`msc-toast level-${msg.level}`} role="alert">
       <span className={`msc-lamp ${lampClass(msg.level)}`} aria-hidden />
@@ -71,6 +79,9 @@ function Toast({ msg, onClose }: ToastProps) {
         {slotText && <span className="msc-toast-slot">· {slotText}</span>}
         <span className="msc-toast-arrow" aria-hidden>→</span>
         <span className={`msc-toast-status level-${msg.level}`}>{statusText}</span>
+        {showDetail && (
+          <span className="msc-toast-detail">{truncateDetail(msg.message, 140)}</span>
+        )}
       </span>
       <button type="button" className="msc-close-btn" onClick={onClose} aria-label="Dismiss notification">
         ×
@@ -86,6 +97,7 @@ interface DrawerItemProps {
 function DrawerItem({ msg, onDismiss }: DrawerItemProps) {
   const statusText = msg.status_to ? statusLabel(msg.status_to) : msg.title
   const slotText = msg.slot ? slotLabel(msg.slot) : ''
+  const detail = msg.message && msg.message.trim() ? msg.message.trim() : ''
   return (
     <div className={`msc-drawer-item level-${msg.level}`}>
       <span className={`msc-lamp ${lampClass(msg.level)}`} aria-hidden />
@@ -96,6 +108,7 @@ function DrawerItem({ msg, onDismiss }: DrawerItemProps) {
           <span className="msc-drawer-item-arrow" aria-hidden>→</span>
           <span className={`msc-drawer-item-status level-${msg.level}`}>{statusText}</span>
         </div>
+        {detail && <div className="msc-drawer-item-detail">{detail}</div>}
         {msg.reason && <div className="msc-drawer-item-reason">{msg.reason}</div>}
         <div className="msc-drawer-item-time">{relTime(Number(msg.occurred_at))}</div>
       </div>

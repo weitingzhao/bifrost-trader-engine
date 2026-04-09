@@ -17,6 +17,9 @@ from fastapi.responses import JSONResponse
 from src.ib_operator.client import IbOperatorClient
 from src.monitor.reader import (
     sync_accounts_snapshot_to_db,
+    write_account_sync_control,
+    write_account_sync_heartbeat_interval,
+    write_account_sync_run_status,
     write_control_command,
     write_heartbeat_interval,
     write_run_status,
@@ -366,3 +369,70 @@ def post_set_heartbeat_interval(request: Request, body: Dict[str, Any] = Body(..
     if write_heartbeat_interval(control_via_db, sec):
         return JSONResponse(status_code=200, content={"ok": True, "heartbeat_interval_sec": max(5, min(120, sec))})
     return JSONResponse(status_code=500, content={"error": "failed to set heartbeat interval"})
+
+
+# ---------------------------------------------------------------------------
+# Account Sync Daemon control
+# ---------------------------------------------------------------------------
+
+
+@router.post("/account-sync/control/suspend")
+def post_account_sync_suspend(request: Request) -> JSONResponse:
+    """Suspend Account Sync Daemon (account_sync_run_status.suspended=true)."""
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return JSONResponse(status_code=503, content={"error": "control via DB not available"})
+    if write_account_sync_run_status(control_via_db, suspended=True):
+        return JSONResponse(status_code=200, content={"ok": True, "message": "Account Sync Daemon suspended"})
+    return JSONResponse(status_code=500, content={"error": "failed to set account sync run status"})
+
+
+@router.post("/account-sync/control/resume")
+def post_account_sync_resume(request: Request) -> JSONResponse:
+    """Resume Account Sync Daemon (account_sync_run_status.suspended=false)."""
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return JSONResponse(status_code=503, content={"error": "control via DB not available"})
+    if write_account_sync_run_status(control_via_db, suspended=False):
+        return JSONResponse(status_code=200, content={"ok": True, "message": "Account Sync Daemon resumed"})
+    return JSONResponse(status_code=500, content={"error": "failed to set account sync run status"})
+
+
+@router.post("/account-sync/control/stop")
+def post_account_sync_stop(request: Request) -> JSONResponse:
+    """Insert 'stop' into account_sync_control."""
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return JSONResponse(status_code=503, content={"error": "control via DB not available"})
+    if write_account_sync_control(control_via_db, "stop"):
+        return JSONResponse(status_code=200, content={"ok": True, "message": "stop written to account_sync_control"})
+    return JSONResponse(status_code=500, content={"error": "failed to write account sync control command"})
+
+
+@router.post("/account-sync/control/force-sync")
+def post_account_sync_force_sync(request: Request) -> JSONResponse:
+    """Insert 'force_sync' into account_sync_control (clears diff cache, forces full write)."""
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return JSONResponse(status_code=503, content={"error": "control via DB not available"})
+    if write_account_sync_control(control_via_db, "force_sync"):
+        return JSONResponse(status_code=200, content={"ok": True, "message": "force_sync written to account_sync_control"})
+    return JSONResponse(status_code=500, content={"error": "failed to write account sync control command"})
+
+
+@router.post("/account-sync/control/set_heartbeat_interval")
+def post_account_sync_set_heartbeat_interval(request: Request, body: Dict[str, Any] = Body(...)) -> JSONResponse:
+    """Set account_sync_run_status.heartbeat_interval_sec (2–60)."""
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return JSONResponse(status_code=503, content={"error": "control via DB not available"})
+    sec = body.get("heartbeat_interval_sec")
+    if sec is None:
+        return JSONResponse(status_code=400, content={"error": "heartbeat_interval_sec required (2–60)"})
+    try:
+        sec = float(sec)
+    except (TypeError, ValueError):
+        return JSONResponse(status_code=400, content={"error": "heartbeat_interval_sec must be a number"})
+    if write_account_sync_heartbeat_interval(control_via_db, sec):
+        return JSONResponse(status_code=200, content={"ok": True, "heartbeat_interval_sec": max(2.0, min(60.0, sec))})
+    return JSONResponse(status_code=500, content={"error": "failed to set account sync heartbeat interval"})

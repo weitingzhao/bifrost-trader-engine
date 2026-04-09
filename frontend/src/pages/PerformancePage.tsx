@@ -20,6 +20,7 @@ import {
   getChicagoDayRange,
   getTimeRangeDates,
   ledgerOptionExecutionDisplayPnl,
+  stockFillTotalDisplay,
   listDateStrings,
   listMonthKeysInRange,
   mapWithConcurrency,
@@ -1427,7 +1428,13 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                     </span>
                     <span className="performance-on-the-fly-summary-kv">
                       Unrealized (open){' '}
-                      <strong className={kvClass(sAg.unrealized)}>{fmtPnl(sAg.unrealized)}</strong>
+                      <strong
+                        className={
+                          Math.abs(sAg.unrealized) < 0.005 ? '' : 'tone-unrealized performance-on-the-fly-stk-unrealized'
+                        }
+                      >
+                        {fmtPnl(sAg.unrealized)}
+                      </strong>
                       <InfoTooltip text="Stock FIFO realized/unrealized from fills in range (shares × price, no contract multiplier). Trade date uses exec date when trade_date is missing." />
                     </span>
                     <span className="performance-on-the-fly-summary-kv">
@@ -1483,7 +1490,13 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                         <th>Qty</th>
                         <th>Price</th>
                         <th>Source</th>
-                        <th>PnL</th>
+                        <th>
+                          {onTheFlySecTab === 'STK'
+                            ? 'Total'
+                            : onTheFlySecTab === 'OPT'
+                              ? 'PnL'
+                              : 'PnL / Total'}
+                        </th>
                         <th>Realized PnL</th>
                         <th>Commission</th>
                       </tr>
@@ -1498,14 +1511,24 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                           const rp = e.realized_pnl
                           const rpNum = rp != null && typeof rp === 'number' && Number.isFinite(rp) ? rp : null
                           const isOpt = (e.sec_type ?? '').toUpperCase() === 'OPT'
+                          const isStk = (e.sec_type ?? '').toUpperCase() === 'STK'
                           const tradeDateDisplay = (e.trade_date ?? '').trim() || executionDateStr(e) || '—'
                           const ledgerPnl = isOpt ? ledgerOptionExecutionDisplayPnl(e) : null
+                          const stkTotal = isStk ? stockFillTotalDisplay(e) : null
                           const ledgerPnlClass =
                             ledgerPnl == null || !isOpt
                               ? ''
                               : Math.abs(ledgerPnl) < 0.005
                                 ? ''
                                 : ledgerPnl >= 0
+                                  ? 'tone-positive'
+                                  : 'tone-negative'
+                          const stkTotalClass =
+                            stkTotal == null || !isStk
+                              ? ''
+                              : Math.abs(stkTotal) < 0.005
+                                ? ''
+                                : stkTotal >= 0
                                   ? 'tone-positive'
                                   : 'tone-negative'
                           return (
@@ -1525,8 +1548,12 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                               <td>{e.quantity ?? '—'}</td>
                               <td>{fmtUsd(e.price)}</td>
                               <td><ExecSourceBadge source={e.source} /></td>
-                              <td className={ledgerPnlClass}>
-                                {isOpt && ledgerPnl != null ? fmtPnl(ledgerPnl) : '—'}
+                              <td className={isOpt ? ledgerPnlClass : stkTotalClass}>
+                                {isOpt && ledgerPnl != null
+                                  ? fmtPnl(ledgerPnl)
+                                  : isStk && stkTotal != null
+                                    ? fmtUsd(stkTotal)
+                                    : '—'}
                               </td>
                               <td className={rpNum == null ? '' : rpNum >= 0 ? 'tone-positive' : 'tone-negative'}>
                                 {rpNum == null ? '—' : fmtPnl(rpNum)}

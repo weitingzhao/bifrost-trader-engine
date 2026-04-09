@@ -20,6 +20,10 @@ BIFROST_HEALTH_IB_INGESTOR = "bifrost:health:ws_ib_ingestor"
 BIFROST_HEALTH_IB_OPERATOR = "bifrost:health:ws_ib_operator"
 BIFROST_HEALTH_IB_ACCOUNT_AGENT = "bifrost:health:ws_ib_account_agent"
 
+# Account Sync Daemon: independent process that consumes ib:account:stream:v1 and
+# persists Account / Position / Execution data to PostgreSQL.
+BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON = "bifrost:health:account_sync_daemon"
+
 # Trading daemon (Engine): health hash + Ops Dev/Prod lease fields (``bifrost_ops_control_*``,
 # ``engine_ops_active``) on the same key, same pattern as ``bifrost:health:ws_ib_operator``.
 BIFROST_HEALTH_DAEMON_TRADING_ENGINE = "bifrost:health:daemon_trading_engine"
@@ -83,4 +87,10 @@ def hgetall_ib_account_agent_health(r: Any) -> Dict[str, str]:
     h = r.hgetall(BIFROST_HEALTH_IB_ACCOUNT_AGENT)
     if not h:
         h = r.hgetall(LEGACY_BIFROST_IB_ACCOUNT_AGENT)
+    return dict(h or {})
+
+
+def hgetall_account_sync_daemon_health(r: Any) -> Dict[str, str]:
+    """Account Sync Daemon health hash."""
+    h = r.hgetall(BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON)
     return dict(h or {})
