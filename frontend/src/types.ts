@@ -290,6 +290,30 @@ export interface StatusLiveUi {
   reference_indices?: { symbol: string; label?: string }[]
 }
 
+export type SystemMessageLevel = 'info' | 'success' | 'warning' | 'error'
+export type SystemMessageTopic = 'ib.connection' | string
+export type SystemMessageStatus = 'unknown' | 'connected' | 'reconnecting' | 'disconnected' | string
+
+export interface SystemMessage {
+  message_id: string
+  topic: SystemMessageTopic
+  level: SystemMessageLevel
+  service?: string
+  slot?: string
+  client_id?: number | null
+  account?: string | null
+  status_from?: SystemMessageStatus
+  status_to?: SystemMessageStatus
+  title: string
+  message: string
+  reason?: string | null
+  occurred_at: number
+}
+
+export interface SystemMessagesResponse {
+  messages: SystemMessage[]
+}
+
 /** GET /status nested JSON (status_schema_version 8–9). */
 export interface StatusResponse {
   status_schema_version?: 8 | 9

@@ -594,6 +594,26 @@ export async function postMassiveApiCoverageSync(): Promise<{
   }
 }
 
+export async function postMassiveStocksApiCoverageSync(): Promise<{
+  ok: boolean
+  error?: string
+  source?: string
+  target?: string
+  size_bytes?: number
+}> {
+  const r = await fetch(massiveUrl('/research/massive/stocks-api-coverage/sync'), {
+    method: 'POST',
+  })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: Boolean(j.ok) && r.ok,
+    error: typeof j.error === 'string' ? j.error : undefined,
+    source: typeof j.source === 'string' ? j.source : undefined,
+    target: typeof j.target === 'string' ? j.target : undefined,
+    size_bytes: Number.isFinite(Number(j.size_bytes)) ? Number(j.size_bytes) : undefined,
+  }
+}
+
 export interface MassiveJobApiRow {
   job_id: string
   type?: string

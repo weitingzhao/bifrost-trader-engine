@@ -29,8 +29,9 @@ export const COVERAGE_SUBSECTIONS = [
   { id: 'coverage-stock', label: 'Stock', icon: 'coverage-stock' as const },
 ] as const
 
-/** Feed: IB Stock (single link). Massive Option submenu is nested under Feed in SettingsPage. */
+/** Feed: IB Stock (single link). Massive Option/Stock submenus are nested under Feed in SettingsPage. */
 export const FEED_MASSIVE_OPTION_ID = 'feed-massive-option' as const
+export const FEED_MASSIVE_STOCK_ID = 'feed-massive-stock' as const
 
 export const FEED_SUBSECTIONS = [{ id: 'feed-ib-stock', label: 'IB Stock', icon: 'feed-ib' as const }] as const
 

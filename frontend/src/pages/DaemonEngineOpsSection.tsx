@@ -208,9 +208,11 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
         setConfirmState(prev => ({ ...prev, confirming: true, error: null }))
         try {
           await fn()
-          await refresh()
-          await loadStatus()
           setConfirmState(INITIAL_CONFIRM)
+          void (async () => {
+            await refresh()
+            await loadStatus()
+          })()
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
           setConfirmState(prev => ({ ...prev, confirming: false, error: msg }))

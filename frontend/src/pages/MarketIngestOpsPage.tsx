@@ -135,6 +135,7 @@ type IbClientIdSlot = {
   lastIbProbeLabel?: string
   nextProbeInSec?: number | null
   ibProbeStale?: boolean
+  slotConnected?: boolean | null
 }
 
 function formatLastIbProbe(ts: number | undefined | null): string {
@@ -215,12 +216,15 @@ function ibIngestClientIdSlots(
   if (category !== 'IB') return []
   const cfg = status?.config?.ib_client
   if (svcId === 'ib_ingestor' || svcId === 'ib_market') {
-    const run = status?.socket?.ib_ingestor?.client_id
+    const ib = status?.socket?.ib_ingestor
+    const run = ib?.client_id
+    const conn = ib ? ingestRedisTruthyConnected(ib.connected) : null
     if (run != null && Number.isFinite(Number(run))) {
       return [
         {
           id: Number(run),
           title: 'Client ID used by the live IB ingestor connection (Monitor GET /status).',
+          slotConnected: conn,
         },
       ]
     }
@@ -231,6 +235,7 @@ function ibIngestClientIdSlots(
           id: Number(c),
           title:
             'Client ID from config (YAML ib.host.client_id.ingestor) for IB ingestor. Live connection not reporting an ID yet.',
+          slotConnected: conn,
         },
       ]
     }
@@ -250,6 +255,7 @@ function ibIngestClientIdSlots(
         title: hostLive
           ? 'Client ID for IB Account Agent Host IB API (Monitor GET /status socket.ib_account_agent.host).'
           : 'Redis reports Host client_id; green lamp requires Host API connected.',
+        slotConnected: hostLive,
       })
     } else if (hostCfg != null && Number.isFinite(Number(hostCfg))) {
       slots.push({
@@ -257,6 +263,7 @@ function ibIngestClientIdSlots(
         id: Number(hostCfg),
         title:
           'Client ID from config (YAML ib.host.client_id.account_agent). Live Host slot not reporting an ID yet.',
+        slotConnected: hostLive,
       })
     }
     const secConfigured = aa?.secondary !== undefined && aa?.secondary !== null
@@ -272,12 +279,14 @@ function ibIngestClientIdSlots(
           title: secApiLive
             ? 'Client ID for IB Account Agent Secondary IB API (socket.ib_account_agent.secondary).'
             : 'Secondary client_id in /status while secondary_connected is false.',
+          slotConnected: secApiLive,
         })
       } else if (secCfg != null && Number.isFinite(Number(secCfg))) {
         slots.push({
           label: 'Sec',
           id: Number(secCfg),
           title: 'Secondary account_agent client_id from config when exposed; else YAML ib2 client_id.account_agent.',
+          slotConnected: secApiLive,
         })
       } else {
         slots.push({
@@ -285,6 +294,7 @@ function ibIngestClientIdSlots(
           id: null,
           title:
             'Configure ib.secondary (ip + client_id.account_agent) for a second TWS; then /status will show Secondary client_id.',
+          slotConnected: null,
         })
       }
     }
@@ -304,6 +314,7 @@ function ibIngestClientIdSlots(
         title: hostApiLive
           ? 'Client ID used by the live IB Operator Host IB API connection (Monitor GET /status socket.ib_operator.host; host_connected).'
           : 'Redis host_client_id in Monitor /status (same value as config before API login). host_client_id is always present in the health hash; green lamp requires host_connected=true (IB API), not this number alone.',
+        slotConnected: hostApiLive,
       })
     } else if (hostCfg != null && Number.isFinite(Number(hostCfg))) {
       slots.push({
@@ -311,6 +322,7 @@ function ibIngestClientIdSlots(
         id: Number(hostCfg),
         title:
           'Client ID from config (YAML ib.host.client_id.operator) for IB Operator cmd RPC. Live Host slot not reporting an ID yet.',
+        slotConnected: hostApiLive,
       })
     }
     const secConfigured =
@@ -327,6 +339,7 @@ function ibIngestClientIdSlots(
           title: secApiLive
             ? 'Client ID used by the live IB Operator Secondary IB API connection (Monitor socket.ib_operator.secondary; secondary_connected).'
             : 'Redis secondary_client_id in Monitor /status while secondary_connected is false. Same as Host: client_id in the hash does not prove IB API login; lamp uses secondary_connected.',
+          slotConnected: secApiLive,
         })
       } else if (secCfg != null && Number.isFinite(Number(secCfg))) {
         slots.push({
@@ -334,6 +347,7 @@ function ibIngestClientIdSlots(
           id: Number(secCfg),
           title:
             'Client ID from config (merged YAML ib2_client_id_operator / operator_secondary) for IB Operator Secondary. Live Secondary slot not reporting an ID yet.',
+          slotConnected: secApiLive,
         })
       } else {
         slots.push({
@@ -341,6 +355,7 @@ function ibIngestClientIdSlots(
           id: null,
           title:
             'Secondary IB Operator slot is present in Monitor /status or expected from config, but client_id is not available yet.',
+          slotConnected: null,
         })
       }
     }
@@ -518,9 +533,20 @@ function ServiceRow(props: {
                     style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem' }}
                   >
                     {slot.label ? (
-                      <span className="massive-api-doc-hint" style={{ margin: 0 }}>
+                      <span className="massive-api-doc-hint" style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        {slot.slotConnected != null ? (
+                          <span
+                            className={`ib-slot-lamp ib-slot-lamp--${slot.slotConnected ? 'green' : 'red'}`}
+                            title={slot.slotConnected ? `${slot.label} IB API connected` : `${slot.label} IB API disconnected`}
+                          />
+                        ) : null}
                         {slot.label}
                       </span>
+                    ) : slot.slotConnected != null ? (
+                      <span
+                        className={`ib-slot-lamp ib-slot-lamp--${slot.slotConnected ? 'green' : 'red'}`}
+                        title={slot.slotConnected ? 'IB API connected' : 'IB API disconnected'}
+                      />
                     ) : null}
                     {slot.id != null ? (
                       <span className="socket-ib-client-id-badge" title={slot.title} aria-label={slot.title}>
@@ -972,9 +998,11 @@ export function MarketIngestOpsPage({
         setConfirmState(prev => ({ ...prev, confirming: true, error: null }))
         try {
           await fn()
-          await refresh()
-          await loadStatus()
           setConfirmState(INITIAL_CONFIRM)
+          void (async () => {
+            await refresh()
+            await loadStatus()
+          })()
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
           setConfirmState(prev => ({ ...prev, confirming: false, error: msg }))

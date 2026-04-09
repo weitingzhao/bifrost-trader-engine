@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "sync:massive-coverage": "mkdir -p public/plans && cp ../docs/plans/massive_api_coverage.html public/plans/massive_api_coverage.html && cp ../docs/plans/massive_api_coverage.csv public/plans/massive_api_coverage.csv && cp ../docs/plans/ib_stock_api_coverage.html public/plans/ib_stock_api_coverage.html && cp ../docs/plans/ib_stock_coverage.csv public/plans/ib_stock_coverage.csv",
+    "sync:massive-coverage": "mkdir -p public/plans && cp ../docs/plans/massive_api_coverage.html public/plans/massive_api_coverage.html && cp ../docs/plans/massive_api_coverage.csv public/plans/massive_api_coverage.csv && cp ../docs/plans/ib_stock_api_coverage.html public/plans/ib_stock_api_coverage.html && cp ../docs/plans/ib_stock_coverage.csv public/plans/ib_stock_coverage.csv && cp ../docs/plans/massive_stocks_api_coverage.html public/plans/massive_stocks_api_coverage.html && cp ../docs/plans/massive_stocks_api_coverage.csv public/plans/massive_stocks_api_coverage.csv",
     "build": "npm run sync:massive-coverage && tsc -b && vite build",
     "preview": "vite preview"
   },

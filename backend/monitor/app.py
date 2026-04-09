@@ -206,6 +206,12 @@ def create_app(
     app.state._market_log_thread: Optional[threading.Thread] = None
     app.state._market_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
+    # System messages (Redis message center -> materialized TTL items -> SSE fan-out).
+    app.state.system_message_queues: list = []
+    app.state.system_message_queue_lock = threading.Lock()
+    app.state._system_message_thread: Optional[threading.Thread] = None
+    app.state._system_message_loop: Optional[asyncio.AbstractEventLoop] = None
+
     # IB access via Redis IB Operator only (no in-process TWS clients).
     app.state.monitor_enabled = True
     app.state.ib_operator_client = None
@@ -262,11 +268,13 @@ def create_app(
         core_router,
         daemon_router,
         logs_router,
+        messages_router,
         status_router,
     )
 
     app.include_router(core_router)
     app.include_router(logs_router)
+    app.include_router(messages_router)
     app.include_router(status_router)
     app.include_router(daemon_router)
     app.include_router(config_router)

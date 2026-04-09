@@ -27,6 +27,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 os.chdir(str(_PROJECT_ROOT))
 
 from backend.monitor.routers.deps import IB_ACCOUNT_AGENT_LOG_STREAM_KEY
+from src.bifrost.message_center import IbConnectionStatusTracker
 from src.core.logging_redis_stream import RedisStreamLogHandler
 
 _LOG_STREAM_MAXLEN = 2000
@@ -164,6 +165,7 @@ class IbAccountAgentApp:
         from src.vendor.ib_account_agent.writer import IbAccountAgentRedisWriter
 
         self._writer = IbAccountAgentRedisWriter(self._rds)
+        self._status_tracker = IbConnectionStatusTracker(self._rds, service="ib_account_agent")
         self._stop = asyncio.Event()
         self._reconnects = 0
         self._msg_count = 0
@@ -179,6 +181,7 @@ class IbAccountAgentApp:
         self._host_probe_ok = False
         self._sec_probe_at = 0.0
         self._sec_probe_ok = False
+        self._session_disconnected = asyncio.Event()
 
     def _bump(self) -> None:
         self._msg_count += 1
@@ -247,6 +250,19 @@ class IbAccountAgentApp:
             secondary_ib_probe_ok=sec_probe_ok,
             secondary_ib_probe_interval_sec=self._ib_probe_interval_sec,
         )
+        self._status_tracker.update(
+            slot="host",
+            status="connected" if host_ok else "disconnected",
+            client_id=self._host_cid or None,
+            occurred_at=last_msg_ts,
+        )
+        if secondary is not None:
+            self._status_tracker.update(
+                slot="secondary",
+                status="connected" if sec_ok else "disconnected",
+                client_id=self._sec_cid,
+                occurred_at=last_msg_ts,
+            )
 
     async def run(self) -> None:
         loop = asyncio.get_event_loop()
@@ -341,6 +357,35 @@ class IbAccountAgentApp:
                 secondary_ib_probe_ok=False,
                 secondary_ib_probe_interval_sec=self._ib_probe_interval_sec,
             )
+            self._status_tracker.update(
+                slot="host",
+                status="disconnected",
+                client_id=self._host_cid or None,
+                occurred_at=time.time(),
+                reason="Session ended",
+            )
+            self._status_tracker.update(
+                slot="host",
+                status="reconnecting",
+                client_id=self._host_cid or None,
+                occurred_at=time.time(),
+                reason="Waiting for reconnect backoff",
+            )
+            if secondary is not None:
+                self._status_tracker.update(
+                    slot="secondary",
+                    status="disconnected",
+                    client_id=self._sec_cid,
+                    occurred_at=time.time(),
+                    reason="Session ended",
+                )
+                self._status_tracker.update(
+                    slot="secondary",
+                    status="reconnecting",
+                    client_id=self._sec_cid,
+                    occurred_at=time.time(),
+                    reason="Waiting for reconnect backoff",
+                )
             logger.info("Reconnecting in %.1fs (attempt %d)…", delay, self._reconnects)
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=delay)
@@ -363,6 +408,21 @@ class IbAccountAgentApp:
             secondary_ib_probe_ok=False,
             secondary_ib_probe_interval_sec=self._ib_probe_interval_sec,
         )
+        self._status_tracker.update(
+            slot="host",
+            status="disconnected",
+            client_id=self._host_cid or None,
+            occurred_at=time.time(),
+            reason="Service stopped",
+        )
+        if secondary is not None:
+            self._status_tracker.update(
+                slot="secondary",
+                status="disconnected",
+                client_id=self._sec_cid,
+                occurred_at=time.time(),
+                reason="Service stopped",
+            )
         logger.info("IB Account Agent stopped")
 
     async def _ib_probe_loop(self, primary: Any, secondary: Any) -> None:
@@ -396,6 +456,8 @@ class IbAccountAgentApp:
                 if secondary is not None
                 else False
             )
+            if not host_ok:
+                self._session_disconnected.set()
             self._host_probe_at = now
             self._host_probe_ok = host_ok
             if secondary is not None:
@@ -428,6 +490,7 @@ class IbAccountAgentApp:
     ) -> None:
         await primary.ensure_connected()
         self._reconnects = 0
+        self._session_disconnected.clear()
         for _ in range(_POST_CONNECT_SNAPSHOT_ATTEMPTS):
             if primary.connected_snapshot():
                 break
@@ -505,19 +568,13 @@ class IbAccountAgentApp:
 
         try:
             while not self._stop.is_set():
+                if self._session_disconnected.is_set():
+                    raise ConnectionError(
+                        "IB Account Agent disconnect detected by probe — resetting session for reconnect"
+                    )
                 try:
-                    if not primary.connected_snapshot():
-                        try:
-                            await primary.ensure_connected()
-                        except Exception as e:
-                            logger.warning("Host ensure_connected: %s", e)
                     host_ok = bool(primary.connected_snapshot())
                     if secondary is not None:
-                        if not secondary.connected_snapshot():
-                            try:
-                                await secondary.ensure_connected()
-                            except Exception as e:
-                                logger.warning("Secondary ensure_connected: %s", e)
                         sec_ok = bool(secondary.connected_snapshot())
                     else:
                         sec_ok = False
@@ -557,6 +614,8 @@ class IbAccountAgentApp:
                         last_msg_ts=self._last_msg_ts or now,
                         secondary=secondary,
                     )
+                except ConnectionError:
+                    raise
                 except Exception as e:
                     logger.warning("snapshot iteration: %s", e)
                 try:

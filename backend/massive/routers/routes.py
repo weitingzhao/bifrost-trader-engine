@@ -157,6 +157,27 @@ def post_massive_api_coverage_sync() -> Dict[str, Any]:
         return {"ok": False, "error": str(e)}
 
 
+@router.post("/research/massive/stocks-api-coverage/sync")
+def post_massive_stocks_api_coverage_sync() -> Dict[str, Any]:
+    """Sync docs/plans/massive_stocks_api_coverage.html to frontend/public/plans for UI embed."""
+    root = Path(__file__).resolve().parents[2]
+    src = root / "docs" / "plans" / "massive_stocks_api_coverage.html"
+    dst = root / "frontend" / "public" / "plans" / "massive_stocks_api_coverage.html"
+    if not src.is_file():
+        return {"ok": False, "error": f"Source file not found: {src}"}
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        return {
+            "ok": True,
+            "source": str(src),
+            "target": str(dst),
+            "size_bytes": dst.stat().st_size,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @router.get("/research/massive/greeks-coverage")
 def get_massive_greeks_coverage(
     request: Request,

@@ -33,11 +33,21 @@ import {
   CONFIG_SECTIONS,
   COVERAGE_SUBSECTIONS,
   FEED_MASSIVE_OPTION_ID,
+  FEED_MASSIVE_STOCK_ID,
   FEED_SUBSECTIONS,
 } from './settings/settingsConstants'
 import { CAPABILITY_GROUP_LABELS, CAPABILITY_GROUP_ORDER, type CapabilityGroup } from './massiveFeedChecklistRows'
 import { feedMassiveSvcAnchorId } from './massive/feedMassiveAnchors'
 import { isMassiveOptionFeedHash, parseFeedMassiveTabFromHash } from './massive/feedMassiveTabUtils'
+import { isMassiveStockFeedHash, parseFeedMassiveStockTabFromHash } from './massive/feedMassiveStockTabUtils'
+import { feedMassiveStockSvcAnchorId } from './massive/feedMassiveStockTabUtils'
+import {
+  effectiveChecklistProjectStatus as stockEffectiveStatus,
+  groupedStockChecklistRows,
+  shortServiceLabel as stockShortServiceLabel,
+  tierOkForRow as stockTierOkForRow,
+  tradesOkForRow as stockTradesOkForRow,
+} from './massive/massiveStockChecklistStatus'
 import {
   effectiveChecklistProjectStatus,
   groupedChecklistRows,
@@ -52,6 +62,7 @@ import { IbConnectionSection } from './settings/IbConnectionSection'
 import { HolidaysSection } from './settings/HolidaysSection'
 import { DataPage } from './DataPage'
 import { FeedMassiveOptionPage } from './FeedMassiveOptionPage'
+import { FeedMassiveStockPage } from './FeedMassiveStockPage'
 import { DaemonStatusPage } from './DaemonStatusPage'
 import { IbEventSubscribePage } from './IbEventSubscribePage'
 import { MassiveApiStatusPage } from './MassiveApiStatusPage'
@@ -260,6 +271,7 @@ export function SettingsPage({
     if (h && h.startsWith('settings-api')) return 'settings-api'
     if (h === 'feed-celery' || h === 'settings-system-celery') return 'settings-celery'
     if (h && isMassiveOptionFeedHash(`#${h}`)) return 'settings-feed'
+    if (h && isMassiveStockFeedHash(`#${h}`)) return 'settings-feed'
     if (h && h.startsWith('feed-')) return 'settings-feed'
     return h || SETTINGS_SECTIONS[0].id
   }
@@ -268,7 +280,14 @@ export function SettingsPage({
     return hashToSectionId(window.location.hash)
   })
   const [ibConnectionExpanded, setIbConnectionExpanded] = useState(true)
-  const [massiveOptionExpanded, setMassiveOptionExpanded] = useState(true)
+  const [massiveOptionExpanded, setMassiveOptionExpanded] = useState(false)
+  const [massiveStockExpanded, setMassiveStockExpanded] = useState(true)
+  const [massiveStockCapGroupExpanded, setMassiveStockCapGroupExpanded] = useState<Record<CapabilityGroup, boolean>>(() =>
+    CAPABILITY_GROUP_ORDER.reduce(
+      (acc, g) => { acc[g] = false; return acc },
+      {} as Record<CapabilityGroup, boolean>,
+    ),
+  )
   const [massiveCapGroupExpanded, setMassiveCapGroupExpanded] = useState<Record<CapabilityGroup, boolean>>(() =>
     CAPABILITY_GROUP_ORDER.reduce(
       (acc, g) => {
@@ -300,6 +319,7 @@ export function SettingsPage({
   const activeSubId = activeSectionId === 'settings-ib-connection' && IB_CONNECTION_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
   const activeIbStockFeed = activeSectionId === 'settings-feed' && currentHash === 'feed-ib-stock'
   const isMassiveOptionFeedActive = activeSectionId === 'settings-feed' && isMassiveOptionFeedHash(currentHash)
+  const isMassiveStockFeedActive = activeSectionId === 'settings-feed' && isMassiveStockFeedHash(currentHash)
   /** Same as Daemon page title lamp: trading_engine Redis/heartbeat via GET /status (DaemonEngineOpsSection). */
   const daemonPageLamp = useMemo(() => ingestRedisHealthLamp('trading_engine', status), [status])
   const daemonLamp = daemonPageLamp.lamp
@@ -815,6 +835,97 @@ export function SettingsPage({
             })}
           </div>
         </div>
+        <div className="settings-sidebar-group">
+          <div className={`settings-sidebar-parent ${isMassiveStockFeedActive ? 'active' : ''}`}>
+            <a href={`#${FEED_MASSIVE_STOCK_ID}`} className="settings-sidebar-parent-label">
+              <SettingsSectionIcon name="feed-massive-stock" />
+              Massive Stock
+            </a>
+            <button
+              type="button"
+              className={`settings-sidebar-chevron ${massiveStockExpanded ? 'expanded' : ''}`}
+              onClick={() => setMassiveStockExpanded(e => !e)}
+              aria-expanded={massiveStockExpanded}
+              aria-controls="settings-feed-massive-stock-subs"
+              aria-label={massiveStockExpanded ? 'Collapse Massive Stock capabilities' : 'Expand Massive Stock capabilities'}
+            >
+              ▼
+            </button>
+          </div>
+          <div id="settings-feed-massive-stock-subs" className="settings-sidebar-subs" hidden={!massiveStockExpanded}>
+            {groupedStockChecklistRows().map(({ group, rows: groupRows }) => {
+              const capGroupOpen = massiveStockCapGroupExpanded[group]
+              const fromTab = parseFeedMassiveStockTabFromHash(`#${currentHash}`)
+              const groupHasActive = groupRows.some(row => {
+                const anchor = feedMassiveStockSvcAnchorId(row.id)
+                return currentHash === anchor || fromTab === row.id
+              })
+              return (
+                <div key={group} className="settings-sidebar-massive-group">
+                  <div
+                    className={`settings-sidebar-massive-cap-group-head${groupHasActive ? ' settings-sidebar-massive-cap-group-head--active' : ''
+                      }`}
+                  >
+                    <button
+                      type="button"
+                      className="settings-sidebar-massive-cap-group-toggle"
+                      aria-expanded={capGroupOpen}
+                      aria-controls={`settings-massive-stock-cap-group-${group}`}
+                      id={`settings-massive-stock-cap-group-head-${group}`}
+                      onClick={() =>
+                        setMassiveStockCapGroupExpanded(prev => ({ ...prev, [group]: !prev[group] }))
+                      }
+                    >
+                      <span
+                        className={`settings-sidebar-chevron settings-sidebar-massive-cap-group-chevron ${capGroupOpen ? 'expanded' : ''
+                          }`}
+                        aria-hidden
+                      >
+                        ▼
+                      </span>
+                      <span className="settings-sidebar-massive-cap-group-title">
+                        {CAPABILITY_GROUP_LABELS[group]}
+                      </span>
+                    </button>
+                  </div>
+                  <div
+                    id={`settings-massive-stock-cap-group-${group}`}
+                    className="settings-sidebar-massive-cap-group-subs"
+                    hidden={!capGroupOpen}
+                    role="group"
+                    aria-labelledby={`settings-massive-stock-cap-group-head-${group}`}
+                  >
+                    {groupRows.map(row => {
+                      const configured = Boolean(massiveStatus?.configured)
+                      const tierOk = stockTierOkForRow(row, massiveStatus, configured)
+                      const tradesOk = stockTradesOkForRow(row, massiveStatus)
+                      const eff = stockEffectiveStatus(row, configured, tierOk, tradesOk)
+                      const isTierLimited = eff === 'not-on-tier'
+                      const anchor = feedMassiveStockSvcAnchorId(row.id)
+                      const childActive = currentHash === anchor || fromTab === row.id
+                      return (
+                        <a
+                          key={row.id}
+                          href={`#${anchor}`}
+                          className={`settings-sidebar-link settings-sidebar-link-sub settings-sidebar-link-massive-cap ${childActive ? 'active' : ''}`}
+                        >
+                          <span
+                            className={`title-inline-lamp lamp-icon ${isTierLimited ? 'tier' : 'none'}`}
+                            title={isTierLimited ? 'Not available on current plan tier' : undefined}
+                            aria-hidden
+                          >
+                            <SettingsSidebarLampGlyph id={row.id} />
+                          </span>
+                          <span className="settings-sidebar-massive-cap-label">{stockShortServiceLabel(row)}</span>
+                        </a>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
       </div>
       <div className="settings-sidebar-group-block" role="group" aria-label="Settings">
         <div className="settings-sidebar-group-label">Settings</div>
@@ -912,6 +1023,12 @@ export function SettingsPage({
             onGoToFeed={() => { window.location.hash = '#feed-ib-stock' }}
             onGoToScreener={() => { window.location.hash = '#feed-ib-stock' }}
             breadcrumbLabel="Massive Option"
+          />
+        ) : isMassiveStockFeedHash(currentHash) ? (
+          <FeedMassiveStockPage
+            status={status}
+            onGoToFeed={() => { window.location.hash = '#feed-ib-stock' }}
+            breadcrumbLabel="Massive Stock"
           />
         ) : (
           <DataPage

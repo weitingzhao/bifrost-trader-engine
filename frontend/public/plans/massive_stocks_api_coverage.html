@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Massive Stocks API Coverage — bifrost-trader-engine</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#0d1117;color:#c9d1d9;padding:28px 32px;line-height:1.5}
+h1{font-size:22px;color:#58a6ff;margin-bottom:4px;font-weight:600}
+.sub{font-size:13px;color:#8b949e;font-weight:400;margin-bottom:16px}
+.stats{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
+.stat{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 18px;min-width:110px;text-align:center}
+.stat-val{font-size:28px;font-weight:700;color:#58a6ff}
+.stat-lbl{font-size:11px;color:#8b949e;margin-top:3px;text-transform:uppercase;letter-spacing:.4px}
+.filters{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
+.filters label{font-size:11px;color:#8b949e;margin-right:2px}
+.filters select,.filters input{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:6px 10px;font-size:12px;font-family:inherit}
+.filters select:focus,.filters input:focus{outline:none;border-color:#58a6ff}
+.wrap{overflow-x:auto;border:1px solid #30363d;border-radius:8px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead{position:sticky;top:0;z-index:2}
+th{background:#161b22;color:#8b949e;font-weight:600;padding:9px 10px;text-align:left;border-bottom:2px solid #30363d;font-size:10px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid #21262d;vertical-align:top}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;letter-spacing:.3px;white-space:nowrap}
+.b-impl{background:#0d419d;color:#58a6ff}
+.b-part{background:#462c00;color:#d29922}
+.b-noimpl{background:#21262d;color:#636c76}
+.b-pytest-yes{background:#044321;color:#3fb950}
+.b-pytest-no{background:#490b0c;color:#f85149}
+.b-script{background:#1c2541;color:#79c0ff}
+.b-na{background:#21262d;color:#484f58}
+tr.dim td{opacity:.5}
+tr:hover td{background:#161b22}
+tr.proj td:first-child{color:#d29922}
+.ep{color:#79c0ff;font-family:'SF Mono',Monaco,Consolas,monospace;font-size:11px;word-break:break-all}
+.uc{max-width:260px;font-size:11px;color:#8b949e}
+.code{font-size:11px;color:#8b949e;font-family:'SF Mono',Monaco,Consolas,monospace}
+.note{font-size:11px;max-width:220px;color:#636c76}
+.legend{margin-top:20px;font-size:11px;color:#484f58;text-align:center}.legend a{color:#58a6ff}
+.surfaces{display:flex;gap:16px;margin-bottom:14px;font-size:12px;flex-wrap:wrap}
+.surfaces a{color:#58a6ff;text-decoration:none;border:1px solid #30363d;border-radius:6px;padding:4px 10px;background:#161b22;transition:border-color .15s}
+.surfaces a:hover{border-color:#58a6ff}
+.colmap{font-size:11px;color:#8b949e;margin-bottom:18px;line-height:1.45;max-width:920px}
+.colmap code{font-size:10px;color:#79c0ff}
+body.embed .colmap{font-size:10px;margin-bottom:10px}
+.cards{display:none;gap:12px;grid-template-columns:1fr}
+.card{border:1px solid #30363d;border-radius:10px;background:#161b22;padding:12px}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.card-title{font-size:12px;font-weight:600;color:#e6edf3}
+.kv{display:grid;grid-template-columns:112px 1fr;gap:4px 10px;font-size:11px}
+.k{color:#8b949e;text-transform:uppercase;letter-spacing:.3px}
+.v{color:#c9d1d9;word-break:break-word}
+.v.ep{font-size:11px}
+body.embed{padding:12px 14px}
+body.embed h1{font-size:16px}
+body.embed .sub{font-size:11px;margin-bottom:10px}
+body.embed .stats{margin-bottom:10px;gap:8px}
+body.embed .stat{padding:8px 10px;min-width:76px}
+body.embed .stat-val{font-size:18px}
+body.embed .stat-lbl{font-size:9px}
+body.embed .filters{margin-bottom:10px}
+body.embed .filters label{display:none}
+body.embed .filters select,body.embed .filters input{font-size:11px;padding:5px 8px}
+body.embed .wrap{display:none}
+body.embed .cards{display:grid}
+body.embed .legend{display:none}
+</style>
+</head>
+<body>
+<h1>Massive (Polygon) Stocks API Coverage Sheet</h1>
+<p class="sub">bifrost-trader-engine — same columns as <code>docs/plans/massive_stocks_api_coverage.csv</code> (Product, Section, DocPage, …)</p>
+<nav class="surfaces" aria-label="Official Massive Stocks documentation">
+  <a href="https://massive.com/docs/rest/stocks/overview" target="_blank" rel="noopener">REST</a>
+  <a href="https://massive.com/docs/websocket/stocks/overview" target="_blank" rel="noopener">WebSocket</a>
+  <a href="https://massive.com/docs/flat-files/stocks/overview" target="_blank" rel="noopener">Flat Files</a>
+</nav>
+<p class="colmap">Classification follows Massive docs: <strong>Product</strong> = <code>REST</code> | <code>WebSocket</code> | <code>Flat Files</code> (three official surfaces) or <code>Project</code> for repo-only rows. <strong>Section</strong> = REST grouping (Reference Data, Aggregate Bars, Snapshots, Trades & Quotes, Technical Indicators, Market Operations). CSV column names match these headers exactly.</p>
+<div class="stats" id="stats"></div>
+<div class="filters">
+  <label>Product</label><select id="fProduct"><option value="">All</option></select>
+  <label>Section</label><select id="fSection"><option value="">All</option></select>
+  <label>Doc page</label><select id="fDocPage"><option value="">All</option></select>
+  <label>Status</label><select id="fStatus"><option value="">All</option></select>
+  <label>Test</label><select id="fTest"><option value="">All</option></select>
+  <label>Tier</label><select id="fTier"><option value="">All</option></select>
+  <input id="fSearch" placeholder="Search endpoint / use case…" style="width:220px">
+</div>
+<div class="wrap"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+<section id="cards" class="cards" aria-label="Coverage records"></section>
+<div class="legend">Spreadsheet: <code>docs/plans/massive_stocks_api_coverage.csv</code> — columns Product, Section, DocPage match this table. &nbsp;|&nbsp; <a href="https://massive.com/docs/rest/stocks/overview">REST Stocks</a> &nbsp;|&nbsp; <a href="https://massive.com/docs/llms.txt">llms.txt</a></div>
+<script>
+var DATA=[
+{product:"REST",section:"Reference Data",docPage:"Tickers",ep:"GET /v3/reference/tickers",doc:"Paginated list of active and historical stock tickers",use:"Browse universe of available stock tickers for watchlist or screening",code:"(not implemented)",chk:"stock-reference",status:"not-implemented",test:"N/A",tier:"starter",note:"Paginated; supports search and active/inactive filters.",proj:false},
+{product:"REST",section:"Reference Data",docPage:"Ticker Details",ep:"GET /v3/reference/tickers/{ticker}",doc:"Company metadata (name, market cap, SIC, exchange, description)",use:"Lookup detailed company info for a stock ticker; populate stock profile cards",code:"(not implemented)",chk:"stock-reference",status:"not-implemented",test:"N/A",tier:"starter",note:"Returns branding logos and company description when available.",proj:false},
+{product:"REST",section:"Reference Data",docPage:"Ticker Types",ep:"GET /v3/reference/tickers/types",doc:"List of ticker types (CS, ETF, ADRC, FUND, etc.)",use:"Reference filter for screening; map type codes to labels",code:"(not implemented)",chk:"stock-reference",status:"not-implemented",test:"N/A",tier:"starter",note:"Read-only reference.",proj:false},
+{product:"REST",section:"Reference Data",docPage:"Ticker News",ep:"GET /v2/reference/news",doc:"Paginated news articles with publisher, tickers, keywords",use:"Display relevant stock news for a ticker or watchlist",code:"(not implemented)",chk:"stock-reference",status:"not-implemented",test:"N/A",tier:"starter",note:"Supports ticker and published_utc filters.",proj:false},
+{product:"REST",section:"Reference Data",docPage:"Stock Financials",ep:"GET /vX/reference/financials",doc:"Quarterly and annual financial statements",use:"Fundamental analysis; display key financials for a stock",code:"(not implemented)",chk:"stock-reference",status:"not-implemented",test:"N/A",tier:"starter",note:"Experimental (vX) endpoint; may change.",proj:false},
+{product:"REST",section:"Aggregate Bars (OHLC)",docPage:"Custom Bars (OHLC)",ep:"GET /v2/aggs/ticker/{stocksTicker}/range/{multiplier}/{timespan}/{from}/{to}",doc:"Custom-range OHLCV bars for a stock ticker",use:"Backfill stock bars for charting and backtesting",code:"(not implemented)",chk:"stock-aggregates",status:"not-implemented",test:"N/A",tier:"starter",note:"Supports minute/hour/day/week/month timespans. 15-min delay on Starter.",proj:false},
+{product:"REST",section:"Aggregate Bars (OHLC)",docPage:"Grouped Daily",ep:"GET /v2/aggs/grouped/locale/us/market/stocks/{date}",doc:"Daily OHLCV for all US stocks on a single date",use:"Bulk daily snapshot; universe-wide screening and gap analysis",code:"(not implemented)",chk:"stock-aggregates",status:"not-implemented",test:"N/A",tier:"starter",note:"Returns bars for all traded tickers on the given date.",proj:false},
+{product:"REST",section:"Aggregate Bars (OHLC)",docPage:"Daily Open/Close",ep:"GET /v1/open-close/{stocksTicker}/{date}",doc:"Official open/close/high/low/volume with pre-market and after-hours",use:"Single-day summary with extended hours data",code:"(not implemented)",chk:"stock-aggregates",status:"not-implemented",test:"N/A",tier:"starter",note:"Includes pre-market and after-hours prices when available.",proj:false},
+{product:"REST",section:"Aggregate Bars (OHLC)",docPage:"Previous Close",ep:"GET /v2/aggs/ticker/{stocksTicker}/prev",doc:"Previous trading day OHLC bar for a stock ticker",use:"Quick baseline price reference without calendar math",code:"(not implemented)",chk:"stock-aggregates",status:"not-implemented",test:"N/A",tier:"starter",note:"Single-bar convenience endpoint.",proj:false},
+{product:"REST",section:"Snapshots",docPage:"All Tickers",ep:"GET /v2/snapshot/locale/us/markets/stocks/tickers",doc:"Real-time snapshot for all US stock tickers",use:"Universe-wide current state; screener input for gainers/losers/volume",code:"(not implemented)",chk:"stock-snapshots",status:"not-implemented",test:"N/A",tier:"starter",note:"15-min delay on Starter. Can filter by tickers param.",proj:false},
+{product:"REST",section:"Snapshots",docPage:"Single Ticker",ep:"GET /v2/snapshot/locale/us/markets/stocks/tickers/{ticker}",doc:"Real-time snapshot for one stock ticker",use:"Quick current-state lookup for a single stock",code:"(not implemented)",chk:"stock-snapshots",status:"not-implemented",test:"N/A",tier:"starter",note:"15-min delay on Starter.",proj:false},
+{product:"REST",section:"Snapshots",docPage:"Gainers/Losers",ep:"GET /v2/snapshot/locale/us/markets/stocks/{direction}",doc:"Top gainers or losers by percent change",use:"Market movers widget; sorted by daily percent change",code:"(not implemented)",chk:"stock-snapshots",status:"not-implemented",test:"N/A",tier:"starter",note:"Direction = gainers or losers.",proj:false},
+{product:"REST",section:"Trades & Quotes",docPage:"Trades",ep:"GET /v3/trades/{stocksTicker}",doc:"Historical tick-level trade data for a stock",use:"Tick-level analysis; trade tape replay",code:"(not implemented)",chk:"stock-trades-quotes",status:"not-implemented",test:"N/A",tier:"starter",note:"Paginated with nanosecond timestamps.",proj:false},
+{product:"REST",section:"Trades & Quotes",docPage:"Last Trade",ep:"GET /v2/last/trade/{stocksTicker}",doc:"Most recent trade for a stock",use:"Real-time last-sale lookup for a stock ticker",code:"(not implemented)",chk:"stock-trades-quotes",status:"not-implemented",test:"N/A",tier:"starter",note:"Read-only real-time query.",proj:false},
+{product:"REST",section:"Trades & Quotes",docPage:"Quotes (NBBO)",ep:"GET /v3/quotes/{stocksTicker}",doc:"Historical NBBO quotes for a stock",use:"Bid/ask spread analysis; historical quote replay",code:"(not implemented)",chk:"stock-trades-quotes",status:"not-implemented",test:"N/A",tier:"starter",note:"Paginated with nanosecond timestamps.",proj:false},
+{product:"REST",section:"Trades & Quotes",docPage:"Last Quote (NBBO)",ep:"GET /v2/last/nbbo/{stocksTicker}",doc:"Most recent NBBO quote for a stock",use:"Real-time spread lookup for a stock ticker",code:"(not implemented)",chk:"stock-trades-quotes",status:"not-implemented",test:"N/A",tier:"starter",note:"Read-only real-time query.",proj:false},
+{product:"REST",section:"Technical Indicators",docPage:"Simple Moving Average (SMA)",ep:"GET /v1/indicators/sma/{stocksTicker}",doc:"Simple Moving Average",use:"Shared endpoint: works with stock tickers natively",code:"MassiveClient._fetch_indicator('sma')",chk:"stock-technical-indicators",status:"implemented",test:"N/A",tier:"starter",note:"Shared with Massive Option.",proj:false},
+{product:"REST",section:"Technical Indicators",docPage:"Exponential Moving Average (EMA)",ep:"GET /v1/indicators/ema/{stocksTicker}",doc:"Exponential Moving Average",use:"Shared endpoint: works with stock tickers natively",code:"MassiveClient._fetch_indicator('ema')",chk:"stock-technical-indicators",status:"implemented",test:"N/A",tier:"starter",note:"Shared with Massive Option.",proj:false},
+{product:"REST",section:"Technical Indicators",docPage:"Moving Average Convergence/Divergence (MACD)",ep:"GET /v1/indicators/macd/{stocksTicker}",doc:"MACD indicator",use:"Shared endpoint: works with stock tickers natively",code:"MassiveClient.fetch_indicator_macd",chk:"stock-technical-indicators",status:"implemented",test:"N/A",tier:"starter",note:"Shared with Massive Option.",proj:false},
+{product:"REST",section:"Technical Indicators",docPage:"Relative Strength Index (RSI)",ep:"GET /v1/indicators/rsi/{stocksTicker}",doc:"Relative Strength Index",use:"Shared endpoint: works with stock tickers natively",code:"MassiveClient._fetch_indicator('rsi')",chk:"stock-technical-indicators",status:"implemented",test:"N/A",tier:"starter",note:"Shared with Massive Option.",proj:false},
+{product:"REST",section:"Market Operations",docPage:"Condition Codes",ep:"GET /v3/reference/conditions",doc:"Unified trade/quote condition codes",use:"Shared with Massive Option Market Ops",code:"MassiveClient.fetch_market_conditions",chk:"stock-market-ops",status:"implemented",test:"N/A",tier:"starter",note:"Shared with Massive Option.",proj:false},
+{product:"REST",section:"Market Operations",docPage:"Exchanges",ep:"GET /v3/reference/exchanges",doc:"List of exchanges with IDs/names/MICs",use:"Shared with Massive Option Market Ops",code:"MassiveClient.fetch_market_exchanges",chk:"stock-market-ops",status:"implemented",test:"N/A",tier:"starter",note:"Shared with Massive Option.",proj:false},
+{product:"REST",section:"Market Operations",docPage:"Market Holidays",ep:"GET /v3/reference/market/holidays",doc:"Upcoming market holidays",use:"Shared with Massive Option Market Ops",code:"MassiveClient.fetch_market_holidays",chk:"stock-market-ops",status:"implemented",test:"N/A",tier:"starter",note:"Shared with Massive Option.",proj:false},
+{product:"REST",section:"Market Operations",docPage:"Market Status",ep:"GET /v3/reference/market/status",doc:"Current market trading status",use:"Shared with Massive Option Market Ops",code:"MassiveClient.fetch_market_status",chk:"stock-market-ops",status:"implemented",test:"N/A",tier:"starter",note:"Shared with Massive Option.",proj:false},
+{product:"WebSocket",section:"Aggregates (Per Second)",docPage:"Aggregates (Per Second)",ep:"wss://…/stocks  A.{ticker}",doc:"Stream per-second OHLCV for a stock",use:"Real-time per-second bars; no persistent bridge",code:"(not implemented)",chk:"stock-ws",status:"not-implemented",test:"N/A",tier:"starter",note:"WS ingest → Redis → SSE not built.",proj:false},
+{product:"WebSocket",section:"Aggregates (Per Minute)",docPage:"Aggregates (Per Minute)",ep:"wss://…/stocks  AM.{ticker}",doc:"Stream per-minute OHLCV for a stock",use:"Real-time per-minute bars; no persistent bridge",code:"(not implemented)",chk:"stock-ws",status:"not-implemented",test:"N/A",tier:"starter",note:"",proj:false},
+{product:"WebSocket",section:"Trades",docPage:"Trades",ep:"wss://…/stocks  T.{ticker}",doc:"Stream tick-level trades for a stock",use:"Real-time trade prints; no persistent bridge",code:"(not implemented)",chk:"stock-ws",status:"not-implemented",test:"N/A",tier:"starter",note:"",proj:false},
+{product:"WebSocket",section:"Quotes",docPage:"Quotes",ep:"wss://…/stocks  Q.{ticker}",doc:"Stream NBBO quotes for a stock",use:"Real-time bid/ask; no persistent bridge",code:"(not implemented)",chk:"stock-ws",status:"not-implemented",test:"N/A",tier:"starter",note:"Delayed on Starter.",proj:false},
+{product:"Flat Files",section:"Day Aggregates",docPage:"Day Aggregates",ep:"S3 flat file download",doc:"Daily OHLCV all US stocks",use:"Bulk download alternative to REST aggregates",code:"(not implemented)",chk:"stock-flat-file-day-aggs",status:"not-implemented",test:"N/A",tier:"starter",note:"Not yet integrated.",proj:false},
+{product:"Flat Files",section:"Minute Aggregates",docPage:"Minute Aggregates",ep:"S3 flat file download",doc:"Minute OHLCV all US stocks",use:"Bulk download of minute bars for stocks",code:"(not implemented)",chk:"stock-flat-file-minute-aggs",status:"not-implemented",test:"N/A",tier:"starter",note:"Not yet integrated.",proj:false},
+{product:"Flat Files",section:"Trades",docPage:"Trades",ep:"S3 flat file download",doc:"Tick-level stock trades",use:"Bulk download of stock trade data",code:"(not implemented)",chk:"stock-flat-file-trades",status:"not-implemented",test:"N/A",tier:"developer",note:"Developer tier required.",proj:false},
+{product:"Flat Files",section:"Quotes",docPage:"Quotes",ep:"S3 flat file download",doc:"Top-of-book stock quotes",use:"Bulk download of stock quote data",code:"(not implemented)",chk:"stock-flat-file-quotes",status:"not-implemented",test:"N/A",tier:"starter",note:"Not yet integrated.",proj:false},
+{product:"Project",section:"Corporate Actions",docPage:"Dividends",ep:"GET /v3/reference/dividends",doc:"Cash dividend distributions",use:"Already implemented: sync dividends → massive_corporate_action",code:"MassiveClient.fetch_dividends",chk:"stock-corporate-actions",status:"implemented",test:"pytest: no",tier:"starter",note:"Shared with Massive Option corporate actions.",proj:true},
+{product:"Project",section:"Corporate Actions",docPage:"Splits",ep:"GET /v3/reference/splits",doc:"Stock split events and ratios",use:"Already implemented: sync splits → massive_corporate_action",code:"MassiveClient.fetch_splits",chk:"stock-corporate-actions",status:"implemented",test:"pytest: no",tier:"starter",note:"Shared with Massive Option corporate actions.",proj:true}
+];
+
+var headers=["Product","Section","Doc page","Endpoint","Summary","Use Case","Code Location","Checklist","Status","Test","Tier","Notes"];
+
+function badge(t,cls){return '<span class="badge '+cls+'">'+t+'</span>'}
+function statusBadge(s){
+  if(s==="implemented") return badge("Implemented","b-impl");
+  if(s==="partial") return badge("Partial","b-part");
+  return badge("Not impl","b-noimpl");
+}
+function testBadge(t){
+  if(t==="pytest: yes") return badge("pytest ✓","b-pytest-yes");
+  if(t==="pytest: no") return badge("no pytest","b-pytest-no");
+  if(t==="script") return badge("script","b-script");
+  return badge("N/A","b-na");
+}
+
+function render(data){
+  var tb=document.getElementById("tbody");tb.innerHTML="";
+  var cards=document.getElementById("cards");cards.innerHTML="";
+  data.forEach(function(r){
+    var tr=document.createElement("tr");
+    if(r.status==="not-implemented") tr.className="dim";
+    if(r.proj) tr.className=(tr.className?tr.className+" ":"")+"proj";
+    tr.innerHTML='<td>'+r.product+'</td><td>'+r.section+'</td><td>'+r.docPage+'</td><td class="ep">'+r.ep+'</td><td>'+r.doc+'</td><td class="uc">'+r.use+'</td><td class="code">'+r.code+'</td><td>'+(r.chk==="--"?"":r.chk)+'</td><td>'+statusBadge(r.status)+'</td><td>'+testBadge(r.test)+'</td><td>'+r.tier+'</td><td class="note">'+r.note+'</td>';
+    tb.appendChild(tr);
+
+    var card=document.createElement("article");
+    card.className='card'+(r.status==="not-implemented"?' dim':'');
+    card.innerHTML=
+      '<div class="card-head"><div class="card-title">'+r.product+' · '+r.section+' · '+r.docPage+'</div><div>'+statusBadge(r.status)+'</div></div>'+
+      '<div class="kv">'+
+      '<div class="k">Endpoint</div><div class="v ep">'+r.ep+'</div>'+
+      '<div class="k">Summary</div><div class="v">'+r.doc+'</div>'+
+      '<div class="k">Use case</div><div class="v">'+r.use+'</div>'+
+      '<div class="k">Code</div><div class="v">'+r.code+'</div>'+
+      '<div class="k">Checklist</div><div class="v">'+(r.chk==="--"?"":r.chk)+'</div>'+
+      '<div class="k">Test</div><div class="v">'+testBadge(r.test)+'</div>'+
+      '<div class="k">Tier</div><div class="v">'+r.tier+'</div>'+
+      '<div class="k">Notes</div><div class="v">'+r.note+'</div>'+
+      '</div>';
+    cards.appendChild(card);
+  });
+  updateStats(data);
+}
+
+function updateStats(data){
+  var impl=0,part=0,ni=0,py=0;
+  data.forEach(function(r){
+    if(r.status==="implemented") impl++;
+    else if(r.status==="partial") part++;
+    else ni++;
+    if(r.test==="pytest: yes") py++;
+  });
+  document.getElementById("stats").innerHTML=
+    '<div class="stat"><div class="stat-val">'+data.length+'</div><div class="stat-lbl">Total</div></div>'+
+    '<div class="stat"><div class="stat-val" style="color:#3fb950">'+impl+'</div><div class="stat-lbl">Implemented</div></div>'+
+    '<div class="stat"><div class="stat-val" style="color:#d29922">'+part+'</div><div class="stat-lbl">Partial</div></div>'+
+    '<div class="stat"><div class="stat-val" style="color:#636c76">'+ni+'</div><div class="stat-lbl">Not impl</div></div>'+
+    '<div class="stat"><div class="stat-val" style="color:#3fb950">'+py+'</div><div class="stat-lbl">pytest ✓</div></div>'+
+    '<div class="stat"><div class="stat-val" style="color:#f85149">'+(impl+part-py)+'</div><div class="stat-lbl">Missing tests</div></div>';
+}
+
+function initFilters(){
+  var prods={},sects={},docPages={},statuses={},tests={},tiers={};
+  DATA.forEach(function(r){ prods[r.product]=1; sects[r.section]=1; docPages[r.docPage]=1; statuses[r.status]=1; tests[r.test]=1; tiers[r.tier]=1; });
+  function fill(id,obj){var el=document.getElementById(id);Object.keys(obj).sort().forEach(function(k){var o=document.createElement("option");o.value=k;o.textContent=k;el.appendChild(o)})}
+  fill("fProduct",prods); fill("fSection",sects); fill("fDocPage",docPages); fill("fStatus",statuses); fill("fTest",tests); fill("fTier",tiers);
+}
+
+function applyFilters(){
+  var p=document.getElementById("fProduct").value;
+  var se=document.getElementById("fSection").value;
+  var dp=document.getElementById("fDocPage").value;
+  var s=document.getElementById("fStatus").value;
+  var t=document.getElementById("fTest").value;
+  var ti=document.getElementById("fTier").value;
+  var q=document.getElementById("fSearch").value.toLowerCase();
+  var f=DATA.filter(function(r){
+    return (!p||r.product===p)&&(!se||r.section===se)&&(!dp||r.docPage===dp)&&(!s||r.status===s)&&(!t||r.test===t)&&(!ti||r.tier===ti)&&
+      (!q||r.ep.toLowerCase().indexOf(q)>=0||r.doc.toLowerCase().indexOf(q)>=0||r.use.toLowerCase().indexOf(q)>=0||r.code.toLowerCase().indexOf(q)>=0||r.docPage.toLowerCase().indexOf(q)>=0||r.product.toLowerCase().indexOf(q)>=0||r.section.toLowerCase().indexOf(q)>=0);
+  });
+  render(f);
+}
+
+if(new URLSearchParams(window.location.search).get("embed")==="1"){
+  document.body.classList.add("embed");
+}
+document.getElementById("thead").innerHTML='<tr>'+headers.map(function(h){return '<th>'+h+'</th>'}).join("")+'</tr>';
+initFilters();
+render(DATA);
+["fProduct","fSection","fDocPage","fStatus","fTest","fTier"].forEach(function(id){document.getElementById(id).onchange=applyFilters});
+document.getElementById("fSearch").oninput=applyFilters;
+</script>
+</body>
+</html>

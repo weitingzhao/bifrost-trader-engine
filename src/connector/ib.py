@@ -43,6 +43,7 @@ class IBConnector:
         self.ib = IB()
         self._connected = False
         self._commission_registered = False
+        self._disconnect_event_registered = False
         self._stock_contract: Optional[Stock] = None
         self._tickers: Dict[str, Ticker] = {}  # symbol -> Ticker for multi-symbol subscription
         self._option_tickers: Dict[str, Ticker] = {}  # contract_key -> Ticker for Watchlist OPT subscription
@@ -116,6 +117,13 @@ class IBConnector:
             "connection closed",
             "disconnected",
         ))
+
+    def _on_ib_disconnected(self) -> None:
+        """Called by ib_insync disconnectedEvent when the TCP socket drops."""
+        was = self._connected
+        self._connected = False
+        if was:
+            logger.warning("IB disconnectedEvent fired — _connected cleared (was True)")
 
     def _mark_connection_dropped(self, reason: str, exc: Exception) -> None:
         """Mark the connector disconnected after an in-flight socket drop."""
@@ -192,6 +200,9 @@ class IBConnector:
                     self.port = try_port
                     self.client_id = try_id
                     self._connected = True
+                    if not self._disconnect_event_registered:
+                        self.ib.disconnectedEvent += self._on_ib_disconnected
+                        self._disconnect_event_registered = True
                     if try_port != base_port:
                         logger.info(
                             "Connected to IB %s:%s clientId=%s (base port was %s)",

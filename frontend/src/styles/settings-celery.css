@@ -1937,6 +1937,22 @@
   cursor: default;
 }
 
+.ib-slot-lamp {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.ib-slot-lamp--green {
+  background: var(--color-green, #22c55e);
+  box-shadow: 0 0 4px var(--color-green, #22c55e);
+}
+.ib-slot-lamp--red {
+  background: var(--color-red, #ef4444);
+  box-shadow: 0 0 4px var(--color-red, #ef4444);
+}
+
 .massive-api-doc-links {
   display: flex;
   gap: var(--space-3);

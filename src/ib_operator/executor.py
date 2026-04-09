@@ -205,7 +205,8 @@ class IbOperatorExecutor:
         self._ib_probe_interval_sec = float(interval_sec)
         now = time.time()
         self._host_ib_probe_at = now
-        self._host_ib_probe_ok = bool(self._primary.connected_snapshot())
+        _snap = self._primary.connected_snapshot()
+        self._host_ib_probe_ok = bool(_snap)
         if self._account_secondary is not None:
             self._secondary_ib_probe_at = now
             self._secondary_ib_probe_ok = bool(self._account_secondary.connected_snapshot())

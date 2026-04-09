@@ -6,6 +6,7 @@ export {
   fetchMonitorCapabilities,
   postMonitorShutdown,
 } from './monitor/status'
+export { fetchSystemMessages, subscribeSystemMessages } from './monitor/messages'
 export {
   postSuspend,
   postResume,
@@ -74,6 +75,7 @@ export {
   fetchMassiveStatus,
   postMassiveSync,
   postMassiveApiCoverageSync,
+  postMassiveStocksApiCoverageSync,
   fetchMassiveJobsList,
   deleteMassiveJob,
   deleteAllMassiveJobs,

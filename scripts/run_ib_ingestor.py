@@ -35,6 +35,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 os.chdir(str(_PROJECT_ROOT))
 
 from backend.monitor.routers.deps import IB_INGESTOR_LOG_STREAM_KEY
+from src.bifrost.message_center import IbConnectionStatusTracker
 from src.core.logging_redis_stream import RedisStreamLogHandler
 
 _IB_INGESTOR_LOG_STREAM_MAXLEN = 2000
@@ -267,6 +268,7 @@ class IbIngestorApp:
         from src.vendor.ib_ingestor.writer import IbIngestorRedisWriter
 
         self._writer = IbIngestorRedisWriter(self._rds)
+        self._status_tracker = IbConnectionStatusTracker(self._rds, service="ib_ingestor")
         self._stop = asyncio.Event()
         self._reconnects = 0
         self._msg_count = 0
@@ -279,6 +281,7 @@ class IbIngestorApp:
         self._reconnect_base_sec = 2.0
         self._reconnect_max_sec = 60.0
         self._reconnect_max_exp = 6
+        self._session_disconnected = asyncio.Event()
 
     def _max_subscriptions(self) -> int:
         try:
@@ -352,6 +355,20 @@ class IbIngestorApp:
                 ib_probe_ok=False,
                 ib_probe_interval_sec=self._ib_probe_interval_sec,
             )
+            self._status_tracker.update(
+                slot="host",
+                status="disconnected",
+                client_id=self._client_id or None,
+                occurred_at=now,
+                reason="Session ended",
+            )
+            self._status_tracker.update(
+                slot="host",
+                status="reconnecting",
+                client_id=self._client_id or None,
+                occurred_at=now,
+                reason="Waiting for reconnect backoff",
+            )
             logger.info("Reconnecting in %.1fs (attempt %d)…", delay, self._reconnects)
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=delay)
@@ -367,6 +384,13 @@ class IbIngestorApp:
             ib_probe_at=0.0,
             ib_probe_ok=False,
             ib_probe_interval_sec=self._ib_probe_interval_sec,
+        )
+        self._status_tracker.update(
+            slot="host",
+            status="disconnected",
+            client_id=self._client_id or None,
+            occurred_at=time.time(),
+            reason="Service stopped",
         )
         logger.info(
             "IB ingestor stopped (messages=%d reconnects=%d)",
@@ -390,11 +414,40 @@ class IbIngestorApp:
             ib_probe_ok=self._last_ib_probe_ok,
             ib_probe_interval_sec=self._ib_probe_interval_sec,
         )
+        self._status_tracker.update(
+            slot="host",
+            status="connected" if connected else "disconnected",
+            client_id=self._client_id or None,
+            occurred_at=last_msg_ts,
+        )
+
+    async def _wait_session_or_stop(self, timeout: float) -> bool:
+        """Wait up to *timeout* seconds; return True if the session should exit
+        (either stop requested or IB disconnect detected by heartbeat/probe)."""
+        if self._stop.is_set() or self._session_disconnected.is_set():
+            return True
+        stop_f = asyncio.ensure_future(self._stop.wait())
+        disc_f = asyncio.ensure_future(self._session_disconnected.wait())
+        done, pending = await asyncio.wait(
+            [stop_f, disc_f],
+            timeout=timeout,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for t in pending:
+            t.cancel()
+        return self._stop.is_set() or self._session_disconnected.is_set()
 
     async def _run_connected_session(self, client: Any) -> None:
         await client.ensure_connected()
         self._reconnects = 0
         self._session_ib_client = client
+        self._session_disconnected.clear()
+        self._status_tracker.update(
+            slot="host",
+            status="connected",
+            client_id=self._client_id or None,
+            occurred_at=time.time(),
+        )
         hb_task = asyncio.create_task(self._heartbeat_loop())
         probe_task = asyncio.create_task(self._ib_probe_loop())
         try:
@@ -420,14 +473,11 @@ class IbIngestorApp:
                     wire = client.connected_snapshot()
                     self._push_health(connected=wire, last_msg_ts=time.time())
                     self._writer.set_subscriptions(set())
-                    try:
-                        await asyncio.wait_for(
-                            self._stop.wait(),
-                            timeout=WATCHLIST_POLL_SEC,
-                        )
+                    if await self._wait_session_or_stop(WATCHLIST_POLL_SEC):
+                        if self._session_disconnected.is_set():
+                            logger.warning("IB disconnected during empty-watchlist wait — ending session for reconnect")
                         return
-                    except asyncio.TimeoutError:
-                        continue
+                    continue
 
                 keys: Set[str] = {r["contract_key"] for r in opt_rows}
                 for s in stk_syms:
@@ -464,11 +514,10 @@ class IbIngestorApp:
                     self._max_subscriptions(),
                 )
 
-                try:
-                    await asyncio.wait_for(self._stop.wait(), timeout=WATCHLIST_POLL_SEC)
+                if await self._wait_session_or_stop(WATCHLIST_POLL_SEC):
+                    if self._session_disconnected.is_set():
+                        logger.warning("IB disconnected — ending session for reconnect")
                     return
-                except asyncio.TimeoutError:
-                    pass
         finally:
             self._session_ib_client = None
             hb_task.cancel()
@@ -507,6 +556,8 @@ class IbIngestorApp:
             if cl is None:
                 continue
             ok = cl.connected_snapshot()
+            if not ok:
+                self._session_disconnected.set()
             now = time.time()
             self._last_ib_probe_at = now
             self._last_ib_probe_ok = ok
@@ -524,6 +575,8 @@ class IbIngestorApp:
             ts = self._last_msg_ts or time.time()
             cl = self._session_ib_client
             wire = cl.connected_snapshot() if cl is not None else False
+            if not wire and cl is not None:
+                self._session_disconnected.set()
             try:
                 self._push_health(connected=wire, last_msg_ts=ts)
             except Exception as e:

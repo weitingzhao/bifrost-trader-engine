@@ -65,6 +65,8 @@ class BaseMonitorIbClient:
                 return self._connected_state
         return self._connected_state
 
+    _POST_CONNECT_GRACE_SEC = 10.0
+
     def connected_snapshot(self) -> bool:
         """Read live API state on this client's event loop (safe from any thread).
 
@@ -85,15 +87,32 @@ class BaseMonitorIbClient:
                 api = bool(conn.is_connected)
             except Exception:
                 return self._connected_state
-            # connect() can return before ib_insync sets client._apiReady; OR avoids stuck host_connected=0.
-            # _connected_state is cleared on disconnect / failed connect (connector dropped).
-            return api or self._connected_state
+            if api:
+                return True
+            # api is False — only trust _connected_state during post-connect grace window
+            # (ib_insync may lag setting _apiReady right after connectAsync returns).
+            if self._connected_state and self.last_connected_at is not None:
+                elapsed = time.time() - self.last_connected_at
+                if elapsed < self._POST_CONNECT_GRACE_SEC:
+                    return True
+            self._connected_state = False
+            return False
 
         try:
             fut = asyncio.run_coroutine_threadsafe(_read(), loop)
             return bool(fut.result(timeout=5.0))
         except Exception:
             return self._connected_state
+
+    def _on_ib_disconnected_event(self) -> None:
+        """ib_insync disconnectedEvent handler — immediately clear _connected_state."""
+        was = self._connected_state
+        self._connected_state = False
+        self.last_disconnected_at = time.time()
+        if was:
+            logger.warning(
+                "[monitor_ib] %s disconnectedEvent → _connected_state cleared", self.name
+            )
 
     def _ensure_loop(self) -> None:
         if self._loop is not None and self._loop.is_running():
@@ -179,6 +198,7 @@ class BaseMonitorIbClient:
                 self.reconnects += 1
             self.last_connected_at = time.time()
             self._connected_state = True
+            self._connector.ib.disconnectedEvent += self._on_ib_disconnected_event
             logger.info(
                 "[monitor_ib] %s connected host=%s port=%s clientId=%s",
                 self.name,

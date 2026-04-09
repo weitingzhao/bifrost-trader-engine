@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 import redis
 
 from src.app.config import get_effective_ib_config
+from src.bifrost.message_center import IbConnectionStatusTracker
 from src.ib.connection_policy import operator_effective_health_refresh_sec
 from src.ib_operator.config import effective_ib_operator_settings
 from src.ib_operator.executor import IbOperatorExecutor
@@ -65,6 +66,7 @@ def _write_health_sync(
     executor: IbOperatorExecutor,
     key: str,
     probe_interval_sec: float,
+    tracker: Optional[IbConnectionStatusTracker] = None,
 ) -> None:
     try:
         asyncio.run(executor.record_ib_probe(probe_interval_sec))
@@ -85,9 +87,42 @@ def _write_health_sync(
         prune_legacy_operator_health_hash_fields(r, key)
     except Exception as e:
         logger.warning("write health key failed: %s", e)
+    _publish_operator_status_messages(tracker, h)
 
 
-def _write_shutdown_health_sync(r: redis.Redis, executor: IbOperatorExecutor, key: str) -> None:
+def _publish_operator_status_messages(
+    tracker: Optional[IbConnectionStatusTracker],
+    health_dict: Dict[str, Any],
+) -> None:
+    if tracker is None:
+        return
+    host = health_dict.get("host") if isinstance(health_dict.get("host"), dict) else {}
+    tracker.update(
+        slot="host",
+        status="connected" if bool(host.get("connected")) else "disconnected",
+        client_id=int(host.get("client_id") or 0) or None,
+        occurred_at=float(health_dict.get("updated_at") or time.time()),
+        reason=(str(host.get("last_error")).strip() or None) if host.get("last_error") is not None else None,
+    )
+    secondary = health_dict.get("secondary")
+    if isinstance(secondary, dict):
+        tracker.update(
+            slot="secondary",
+            status="connected" if bool(secondary.get("connected")) else "disconnected",
+            client_id=int(secondary.get("client_id") or 0) or None,
+            occurred_at=float(health_dict.get("updated_at") or time.time()),
+            reason=(str(secondary.get("last_error")).strip() or None)
+            if secondary.get("last_error") is not None
+            else None,
+        )
+
+
+def _write_shutdown_health_sync(
+    r: redis.Redis,
+    executor: IbOperatorExecutor,
+    key: str,
+    tracker: Optional[IbConnectionStatusTracker] = None,
+) -> None:
     """Publish final Redis health before process exit so /status and Socket Services update immediately."""
     h = executor.health_dict()
     for slot in ("host", "secondary"):
@@ -102,6 +137,7 @@ def _write_shutdown_health_sync(r: redis.Redis, executor: IbOperatorExecutor, ke
         prune_legacy_operator_health_hash_fields(r, key)
     except Exception as e:
         logger.warning("write shutdown health failed: %s", e)
+    _publish_operator_status_messages(tracker, h)
 
 
 async def _handle_message(
@@ -155,6 +191,7 @@ def run_ib_operator_loop(
     r = redis_client or redis.from_url(rurl, decode_responses=True)
     ensure_stream_and_group(r, stream, group)
     executor = _build_clients(config)
+    tracker = IbConnectionStatusTracker(r, service="ib_operator")
     runner = OperatorRedisRunner(r, stream, group, cons, block_ms)
 
     logger.info(
@@ -167,15 +204,30 @@ def run_ib_operator_loop(
     # Publish Redis health before blocking on IB connect. Otherwise Ops may HSET only
     # bifrost_ops_control_env on this key after systemd start while connect_all() retries
     # TWS for a long time — leaving a hash with no host_* fields until connect returns.
-    _write_health_sync(r, executor, health_key, probe_iv)
+    _write_health_sync(r, executor, health_key, probe_iv, tracker)
     last_health = time.time()
 
     try:
         asyncio.run(executor.connect_all())
     except Exception as e:
         logger.warning("IB Operator initial connect failed (will retry on demand): %s", e)
+        tracker.update(
+            slot="host",
+            status="reconnecting",
+            client_id=int(ib_eff["client_id_operator"]),
+            occurred_at=time.time(),
+            reason="Initial connect failed",
+        )
+        if ib_eff.get("ib2_host"):
+            tracker.update(
+                slot="secondary",
+                status="reconnecting",
+                client_id=int(ib_eff.get("ib2_client_id_operator") or 0) or None,
+                occurred_at=time.time(),
+                reason="Initial connect failed",
+            )
 
-    _write_health_sync(r, executor, health_key, probe_iv)
+    _write_health_sync(r, executor, health_key, probe_iv, tracker)
     last_health = time.time()
     stop = stop_event or threading.Event()
 
@@ -185,16 +237,35 @@ def run_ib_operator_loop(
     while not should_stop():
         now = time.time()
         if now - last_health >= health_refresh:
-            # If TWS/API was not ready at startup, initial connect_all() may have failed and the
-            # idle loop never retried — Redis would stay host_connected=0 until an RPC op runs.
-            # Retry here so Socket Services /status matches TWS once the API connects.
+            # Retry connect for any disconnected slot (host or secondary) so Redis health
+            # stays in sync with TWS and the UI shows green once TWS is reachable again.
             hd_try = executor.health_dict()
-            if not (hd_try.get("host") or {}).get("connected"):
+            host_ok = bool((hd_try.get("host") or {}).get("connected"))
+            sec_info = hd_try.get("secondary")
+            sec_ok = bool((sec_info or {}).get("connected")) if sec_info is not None else True
+            if not host_ok or not sec_ok:
+                if not host_ok:
+                    tracker.update(
+                        slot="host",
+                        status="reconnecting",
+                        client_id=int((hd_try.get("host") or {}).get("client_id") or ib_eff["client_id_operator"]),
+                        occurred_at=now,
+                        reason="Health refresh reconnect",
+                    )
+                if sec_info is not None and not sec_ok:
+                    tracker.update(
+                        slot="secondary",
+                        status="reconnecting",
+                        client_id=int((sec_info or {}).get("client_id") or ib_eff.get("ib2_client_id_operator") or 0)
+                        or None,
+                        occurred_at=now,
+                        reason="Health refresh reconnect",
+                    )
                 try:
                     asyncio.run(executor.connect_all())
                 except Exception as e:
                     logger.debug("IB Operator health-tick connect retry: %s", e)
-            _write_health_sync(r, executor, health_key, probe_iv)
+            _write_health_sync(r, executor, health_key, probe_iv, tracker)
             last_health = now
 
         entries = []
@@ -254,7 +325,7 @@ def run_ib_operator_loop(
             write_result(r, rk, body or '{"ok":false,"error":"encode"}', ttl_sec=result_ttl)
             ack_message(r, stream, group, entry_id)
             executor.note_cmd_processed()
-            _write_health_sync(r, executor, health_key, probe_iv)
+            _write_health_sync(r, executor, health_key, probe_iv, tracker)
             last_health = time.time()
 
     logger.info("IB Operator stopping: disconnecting IB clients")
@@ -262,4 +333,4 @@ def run_ib_operator_loop(
         asyncio.run(executor.disconnect_all())
     except Exception as e:
         logger.warning("disconnect on shutdown: %s", e)
-    _write_shutdown_health_sync(r, executor, health_key)
+    _write_shutdown_health_sync(r, executor, health_key, tracker)

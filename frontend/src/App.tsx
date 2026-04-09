@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback, useMemo, useRef, Fragment } from 'react'
-import type { IbAccountSnapshot, StatusResponse, Operation, RealtimeQuote } from './types'
+import { useEffect, useState, useCallback, useMemo, useRef, Fragment, type RefObject } from 'react'
+import type { IbAccountSnapshot, StatusResponse, Operation, RealtimeQuote, SystemMessage } from './types'
 import {
   fetchStatus,
   fetchOperations,
@@ -9,6 +9,8 @@ import {
   subscribeQuotes,
   fetchBarsBenchmark,
   fetchOpenOrders,
+  fetchSystemMessages,
+  subscribeSystemMessages,
 } from './api'
 import { postMonitorStop } from './api/monitor/monitor'
 import { fetchOpsWorkers, fetchQueueSummary } from './api/ops/ops'
@@ -42,12 +44,15 @@ import { MainTabIcon, SubmenuIcon, NavGroupDivider, type TabId, type TabGroup } 
 import { UI_BUILD_LABEL } from './uiBuildLabel'
 import { useSettingsApiHealthProbes } from './hooks/useSettingsApiHealthProbes'
 import { useSocketIngestProbe } from './hooks/useSocketIngestProbe'
+import { MessageCenter, type MessageCenterHandle } from './components/MessageCenter'
 import { FEED_MASSIVE_DAILY_DATA_ID, isMassiveOptionFeedHash } from './pages/massive/feedMassiveTabUtils'
+import { isMassiveStockFeedHash } from './pages/massive/feedMassiveStockTabUtils'
 import { SettingsSidebarLampGlyph } from './pages/settings/settingsSidebarLampGlyphs'
 import type { SettingsSidebarLampGlyphId } from './pages/settings/settingsSidebarLampGlyphs'
 import {
   COVERAGE_SUBSECTIONS,
   FEED_MASSIVE_OPTION_ID,
+  FEED_MASSIVE_STOCK_ID,
   FEED_SUBSECTIONS,
 } from './pages/settings/settingsConstants'
 import { SettingsSectionIcon } from './pages/settings/SettingsSectionIcon'
@@ -71,6 +76,10 @@ import './App.css'
 import './styles/settings-celery.css'
 
 const THEME_KEY = 'bifrost-monitor-theme'
+// Keep messages for 1 hour (matching backend TTL). The MessageCenter component
+// handles the 10-second toast window internally.
+const SYSTEM_MESSAGE_BACKEND_TTL_SEC = 3600
+const SYSTEM_MESSAGE_BOOTSTRAP_LIMIT = 50
 
 type StreamTone = 'neutral' | 'positive' | 'negative'
 
@@ -78,6 +87,19 @@ interface StreamSummaryItem {
   label: string
   value: string
   tone: StreamTone
+}
+
+function mergeSystemMessages(prev: SystemMessage[], incoming: SystemMessage[]): SystemMessage[] {
+  const deduped = new Map<string, SystemMessage>()
+  // incoming first, prev later → prev wins on duplicate IDs (stable existing state)
+  for (const message of [...incoming, ...prev]) {
+    if (!message || typeof message.message_id !== 'string' || !message.message_id) continue
+    deduped.set(message.message_id, message)
+  }
+  const cutoff = Date.now() / 1000 - SYSTEM_MESSAGE_BACKEND_TTL_SEC
+  return Array.from(deduped.values())
+    .filter((m) => Number(m.occurred_at || 0) > cutoff)
+    .sort((a, b) => Number(b.occurred_at || 0) - Number(a.occurred_at || 0))
 }
 
 /** Dashboard strip: Open orders summary + Market Streams marquee. */
@@ -287,6 +309,7 @@ type LampId = 'green' | 'yellow' | 'red' | 'none'
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('live')
   const [quickCtrlMsg, setQuickCtrlMsg] = useState({ text: '', isErr: false })
+  const [systemMessages, setSystemMessages] = useState<SystemMessage[]>([])
   const [urlHash, setUrlHash] = useState(() => (typeof window !== 'undefined' ? window.location.hash : ''))
   const [portfolioView, setPortfolioView] = useState<PortfolioView>('accounts')
   const [researchView, setResearchView] = useState<'risk' | 'screener' | 'backtest' | 'options'>('risk')
@@ -316,6 +339,20 @@ export default function App() {
   const [celeryQueuePendingTotal, setCeleryQueuePendingTotal] = useState<number | null>(null)
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
   const headerMenuRef = useRef<HTMLDivElement>(null)
+  const messageCenterRef = useRef<MessageCenterHandle>(null) as RefObject<MessageCenterHandle>
+  const [msgDismissedIds, setMsgDismissedIds] = useState<Set<string>>(() => new Set())
+
+  const dismissMessage = useCallback((id: string) => {
+    setMsgDismissedIds((prev) => new Set([...prev, id]))
+  }, [])
+
+  const dismissAllMessages = useCallback(() => {
+    setMsgDismissedIds((prev) => {
+      const next = new Set(prev)
+      for (const m of systemMessages) next.add(m.message_id)
+      return next
+    })
+  }, [systemMessages])
   /** When GET /status is slow, setInterval would stack concurrent fetches — coalesce to one in-flight request. */
   const statusFetchRef = useRef<Promise<StatusResponse | null> | null>(null)
   const operationsFetchRef = useRef<Promise<void> | null>(null)
@@ -327,6 +364,7 @@ export default function App() {
     if (!h) return 'system'
     const hashNorm = hash.startsWith('#') ? hash : `#${hash}`
     if (isMassiveOptionFeedHash(hashNorm)) return 'massive'
+    if (isMassiveStockFeedHash(hashNorm)) return 'massive'
     if (
       h === FEED_MASSIVE_DAILY_DATA_ID ||
       h === 'settings-subscribe' ||
@@ -412,7 +450,8 @@ export default function App() {
         h === 'flex-preference' ||
         h === 'settings-ib-connection' ||
         h === FEED_MASSIVE_DAILY_DATA_ID ||
-        isMassiveOptionFeedHash(raw.startsWith('#') ? raw : `#${raw}`)
+        isMassiveOptionFeedHash(raw.startsWith('#') ? raw : `#${raw}`) ||
+        isMassiveStockFeedHash(raw.startsWith('#') ? raw : `#${raw}`)
       if (impliesSettings) setActiveTab('settings')
     }
     syncSettingsTabFromHash()
@@ -603,6 +642,37 @@ export default function App() {
     const t = setTimeout(() => setAccountsRefreshFeedback(null), 5000)
     return () => clearTimeout(t)
   }, [accountsRefreshFeedback])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchSystemMessages(SYSTEM_MESSAGE_BOOTSTRAP_LIMIT)
+      .then((res) => {
+        if (cancelled || !Array.isArray(res.messages)) return
+        if (res.messages.length > 0) {
+          setSystemMessages((prev) => mergeSystemMessages(prev, res.messages))
+        }
+      })
+      .catch(() => {})
+    const unsub = subscribeSystemMessages((message) => {
+      setSystemMessages((prev) => mergeSystemMessages(prev, [message]))
+    })
+    return () => {
+      cancelled = true
+      unsub()
+    }
+  }, [])
+
+  // Prune messages older than 1 hr from React state (matches backend TTL)
+  useEffect(() => {
+    if (systemMessages.length === 0) return
+    const oldestExpiry = Math.min(...systemMessages.map((m) => Number(m.occurred_at || 0))) * 1000 + SYSTEM_MESSAGE_BACKEND_TTL_SEC * 1000
+    const delayMs = Math.max(5000, oldestExpiry - Date.now())
+    const t = setTimeout(() => {
+      const cutoff = Date.now() / 1000 - SYSTEM_MESSAGE_BACKEND_TTL_SEC
+      setSystemMessages((prev) => prev.filter((m) => Number(m.occurred_at || 0) > cutoff))
+    }, delayMs)
+    return () => clearTimeout(t)
+  }, [systemMessages])
 
   const onRefreshAccounts = useCallback(async () => {
     setIbAccountsRefreshing(true)
@@ -1118,6 +1188,13 @@ export default function App() {
           {quickCtrlMsg.text ? (
             <span className={`app-header-system-msg ${quickCtrlMsg.isErr ? 'err' : ''}`}>{quickCtrlMsg.text}</span>
           ) : null}
+          <MessageCenter
+            ref={messageCenterRef}
+            messages={systemMessages}
+            dismissedIds={msgDismissedIds}
+            onDismiss={dismissMessage}
+            onDismissAll={dismissAllMessages}
+          />
           <div className="app-header-system-lamps-wrap">
             <div
               className="app-header-lamp-stop-group app-header-api-shortcuts-group"
@@ -1212,23 +1289,55 @@ export default function App() {
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            className={`app-header-icon-btn ${headerMenuOpen ? 'active' : ''} ${activeTab === 'settings' ? 'active' : ''}`}
-            onClick={() => setHeaderMenuOpen((o) => !o)}
-            title="Menu"
-            aria-label="Open menu"
-            aria-expanded={headerMenuOpen}
-            aria-haspopup="menu"
-          >
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <circle cx="12" cy="12" r="1" />
-              <circle cx="12" cy="5" r="1" />
-              <circle cx="12" cy="19" r="1" />
-            </svg>
-          </button>
+          {(() => {
+            const activeMsgCount = systemMessages.filter((m) => !msgDismissedIds.has(m.message_id)).length
+            return (
+              <button
+                type="button"
+                className={`app-header-icon-btn ${headerMenuOpen ? 'active' : ''} ${activeTab === 'settings' ? 'active' : ''}`}
+                onClick={() => setHeaderMenuOpen((o) => !o)}
+                title={activeMsgCount > 0 ? `Menu — ${activeMsgCount} active messages` : 'Menu'}
+                aria-label={activeMsgCount > 0 ? `Open menu (${activeMsgCount} active messages)` : 'Open menu'}
+                aria-expanded={headerMenuOpen}
+                aria-haspopup="menu"
+              >
+                {activeMsgCount > 0 && (
+                  <span className="msc-bell-badge" aria-hidden>
+                    {activeMsgCount > 99 ? '99+' : activeMsgCount}
+                  </span>
+                )}
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <circle cx="12" cy="12" r="1" />
+                  <circle cx="12" cy="5" r="1" />
+                  <circle cx="12" cy="19" r="1" />
+                </svg>
+              </button>
+            )
+          })()}
           {headerMenuOpen && (
             <div className="app-header-menu" role="menu" aria-label="App menu">
+              {(() => {
+                const activeMsgCount = systemMessages.filter((m) => !msgDismissedIds.has(m.message_id)).length
+                if (activeMsgCount === 0) return null
+                return (
+                  <>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="app-header-menu-item app-header-menu-item-messages"
+                      onClick={() => { messageCenterRef.current?.openDrawer(); setHeaderMenuOpen(false) }}
+                      title="View system messages"
+                    >
+                      <svg viewBox="0 0 20 20" width="15" height="15" fill="currentColor" style={{ flexShrink: 0 }} aria-hidden>
+                        <path d="M10 2a6 6 0 00-6 6v2.586l-1.707 1.707A1 1 0 003 14h14a1 1 0 00.707-1.707L16 10.586V8a6 6 0 00-6-6zM8.5 17a1.5 1.5 0 003 0H8.5z" />
+                      </svg>
+                      Messages
+                      <span className="app-header-menu-msg-count">{activeMsgCount}</span>
+                    </button>
+                    <div className="app-header-menu-divider" role="presentation" />
+                  </>
+                )
+              })()}
               <div className="app-header-menu-label" role="presentation">API</div>
               {HEADER_API_SHORTCUTS.map(({ hash, glyph, title, menuLabel, lampPicker }) => {
                 const lamp =
@@ -1319,7 +1428,7 @@ export default function App() {
                   key={sub.id}
                   type="button"
                   role="menuitem"
-                  className={`app-header-menu-item ${activeTab === 'settings' && settingsHashKey(urlHash) === sub.id ? 'active' : ''}`}
+                  className={`app-header-menu-item app-header-menu-item-massive ${activeTab === 'settings' && settingsHashKey(urlHash) === sub.id ? 'active' : ''}`}
                   onClick={() => { openSettingsSectionById(sub.id); setHeaderMenuOpen(false) }}
                   title={`Settings → Feed → ${sub.label}`}
                 >
@@ -1330,7 +1439,7 @@ export default function App() {
               <button
                 type="button"
                 role="menuitem"
-                className={`app-header-menu-item app-header-menu-item-massive ${activeTab === 'settings' && settingsViewSection === 'massive' ? 'active' : ''}`}
+                className={`app-header-menu-item app-header-menu-item-massive ${activeTab === 'settings' && isMassiveOptionFeedHash(urlHash) ? 'active' : ''}`}
                 onClick={() => {
                   setActiveTab('settings')
                   window.location.hash = `#${FEED_MASSIVE_OPTION_ID}`
@@ -1340,6 +1449,20 @@ export default function App() {
               >
                 <SettingsSectionIcon name="feed-massive" />
                 Massive Option
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={`app-header-menu-item app-header-menu-item-massive ${activeTab === 'settings' && isMassiveStockFeedHash(urlHash) ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveTab('settings')
+                  window.location.hash = `#${FEED_MASSIVE_STOCK_ID}`
+                  setHeaderMenuOpen(false)
+                }}
+                title="Settings → Feed → Massive Stock"
+              >
+                <SettingsSectionIcon name="feed-massive-stock" />
+                Massive Stock
               </button>
               <button
                 type="button"
@@ -1360,62 +1483,72 @@ export default function App() {
                 </svg>
                 Settings
               </button>
-              <div className="app-header-menu-label" role="presentation">Theme</div>
-              <button
-                type="button"
-                role="menuitemradio"
-                aria-checked={theme === 'dark'}
-                className={`app-header-menu-item ${theme === 'dark' ? 'active' : ''}`}
-                onClick={() => { setTheme('dark'); setHeaderMenuOpen(false) }}
-              >
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
-                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                </svg>
-                Dark
-              </button>
-              <button
-                type="button"
-                role="menuitemradio"
-                aria-checked={theme === 'light'}
-                className={`app-header-menu-item ${theme === 'light' ? 'active' : ''}`}
-                onClick={() => { setTheme('light'); setHeaderMenuOpen(false) }}
-              >
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
-                  <circle cx="12" cy="12" r="5" />
-                  <line x1="12" y1="1" x2="12" y2="3" />
-                  <line x1="12" y1="21" x2="12" y2="23" />
-                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-                  <line x1="1" y1="12" x2="3" y2="12" />
-                  <line x1="21" y1="12" x2="23" y2="12" />
-                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-                </svg>
-                Light
-              </button>
-              <div className="app-header-menu-divider" role="separator" />
-              <a
-                href="/docs"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="app-header-menu-item"
-                role="menuitem"
-                onClick={() => setHeaderMenuOpen(false)}
-              >
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
-                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-                  <path d="M8 7h8" />
-                  <path d="M8 11h8" />
-                </svg>
-                Docs
-              </a>
-              <div
-                className="app-header-menu-version"
-                role="presentation"
-                title="UI bundle build label (from last npm run build / Vite start). Compare after deploy to detect cache or stale static files."
-              >
-                UI build: {UI_BUILD_LABEL}
+              <div className="app-header-menu-theme-row" role="group" aria-label="Theme">
+                <span className="app-header-menu-theme-label">Theme</span>
+                <div className="app-header-menu-theme-bubble" role="radiogroup" aria-label="Color theme">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={theme === 'light'}
+                    className={`app-header-menu-theme-bubble-btn ${theme === 'light' ? 'active' : ''}`}
+                    onClick={() => { setTheme('light'); setHeaderMenuOpen(false) }}
+                    title="Light"
+                  >
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <circle cx="12" cy="12" r="5" />
+                      <line x1="12" y1="1" x2="12" y2="3" />
+                      <line x1="12" y1="21" x2="12" y2="23" />
+                      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                      <line x1="1" y1="12" x2="3" y2="12" />
+                      <line x1="21" y1="12" x2="23" y2="12" />
+                      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={theme === 'dark'}
+                    className={`app-header-menu-theme-bubble-btn ${theme === 'dark' ? 'active' : ''}`}
+                    onClick={() => { setTheme('dark'); setHeaderMenuOpen(false) }}
+                    title="Dark"
+                  >
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div className="app-header-menu-docs-version-row" role="presentation">
+                <a
+                  href="/docs"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="app-header-menu-item app-header-menu-docs-link"
+                  role="menuitem"
+                  onClick={() => setHeaderMenuOpen(false)}
+                >
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                    <path d="M8 7h8" />
+                    <path d="M8 11h8" />
+                  </svg>
+                  Docs
+                </a>
+                <button
+                  type="button"
+                  className="app-header-menu-version-icon"
+                  title={`UI build: ${UI_BUILD_LABEL}. Compare after deploy to detect cache or stale static files.`}
+                  aria-label={`UI build: ${UI_BUILD_LABEL}`}
+                >
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M4 7V4a2 2 0 0 1 2-2h4.5a2 2 0 0 1 1.6.8L14 6h4a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3" />
+                    <path d="M2 12h4" />
+                    <path d="M4 10v4" />
+                  </svg>
+                </button>
               </div>
             </div>
           )}
