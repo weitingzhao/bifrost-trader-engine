@@ -332,8 +332,10 @@ def get_account_sync_heartbeat(conn: Any) -> Optional[Dict[str, Any]]:
             row = cur.fetchone()
             if not row:
                 return None
+            # extract(epoch) may be Decimal from psycopg2; coerce for time arithmetic / JSON.
+            _lts = row[0]
             return {
-                "last_ts": row[0],
+                "last_ts": float(_lts) if _lts is not None else None,
                 "last_sync_version": row[1],
                 "accounts_synced": row[2],
                 "positions_synced": row[3],

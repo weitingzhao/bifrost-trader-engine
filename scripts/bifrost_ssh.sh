@@ -6,8 +6,8 @@
 # Bash 3.2 (macOS) + set -u: avoid expanding empty arrays with "${arr[@]}" — use length checks first.
 #
 # Interactive mode (no args, or -i/--interactive): SSH ControlMaster — SSH login once (unless using keys);
-# sudo password is kept in memory for the whole session (sudo -S) until quit or menu (5) Clear.
-# Menu (6) DB refresh / (7) lock release: choose Dev (local --dev) or Prod (remote --prod); no need to exit SSH.
+# sudo password is kept in memory for the whole session (sudo -S) until quit or menu tl2 Clear.
+# Menu db1 DB refresh / db2 lock release: choose Dev (local --dev) or Prod (remote --prod); no need to exit SSH.
 
 set -euo pipefail
 
@@ -78,7 +78,7 @@ BIFROST_STATUS_ROWS=(
   bifrost-agent
   bifrost-account-sync
 )
-# Remote --remote-services-status / menu (p): sectioned scan (see _cli_remote_services_systemd_scan); flat list for reference only.
+# Remote --remote-services-status / menu tl5: sectioned scan (see _cli_remote_services_systemd_scan); flat list for reference only.
 BIFROST_REMOTE_SCAN_UNITS=(
   bifrost-server bifrost-engine bifrost-celery
   "${BIFROST_HTTP_UNITS[@]}"
@@ -88,17 +88,20 @@ BIFROST_REMOTE_SCAN_UNITS=(
 )
 declare -a RESTART_UNITS=()
 
-# Interactive full-screen TUI: menu on top, last N lines of command output below.
+# Interactive full-screen TUI: menu on top, last N lines of command output below (menu o = full log).
 BIFROST_SSH_TUI=0
 BIFROST_SSH_LAST_LOG=""
-BIFROST_SSH_RESULT_LINES=20
+# Default tail height for Last output pane (override: export BIFROST_SSH_RESULT_LINES=N before running).
+BIFROST_SSH_RESULT_LINES="${BIFROST_SSH_RESULT_LINES:-20}"
+# When 1, Last output shows the entire session temp log; when 0, tail only (see BIFROST_SSH_LAST_OUTPUT_LINES after menu tl1).
+BIFROST_SSH_LAST_OUTPUT_FULL=0
 # Persistent deploy log — survives between sessions; overwritten on each deploy/pipeline run.
 BIFROST_PERSIST_DEPLOY_LOG="${PROJECT_ROOT}/logs/.bifrost-deploy-last.log"
-# MkDocs-only rsync log (menu m / --deploy-mkdocs); separate from application deploy.
+# MkDocs-only rsync log (menu tl6 / --deploy-mkdocs); separate from application deploy.
 BIFROST_PERSIST_MKDOCS_LOG="${PROJECT_ROOT}/logs/.bifrost-mkdocs-deploy-last.log"
-# TUI "Last output" tail count; after menu (4) systemd install set high so log + summaries fit (cleared on other menu keys).
+# TUI "Last output" tail count; after menu tl1 systemd install set high so log + summaries fit (cleared on other menu keys).
 BIFROST_SSH_LAST_OUTPUT_LINES=""
-# Interactive: systemd snapshot for header (menu 3 refreshes all bifrost-* on DEPLOY_HOST).
+# Interactive: systemd snapshot for header (menu s Status refreshes all bifrost-* on DEPLOY_HOST).
 BIFROST_INTERACTIVE_STATUS_RAW=""
 BIFROST_INTERACTIVE_STATUS_AT=""
 
@@ -327,7 +330,7 @@ _bifrost_status_paint_one_row() {
 # Paint units under the banner (grouped: Architecture / Account / Research / Feed / Socket Services / Daemon). Uses BIFROST_INTERACTIVE_STATUS_*.
 _interactive_paint_remote_status_block() {
   if [[ -z "${BIFROST_INTERACTIVE_STATUS_RAW:-}" ]]; then
-    echo "${C_DIM}  (Menu ${C_GREEN}3${C_DIM} loads systemd units from ${DEPLOY_HOST}; see Quick ${C_BOLD}a${C_DIM} = restart all HTTP APIs.)${C_RESET}"
+    echo "${C_DIM}  (Menu ${C_GREEN}s${C_DIM} Status loads systemd units from ${DEPLOY_HOST}; in ${C_BOLD}d${C_DIM} use ${C_BOLD}0${C_DIM} = restart all HTTP APIs.)${C_RESET}"
     return 0
   fi
   echo "${C_BLUE}${C_BOLD}  Units on ${DEPLOY_HOST}${C_RESET} ${C_DIM}· refreshed ${BIFROST_INTERACTIVE_STATUS_AT:-?}${C_RESET}"
@@ -353,24 +356,38 @@ _interactive_paint_remote_status_block() {
 
 _interactive_paint_main_menu() {
   echo "${C_BLUE}${C_BOLD}--- Main menu ---${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}1)${C_RESET} ${C_BOLD}systemctl:${C_RESET} same keys as Quick ${C_DIM}(1–3; ${C_BOLD}0${C_DIM}+action = all 9 HTTP; ${C_BOLD}a–d${C_DIM} = category; ${C_BOLD}h3 / 03${C_DIM} = restart all HTTP; ${C_BOLD}a3${C_DIM} = architecture+restart; words: all-stack, both, docs, massive, … — ${C_BOLD}Engine${C_DIM}: use Dashboard)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}2)${C_RESET} ${C_BOLD}Quick:${C_RESET} Deploy ${C_DIM}(${C_BOLD}0${C_DIM} = deploy+restart all 9 HTTP · ${C_BOLD}1–3${C_DIM} + optional ${C_BOLD}R${C_RESET}${C_DIM} · ${C_BOLD}a–d${C_DIM} architecture/account/research/feed + optional ${C_BOLD}R${C_RESET}${C_DIM} · ${C_BOLD}q${C_DIM} or empty = cancel)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}3)${C_RESET} ${C_BOLD}Status:${C_RESET} refresh ${C_DIM}(all bifrost units, summary above)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}4)${C_RESET} ${C_BOLD}systemd install:${C_RESET} ${C_DIM}local${C_RESET} render ${C_DIM}bifrost-status.conf${C_RESET} from prod YAML + rsync to host; ${C_DIM}remote${C_RESET} systemd register + copy nginx site + reload if nginx installed; ${C_DIM}repo unit list + summary like (3); widens Last output${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}5)${C_RESET} Clear stored sudo password"
-  echo "  ${C_GREEN}${C_BOLD}6)${C_RESET} ${C_BOLD}DB: Refresh schema${C_RESET} ${C_DIM}(choose Dev=local --dev or Prod=remote --prod; pg_ddl / script changes — stays in this menu)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}7)${C_RESET} ${C_BOLD}DB: Release locks${C_RESET} ${C_DIM}(choose Dev=local or Prod=remote; dry-run then optional terminate)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}9)${C_RESET} Reconnect SSH master ${C_DIM}(password again)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}l)${C_RESET} ${C_BOLD}Local Mac:${C_RESET} Socket ingest + Celery ${C_DIM}(pgrep + logs/.ops-ingest-*.pid on this repo)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}m)${C_RESET} ${C_BOLD}MkDocs site:${C_RESET} build + rsync ${C_DIM}site/ → ${DEPLOY_PATH}/site/ only ${C_RESET}${C_DIM}(handbook /mkdocs/; no APIs or DB)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}p)${C_RESET} ${C_BOLD}Remote Prod:${C_RESET} systemd scan on ${DEPLOY_HOST} ${C_DIM}(same units as deploy + worker@*)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}v)${C_RESET} ${C_BOLD}View last deploy log${C_RESET} ${C_DIM}(full output in less; saved to logs/.bifrost-deploy-last.log)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}r)${C_RESET} ${C_BOLD}Reboot services${C_RESET} ${C_DIM}(systemctl: 0 / 1–3 / a–d / h3 / words — Engine: Dashboard)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}d)${C_RESET} ${C_BOLD}Deploy${C_RESET} ${C_DIM}(${C_BOLD}0${C_DIM} = deploy+restart all 9 HTTP · ${C_BOLD}1–3${C_DIM}+optional ${C_BOLD}R${C_RESET}${C_DIM} · ${C_BOLD}a–d${C_DIM}+optional ${C_BOLD}R${C_RESET}${C_DIM} · ${C_BOLD}q${C_DIM} = cancel)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}s)${C_RESET} ${C_BOLD}Status:${C_RESET} refresh ${C_DIM}(all bifrost units, summary above)${C_RESET}"
+  echo "${C_DIM}  db — database${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}db1)${C_RESET} ${C_BOLD}Refresh schema${C_RESET} ${C_DIM}(Dev local / Prod remote)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}db2)${C_RESET} ${C_BOLD}Release locks${C_RESET} ${C_DIM}(dry-run then optional terminate)${C_RESET}"
+  echo "${C_DIM}  tl — tooling${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}tl1)${C_RESET} ${C_BOLD}systemd install:${C_RESET} ${C_DIM}render nginx + rsync; register units; widens Last output; summary like ${C_BOLD}r${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}tl2)${C_RESET} Clear stored sudo password"
+  echo "  ${C_GREEN}${C_BOLD}tl3)${C_RESET} Reconnect SSH master ${C_DIM}(password again)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}tl4)${C_RESET} ${C_BOLD}Local Mac:${C_RESET} Socket ingest + Celery ${C_DIM}(pgrep + pidfiles)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}tl5)${C_RESET} ${C_BOLD}Remote Prod:${C_RESET} systemd scan on ${DEPLOY_HOST} ${C_DIM}(bifrost-* + worker@*)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}tl6)${C_RESET} ${C_BOLD}MkDocs site:${C_RESET} build + rsync ${C_DIM}site/ → ${DEPLOY_PATH}/site/ ${C_RESET}${C_DIM}(no APIs or DB)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}o)${C_RESET} ${C_BOLD}Last output pane:${C_RESET} toggle ${C_DIM}full log vs last ${BIFROST_SSH_RESULT_LINES} lines${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}v)${C_RESET} ${C_BOLD}View last deploy log${C_RESET} ${C_DIM}(less; logs/.bifrost-deploy-last.log)${C_RESET}"
   echo "  ${C_YELLOW}${C_BOLD}q)${C_RESET} Quit"
 }
 
-# Pad with dim rows so the result area is always exactly _lim lines (_lim from BIFROST_SSH_LAST_OUTPUT_LINES or BIFROST_SSH_RESULT_LINES).
+# Bottom pane: either full session log or tail (default BIFROST_SSH_RESULT_LINES lines; widened by menu tl1 via BIFROST_SSH_LAST_OUTPUT_LINES). Menu o toggles full.
 _interactive_paint_result_block() {
   local _tmp _n line _lim
+  if [[ "${BIFROST_SSH_LAST_OUTPUT_FULL:-0}" == "1" ]]; then
+    echo "${C_BLUE}${C_BOLD}── Last output (full) ──${C_RESET}"
+    if [[ -f "${BIFROST_SSH_LAST_LOG}" ]] && [[ -s "${BIFROST_SSH_LAST_LOG}" ]]; then
+      while IFS= read -r line || [[ -n "${line}" ]]; do
+        _colorize_line "${line}"
+      done <"${BIFROST_SSH_LAST_LOG}"
+    else
+      echo "${C_DIM}(empty)${C_RESET}"
+    fi
+    return 0
+  fi
   _lim="${BIFROST_SSH_LAST_OUTPUT_LINES:-${BIFROST_SSH_RESULT_LINES}}"
   echo "${C_BLUE}${C_BOLD}── Last output (last ${_lim} lines) ──${C_RESET}"
   _tmp="$(mktemp -t bifrost_ssh_tui)"
@@ -413,13 +430,14 @@ Usage (from repo root):
   ./scripts/bifrost_ssh.sh --interactive
   ./scripts/bifrost_ssh.sh --password 'REMOTE_SUDO_SECRET' -i
       Interactive menu: open one SSH master (login once; kept until you quit), then run operations in a loop;
-      sudo password you enter (or -p) is kept in memory for every menu action until quit or menu (5) Clear.
-      Main menu stays on top; last command output is shown in the bottom pane (20 lines by default; wider after menu 4 systemd install). Same flags as below.
-      Menu (3) Status refreshes units grouped by category + Socket Services + Daemon (no bifrost-celery; use Ops UI). Menu (4) systemd install appends repo unit file list + the same unit summary as (3). Quick deploy: 0 = deploy+restart all 9 HTTP APIs; 1–3 = single units (Engine not in this script — use Dashboard); a–d = category; q or empty = cancel.
-      Menu (4) Install systemd: locally render deploy/nginx/bifrost-status.conf from merged prod YAML, rsync it to the server, then register deploy/systemd/*.service + *.target (sudo); install nginx site from that file + nginx -t + reload when nginx is present.
-      Menu (l) Local Mac: pgrep run_massive_ws / IB ingest / IB operator / run_celery + check logs/.ops-ingest-*.pid (this machine; not SSH).
-      Menu (m) MkDocs: mkdocs build + rsync site/ to DEPLOY_PATH only (no app/DB/systemctl; nginx serves /mkdocs/).
-      Menu (p) Remote Prod: systemctl scan on DEPLOY_HOST (bifrost-* units + socket ingest + bifrost-celery-worker@*); use --password if systemctl needs sudo.
+      sudo password you enter (or -p) is kept in memory for every menu action until quit or menu tl2 Clear.
+      Main menu stays on top; last command output is shown in the bottom pane (20 lines by default; wider after tl1 systemd install; menu o toggles full log vs tail). Same flags as below.
+      Keys: r Reboot services · d Deploy · s Status · db1/db2 schema & locks · tl1–tl6 tooling (nginx/ssh/local remote/MkDocs) · o/v/q.
+      Menu s Status refreshes units grouped by category + Socket Services + Daemon (no bifrost-celery; use Ops UI). Menu tl1 appends repo unit file list + same summary as s. Deploy d: 0 = deploy+restart all 9 HTTP APIs; 1–3 = single units (Engine: Dashboard); a–d = category; q or empty = cancel.
+      Menu tl1 Install systemd: locally render deploy/nginx/bifrost-status.conf from merged prod YAML, rsync it to the server, then register deploy/systemd/*.service + *.target (sudo); install nginx site from that file + nginx -t + reload when nginx is present.
+      Menu tl4 Local Mac: pgrep run_massive_ws / IB ingest / IB operator / run_celery + check logs/.ops-ingest-*.pid (this machine; not SSH).
+      Menu tl6 MkDocs: mkdocs build + rsync site/ to DEPLOY_PATH only (no app/DB/systemctl; nginx serves /mkdocs/).
+      Menu tl5 Remote Prod: systemctl scan on DEPLOY_HOST (bifrost-* units + socket ingest + bifrost-celery-worker@*); use --password if systemctl needs sudo.
       CLI: --local-mac-services | --remote-services-status | --deploy-mkdocs
       With --password / -p (or env DEPLOY_SUDO_PASSWORD), skip the sudo password prompt; value is
       kept in memory only for this process. Warning: --password may be visible in process listings.
@@ -464,7 +482,7 @@ Usage (from repo root):
     --migrate                   with --deploy or --deploy-only: run db_refresh_schema.py --prod on remote
     --sync-prod-config          with deploy: also rsync config/config.prod.yaml (overwrites remote)
 
-    --db-refresh                Remote ${DEPLOY_PATH}: python scripts/db_refresh_schema.py --prod (no rsync). Interactive menu (6) Prod.
+    --db-refresh                Remote ${DEPLOY_PATH}: python scripts/db_refresh_schema.py --prod (no rsync). Interactive menu db1 Prod.
     --db-refresh-dev            This machine (repo root): python scripts/db_refresh_schema.py --dev (local .venv if present).
     --db-release-locks          Remote: db_release_dblock.py --prod --dry-run.
     --db-release-locks-dev      Local: db_release_dblock.py --dev --dry-run.
@@ -487,7 +505,7 @@ Usage (from repo root):
                                   Socket Services (massive-ws, ib-operator, ib-ingestor, ib-account-agent); list bifrost-celery-worker@*.
                                   Optional --password if remote systemctl requires sudo.
 
-    --install-systemd-units       Same as interactive menu (4): on this machine run scripts/render_nginx_status_conf.py with merged
+    --install-systemd-units       Same as interactive menu tl1: on this machine run scripts/render_nginx_status_conf.py with merged
                                   config/config.prod.yaml, then rsync deploy/nginx/bifrost-status.conf to the server. Remote: register
                                   deploy/systemd/*.service and *.target, daemon-reload, copy nginx site, nginx -t, reload when nginx
                                   exists. One-shot; no other flags. Sync unit files first if needed (e.g. --deploy-only).
@@ -504,6 +522,7 @@ Usage (from repo root):
     DEPLOY_USER   (default vision)
     DEPLOY_PATH   (default /home/vision/bifrost-trader-engine)
     DEPLOY_SUDO_PASSWORD  optional; same effect as --password (skips interactive sudo prompt)
+    BIFROST_SSH_RESULT_LINES  optional; interactive TUI only — default tail height for Last output pane (default 20)
 
 Examples:
 
@@ -1094,11 +1113,11 @@ REMOTE_EOF
 }
 
 # Interactive: rsync --delete + remote build; optional systemctl restart.
-# Keys align with menu (1) systemctl unit legend: 0=all HTTP restart, 1–3=single units (no Engine — use Dashboard), a–d=categories; R suffix = restart after deploy.
+# Keys align with main menu r (Reboot services) unit legend: 0=all HTTP restart, 1–3=single units (no Engine — use Dashboard), a–d=categories; R suffix = restart after deploy.
 _interactive_quick_deploy() {
   local _raw _norm _digit _ltr _want_r _qd_ec
   echo ""
-  echo "${C_BLUE}${C_BOLD}--- Quick: Deploy ---${C_RESET}"
+  echo "${C_BLUE}${C_BOLD}--- Deploy ---${C_RESET}"
   _msg_info "Remote: rsync --delete + venv pip + npm build (includes React SPA / Dashboard). Append R after 1–3 or a–d to restart those units after deploy."
   echo "  ${C_GREEN}0${C_RESET} deploy + restart ${C_BOLD}all 9 HTTP${C_RESET} ${C_DIM}APIs${C_RESET}"
   echo "  ${C_GREEN}1${C_RESET} agent  ${C_GREEN}2${C_RESET} monitor  ${C_GREEN}3${C_RESET} ops"
@@ -1380,7 +1399,7 @@ _interactive_pick_db_env() {
   esac
 }
 
-# Refresh BIFROST_INTERACTIVE_STATUS_* from DEPLOY_HOST (same units as menu 3 banner / --status grouping).
+# Refresh BIFROST_INTERACTIVE_STATUS_* from DEPLOY_HOST (same units as menu s Status banner / --status grouping).
 _bifrost_interactive_capture_remote_status() {
   local _raw _ec
   _bifrost_restore_session_sudo
@@ -1393,7 +1412,7 @@ _bifrost_interactive_capture_remote_status() {
   return "${_ec}"
 }
 
-# Interactive menu 3: systemd units on DEPLOY_HOST; store summary for banner (no sub-prompt).
+# Interactive menu s (Status): systemd units on DEPLOY_HOST; store summary for banner (no sub-prompt).
 _interactive_show_status() {
   local _ec
   _msg_info "Fetching status (all bifrost units) on ${DEPLOY_HOST} …"
@@ -1410,7 +1429,7 @@ _interactive_show_status() {
   return 0
 }
 
-# Interactive menu 6: db_refresh_schema.py --dev (local) or --prod (remote).
+# Interactive menu db1: db_refresh_schema.py --dev (local) or --prod (remote).
 _interactive_db_refresh_schema() {
   local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
   local _ec _env
@@ -1435,7 +1454,7 @@ _interactive_db_refresh_schema() {
 set -euo pipefail
 cd "$DEPLOY_PATH"
 if [[ ! -f .venv/bin/activate ]]; then
-  echo "ERROR: .venv missing on remote. Run Quick deploy (menu 2) once to create venv and sync code." >&2
+  echo "ERROR: .venv missing on remote. Run Deploy (menu d) once to create venv and sync code." >&2
   exit 1
 fi
 # shellcheck source=/dev/null
@@ -1454,7 +1473,7 @@ REMOTE_DB_REFRESH_EOF
   return 0
 }
 
-# Interactive menu 7: db_release_dblock.py --dev (local) or --prod (remote); dry-run then optional --yes.
+# Interactive menu db2: db_release_dblock.py --dev (local) or --prod (remote); dry-run then optional --yes.
 _interactive_db_release_locks() {
   local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
   local _ec _ans _env _term_q
@@ -1479,7 +1498,7 @@ _interactive_db_release_locks() {
 set -euo pipefail
 cd "$DEPLOY_PATH"
 if [[ ! -f .venv/bin/activate ]]; then
-  echo "ERROR: .venv missing on remote. Run Quick deploy (menu 2) first." >&2
+  echo "ERROR: .venv missing on remote. Run Deploy (menu d) first." >&2
   exit 1
 fi
 # shellcheck source=/dev/null
@@ -1806,7 +1825,7 @@ _bifrost_append_deploy_systemd_files_summary_to_log() {
   rm -f "${_tmp}"
 }
 
-# Interactive menu 4: install systemd unit files from synced repo.
+# Interactive menu tl1: install systemd unit files from synced repo.
 _interactive_install_systemd_units() {
   local _ec _sum_ec _lc
   _bifrost_restore_session_sudo
@@ -1823,7 +1842,7 @@ _interactive_install_systemd_units() {
   if [[ -n "${BIFROST_SSH_LAST_LOG:-}" ]]; then
     _bifrost_append_deploy_systemd_files_summary_to_log "${BIFROST_SSH_LAST_LOG}"
   fi
-  _msg_info "systemd install finished (exit ${_ec}). Fetching unit summary (same as menu 3) …"
+  _msg_info "systemd install finished (exit ${_ec}). Fetching unit summary (same as menu s Status) …"
   echo ""
   _bifrost_interactive_capture_remote_status
   _sum_ec=$?
@@ -1852,7 +1871,7 @@ _interactive_install_systemd_units() {
 }
 
 # Map token -> bifrost unit name, ALL*, or CAT_*.
-# Digits 1–3 match Quick Deploy / systemctl legend: 1=agent 2=bifrost-server 3=bifrost-ops (bifrost-engine: Dashboard only). Letters a–d = HTTP categories.
+# Digits 1–3 match Deploy / Reboot services legend: 1=agent 2=bifrost-server 3=bifrost-ops (bifrost-engine: Dashboard only). Letters a–d = HTTP categories.
 _interactive_map_unit_token() {
   case "$1" in
     0) echo ALL_HTTP ;;
@@ -1887,11 +1906,11 @@ _interactive_map_action_token() {
   esac
 }
 
-# Interactive: systemctl — same unit keys as Quick Deploy (1–3, 0=all HTTP, a–d categories) plus words (all-stack, massive, …).
+# Interactive: systemctl — same unit keys as Deploy (1–3, 0=all HTTP, a–d categories) plus words (all-stack, massive, …).
 _interactive_systemctl_one_service() {
   local _unit _act _t1 _t2 _u _a _line_lower _hx _digits _d1 _d2 _cl _ac_digit _cn _sc_ec
   echo ""
-  echo "${C_BLUE}${C_BOLD}--- systemctl (one unit or all) ---${C_RESET}"
+  echo "${C_BLUE}${C_BOLD}--- Reboot services ---${C_RESET}"
   _msg_info "Enter unit + action on one line (examples below)."
   echo "  ${C_GREEN}Units:${C_RESET}  ${C_DIM}1${C_RESET} agent  ${C_DIM}2${C_RESET} monitor  ${C_DIM}3${C_RESET} ops"
   echo "  ${C_GREEN}0${C_RESET} all 9 HTTP APIs  ${C_DIM}(same as apis / h3)${C_RESET}  ·  ${C_GREEN}a–d${C_RESET} architecture / account / research / feed"
@@ -2096,9 +2115,9 @@ interactive_mode() {
     SUDO_PASSWORD="${SUDO_PASSWORD//$'\r'/}"
     echo ""
     if [[ -z "${SUDO_PASSWORD}" ]]; then
-      _msg_info "No sudo password stored — you will be prompted for sudo when a step runs systemctl (e.g. Quick deploy with R)."
+      _msg_info "No sudo password stored — you will be prompted for sudo when a step runs systemctl (e.g. Deploy d with R)."
     else
-      _msg_info "sudo password kept in memory for this session (all menu actions) until you quit or choose (5) Clear."
+      _msg_info "sudo password kept in memory for this session (all menu actions) until you quit or choose tl2 Clear."
     fi
   fi
   if [[ -n "${SUDO_PASSWORD}" ]]; then
@@ -2107,37 +2126,26 @@ interactive_mode() {
 
   while true; do
     _interactive_paint_full
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-7|9|l|m|p|v|q]${C_RESET} "
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[r d s db1 db2 tl1 tl2 tl3 tl4 tl5 tl6 o v q]${C_RESET} "
     read -r _ch
+    _ch=$(echo "${_ch}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')
     case "${_ch}" in
-      1)
+      db1)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
-        _interactive_systemctl_one_service
+        _interactive_db_refresh_schema
         ;;
-      2)
+      db2)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
-        _interactive_quick_deploy
+        _interactive_db_release_locks
         ;;
-      3)
-        BIFROST_SSH_LAST_OUTPUT_LINES=""
-        _interactive_show_status
-        ;;
-      4) _interactive_install_systemd_units ;;
-      5)
+      tl1) _interactive_install_systemd_units ;;
+      tl2)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
         SUDO_PASSWORD=""
         BIFROST_SESSION_SUDO_PASSWORD=""
         echo "[INFO] Stored sudo password cleared." >"${BIFROST_SSH_LAST_LOG}"
         ;;
-      6)
-        BIFROST_SSH_LAST_OUTPUT_LINES=""
-        _interactive_db_refresh_schema
-        ;;
-      7)
-        BIFROST_SSH_LAST_OUTPUT_LINES=""
-        _interactive_db_release_locks
-        ;;
-      9)
+      tl3)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
         _msg_info "Reconnecting SSH (output streams below; may take a few seconds)…"
         echo ""
@@ -2152,11 +2160,7 @@ interactive_mode() {
           echo "--- exit code: ${_rc9} ---"
         } >>"${BIFROST_SSH_LAST_LOG}"
         ;;
-      8)
-        BIFROST_SSH_LAST_OUTPUT_LINES=""
-        echo "[WARN] systemd install is now menu 4 (not 8)." >"${BIFROST_SSH_LAST_LOG}"
-        ;;
-      l|L)
+      tl4)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
         set +e
         _cli_local_mac_subprocess_check 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
@@ -2167,11 +2171,7 @@ interactive_mode() {
           echo "--- exit code: ${_ec_l} ---"
         } >>"${BIFROST_SSH_LAST_LOG}"
         ;;
-      m|M)
-        BIFROST_SSH_LAST_OUTPUT_LINES=""
-        _interactive_deploy_mkdocs
-        ;;
-      p|P)
+      tl5)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
         _bifrost_restore_session_sudo
         set +e
@@ -2183,7 +2183,30 @@ interactive_mode() {
           echo "--- exit code: ${_ec_p} ---"
         } >>"${BIFROST_SSH_LAST_LOG}"
         ;;
-      v|V)
+      tl6|mkdocs)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        _interactive_deploy_mkdocs
+        ;;
+      r)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        _interactive_systemctl_one_service
+        ;;
+      d)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        _interactive_quick_deploy
+        ;;
+      s)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        _interactive_show_status
+        ;;
+      o)
+        if [[ "${BIFROST_SSH_LAST_OUTPUT_FULL:-0}" == "1" ]]; then
+          BIFROST_SSH_LAST_OUTPUT_FULL=0
+        else
+          BIFROST_SSH_LAST_OUTPUT_FULL=1
+        fi
+        ;;
+      v)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
         if [[ -f "${BIFROST_PERSIST_DEPLOY_LOG}" ]] && [[ -s "${BIFROST_PERSIST_DEPLOY_LOG}" ]]; then
           if command -v less >/dev/null 2>&1; then
@@ -2192,18 +2215,38 @@ interactive_mode() {
             cat "${BIFROST_PERSIST_DEPLOY_LOG}"
           fi
         else
-          echo "[INFO] No deploy log saved yet. Run a deploy first (menu 2)." >"${BIFROST_SSH_LAST_LOG}"
+          echo "[INFO] No deploy log saved yet. Run Deploy (menu d) first." >"${BIFROST_SSH_LAST_LOG}"
         fi
         ;;
-      q|Q)
+      q|quit)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
         echo "[INFO] Bye." >"${BIFROST_SSH_LAST_LOG}"
         _interactive_paint_full
         break
         ;;
+      8)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        echo "[WARN] systemd install is now menu tl1 (not 8)." >"${BIFROST_SSH_LAST_LOG}"
+        ;;
+      1|2|3|4|5|6|7|9)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        echo "[WARN] Main menu no longer uses numbers — use r d s db1 db2 tl1–tl6 o v q (see menu above)." >"${BIFROST_SSH_LAST_LOG}"
+        ;;
+      l)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        echo "[INFO] Local Mac scan is now tl4 (not l)." >"${BIFROST_SSH_LAST_LOG}"
+        ;;
+      p)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        echo "[INFO] Remote Prod scan is now tl5 (not p)." >"${BIFROST_SSH_LAST_LOG}"
+        ;;
+      m)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        echo "[INFO] MkDocs deploy is now tl6 (not m)." >"${BIFROST_SSH_LAST_LOG}"
+        ;;
       *)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
-        echo "[WARN] Unknown choice — try 1–7, 9, l, m, p, v, or q. (systemd install = 4; MkDocs = m; view deploy log = v)" >"${BIFROST_SSH_LAST_LOG}"
+        echo "[WARN] Unknown choice — try r d s db1 db2 tl1 tl2 tl3 tl4 tl5 tl6 o v q. (db*=database · tl1=systemd/nginx · tl6=MkDocs · o=full Last output · v=deploy log)" >"${BIFROST_SSH_LAST_LOG}"
         ;;
     esac
   done

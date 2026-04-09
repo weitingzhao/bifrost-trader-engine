@@ -239,6 +239,14 @@ server {
         proxy_read_timeout 86400s;
     }
 
+    location = /mkdocs {
+        return 301 /mkdocs/;
+    }
+    location ^~ /mkdocs/ {
+        alias /home/vision/bifrost-trader-engine/site/;
+        index index.html;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:8711;
         proxy_http_version 1.1;

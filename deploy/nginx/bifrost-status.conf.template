@@ -263,6 +263,10 @@ server {
 
     # MkDocs static site (build: mkdocs build -f mkdocs.prod.yml; output site/). Path must match mkdocs.prod.yml site_url.
     # If DEPLOY_PATH on the server is not /home/vision/bifrost-trader-engine, adjust alias to …/site/ and reload nginx.
+    # Without trailing slash, prefix location /mkdocs/ does not match — redirect to /mkdocs/ so requests do not fall through to Monitor (JSON 404).
+    location = /mkdocs {
+        return 301 /mkdocs/;
+    }
     location ^~ /mkdocs/ {
         alias /home/vision/bifrost-trader-engine/site/;
         index index.html;

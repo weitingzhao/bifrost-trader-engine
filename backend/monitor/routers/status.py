@@ -688,7 +688,9 @@ def get_status(request: Request) -> Dict[str, Any]:
         account_sync_block: Optional[Dict[str, Any]] = None
         if account_sync_hb is not None:
             _as_last_ts = account_sync_hb.get("last_ts")
-            _as_alive = _as_last_ts is not None and (time.time() - _as_last_ts) < 35
+            _as_alive = _as_last_ts is not None and (
+                time.time() - float(_as_last_ts)
+            ) < 35
             account_sync_block = {
                 "heartbeat": {
                     "last_ts": _as_last_ts,
