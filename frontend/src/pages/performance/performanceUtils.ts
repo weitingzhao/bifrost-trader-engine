@@ -75,10 +75,10 @@ export function executionLegPnlToneClass(e: Execution, ep: number): string {
 }
 
 /**
- * On-the-fly STK row: Total = quantity × price (no contract multiplier).
- * Same display convention as option leg PnL: BUY shows signed outflow, SELL shows abs(inflow).
+ * On-the-fly STK row: per-fill “Unrealized PnL” column = quantity × price (no multiplier).
+ * Sign: BUY positive, SELL negative — differs from OPT leg cash-flow display.
  */
-export function stockFillTotalDisplay(e: Execution): number | null {
+export function stockOnTheFlyUnrealizedPnlLeg(e: Execution): number | null {
   if ((e.sec_type ?? '').toUpperCase() !== 'STK') return null
   const q = Math.abs(Number(e.quantity) || 0)
   const p = Number(e.price) || 0
@@ -86,10 +86,10 @@ export function stockFillTotalDisplay(e: Execution): number | null {
   const s = (e.side ?? '').toString().trim().toUpperCase()
   const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
   const isSell = s === 'SELL' || s === 'SLD' || s === 'S'
-  const raw = isBuy ? -q * p : isSell ? q * p : q * p
-  if (isSell) return Math.abs(raw)
-  if (isBuy) return raw
-  return raw
+  const gross = q * p
+  if (isBuy) return gross
+  if (isSell) return -gross
+  return gross
 }
 
 export function matchPnl(p: { quantity: number; c_side: string; p_side: string; c_price: number; p_price: number; commission: number }): number {
@@ -579,8 +579,39 @@ export function computeDayRealizedUnrealizedStock(
         if (remaining > 0) sellQueue.push({ q: remaining, p, c: (remaining / q) * comm })
       }
     }
-    for (const b of buyQueue) totalUnrealized += -b.q * b.p - b.c
-    for (const s of sellQueue) totalUnrealized += s.q * s.p - s.c
+    // STK unrealized sign (opposite of option cash-flow leg): open long (remaining buys) = positive cost basis;
+    // open short (remaining sells) = negative obligation.
+    for (const b of buyQueue) totalUnrealized += b.q * b.p + b.c
+    for (const s of sellQueue) totalUnrealized += -s.q * s.p + s.c
   }
   return { realized: totalRealized, unrealized: totalUnrealized }
+}
+
+/**
+ * Per Chicago calendar day for STK: **realized** = increment in cumulative FIFO realized PnL (closes attributed to
+ * the day the offsetting fill occurs); **unrealized** = end-of-day open position (same sign as
+ * {@link computeDayRealizedUnrealizedStock}).
+ * `execs` must include all STK fills from the same lookback window as the drill-down (through end of `dateStr`).
+ */
+export function computeStockDayPnLForPerformanceDate(
+  dateStr: string,
+  execs: Execution[],
+  sortExec: (a: Execution, b: Execution) => number = sortExecByExecutionDateThenTime,
+): { realized: number; unrealized: number } {
+  const stk = execs.filter((e) => (e.sec_type ?? '').toUpperCase() === 'STK')
+  const throughDay = stk.filter((e) => {
+    const d = executionDateStr(e)
+    return d !== '' && d <= dateStr
+  })
+  const throughPrev = stk.filter((e) => {
+    const d = executionDateStr(e)
+    return d !== '' && d < dateStr
+  })
+  const endDay = computeDayRealizedUnrealizedStock(throughDay, sortExec)
+  const endPrev =
+    throughPrev.length === 0 ? { realized: 0, unrealized: 0 } : computeDayRealizedUnrealizedStock(throughPrev, sortExec)
+  return {
+    realized: endDay.realized - endPrev.realized,
+    unrealized: endDay.unrealized,
+  }
 }

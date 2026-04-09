@@ -8,10 +8,15 @@
 
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
 import type { SystemMessage } from '../types'
+import {
+  SYSTEM_MESSAGE_TOAST_VISIBLE_MS,
+  getMessageLifeCompact,
+  getMessageLifeCompactAria,
+  needsLifecycleCountdownTick,
+} from '../utils/systemMessageLifecycle'
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
-const TOAST_TTL_MS = 10_000
 const MAX_VISIBLE_TOASTS = 5
 
 // ─── label helpers ───────────────────────────────────────────────────────────
@@ -20,6 +25,7 @@ const SVC_LABELS: Record<string, string> = {
   ib_operator: 'Operator',
   ib_ingestor: 'Ingestor',
   ib_account_agent: 'Acct Agent',
+  portfolio_flex: 'Flex',
 }
 const SLOT_LABELS: Record<string, string> = { host: 'Host', secondary: 'Secondary' }
 const STATUS_LABELS: Record<string, string> = {
@@ -58,6 +64,7 @@ function relTime(occurred_at: number) {
 
 interface ToastProps {
   msg: SystemMessage
+  nowMs: number
   onClose: () => void
 }
 function truncateDetail(s: string, maxLen: number) {
@@ -66,11 +73,12 @@ function truncateDetail(s: string, maxLen: number) {
   return `${t.slice(0, maxLen)}…`
 }
 
-function Toast({ msg, onClose }: ToastProps) {
+function Toast({ msg, nowMs, onClose }: ToastProps) {
   const statusText = msg.status_to ? statusLabel(msg.status_to) : msg.title
   const slotText = msg.slot ? slotLabel(msg.slot) : ''
   const showDetail =
     Boolean(msg.message && msg.message.trim()) && msg.topic && msg.topic !== 'ib.connection'
+  const life = getMessageLifeCompact(msg, nowMs)
   return (
     <div className={`msc-toast level-${msg.level}`} role="alert">
       <span className={`msc-lamp ${lampClass(msg.level)}`} aria-hidden />
@@ -82,6 +90,9 @@ function Toast({ msg, onClose }: ToastProps) {
         {showDetail && (
           <span className="msc-toast-detail">{truncateDetail(msg.message, 140)}</span>
         )}
+        <span className="msc-message-life" aria-label={getMessageLifeCompactAria(life)}>
+          {life}
+        </span>
       </span>
       <button type="button" className="msc-close-btn" onClick={onClose} aria-label="Dismiss notification">
         ×
@@ -92,12 +103,14 @@ function Toast({ msg, onClose }: ToastProps) {
 
 interface DrawerItemProps {
   msg: SystemMessage
+  nowMs: number
   onDismiss: () => void
 }
-function DrawerItem({ msg, onDismiss }: DrawerItemProps) {
+function DrawerItem({ msg, nowMs, onDismiss }: DrawerItemProps) {
   const statusText = msg.status_to ? statusLabel(msg.status_to) : msg.title
   const slotText = msg.slot ? slotLabel(msg.slot) : ''
   const detail = msg.message && msg.message.trim() ? msg.message.trim() : ''
+  const life = getMessageLifeCompact(msg, nowMs)
   return (
     <div className={`msc-drawer-item level-${msg.level}`}>
       <span className={`msc-lamp ${lampClass(msg.level)}`} aria-hidden />
@@ -110,7 +123,12 @@ function DrawerItem({ msg, onDismiss }: DrawerItemProps) {
         </div>
         {detail && <div className="msc-drawer-item-detail">{detail}</div>}
         {msg.reason && <div className="msc-drawer-item-reason">{msg.reason}</div>}
-        <div className="msc-drawer-item-time">{relTime(Number(msg.occurred_at))}</div>
+        <div className="msc-drawer-item-time-row">
+          <span className="msc-drawer-item-time">{relTime(Number(msg.occurred_at))}</span>
+          <span className="msc-message-life" aria-label={getMessageLifeCompactAria(life)}>
+            {life}
+          </span>
+        </div>
       </div>
       <button type="button" className="msc-close-btn msc-drawer-item-dismiss" onClick={onDismiss} aria-label="Dismiss">
         ×
@@ -162,13 +180,20 @@ export const MessageCenter = forwardRef<MessageCenterHandle, MessageCenterProps>
     useEffect(() => {
       const now = Date.now()
       const active = messages.filter(
-        (m) => !dismissedIds.has(m.message_id) && now - Number(m.occurred_at) * 1000 < TOAST_TTL_MS,
+        (m) => !dismissedIds.has(m.message_id) && now - Number(m.occurred_at) * 1000 < SYSTEM_MESSAGE_TOAST_VISIBLE_MS,
       )
       if (active.length === 0) return
       const earliest = Math.min(...active.map((m) => Number(m.occurred_at) * 1000))
-      const delay = Math.max(100, earliest + TOAST_TTL_MS - now)
+      const delay = Math.max(100, earliest + SYSTEM_MESSAGE_TOAST_VISIBLE_MS - now)
       const t = setTimeout(() => forceUpdateRef.current(), delay)
       return () => clearTimeout(t)
+    }, [messages, dismissedIds])
+
+    // Per-second tick while banner or IB auto-dismiss countdown is active
+    useEffect(() => {
+      if (!needsLifecycleCountdownTick(messages, dismissedIds)) return
+      const id = setInterval(() => forceUpdateRef.current(), 1000)
+      return () => clearInterval(id)
     }, [messages, dismissedIds])
 
     // Refresh relative timestamps every 30 s while drawer is open
@@ -185,7 +210,7 @@ export const MessageCenter = forwardRef<MessageCenterHandle, MessageCenterProps>
       .filter((m) => !dismissedIds.has(m.message_id))
       .sort((a, b) => Number(b.occurred_at) - Number(a.occurred_at))
     const toastMessages = messages
-      .filter((m) => !dismissedIds.has(m.message_id) && now - Number(m.occurred_at) * 1000 < TOAST_TTL_MS)
+      .filter((m) => !dismissedIds.has(m.message_id) && now - Number(m.occurred_at) * 1000 < SYSTEM_MESSAGE_TOAST_VISIBLE_MS)
       .sort((a, b) => Number(b.occurred_at) - Number(a.occurred_at))
       .slice(0, MAX_VISIBLE_TOASTS)
 
@@ -197,7 +222,7 @@ export const MessageCenter = forwardRef<MessageCenterHandle, MessageCenterProps>
         {toastMessages.length > 0 && (
           <div className="msc-toast-stack" aria-live="polite" aria-atomic="false" role="region" aria-label="System notifications">
             {toastMessages.map((msg) => (
-              <Toast key={msg.message_id} msg={msg} onClose={() => onDismiss(msg.message_id)} />
+              <Toast key={msg.message_id} msg={msg} nowMs={now} onClose={() => onDismiss(msg.message_id)} />
             ))}
           </div>
         )}
@@ -249,6 +274,7 @@ export const MessageCenter = forwardRef<MessageCenterHandle, MessageCenterProps>
                     <DrawerItem
                       key={msg.message_id}
                       msg={msg}
+                      nowMs={now}
                       onDismiss={() => onDismiss(msg.message_id)}
                     />
                   ))

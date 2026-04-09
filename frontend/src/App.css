@@ -693,6 +693,20 @@ body::before {
   overflow: hidden;
 }
 
+/* totalSec/remainingSec (e.g. 10/7, 30/12, -/-) */
+.msc-message-life {
+  flex: 1 1 100%;
+  margin-top: 4px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+}
+
 .msc-toast-svc {
   font-weight: 700;
   color: var(--color-text-main);
@@ -901,11 +915,25 @@ body::before {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.msc-drawer-item-time-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 3px;
+}
 .msc-drawer-item-time {
   font-size: 10px;
   color: var(--color-text-dim);
-  margin-top: 3px;
+  margin-top: 0;
   font-variant-numeric: tabular-nums;
+  min-width: 0;
+}
+.msc-drawer-item-time-row .msc-message-life {
+  flex: 0 0 auto;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
 
 .msc-drawer-item-dismiss {
@@ -10415,6 +10443,11 @@ th {
 /* STK on-the-fly aggregate: unrealized uses orange (warning), not green/red PnL */
 .performance-page .performance-on-the-fly-summary-kv strong.performance-on-the-fly-stk-unrealized.tone-unrealized {
   color: var(--color-warning);
+}
+
+/* STK on-the-fly table: per-row Unrealized PnL leg (QTY×PRICE) — yellow */
+.performance-page .performance-on-the-fly-table td.performance-on-the-fly-stk-table-unreal-pnl.tone-unrealized {
+  color: var(--color-lamp-yellow);
 }
 
 .performance-page .performance-on-the-fly-hint {

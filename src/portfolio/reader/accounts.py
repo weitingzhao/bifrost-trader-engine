@@ -542,7 +542,9 @@ def write_account_executions_to_db(
     """R-A2: 写入执行记录到 account_executions；CommissionReport 写入 account_execution_commissions。按 exec_id 去重。
 
     If ``stats_out`` is provided, it is cleared and filled with TWS raw table stats (executions_raw_tws only):
-    ``tws_raw_inserted``, ``tws_raw_skipped_duplicate``, ``tws_raw_missing_table`` (bool).
+    ``tws_raw_inserted``, ``tws_raw_skipped_duplicate``, ``tws_raw_missing_table`` (bool),
+    ``tws_raw_inserted_ids``, ``tws_raw_updated_ids`` (always empty for TWS; flex uses upsert elsewhere),
+    ``tws_raw_skipped_ids`` (existing ``executions_raw_tws_id`` when ``exec_id`` was duplicate).
     """
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
@@ -551,6 +553,9 @@ def write_account_executions_to_db(
         stats_out["tws_raw_inserted"] = 0
         stats_out["tws_raw_skipped_duplicate"] = 0
         stats_out["tws_raw_missing_table"] = False
+        stats_out["tws_raw_inserted_ids"] = []
+        stats_out["tws_raw_updated_ids"] = []
+        stats_out["tws_raw_skipped_ids"] = []
     try:
         params = _get_conn_params(status_config)
         conn = psycopg2.connect(**params)
@@ -830,31 +835,56 @@ def write_account_executions_to_db(
                                     vals,
                                 )
                             else:
+                                _ret = (
+                                    "\nRETURNING executions_raw_tws_id"
+                                    if raw_table == "executions_raw_tws"
+                                    else ""
+                                )
                                 cur.execute(
                                     f"""
                                     INSERT INTO {raw_table} ({cols})
                                     VALUES ({placeholders})
-                                    ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != '' DO NOTHING
+                                    ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != '' DO NOTHING{_ret}
                                     """,
                                     vals,
                                 )
                                 if stats_out is not None and raw_table == "executions_raw_tws":
-                                    rc = int(cur.rowcount or 0)
-                                    if rc >= 1:
+                                    ins_row = cur.fetchone()
+                                    if ins_row and ins_row[0] is not None:
                                         stats_out["tws_raw_inserted"] += 1
+                                        stats_out["tws_raw_inserted_ids"].append(int(ins_row[0]))
                                     else:
                                         stats_out["tws_raw_skipped_duplicate"] += 1
+                                        cur.execute(
+                                            """
+                                            SELECT executions_raw_tws_id
+                                            FROM executions_raw_tws
+                                            WHERE exec_id = %s
+                                            LIMIT 1
+                                            """,
+                                            (exec_id,),
+                                        )
+                                        sk = cur.fetchone()
+                                        if sk and sk[0] is not None:
+                                            stats_out["tws_raw_skipped_ids"].append(int(sk[0]))
                         else:
+                            _ret_ins = (
+                                "\nRETURNING executions_raw_tws_id"
+                                if raw_table == "executions_raw_tws"
+                                else ""
+                            )
                             cur.execute(
                                 f"""
                                 INSERT INTO {raw_table} ({cols})
-                                VALUES ({placeholders})
+                                VALUES ({placeholders}){_ret_ins}
                                 """,
                                 vals,
                             )
                             if stats_out is not None and raw_table == "executions_raw_tws":
-                                if int(cur.rowcount or 0) >= 1:
+                                ins_row = cur.fetchone() if _ret_ins else None
+                                if ins_row and ins_row[0] is not None:
                                     stats_out["tws_raw_inserted"] += 1
+                                    stats_out["tws_raw_inserted_ids"].append(int(ins_row[0]))
                     except Exception as _raw_e:
                         # Older deployments without split raw tables: ignore missing relation only.
                         if getattr(_raw_e, "pgcode", None) == "42P01":

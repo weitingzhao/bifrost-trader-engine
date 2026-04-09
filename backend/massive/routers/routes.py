@@ -19,6 +19,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from src.vendor.massive.client import _as_error_str
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["massive"])
@@ -478,6 +480,355 @@ def get_massive_market_status(request: Request) -> Dict[str, Any]:
     return {"ok": True, "status": data}
 
 
+# ── Tickers reference (Stocks REST, read-only) ───────────────────────────────
+
+@router.get("/research/massive/tickers")
+def get_massive_reference_tickers(
+    request: Request,
+    ticker: Optional[str] = Query(None),
+    instrument_type: Optional[str] = Query(None, alias="type"),
+    market: Optional[str] = Query(None),
+    exchange: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    active: Optional[bool] = Query(None),
+    date: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    sort: str = Query("ticker"),
+    order: str = Query("asc"),
+    cursor: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /v3/reference/tickers — paginated ticker universe (proxy)."""
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured"}
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    data = client.fetch_reference_tickers(
+        ticker=ticker,
+        instrument_type=instrument_type,
+        market=market,
+        exchange=exchange,
+        search=search,
+        active=active,
+        date=date,
+        limit=limit,
+        sort=sort,
+        order=order,
+        cursor=cursor,
+    )
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/tickers/types")
+def get_massive_ticker_types(
+    request: Request,
+    asset_class: Optional[str] = Query(None),
+    locale: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /v3/reference/tickers/types — registered before /tickers/{ticker} so *types* is not captured as a symbol."""
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured"}
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    data = client.fetch_ticker_types(asset_class=asset_class, locale=locale)
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+# ── Stock reference (PostgreSQL + Redis cache) ───────────────────────────────
+
+
+def _pg_configured(request: Request) -> Optional[dict]:
+    db = _db_config(request)
+    if not db or (db.get("sink") != "postgres" and not db.get("postgres")):
+        return None
+    return db
+
+
+@router.get("/research/massive/stocks/search")
+def get_stock_reference_search(
+    request: Request,
+    q: str = Query("", max_length=128),
+    limit: int = Query(20, ge=1, le=100),
+) -> Dict[str, Any]:
+    """Autocomplete over ``stocks`` (symbol prefix + name ILIKE)."""
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.persistence.postgres.stock_reference import search_stocks
+    from src.vendor.massive.reference_cache_keys import (
+        CACHE_TTL_SEARCH_SEC,
+        key_search,
+        normalize_search_key,
+        redis_client_from_status_config,
+    )
+
+    cfg = _pg_configured(request)
+    if not cfg:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    nq = normalize_search_key(q)
+    rds = redis_client_from_status_config(cfg)
+    cache_key = key_search(nq) if nq else None
+    if rds and cache_key and nq:
+        try:
+            raw = rds.get(cache_key)
+            if raw:
+                return {"ok": True, "cached": True, "results": json.loads(raw)}
+        except (json.JSONDecodeError, TypeError):
+            pass
+    params = _get_conn_params(cfg)
+    conn = psycopg2.connect(**params)
+    try:
+        with conn.cursor() as cur:
+            rows = search_stocks(cur, q, limit)
+    finally:
+        conn.close()
+    if rds and cache_key and nq:
+        try:
+            rds.setex(cache_key, CACHE_TTL_SEARCH_SEC, json.dumps(rows, default=str))
+        except Exception:
+            pass
+    return {"ok": True, "cached": False, "results": rows}
+
+
+@router.get("/research/massive/stocks/{symbol}/related")
+def get_stock_reference_related(request: Request, symbol: str) -> Dict[str, Any]:
+    """Related tickers from ``stock_related_tickers`` (+ peer names from ``stocks``)."""
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.persistence.postgres.stock_reference import fetch_related_with_names
+    from src.vendor.massive.reference_cache_keys import (
+        CACHE_TTL_PEERS_SEC,
+        key_peers,
+        normalize_symbol,
+        redis_client_from_status_config,
+    )
+
+    cfg = _pg_configured(request)
+    if not cfg:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    sym = normalize_symbol(symbol)
+    if not sym:
+        return {"ok": False, "error": "Invalid symbol"}
+    rds = redis_client_from_status_config(cfg)
+    if rds:
+        try:
+            raw = rds.get(key_peers(sym))
+            if raw:
+                return {"ok": True, "cached": True, "data": json.loads(raw)}
+        except (json.JSONDecodeError, TypeError):
+            pass
+    params = _get_conn_params(cfg)
+    conn = psycopg2.connect(**params)
+    try:
+        with conn.cursor() as cur:
+            sid, peers = fetch_related_with_names(cur, sym)
+    finally:
+        conn.close()
+    payload = {"from_stocks_id": sid, "symbol": sym, "related": peers}
+    if rds:
+        try:
+            rds.setex(key_peers(sym), CACHE_TTL_PEERS_SEC, json.dumps(payload, default=str))
+        except Exception:
+            pass
+    return {"ok": True, "cached": False, "data": payload}
+
+
+@router.get("/research/massive/stocks/{symbol}")
+def get_stock_reference_detail(request: Request, symbol: str) -> Dict[str, Any]:
+    """Single row from ``stocks`` by symbol."""
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.persistence.postgres.stock_reference import fetch_stock_detail_dict
+    from src.vendor.massive.reference_cache_keys import (
+        CACHE_TTL_STOCK_SEC,
+        key_stock,
+        normalize_symbol,
+        redis_client_from_status_config,
+    )
+
+    cfg = _pg_configured(request)
+    if not cfg:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    sym = normalize_symbol(symbol)
+    if not sym:
+        return {"ok": False, "error": "Invalid symbol"}
+    rds = redis_client_from_status_config(cfg)
+    if rds:
+        try:
+            raw = rds.get(key_stock(sym))
+            if raw:
+                return {"ok": True, "cached": True, "stock": json.loads(raw)}
+        except (json.JSONDecodeError, TypeError):
+            pass
+    params = _get_conn_params(cfg)
+    conn = psycopg2.connect(**params)
+    try:
+        with conn.cursor() as cur:
+            row = fetch_stock_detail_dict(cur, sym)
+    finally:
+        conn.close()
+    if not row:
+        return {"ok": False, "error": "Not found", "symbol": sym}
+    if rds:
+        try:
+            rds.setex(key_stock(sym), CACHE_TTL_STOCK_SEC, json.dumps(row, default=str))
+        except Exception:
+            pass
+    return {"ok": True, "cached": False, "stock": row}
+
+
+@router.get("/research/massive/instrument-types")
+def get_instrument_types_db(
+    request: Request,
+    asset_class: str = Query("*"),
+    locale: str = Query("*"),
+) -> Dict[str, Any]:
+    """Instrument type dictionary from ``ticker_instrument_types``."""
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.persistence.postgres.stock_reference import list_instrument_types
+    from src.vendor.massive.reference_cache_keys import (
+        CACHE_TTL_INSTRUMENT_TYPES_SEC,
+        key_instrument_types,
+        redis_client_from_status_config,
+    )
+
+    cfg = _pg_configured(request)
+    if not cfg:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    loc = (locale or "*").strip() or "*"
+    ac = (asset_class or "*").strip() or "*"
+    rds = redis_client_from_status_config(cfg)
+    k = key_instrument_types(loc, ac)
+    if rds:
+        try:
+            raw = rds.get(k)
+            if raw:
+                return {"ok": True, "cached": True, "results": json.loads(raw)}
+        except (json.JSONDecodeError, TypeError):
+            pass
+    params = _get_conn_params(cfg)
+    conn = psycopg2.connect(**params)
+    try:
+        with conn.cursor() as cur:
+            rows = list_instrument_types(cur)
+    finally:
+        conn.close()
+    if rds:
+        try:
+            rds.setex(k, CACHE_TTL_INSTRUMENT_TYPES_SEC, json.dumps(rows, default=str))
+        except Exception:
+            pass
+    return {"ok": True, "cached": False, "results": rows}
+
+
+@router.post("/research/massive/jobs/stock-reference")
+def post_jobs_stock_reference(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Enqueue stock reference Celery job (``stock_reference_*`` kinds)."""
+    from src.vendor.massive.config import get_massive_settings
+    from src.massive.tasks import run_massive_job
+    from src.vendor.massive.reader import insert_job_massive_backfill, update_job_massive_backfill_celery_task_id
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+
+    kind = (body.get("kind") or "").strip().lower()
+    payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
+    allowed = frozenset(
+        {
+            "stock_reference_universe",
+            "stock_reference_overview",
+            "stock_reference_related",
+            "stock_reference_instrument_types",
+        }
+    )
+    if kind not in allowed:
+        return {"ok": False, "error": f"Invalid kind; allowed: {sorted(allowed)}"}
+
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured"}
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+
+    jid, deduplicated = insert_job_massive_backfill(db, kind, payload)
+    if jid is None:
+        return {"ok": False, "error": "Failed to enqueue job"}
+
+    if deduplicated:
+        return {"ok": True, "job_id": str(jid), "deduplicated": True}
+
+    try:
+        queue_name = (
+            "massive_high" if str(body.get("priority") or "").strip().lower() == "high" else "massive"
+        )
+        async_result = run_massive_job.apply_async(
+            args=[jid], task_id=str(jid), queue=queue_name
+        )
+        update_job_massive_backfill_celery_task_id(db, jid, async_result.id)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "job_id": str(jid)}
+
+
+@router.get("/research/massive/tickers/{ticker:path}")
+def get_massive_ticker_detail(
+    request: Request,
+    ticker: str,
+    date: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /v3/reference/tickers/{ticker} — single ticker (proxy). Path allows dots (e.g. BRK.A)."""
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured"}
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    data = client.fetch_ticker_detail(ticker, date=date)
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/related-companies/{ticker}")
+def get_massive_related_companies(request: Request, ticker: str) -> Dict[str, Any]:
+    """GET /v1/related-companies/{ticker} (proxy)."""
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured"}
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    data = client.fetch_related_companies(ticker)
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
 # ── Technical Indicators (cross-asset, read-only) ────────────────────────────
 
 @router.get("/research/massive/technical-indicators/{indicator}/{ticker}")
@@ -665,6 +1016,10 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
             "max_pain",
             "reconcile",
             "trim_jobs",
+            "stock_reference_universe",
+            "stock_reference_overview",
+            "stock_reference_related",
+            "stock_reference_instrument_types",
         }
     )
     if kind not in allowed:

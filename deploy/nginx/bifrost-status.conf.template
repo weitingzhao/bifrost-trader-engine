@@ -8,6 +8,7 @@
 #   /trading/, /executions, /performance, /transactions → Trading
 #   /bars, /watchlist, /quotes, /market/, /indices/ → Market
 #   /research/ (rest) → Research API (option discovery, max pain) — longer /research/massive|docs win first
+#   /mkdocs/ → static MkDocs (site/ from mkdocs build; publish: ./scripts/bifrost_ssh.sh --deploy-mkdocs)
 #   / → Monitor (SPA, /status, /health, …). GET /health is only the Monitor process on this host.
 #
 # Install (Debian/Ubuntu) — HTTP only; nginx -t passes without TLS files:
@@ -258,6 +259,13 @@ server {
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 86400s;
+    }
+
+    # MkDocs static site (build: mkdocs build -f mkdocs.prod.yml; output site/). Path must match mkdocs.prod.yml site_url.
+    # If DEPLOY_PATH on the server is not /home/vision/bifrost-trader-engine, adjust alias to …/site/ and reload nginx.
+    location ^~ /mkdocs/ {
+        alias /home/vision/bifrost-trader-engine/site/;
+        index index.html;
     }
 
     location / {

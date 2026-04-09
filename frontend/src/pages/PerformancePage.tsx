@@ -10,6 +10,7 @@ import { fmtChicagoTime, fmtPnl, fmtPnlCalendar, fmtUsd } from '../utils/format'
 import {
   computeDayRealizedUnrealized,
   computeDayRealizedUnrealizedStock,
+  computeStockDayPnLForPerformanceDate,
   computeOptionDayPnLForPerformanceDate,
   computeOptPairsFromExecutions,
   dateStrMinusDays,
@@ -20,7 +21,7 @@ import {
   getChicagoDayRange,
   getTimeRangeDates,
   ledgerOptionExecutionDisplayPnl,
-  stockFillTotalDisplay,
+  stockOnTheFlyUnrealizedPnlLeg,
   listDateStrings,
   listMonthKeysInRange,
   mapWithConcurrency,
@@ -239,8 +240,11 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         const stockMap: Record<string, { realized: number; unrealized: number }> = {}
         for (let day = 1; day <= lastDay; day++) {
           const dateStr = `${monthKey}-${String(day).padStart(2, '0')}`
-          const dayExecs = execs.filter((e) => executionDateStr(e) === dateStr)
-          const { realized: stkR, unrealized: stkU } = computeDayRealizedUnrealizedStock(dayExecs)
+          const { realized: stkR, unrealized: stkU } = computeStockDayPnLForPerformanceDate(
+            dateStr,
+            execs,
+            sortExecByExecutionDateThenTime,
+          )
           stockMap[dateStr] = { realized: stkR, unrealized: stkU }
         }
         return stockMap
@@ -1435,7 +1439,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                       >
                         {fmtPnl(sAg.unrealized)}
                       </strong>
-                      <InfoTooltip text="Stock FIFO realized/unrealized from fills in range (shares × price, no contract multiplier). Trade date uses exec date when trade_date is missing." />
+                      <InfoTooltip text="Realized: FIFO matched lots (buy vs sell) within the time range. Unrealized: open lots — long (remaining buys) is positive cost-style; short (remaining sells) is negative — opposite sign convention to option legs. Shares × price, no multiplier. Trade date uses exec date when trade_date is missing." />
                     </span>
                     <span className="performance-on-the-fly-summary-kv">
                       Commission <strong>{fmtUsd(stkComm)}</strong>
@@ -1492,10 +1496,10 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                         <th>Source</th>
                         <th>
                           {onTheFlySecTab === 'STK'
-                            ? 'Total'
+                            ? 'Unrealized PnL'
                             : onTheFlySecTab === 'OPT'
                               ? 'PnL'
-                              : 'PnL / Total'}
+                              : 'PnL / Unrealized PnL'}
                         </th>
                         <th>Realized PnL</th>
                         <th>Commission</th>
@@ -1514,7 +1518,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                           const isStk = (e.sec_type ?? '').toUpperCase() === 'STK'
                           const tradeDateDisplay = (e.trade_date ?? '').trim() || executionDateStr(e) || '—'
                           const ledgerPnl = isOpt ? ledgerOptionExecutionDisplayPnl(e) : null
-                          const stkTotal = isStk ? stockFillTotalDisplay(e) : null
+                          const stkUnrealLeg = isStk ? stockOnTheFlyUnrealizedPnlLeg(e) : null
                           const ledgerPnlClass =
                             ledgerPnl == null || !isOpt
                               ? ''
@@ -1523,14 +1527,10 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                 : ledgerPnl >= 0
                                   ? 'tone-positive'
                                   : 'tone-negative'
-                          const stkTotalClass =
-                            stkTotal == null || !isStk
-                              ? ''
-                              : Math.abs(stkTotal) < 0.005
-                                ? ''
-                                : stkTotal >= 0
-                                  ? 'tone-positive'
-                                  : 'tone-negative'
+                          const stkUnrealLegClass =
+                            isStk && stkUnrealLeg != null
+                              ? 'tone-unrealized performance-on-the-fly-stk-table-unreal-pnl'
+                              : ''
                           return (
                             <tr key={e.account_executions_id ?? `${e.account_id}-${e.time}-${e.symbol}`}>
                               <td>{e.sec_type ?? '—'}</td>
@@ -1548,11 +1548,11 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                               <td>{e.quantity ?? '—'}</td>
                               <td>{fmtUsd(e.price)}</td>
                               <td><ExecSourceBadge source={e.source} /></td>
-                              <td className={isOpt ? ledgerPnlClass : stkTotalClass}>
+                              <td className={isOpt ? ledgerPnlClass : stkUnrealLegClass}>
                                 {isOpt && ledgerPnl != null
                                   ? fmtPnl(ledgerPnl)
-                                  : isStk && stkTotal != null
-                                    ? fmtUsd(stkTotal)
+                                  : isStk && stkUnrealLeg != null
+                                    ? fmtPnl(stkUnrealLeg)
                                     : '—'}
                               </td>
                               <td className={rpNum == null ? '' : rpNum >= 0 ? 'tone-positive' : 'tone-negative'}>

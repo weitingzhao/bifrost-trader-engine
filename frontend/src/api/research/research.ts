@@ -1051,6 +1051,276 @@ export async function fetchMassiveMarketStatus(): Promise<{ ok: boolean; status?
   return { ok: Boolean(j.ok), status: j.status, error: j.error }
 }
 
+export type MassiveTickerProxyResponse = {
+  ok: boolean
+  data?: Record<string, unknown>
+  error?: string
+}
+
+/** Massive FastAPI returns { ok, error }; nginx/connection failures may omit ok or return FastAPI { detail }. */
+function parseMassiveTickerProxyResponse(
+  j: Record<string, unknown>,
+  r: Response,
+): Pick<MassiveTickerProxyResponse, 'ok' | 'error'> {
+  if (typeof j.error === 'string' && j.error.trim()) {
+    return { ok: false, error: j.error }
+  }
+  if (j.error != null) {
+    return {
+      ok: false,
+      error: typeof j.error === 'object' ? JSON.stringify(j.error) : String(j.error),
+    }
+  }
+  const detail = j.detail
+  if (typeof detail === 'string' && detail.trim()) {
+    return { ok: false, error: detail }
+  }
+  if (Array.isArray(detail)) {
+    const parts = detail.map((x: unknown) =>
+      x && typeof x === 'object' && 'msg' in x ? String((x as { msg: unknown }).msg) : JSON.stringify(x),
+    )
+    return { ok: false, error: parts.join('; ') }
+  }
+  if (detail != null && typeof detail === 'object') {
+    return { ok: false, error: JSON.stringify(detail) }
+  }
+  if (!r.ok) {
+    if (r.status === 502 || r.status === 503 || r.status === 504) {
+      return {
+        ok: false,
+        error: `Massive API unreachable (HTTP ${r.status}). Start the Massive server (e.g. python scripts/run_server_massive.py) on server.massive_port from your config.`,
+      }
+    }
+    return { ok: false, error: `HTTP ${r.status}` }
+  }
+  if (j.ok === true) {
+    return { ok: true, error: undefined }
+  }
+  if (j.ok === false) {
+    return { ok: false, error: 'Request failed' }
+  }
+  return { ok: false, error: 'Empty or unrecognized response from Massive API' }
+}
+
+/** GET /v3/reference/tickers (via Massive server proxy). */
+export async function fetchMassiveReferenceTickers(opts?: {
+  ticker?: string
+  type?: string
+  market?: string
+  exchange?: string
+  search?: string
+  active?: boolean
+  date?: string
+  limit?: number
+  sort?: string
+  order?: string
+  cursor?: string
+}): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  if (opts?.ticker) q.set('ticker', opts.ticker)
+  if (opts?.type) q.set('type', opts.type)
+  if (opts?.market) q.set('market', opts.market)
+  if (opts?.exchange) q.set('exchange', opts.exchange)
+  if (opts?.search) q.set('search', opts.search)
+  if (opts?.active !== undefined) q.set('active', String(opts.active))
+  if (opts?.date) q.set('date', opts.date)
+  if (opts?.limit != null) q.set('limit', String(opts.limit))
+  if (opts?.sort) q.set('sort', opts.sort)
+  if (opts?.order) q.set('order', opts.order)
+  if (opts?.cursor) q.set('cursor', opts.cursor)
+  const r = await fetch(massiveUrl(`/research/massive/tickers?${q.toString()}`))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  const parsed = parseMassiveTickerProxyResponse(j, r)
+  if (!parsed.ok) {
+    return { ok: false, error: parsed.error }
+  }
+  return {
+    ok: true,
+    data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined,
+  }
+}
+
+/** GET /v3/reference/tickers/{ticker} (proxy). */
+export async function fetchMassiveTickerDetail(
+  ticker: string,
+  opts?: { date?: string },
+): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  if (opts?.date) q.set('date', opts.date)
+  const qs = q.toString()
+  const path = `/research/massive/tickers/${encodeURIComponent(ticker)}${qs ? `?${qs}` : ''}`
+  const r = await fetch(massiveUrl(path))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  const parsed = parseMassiveTickerProxyResponse(j, r)
+  if (!parsed.ok) {
+    return { ok: false, error: parsed.error }
+  }
+  return {
+    ok: true,
+    data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined,
+  }
+}
+
+/** GET /v3/reference/tickers/types (proxy). */
+export async function fetchMassiveTickerTypes(opts?: {
+  asset_class?: string
+  locale?: string
+}): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  if (opts?.asset_class) q.set('asset_class', opts.asset_class)
+  if (opts?.locale) q.set('locale', opts.locale)
+  const r = await fetch(massiveUrl(`/research/massive/tickers/types?${q.toString()}`))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  const parsed = parseMassiveTickerProxyResponse(j, r)
+  if (!parsed.ok) {
+    return { ok: false, error: parsed.error }
+  }
+  return {
+    ok: true,
+    data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined,
+  }
+}
+
+/** GET /v1/related-companies/{ticker} (proxy). */
+export async function fetchMassiveRelatedCompanies(ticker: string): Promise<MassiveTickerProxyResponse> {
+  const r = await fetch(massiveUrl(`/research/massive/related-companies/${encodeURIComponent(ticker)}`))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  const parsed = parseMassiveTickerProxyResponse(j, r)
+  if (!parsed.ok) {
+    return { ok: false, error: parsed.error }
+  }
+  return {
+    ok: true,
+    data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined,
+  }
+}
+
+/** PostgreSQL-backed stock reference: search autocomplete. */
+export interface StockReferenceSearchRow {
+  stocks_id: number
+  symbol: string
+  name: string | null
+  exchange: string | null
+  primary_exchange: string | null
+  instrument_type: string | null
+  active: boolean | null
+}
+
+export async function fetchStockReferenceSearch(opts: {
+  q: string
+  limit?: number
+}): Promise<{
+  ok: boolean
+  results?: StockReferenceSearchRow[]
+  cached?: boolean
+  error?: string
+}> {
+  const q = new URLSearchParams()
+  q.set('q', opts.q)
+  if (opts.limit != null) q.set('limit', String(opts.limit))
+  const r = await fetch(massiveUrl(`/research/massive/stocks/search?${q.toString()}`))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  if (!j.ok) {
+    return { ok: false, error: String(j.error ?? r.statusText) }
+  }
+  return {
+    ok: true,
+    cached: Boolean(j.cached),
+    results: (j.results as StockReferenceSearchRow[]) ?? [],
+  }
+}
+
+export async function fetchStockReferenceDetail(symbol: string): Promise<{
+  ok: boolean
+  stock?: Record<string, unknown>
+  cached?: boolean
+  error?: string
+}> {
+  const r = await fetch(massiveUrl(`/research/massive/stocks/${encodeURIComponent(symbol.trim())}`))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  if (!j.ok) {
+    return { ok: false, error: String(j.error ?? r.statusText) }
+  }
+  return {
+    ok: true,
+    cached: Boolean(j.cached),
+    stock: typeof j.stock === 'object' && j.stock != null ? (j.stock as Record<string, unknown>) : undefined,
+  }
+}
+
+export async function fetchStockReferenceRelated(symbol: string): Promise<{
+  ok: boolean
+  data?: Record<string, unknown>
+  cached?: boolean
+  error?: string
+}> {
+  const r = await fetch(
+    massiveUrl(`/research/massive/stocks/${encodeURIComponent(symbol.trim())}/related`),
+  )
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  if (!j.ok) {
+    return { ok: false, error: String(j.error ?? r.statusText) }
+  }
+  return {
+    ok: true,
+    cached: Boolean(j.cached),
+    data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined,
+  }
+}
+
+/** Instrument types from ``ticker_instrument_types`` (synced via jobs). */
+export async function fetchStockReferenceInstrumentTypes(opts?: {
+  asset_class?: string
+  locale?: string
+}): Promise<{
+  ok: boolean
+  results?: Record<string, unknown>[]
+  cached?: boolean
+  error?: string
+}> {
+  const q = new URLSearchParams()
+  q.set('asset_class', opts?.asset_class ?? '*')
+  q.set('locale', opts?.locale ?? '*')
+  const r = await fetch(massiveUrl(`/research/massive/instrument-types?${q.toString()}`))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  if (!j.ok) {
+    return { ok: false, error: String(j.error ?? r.statusText) }
+  }
+  const rows = j.results
+  return {
+    ok: true,
+    cached: Boolean(j.cached),
+    results: Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [],
+  }
+}
+
+export type StockReferenceJobKind =
+  | 'stock_reference_universe'
+  | 'stock_reference_overview'
+  | 'stock_reference_related'
+  | 'stock_reference_instrument_types'
+
+export async function postStockReferenceJob(body: {
+  kind: StockReferenceJobKind
+  payload?: Record<string, unknown>
+  priority?: string
+}): Promise<{ ok: boolean; job_id?: string; deduplicated?: boolean; error?: string }> {
+  const r = await fetch(massiveUrl('/research/massive/jobs/stock-reference'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  if (!j.ok) {
+    return { ok: false, error: String(j.error ?? r.statusText) }
+  }
+  return {
+    ok: true,
+    job_id: j.job_id != null ? String(j.job_id) : undefined,
+    deduplicated: Boolean(j.deduplicated),
+  }
+}
+
 export interface TechnicalIndicatorParams {
   ticker: string
   indicator: 'sma' | 'ema' | 'rsi' | 'macd'

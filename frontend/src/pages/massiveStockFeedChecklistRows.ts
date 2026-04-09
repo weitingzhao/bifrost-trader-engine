@@ -14,8 +14,10 @@ const rows: ChecklistRow[] = [
       + 'Ticker Types (reference classification: returns all supported instrument type codes with descriptions, filterable by asset_class and locale), '
       + 'and Related Tickers (peer and competitor discovery via Massive news-coverage and returns-based similarity analysis).',
     tierMin: 'starter',
-    projectStatus: 'not-implemented',
-    verification: 'N/A — not yet implemented.',
+    projectStatus: 'implemented',
+    verification:
+      'Settings → Feed → Massive Stock → Tickers: each sub-tab has Execute → JSON. '
+      + 'Proxies: GET /research/massive/tickers, GET /research/massive/tickers/{ticker}, GET /research/massive/tickers/types, GET /research/massive/related-companies/{ticker}.',
     purpose:
       'Foundation layer for stock research: discover and filter the full Massive ticker universe, enrich any ticker with company '
       + 'fundamentals and branding assets, populate type filter dropdowns from the canonical Ticker Types reference, '

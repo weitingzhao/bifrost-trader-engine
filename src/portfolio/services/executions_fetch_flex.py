@@ -13,13 +13,58 @@ from src.monitor.reader import write_account_executions_to_db
 logger = logging.getLogger(__name__)
 
 
+def _publish_flex_executions_system_message(
+    config: Optional[dict],
+    *,
+    ok: bool,
+    title: str,
+    message: str,
+    reason: Optional[str] = None,
+    level: Optional[str] = None,
+) -> None:
+    """Best-effort Redis message center (Monitor materializes for SSE)."""
+    if not config:
+        return
+    try:
+        import redis as redis_mod
+
+        from src.bifrost.message_center import (
+            build_portfolio_flex_executions_fetch_event,
+            publish_system_message_event,
+        )
+        from src.core.redis_url import effective_redis_dict, format_redis_url
+
+        url = format_redis_url(effective_redis_dict(config, default_db=0))
+        if not url:
+            return
+        r = redis_mod.from_url(url, decode_responses=True)
+        try:
+            ev = build_portfolio_flex_executions_fetch_event(
+                ok=ok, title=title, message=message, reason=reason, level=level
+            )
+            publish_system_message_event(r, ev)
+        finally:
+            r.close()
+    except Exception as e:
+        logger.debug("flex executions message center publish failed: %s", e)
+
+
 def fetch_flex_trades_and_upsert_executions(
     reader: Any,
     control_via_db: Optional[dict],
     body: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """Mirror POST /executions/fetch-flex (no HTTP)."""
+    cfg = getattr(reader, "_config", None)
     if not control_via_db:
+        _publish_flex_executions_system_message(
+            cfg,
+            ok=False,
+            title="Flex executions fetch failed",
+            message="PostgreSQL is required to write account_executions.",
+            reason="no control_via_db",
+            level="error",
+        )
         return {"ok": False, "error": "PostgreSQL is required to write account_executions.", "count": 0}
     try:
         entries: List[Dict[str, Any]] = []
@@ -32,11 +77,19 @@ def fetch_flex_trades_and_upsert_executions(
                 label = (a.get("query_label") or "").strip() or None
                 entries.append({"token": tok, "query_id": qid, "role": role, "query_label": label})
         if not entries:
-            return {
-                "ok": False,
-                "error": "No Flex credentials for trades: configure in Settings → IB Connection → Flex (token and query_id with purpose=trades).",
-                "count": 0,
-            }
+            err = (
+                "No Flex credentials for trades: configure in Settings → IB Connection → Flex "
+                "(token and query_id with purpose=trades)."
+            )
+            _publish_flex_executions_system_message(
+                cfg,
+                ok=False,
+                title="Flex executions fetch failed",
+                message=err,
+                reason="no flex trades credentials",
+                level="error",
+            )
+            return {"ok": False, "error": err, "count": 0}
         payload = body or {}
         from_date = (payload.get("from_date") or "").strip() or None
         to_date = (payload.get("to_date") or "").strip() or None
@@ -114,7 +167,22 @@ def fetch_flex_trades_and_upsert_executions(
                 raise
 
         if errors and not all_rows:
-            return {"ok": False, "error": "; ".join(errors), "count": 0, "by_account": len(entries), "by_account_counts": rows_per_fetch}
+            err = "; ".join(errors)
+            _publish_flex_executions_system_message(
+                cfg,
+                ok=False,
+                title="Flex executions fetch failed",
+                message=err,
+                reason=err[:500],
+                level="error",
+            )
+            return {
+                "ok": False,
+                "error": err,
+                "count": 0,
+                "by_account": len(entries),
+                "by_account_counts": rows_per_fetch,
+            }
 
         data_from = None
         data_to = None
@@ -141,10 +209,19 @@ def fetch_flex_trades_and_upsert_executions(
                 data_to = max_d.isoformat()
 
         if not all_rows:
+            msg = "No trades in Flex report."
+            _publish_flex_executions_system_message(
+                cfg,
+                ok=True,
+                title="Flex executions import: no rows",
+                message=msg,
+                reason=None,
+                level="warning",
+            )
             return {
                 "ok": True,
                 "count": 0,
-                "message": "No trades in Flex report.",
+                "message": msg,
                 "by_account": len(entries),
                 "by_account_counts": rows_per_fetch,
                 "data_from": data_from,
@@ -155,9 +232,18 @@ def fetch_flex_trades_and_upsert_executions(
 
         raw_count = len(all_rows)
         if not write_account_executions_to_db(control_via_db, all_rows):
+            werr = "Failed to write account_executions."
+            _publish_flex_executions_system_message(
+                cfg,
+                ok=False,
+                title="Flex executions write failed",
+                message=werr,
+                reason="write_account_executions_to_db",
+                level="error",
+            )
             return {
                 "ok": False,
-                "error": "Failed to write account_executions.",
+                "error": werr,
                 "count": 0,
                 "raw_count": raw_count,
                 "data_from": data_from,
@@ -189,6 +275,14 @@ def fetch_flex_trades_and_upsert_executions(
             msg += " Host (Query ID " + str(entries[0]["query_id"]) + ") returned 0 trades; in Settings > IB Connection > Flex ensure the purpose=trades row uses a Query that includes Activity > Trades and the date range covers your trades."
         if errors:
             msg += " Partial errors: " + "; ".join(errors)
+        _publish_flex_executions_system_message(
+            cfg,
+            ok=True,
+            title="Flex executions imported",
+            message=msg,
+            reason=None,
+            level="success",
+        )
         return {
             "ok": True,
             "count": len(all_rows),
@@ -208,33 +302,93 @@ def fetch_flex_trades_and_upsert_executions(
         }
     except Exception as e:
         logger.exception("fetch_flex_trades_and_upsert_executions failed: %s", e)
+        _publish_flex_executions_system_message(
+            getattr(reader, "_config", None),
+            ok=False,
+            title="Flex executions fetch failed",
+            message=str(e),
+            reason=str(e)[:500],
+            level="error",
+        )
         return {"ok": False, "error": str(e), "count": 0}
 
 
-def upsert_executions_from_uploaded_flex_xml(control_via_db: Optional[dict], raw_xml: str) -> Dict[str, Any]:
+def upsert_executions_from_uploaded_flex_xml(
+    control_via_db: Optional[dict],
+    raw_xml: str,
+    *,
+    config: Optional[dict] = None,
+) -> Dict[str, Any]:
     """Mirror POST /executions/fetch-flex-upload (no HTTP)."""
     if not control_via_db:
+        _publish_flex_executions_system_message(
+            config,
+            ok=False,
+            title="Flex XML upload failed",
+            message="PostgreSQL is required to write account_executions.",
+            reason="no control_via_db",
+            level="error",
+        )
         return {"ok": False, "error": "PostgreSQL is required to write account_executions.", "count": 0}
     try:
         raw_xml = (raw_xml or "").strip()
         if not raw_xml:
+            _publish_flex_executions_system_message(
+                config,
+                ok=False,
+                title="Flex XML upload failed",
+                message="Missing xml field in request body.",
+                reason="missing xml",
+                level="error",
+            )
             return {"ok": False, "error": "Missing xml field in request body.", "count": 0}
         rows = parse_trades_xml(raw_xml)
         if not rows:
-            return {
-                "ok": False,
-                "error": "No Trade rows parsed from XML. Ensure this is a Flex Trades report (Activity → Trades).",
-                "count": 0,
-            }
+            err = "No Trade rows parsed from XML. Ensure this is a Flex Trades report (Activity → Trades)."
+            _publish_flex_executions_system_message(
+                config,
+                ok=False,
+                title="Flex XML upload: no trades",
+                message=err,
+                reason="parse_trades_xml empty",
+                level="error",
+            )
+            return {"ok": False, "error": err, "count": 0}
         if not write_account_executions_to_db(control_via_db, rows):
-            return {"ok": False, "error": "Failed to write account_executions.", "count": 0}
+            werr = "Failed to write account_executions."
+            _publish_flex_executions_system_message(
+                config,
+                ok=False,
+                title="Flex XML write failed",
+                message=werr,
+                reason="write_account_executions_to_db",
+                level="error",
+            )
+            return {"ok": False, "error": werr, "count": 0}
         updated_accounts = len({(r.get("account_id") or "").strip() for r in rows if (r.get("account_id") or "").strip()})
+        msg = f"Upserted {len(rows)} execution(s) from uploaded Flex XML for {updated_accounts} account(s)."
+        _publish_flex_executions_system_message(
+            config,
+            ok=True,
+            title="Flex XML executions imported",
+            message=msg,
+            reason=None,
+            level="success",
+        )
         return {
             "ok": True,
             "count": len(rows),
             "updated_accounts": updated_accounts,
-            "message": f"Upserted {len(rows)} execution(s) from uploaded Flex XML for {updated_accounts} account(s).",
+            "message": msg,
         }
     except Exception as e:
         logger.exception("upsert_executions_from_uploaded_flex_xml failed: %s", e)
+        _publish_flex_executions_system_message(
+            config,
+            ok=False,
+            title="Flex XML upload failed",
+            message=str(e),
+            reason=str(e)[:500],
+            level="error",
+        )
         return {"ok": False, "error": str(e), "count": 0}

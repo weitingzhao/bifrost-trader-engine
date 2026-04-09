@@ -79,6 +79,14 @@ class TestMassiveHealth:
         assert "config_profile" not in body
         assert body.get("port") == 8766
 
+    def test_stock_reference_search_requires_postgres(self):
+        client = _make_client()
+        r = client.get("/research/massive/stocks/search?q=AAPL")
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is False
+        assert "PostgreSQL" in str(body.get("error", ""))
+
 
 class TestMassiveDocs:
     def test_openapi_json_reachable(self):

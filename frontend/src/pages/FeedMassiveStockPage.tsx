@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import type { StatusResponse } from '../types'
-import { fetchMassiveStatus, postMassiveStocksApiCoverageSync } from '../api'
-import type { MassiveStatusResponse } from '../api'
+import {
+  fetchMassiveReferenceTickers,
+  fetchMassiveRelatedCompanies,
+  fetchMassiveStatus,
+  fetchMassiveTickerDetail,
+  fetchMassiveTickerTypes,
+  fetchStockReferenceDetail,
+  fetchStockReferenceInstrumentTypes,
+  fetchStockReferenceRelated,
+  fetchStockReferenceSearch,
+  postMassiveStocksApiCoverageSync,
+} from '../api'
+import type { MassiveStatusResponse, StockReferenceSearchRow } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import stockChecklistRows from './massiveStockFeedChecklistRows'
 import type { ChecklistRow } from './massiveStockFeedChecklistRows'
@@ -148,7 +159,7 @@ export function FeedMassiveStockPage({
 
   // ── Tickers sub-tab state ─────────────────────────────────────────────────
   const [tkSubTab, setTkSubTab] = useState<
-    'all_tickers' | 'ticker_overview' | 'ticker_types' | 'related_tickers'
+    'all_tickers' | 'ticker_overview' | 'ticker_types' | 'related_tickers' | 'reference_db'
   >('all_tickers')
 
   // All Tickers form fields
@@ -160,6 +171,32 @@ export function FeedMassiveStockPage({
   const [tkAllActive, setTkAllActive] = useState('')
   const [tkAllDate, setTkAllDate] = useState('')
   const [tkAllLimit, setTkAllLimit] = useState('100')
+  const [tkAllCursor, setTkAllCursor] = useState('')
+
+  const [tkAllBusy, setTkAllBusy] = useState(false)
+  const [tkAllErr, setTkAllErr] = useState<string | null>(null)
+  const [tkAllResult, setTkAllResult] = useState<Record<string, unknown> | null>(null)
+
+  const [tkOvBusy, setTkOvBusy] = useState(false)
+  const [tkOvErr, setTkOvErr] = useState<string | null>(null)
+  const [tkOvResult, setTkOvResult] = useState<Record<string, unknown> | null>(null)
+
+  const [tkTypesBusy, setTkTypesBusy] = useState(false)
+  const [tkTypesErr, setTkTypesErr] = useState<string | null>(null)
+  const [tkTypesResult, setTkTypesResult] = useState<Record<string, unknown> | null>(null)
+
+  const [tkRelBusy, setTkRelBusy] = useState(false)
+  const [tkRelErr, setTkRelErr] = useState<string | null>(null)
+  const [tkRelResult, setTkRelResult] = useState<Record<string, unknown> | null>(null)
+
+  const [tkRefDbQ, setTkRefDbQ] = useState('A')
+  const [tkRefDbSym, setTkRefDbSym] = useState('AAPL')
+  const [tkRefDbBusy, setTkRefDbBusy] = useState(false)
+  const [tkRefDbErr, setTkRefDbErr] = useState<string | null>(null)
+  const [tkRefDbSearchRows, setTkRefDbSearchRows] = useState<StockReferenceSearchRow[]>([])
+  const [tkRefDbDetail, setTkRefDbDetail] = useState<Record<string, unknown> | null>(null)
+  const [tkRefDbRelated, setTkRefDbRelated] = useState<Record<string, unknown> | null>(null)
+  const [tkRefDbTypesRows, setTkRefDbTypesRows] = useState<Record<string, unknown>[] | null>(null)
 
   // Ticker Overview form fields
   const [tkOvTicker, setTkOvTicker] = useState('AAPL')
@@ -177,6 +214,181 @@ export function FeedMassiveStockPage({
   }, [])
 
   useEffect(() => { loadStatus() }, [loadStatus])
+
+  const runTkAllTickers = useCallback(async () => {
+    setTkAllBusy(true)
+    setTkAllErr(null)
+    setTkAllResult(null)
+    try {
+      const lim = Math.min(1000, Math.max(1, parseInt(tkAllLimit, 10) || 100))
+      let active: boolean | undefined
+      if (tkAllActive === 'true') active = true
+      else if (tkAllActive === 'false') active = false
+      const res = await fetchMassiveReferenceTickers({
+        ticker: tkAllTicker.trim() || undefined,
+        type: tkAllType.trim() || undefined,
+        market: tkAllMarket.trim() || undefined,
+        exchange: tkAllExchange.trim() || undefined,
+        search: tkAllSearch.trim() || undefined,
+        active,
+        date: tkAllDate.trim() || undefined,
+        limit: lim,
+        cursor: tkAllCursor.trim() || undefined,
+      })
+      if (!res.ok) {
+        setTkAllErr(res.error ?? 'Request failed')
+        return
+      }
+      setTkAllResult(res.data ?? null)
+    } catch (e: unknown) {
+      setTkAllErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setTkAllBusy(false)
+    }
+  }, [
+    tkAllTicker, tkAllType, tkAllMarket, tkAllExchange, tkAllSearch, tkAllActive,
+    tkAllDate, tkAllLimit, tkAllCursor,
+  ])
+
+  const runTkOverview = useCallback(async () => {
+    const t = tkOvTicker.trim()
+    if (!t) {
+      setTkOvErr('Ticker is required')
+      return
+    }
+    setTkOvBusy(true)
+    setTkOvErr(null)
+    setTkOvResult(null)
+    try {
+      const res = await fetchMassiveTickerDetail(t, { date: tkOvDate.trim() || undefined })
+      if (!res.ok) {
+        setTkOvErr(res.error ?? 'Request failed')
+        return
+      }
+      setTkOvResult(res.data ?? null)
+    } catch (e: unknown) {
+      setTkOvErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setTkOvBusy(false)
+    }
+  }, [tkOvTicker, tkOvDate])
+
+  const runTkTypes = useCallback(async () => {
+    setTkTypesBusy(true)
+    setTkTypesErr(null)
+    setTkTypesResult(null)
+    try {
+      const res = await fetchMassiveTickerTypes({
+        asset_class: tkTypesAssetClass.trim() || undefined,
+        locale: tkTypesLocale.trim() || undefined,
+      })
+      if (!res.ok) {
+        setTkTypesErr(res.error ?? 'Request failed')
+        return
+      }
+      setTkTypesResult(res.data ?? null)
+    } catch (e: unknown) {
+      setTkTypesErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setTkTypesBusy(false)
+    }
+  }, [tkTypesAssetClass, tkTypesLocale])
+
+  const runTkRelated = useCallback(async () => {
+    const t = tkRelTicker.trim()
+    if (!t) {
+      setTkRelErr('Ticker is required')
+      return
+    }
+    setTkRelBusy(true)
+    setTkRelErr(null)
+    setTkRelResult(null)
+    try {
+      const res = await fetchMassiveRelatedCompanies(t)
+      if (!res.ok) {
+        setTkRelErr(res.error ?? 'Request failed')
+        return
+      }
+      setTkRelResult(res.data ?? null)
+    } catch (e: unknown) {
+      setTkRelErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setTkRelBusy(false)
+    }
+  }, [tkRelTicker])
+
+  const runRefDbSearch = useCallback(async () => {
+    const q = tkRefDbQ.trim()
+    if (!q) {
+      setTkRefDbErr('Query is required')
+      return
+    }
+    setTkRefDbBusy(true)
+    setTkRefDbErr(null)
+    setTkRefDbSearchRows([])
+    try {
+      const res = await fetchStockReferenceSearch({ q, limit: 30 })
+      if (!res.ok) {
+        setTkRefDbErr(res.error ?? 'Request failed')
+        return
+      }
+      setTkRefDbSearchRows(res.results ?? [])
+    } catch (e: unknown) {
+      setTkRefDbErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setTkRefDbBusy(false)
+    }
+  }, [tkRefDbQ])
+
+  const runRefDbLoadDetail = useCallback(async () => {
+    const s = tkRefDbSym.trim()
+    if (!s) {
+      setTkRefDbErr('Symbol is required')
+      return
+    }
+    setTkRefDbBusy(true)
+    setTkRefDbErr(null)
+    setTkRefDbDetail(null)
+    setTkRefDbRelated(null)
+    try {
+      const [d, rel] = await Promise.all([
+        fetchStockReferenceDetail(s),
+        fetchStockReferenceRelated(s),
+      ])
+      if (!d.ok) {
+        setTkRefDbErr(d.error ?? 'Detail request failed')
+        return
+      }
+      if (!rel.ok) {
+        setTkRefDbErr(rel.error ?? 'Related request failed')
+        return
+      }
+      setTkRefDbDetail(d.stock ?? null)
+      setTkRefDbRelated(rel.data ?? null)
+    } catch (e: unknown) {
+      setTkRefDbErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setTkRefDbBusy(false)
+    }
+  }, [tkRefDbSym])
+
+  const runRefDbTypes = useCallback(async () => {
+    setTkRefDbBusy(true)
+    setTkRefDbErr(null)
+    setTkRefDbTypesRows(null)
+    try {
+      const res = await fetchStockReferenceInstrumentTypes({ asset_class: 'stocks', locale: 'us' })
+      if (!res.ok) {
+        setTkRefDbErr(res.error ?? 'Request failed')
+        return
+      }
+      setTkRefDbTypesRows(res.results ?? [])
+    } catch (e: unknown) {
+      setTkRefDbErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setTkRefDbBusy(false)
+    }
+  }, [])
 
   const toggleCap = useCallback((id: string) => {
     setCapExpanded(prev => ({ ...prev, [id]: !prev[id] }))
@@ -243,6 +455,13 @@ export function FeedMassiveStockPage({
 
   // ── Evidence helper ───────────────────────────────────────────────────────
   function evidenceFor(row: ChecklistRow): ReactNode {
+    if (row.id === 'stock-tickers' && row.projectStatus === 'implemented') {
+      return (
+        <span className="feed-massive-svc-evidence-ok">
+          REST proxy on the Massive server: use Execute on each Tickers sub-tab to call Polygon and inspect the JSON response.
+        </span>
+      )
+    }
     if (row.projectStatus === 'implemented') {
       return (
         <span className="feed-massive-svc-evidence-ok">
@@ -289,7 +508,7 @@ export function FeedMassiveStockPage({
         </FeedMassiveServiceBlock>
 
         <div className="feed-massive-agg-tabs-wrap">
-          <div className="feed-massive-agg-tabs" role="tablist" aria-label="Tickers API endpoints">
+          <div className="feed-massive-agg-tabs" role="tablist" aria-label="Tickers API and PostgreSQL reference">
             <button
               type="button" role="tab"
               id="feed-massive-stk-tk-tab-all"
@@ -334,6 +553,17 @@ export function FeedMassiveStockPage({
               Related Tickers
               <span className="feed-massive-agg-tab-badge">REST</span>
             </button>
+            <button
+              type="button" role="tab"
+              id="feed-massive-stk-tk-tab-refdb"
+              className={`feed-massive-agg-tab${tkSubTab === 'reference_db' ? ' feed-massive-agg-tab--active' : ''}`}
+              aria-selected={tkSubTab === 'reference_db'}
+              tabIndex={tkSubTab === 'reference_db' ? 0 : -1}
+              onClick={() => setTkSubTab('reference_db')}
+            >
+              Reference (DB)
+              <span className="feed-massive-agg-tab-badge">PG</span>
+            </button>
           </div>
 
           <div className="feed-massive-agg-tab-panels">
@@ -366,7 +596,7 @@ export function FeedMassiveStockPage({
                       className="form-input"
                       value={tkAllTicker}
                       onChange={e => setTkAllTicker(e.target.value)}
-                      disabled={!configured}
+                      disabled={!configured || tkAllBusy}
                       placeholder="AAPL"
                       autoComplete="off"
                     />
@@ -377,7 +607,7 @@ export function FeedMassiveStockPage({
                       className="form-input"
                       value={tkAllMarket}
                       onChange={e => setTkAllMarket(e.target.value)}
-                      disabled={!configured}
+                      disabled={!configured || tkAllBusy}
                     >
                       <option value="">All markets</option>
                       <option value="stocks">Stocks</option>
@@ -393,7 +623,7 @@ export function FeedMassiveStockPage({
                       className="form-input"
                       value={tkAllType}
                       onChange={e => setTkAllType(e.target.value)}
-                      disabled={!configured}
+                      disabled={!configured || tkAllBusy}
                       placeholder="CS (Common Stock)"
                       autoComplete="off"
                     />
@@ -404,7 +634,7 @@ export function FeedMassiveStockPage({
                       className="form-input"
                       value={tkAllExchange}
                       onChange={e => setTkAllExchange(e.target.value)}
-                      disabled={!configured}
+                      disabled={!configured || tkAllBusy}
                       placeholder="XNAS"
                       autoComplete="off"
                     />
@@ -415,7 +645,7 @@ export function FeedMassiveStockPage({
                       className="form-input"
                       value={tkAllSearch}
                       onChange={e => setTkAllSearch(e.target.value)}
-                      disabled={!configured}
+                      disabled={!configured || tkAllBusy}
                       placeholder="Apple"
                       autoComplete="off"
                     />
@@ -426,7 +656,7 @@ export function FeedMassiveStockPage({
                       className="form-input"
                       value={tkAllActive}
                       onChange={e => setTkAllActive(e.target.value)}
-                      disabled={!configured}
+                      disabled={!configured || tkAllBusy}
                     >
                       <option value="">Default (active)</option>
                       <option value="true">Active only</option>
@@ -439,7 +669,7 @@ export function FeedMassiveStockPage({
                       className="form-input"
                       value={tkAllDate}
                       onChange={e => setTkAllDate(e.target.value)}
-                      disabled={!configured}
+                      disabled={!configured || tkAllBusy}
                       placeholder="YYYY-MM-DD"
                       autoComplete="off"
                     />
@@ -451,9 +681,20 @@ export function FeedMassiveStockPage({
                       type="number"
                       value={tkAllLimit}
                       onChange={e => setTkAllLimit(e.target.value)}
-                      disabled={!configured}
+                      disabled={!configured || tkAllBusy}
                       min={1}
                       max={1000}
+                    />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Cursor</span>
+                    <input
+                      className="form-input"
+                      value={tkAllCursor}
+                      onChange={e => setTkAllCursor(e.target.value)}
+                      disabled={!configured || tkAllBusy}
+                      placeholder="Next page (from response)"
+                      autoComplete="off"
                     />
                   </label>
                 </div>
@@ -466,11 +707,30 @@ export function FeedMassiveStockPage({
                     <code>currency_name</code>, <code>composite_figi</code>, <code>cik</code>,{' '}
                     <code>last_updated_utc</code>, <code>delisted_utc</code>
                   </p>
+                  <p style={{ marginTop: 'var(--space-2)' }}>
+                    <strong>Proxy:</strong> <code>GET /research/massive/tickers</code>
+                  </p>
                 </div>
 
-                <p className="feed-massive-svc-evidence-pending" style={{ marginTop: 'var(--space-3)' }}>
-                  Not yet implemented. Target backend endpoint: <code>GET /research/massive/tickers</code>
-                </p>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || tkAllBusy} onClick={runTkAllTickers}>
+                    {tkAllBusy ? 'Loading\u2026' : 'Execute'}
+                  </button>
+                </div>
+                {tkAllErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tkAllErr}</p> : null}
+                {tkAllResult ? (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>
+                      Result
+                      {Array.isArray(tkAllResult.results)
+                        ? ` — ${tkAllResult.results.length} ticker(s)`
+                        : ''}
+                    </summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>
+                      {JSON.stringify(tkAllResult, null, 2)}
+                    </pre>
+                  </details>
+                ) : null}
               </div>
             ) : null}
 
@@ -506,7 +766,7 @@ export function FeedMassiveStockPage({
                       className="form-input"
                       value={tkOvTicker}
                       onChange={e => setTkOvTicker(e.target.value)}
-                      disabled={!configured}
+                      disabled={!configured || tkOvBusy}
                       placeholder="AAPL"
                       autoComplete="off"
                     />
@@ -517,7 +777,7 @@ export function FeedMassiveStockPage({
                       className="form-input"
                       value={tkOvDate}
                       onChange={e => setTkOvDate(e.target.value)}
-                      disabled={!configured}
+                      disabled={!configured || tkOvBusy}
                       placeholder="YYYY-MM-DD (optional)"
                       autoComplete="off"
                     />
@@ -538,12 +798,25 @@ export function FeedMassiveStockPage({
                     <code>ticker_suffix</code>, <code>total_employees</code>,{' '}
                     <code>weighted_shares_outstanding</code>
                   </p>
+                  <p style={{ marginTop: 'var(--space-2)' }}>
+                    <strong>Proxy:</strong> <code>GET /research/massive/tickers/&#123;ticker&#125;</code>
+                  </p>
                 </div>
 
-                <p className="feed-massive-svc-evidence-pending" style={{ marginTop: 'var(--space-3)' }}>
-                  Not yet implemented. Target backend endpoint:{' '}
-                  <code>GET /research/massive/tickers/&#123;ticker&#125;</code>
-                </p>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || tkOvBusy} onClick={runTkOverview}>
+                    {tkOvBusy ? 'Loading\u2026' : 'Execute'}
+                  </button>
+                </div>
+                {tkOvErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tkOvErr}</p> : null}
+                {tkOvResult ? (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Result</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>
+                      {JSON.stringify(tkOvResult, null, 2)}
+                    </pre>
+                  </details>
+                ) : null}
               </div>
             ) : null}
 
@@ -576,7 +849,7 @@ export function FeedMassiveStockPage({
                       className="form-input"
                       value={tkTypesAssetClass}
                       onChange={e => setTkTypesAssetClass(e.target.value)}
-                      disabled={!configured}
+                      disabled={!configured || tkTypesBusy}
                     >
                       <option value="">All</option>
                       <option value="stocks">Stocks</option>
@@ -592,7 +865,7 @@ export function FeedMassiveStockPage({
                       className="form-input"
                       value={tkTypesLocale}
                       onChange={e => setTkTypesLocale(e.target.value)}
-                      disabled={!configured}
+                      disabled={!configured || tkTypesBusy}
                     >
                       <option value="">All</option>
                       <option value="us">US</option>
@@ -608,12 +881,30 @@ export function FeedMassiveStockPage({
                     <code>WARRANT</code>, <code>UNIT</code>), <code>description</code>,{' '}
                     <code>asset_class</code>, <code>locale</code>
                   </p>
+                  <p style={{ marginTop: 'var(--space-2)' }}>
+                    <strong>Proxy:</strong> <code>GET /research/massive/tickers/types</code>
+                  </p>
                 </div>
 
-                <p className="feed-massive-svc-evidence-pending" style={{ marginTop: 'var(--space-3)' }}>
-                  Not yet implemented. Target backend endpoint:{' '}
-                  <code>GET /research/massive/tickers/types</code>
-                </p>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || tkTypesBusy} onClick={runTkTypes}>
+                    {tkTypesBusy ? 'Loading\u2026' : 'Execute'}
+                  </button>
+                </div>
+                {tkTypesErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tkTypesErr}</p> : null}
+                {tkTypesResult ? (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>
+                      Result
+                      {Array.isArray(tkTypesResult.results)
+                        ? ` — ${tkTypesResult.results.length} type(s)`
+                        : ''}
+                    </summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>
+                      {JSON.stringify(tkTypesResult, null, 2)}
+                    </pre>
+                  </details>
+                ) : null}
               </div>
             ) : null}
 
@@ -647,7 +938,7 @@ export function FeedMassiveStockPage({
                       className="form-input"
                       value={tkRelTicker}
                       onChange={e => setTkRelTicker(e.target.value)}
-                      disabled={!configured}
+                      disabled={!configured || tkRelBusy}
                       placeholder="AAPL"
                       autoComplete="off"
                     />
@@ -660,12 +951,129 @@ export function FeedMassiveStockPage({
                     <code>ticker</code> (the queried symbol),{' '}
                     <code>results[].ticker</code> (related ticker symbols ranked by news/returns similarity)
                   </p>
+                  <p style={{ marginTop: 'var(--space-2)' }}>
+                    <strong>Proxy:</strong> <code>GET /research/massive/related-companies/&#123;ticker&#125;</code>
+                  </p>
                 </div>
 
-                <p className="feed-massive-svc-evidence-pending" style={{ marginTop: 'var(--space-3)' }}>
-                  Not yet implemented. Target backend endpoint:{' '}
-                  <code>GET /research/massive/related-companies/&#123;ticker&#125;</code>
-                </p>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || tkRelBusy} onClick={runTkRelated}>
+                    {tkRelBusy ? 'Loading\u2026' : 'Execute'}
+                  </button>
+                </div>
+                {tkRelErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tkRelErr}</p> : null}
+                {tkRelResult ? (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Result</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>
+                      {JSON.stringify(tkRelResult, null, 2)}
+                    </pre>
+                  </details>
+                ) : null}
+              </div>
+            ) : null}
+
+            {/* ── Reference (PostgreSQL) ───────────────────────────────────── */}
+            {tkSubTab === 'reference_db' ? (
+              <div
+                className="feed-massive-agg-tab-panel"
+                role="tabpanel"
+                id="feed-massive-stk-tk-panel-refdb"
+                aria-labelledby="feed-massive-stk-tk-tab-refdb"
+              >
+                <div className="feed-massive-agg-sub-doc">
+                  <p>
+                    <strong>Use case:</strong> Query synced rows in PostgreSQL (<code>stocks</code>,{' '}
+                    <code>stock_related_tickers</code>, <code>ticker_instrument_types</code>) with optional Redis cache.
+                    Populate data via Celery jobs (<code>POST /research/massive/jobs/stock-reference</code>).
+                  </p>
+                  <p className="feed-massive-agg-sub-endpoint">
+                    <code>GET /research/massive/stocks/search</code>
+                    {' · '}
+                    <code>GET /research/massive/stocks/&#123;symbol&#125;</code>
+                    {' · '}
+                    <code>GET /research/massive/instrument-types</code>
+                  </p>
+                </div>
+
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Search query</span>
+                    <input
+                      className="form-input"
+                      value={tkRefDbQ}
+                      onChange={e => setTkRefDbQ(e.target.value)}
+                      disabled={tkRefDbBusy}
+                      placeholder="AAPL or Apple"
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Symbol (detail + related)</span>
+                    <input
+                      className="form-input"
+                      value={tkRefDbSym}
+                      onChange={e => setTkRefDbSym(e.target.value)}
+                      disabled={tkRefDbBusy}
+                      placeholder="AAPL"
+                      autoComplete="off"
+                    />
+                  </label>
+                </div>
+
+                <div style={{ marginTop: 'var(--space-3)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={tkRefDbBusy} onClick={runRefDbSearch}>
+                    {tkRefDbBusy ? 'Loading\u2026' : 'Search (DB)'}
+                  </button>
+                  <button type="button" className="btn btn-secondary" disabled={tkRefDbBusy} onClick={runRefDbLoadDetail}>
+                    {tkRefDbBusy ? 'Loading\u2026' : 'Load detail + related'}
+                  </button>
+                  <button type="button" className="btn btn-secondary" disabled={tkRefDbBusy} onClick={runRefDbTypes}>
+                    {tkRefDbBusy ? 'Loading\u2026' : 'Instrument types (DB)'}
+                  </button>
+                </div>
+
+                {tkRefDbErr ? (
+                  <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>
+                    {tkRefDbErr}
+                  </p>
+                ) : null}
+
+                {tkRefDbSearchRows.length > 0 ? (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Search results ({tkRefDbSearchRows.length})</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '16rem' }}>
+                      {JSON.stringify(tkRefDbSearchRows, null, 2)}
+                    </pre>
+                  </details>
+                ) : null}
+
+                {tkRefDbDetail ? (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Stock row</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '24rem' }}>
+                      {JSON.stringify(tkRefDbDetail, null, 2)}
+                    </pre>
+                  </details>
+                ) : null}
+
+                {tkRefDbRelated ? (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Related (DB)</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '20rem' }}>
+                      {JSON.stringify(tkRefDbRelated, null, 2)}
+                    </pre>
+                  </details>
+                ) : null}
+
+                {tkRefDbTypesRows ? (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Instrument types ({tkRefDbTypesRows.length})</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '24rem' }}>
+                      {JSON.stringify(tkRefDbTypesRows, null, 2)}
+                    </pre>
+                  </details>
+                ) : null}
               </div>
             ) : null}
 

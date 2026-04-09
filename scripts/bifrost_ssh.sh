@@ -94,6 +94,8 @@ BIFROST_SSH_LAST_LOG=""
 BIFROST_SSH_RESULT_LINES=20
 # Persistent deploy log — survives between sessions; overwritten on each deploy/pipeline run.
 BIFROST_PERSIST_DEPLOY_LOG="${PROJECT_ROOT}/logs/.bifrost-deploy-last.log"
+# MkDocs-only rsync log (menu m / --deploy-mkdocs); separate from application deploy.
+BIFROST_PERSIST_MKDOCS_LOG="${PROJECT_ROOT}/logs/.bifrost-mkdocs-deploy-last.log"
 # TUI "Last output" tail count; after menu (4) systemd install set high so log + summaries fit (cleared on other menu keys).
 BIFROST_SSH_LAST_OUTPUT_LINES=""
 # Interactive: systemd snapshot for header (menu 3 refreshes all bifrost-* on DEPLOY_HOST).
@@ -360,6 +362,7 @@ _interactive_paint_main_menu() {
   echo "  ${C_GREEN}${C_BOLD}7)${C_RESET} ${C_BOLD}DB: Release locks${C_RESET} ${C_DIM}(choose Dev=local or Prod=remote; dry-run then optional terminate)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}9)${C_RESET} Reconnect SSH master ${C_DIM}(password again)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}l)${C_RESET} ${C_BOLD}Local Mac:${C_RESET} Socket ingest + Celery ${C_DIM}(pgrep + logs/.ops-ingest-*.pid on this repo)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}m)${C_RESET} ${C_BOLD}MkDocs site:${C_RESET} build + rsync ${C_DIM}site/ → ${DEPLOY_PATH}/site/ only ${C_RESET}${C_DIM}(handbook /mkdocs/; no APIs or DB)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}p)${C_RESET} ${C_BOLD}Remote Prod:${C_RESET} systemd scan on ${DEPLOY_HOST} ${C_DIM}(same units as deploy + worker@*)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}v)${C_RESET} ${C_BOLD}View last deploy log${C_RESET} ${C_DIM}(full output in less; saved to logs/.bifrost-deploy-last.log)${C_RESET}"
   echo "  ${C_YELLOW}${C_BOLD}q)${C_RESET} Quit"
@@ -415,8 +418,9 @@ Usage (from repo root):
       Menu (3) Status refreshes units grouped by category + Socket Services + Daemon (no bifrost-celery; use Ops UI). Menu (4) systemd install appends repo unit file list + the same unit summary as (3). Quick deploy: 0 = deploy+restart all 9 HTTP APIs; 1–3 = single units (Engine not in this script — use Dashboard); a–d = category; q or empty = cancel.
       Menu (4) Install systemd: locally render deploy/nginx/bifrost-status.conf from merged prod YAML, rsync it to the server, then register deploy/systemd/*.service + *.target (sudo); install nginx site from that file + nginx -t + reload when nginx is present.
       Menu (l) Local Mac: pgrep run_massive_ws / IB ingest / IB operator / run_celery + check logs/.ops-ingest-*.pid (this machine; not SSH).
+      Menu (m) MkDocs: mkdocs build + rsync site/ to DEPLOY_PATH only (no app/DB/systemctl; nginx serves /mkdocs/).
       Menu (p) Remote Prod: systemctl scan on DEPLOY_HOST (bifrost-* units + socket ingest + bifrost-celery-worker@*); use --password if systemctl needs sudo.
-      CLI: --local-mac-services | --remote-services-status
+      CLI: --local-mac-services | --remote-services-status | --deploy-mkdocs
       With --password / -p (or env DEPLOY_SUDO_PASSWORD), skip the sudo password prompt; value is
       kept in memory only for this process. Warning: --password may be visible in process listings.
 
@@ -470,6 +474,11 @@ Usage (from repo root):
     --show-last-deploy            print the full output of the last deploy/pipeline run (saved to
                                   logs/.bifrost-deploy-last.log) using less -R (or cat if less is absent).
                                   Does not SSH or deploy. Use after a failed deploy to see the full log.
+
+    --deploy-mkdocs               MkDocs only: run mkdocs build -f mkdocs.prod.yml locally, then rsync site/
+                                  to DEPLOY_PATH/site/ on DEPLOY_HOST. Does not run app pip/npm, DB tools,
+                                  or systemctl. Separate from --deploy / --deploy-only. Requires mkdocs
+                                  (uv sync --extra docs). Nginx must serve /mkdocs/ (see deploy/nginx templates).
 
     --local-mac-services          this machine only: pgrep + pidfiles for run_massive_ws / run_ib_ingestor /
                                   run_ib_operator / run_celery (see Examples).
@@ -533,6 +542,9 @@ Examples:
   ./scripts/bifrost_ssh.sh --show-last-deploy
       View the full output of the last deploy run (no SSH required).
       Log is saved at logs/.bifrost-deploy-last.log every time a pipeline runs.
+
+  ./scripts/bifrost_ssh.sh --deploy-mkdocs
+      Publish static handbook only: mkdocs build + rsync site/ → remote (log: logs/.bifrost-mkdocs-deploy-last.log).
 
 systemctl over SSH uses ssh -t when stdin is a TTY so sudo can prompt; non-interactive needs NOPASSWD for systemctl.
 With --password, --status uses sudo -S like start/stop/restart; without it, status runs as the SSH user (often sufficient for is-active).
@@ -794,6 +806,102 @@ _bifrost_save_persist_deploy_log() {
     fi
     printf '=== end (exit %d) ===\n' "${_ec}"
   } > "${BIFROST_PERSIST_DEPLOY_LOG}" 2>/dev/null || true
+}
+
+# Same as _bifrost_save_persist_deploy_log but for MkDocs static publish.
+_bifrost_save_mkdocs_deploy_log() {
+  local _label="$1" _ec="$2" _src="$3"
+  mkdir -p "$(dirname "${BIFROST_PERSIST_MKDOCS_LOG}")" 2>/dev/null || true
+  {
+    printf '=== MkDocs deploy log: %s | %s | exit %d ===\n' \
+      "${_label}" "$(date '+%Y-%m-%d %H:%M:%S')" "${_ec}"
+    if [[ -f "${_src}" ]]; then
+      sed 's/\x1b\[[0-9;]*[mKHJfABCDGsu]//g; s/\x1b(B//g' "${_src}"
+    fi
+    printf '=== end (exit %d) ===\n' "${_ec}"
+  } > "${BIFROST_PERSIST_MKDOCS_LOG}" 2>/dev/null || true
+}
+
+# Build MkDocs static site/ (mkdocs.prod.yml) and rsync to DEPLOY_PATH/site/. No venv pip of app deps, no npm, no DB, no systemctl.
+_bifrost_run_mkdocs_deploy_core() {
+  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
+  _bifrost_restore_session_sudo
+  cd "${PROJECT_ROOT}" || {
+    echo "ERROR: cannot cd to ${PROJECT_ROOT}" >&2
+    return 1
+  }
+  local py="${PROJECT_ROOT}/.venv/bin/python"
+  [[ -x "${py}" ]] || py="python3"
+  if ! command -v "${py}" >/dev/null 2>&1; then
+    echo "ERROR: no Python interpreter (${py})." >&2
+    return 1
+  fi
+  if ! "${py}" -c "import mkdocs" 2>/dev/null; then
+    echo "ERROR: mkdocs not installed. On this machine: uv sync --extra docs  (or pip install -e '.[docs]')." >&2
+    return 1
+  fi
+  if [[ ! -f "${PROJECT_ROOT}/mkdocs.prod.yml" ]]; then
+    echo "ERROR: ${PROJECT_ROOT}/mkdocs.prod.yml missing." >&2
+    return 1
+  fi
+  _msg_info "Running: ${py} -m mkdocs build -f mkdocs.prod.yml"
+  if ! "${py}" -m mkdocs build -f mkdocs.prod.yml; then
+    return 1
+  fi
+  if [[ ! -f "${PROJECT_ROOT}/site/index.html" ]]; then
+    echo "ERROR: mkdocs build did not produce site/index.html" >&2
+    return 1
+  fi
+  _msg_info "rsync site/ -> ${REMOTE}:${DEPLOY_PATH}/site/ (documentation only; nginx /mkdocs/)"
+  ssh_remote "${REMOTE}" "mkdir -p $(printf '%q' "${DEPLOY_PATH}/site")"
+  if [[ -n "${SSH_CONTROL_PATH}" ]]; then
+    rsync -avz --delete -e "ssh -S ${SSH_CONTROL_PATH}" "${PROJECT_ROOT}/site/" "${REMOTE}:${DEPLOY_PATH}/site/"
+  elif _use_sshpass_for_ssh; then
+    SSHPASS="${SUDO_PASSWORD}" rsync -avz --delete -e "sshpass -e ssh" "${PROJECT_ROOT}/site/" "${REMOTE}:${DEPLOY_PATH}/site/"
+  else
+    rsync -avz --delete -e ssh "${PROJECT_ROOT}/site/" "${REMOTE}:${DEPLOY_PATH}/site/"
+  fi
+  _msg_info "Done. UI header Docs → /mkdocs/ requires nginx location (see deploy/nginx/bifrost-status.conf.template); reload nginx after first install."
+}
+
+_cli_deploy_mkdocs() {
+  local _log _ec _pipeline_label
+  _log="$(mktemp -t bifrost_mkdocs_deploy)"
+  _pipeline_label="MkDocs deploy"
+  set +e
+  _bifrost_run_mkdocs_deploy_core >"${_log}" 2>&1
+  _ec=$?
+  set -e
+  _bifrost_save_mkdocs_deploy_log "${_pipeline_label}" "${_ec}" "${_log}"
+  _show_result "MkDocs deploy (exit ${_ec})" < "${_log}"
+  _emit_result_banner "${_ec}" "${_pipeline_label}"
+  if [[ "${_ec}" -ne 0 ]]; then
+    _msg_info "Full log saved to: ${BIFROST_PERSIST_MKDOCS_LOG}"
+  fi
+  rm -f "${_log}"
+  return "${_ec}"
+}
+
+_interactive_deploy_mkdocs() {
+  local _ec
+  _msg_info "MkDocs: build + rsync only (no application deploy, DB, or systemctl)."
+  echo ""
+  set +e
+  _bifrost_run_mkdocs_deploy_core 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
+  _ec=${PIPESTATUS[0]}
+  set -e
+  {
+    echo ""
+    echo "--- exit code: ${_ec} ---"
+  } | tee -a "${BIFROST_SSH_LAST_LOG}"
+  _bifrost_save_mkdocs_deploy_log "MkDocs deploy (interactive)" "${_ec}" "${BIFROST_SSH_LAST_LOG}"
+  if [[ "${_ec}" -eq 0 ]]; then
+    _msg_info "${C_GREEN}${C_BOLD}MkDocs deploy — SUCCESS${C_RESET} Log: ${BIFROST_PERSIST_MKDOCS_LOG}"
+  else
+    _msg_err "MkDocs deploy — ${C_RED}${C_BOLD}FAILED (exit ${_ec})${C_RESET}. See Last output or ${BIFROST_PERSIST_MKDOCS_LOG}"
+  fi
+  _msg_info "Redrawing menu…"
+  return 0
 }
 
 _run_pipeline() {
@@ -1999,7 +2107,7 @@ interactive_mode() {
 
   while true; do
     _interactive_paint_full
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-7|9|l|p|v|q]${C_RESET} "
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-7|9|l|m|p|v|q]${C_RESET} "
     read -r _ch
     case "${_ch}" in
       1)
@@ -2059,6 +2167,10 @@ interactive_mode() {
           echo "--- exit code: ${_ec_l} ---"
         } >>"${BIFROST_SSH_LAST_LOG}"
         ;;
+      m|M)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        _interactive_deploy_mkdocs
+        ;;
       p|P)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
         _bifrost_restore_session_sudo
@@ -2091,7 +2203,7 @@ interactive_mode() {
         ;;
       *)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
-        echo "[WARN] Unknown choice — try 1–7, 9, l, p, v, or q. (systemd install = 4; view deploy log = v)" >"${BIFROST_SSH_LAST_LOG}"
+        echo "[WARN] Unknown choice — try 1–7, 9, l, m, p, v, or q. (systemd install = 4; MkDocs = m; view deploy log = v)" >"${BIFROST_SSH_LAST_LOG}"
         ;;
     esac
   done
@@ -2162,10 +2274,12 @@ CLI_LOCAL_MAC_SERVICES=0
 CLI_REMOTE_SERVICES_STATUS=0
 CLI_INSTALL_SYSTEMD=0
 CLI_SHOW_LAST_DEPLOY=0
+CLI_DEPLOY_MKDOCS=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --show-last-deploy) CLI_SHOW_LAST_DEPLOY=1 ;;
+    --deploy-mkdocs) CLI_DEPLOY_MKDOCS=1 ;;
     --db-refresh) CLI_DB_REFRESH=1 ;;
     --db-refresh-dev) CLI_DB_REFRESH_DEV=1 ;;
     --db-release-locks)
@@ -2241,6 +2355,10 @@ while [[ $# -gt 0 ]]; do
   shift || true
 done
 
+if [[ "${CLI_SHOW_LAST_DEPLOY}" == "1" ]] && [[ "${CLI_DEPLOY_MKDOCS}" == "1" ]]; then
+  usage_error "cannot combine --show-last-deploy with --deploy-mkdocs."
+fi
+
 # View last deploy log (no SSH; local file only).
 if [[ "${CLI_SHOW_LAST_DEPLOY}" == "1" ]]; then
   if [[ -f "${BIFROST_PERSIST_DEPLOY_LOG}" ]] && [[ -s "${BIFROST_PERSIST_DEPLOY_LOG}" ]]; then
@@ -2309,6 +2427,19 @@ if [[ "${CLI_INSTALL_SYSTEMD}" == "1" ]]; then
     usage_error "--install-systemd-units cannot be combined with deploy, systemctl, --migrate, or --sync-prod-config."
   fi
   _cli_remote_install_systemd_units
+  exit $?
+fi
+
+# MkDocs static site only (mkdocs build + rsync site/; no app deps, DB, or systemctl).
+if [[ "${CLI_DEPLOY_MKDOCS}" == "1" ]]; then
+  if [[ "${_db_cli_count}" -gt 0 ]] || [[ "${CLI_INSTALL_SYSTEMD}" == "1" ]] || [[ "${CLI_LOCAL_MAC_SERVICES}" == "1" ]] || [[ "${CLI_REMOTE_SERVICES_STATUS}" == "1" ]]; then
+    usage_error "--deploy-mkdocs cannot be combined with --db-*, --install-systemd-units, --local-mac-services, or --remote-services-status."
+  fi
+  if [[ "${DO_DEPLOY}" == "1" ]] || [[ "${DO_DEPLOY_ONLY}" == "1" ]] || [[ -n "${ACTION:-}" ]] || [[ "${DO_STATUS}" == "1" ]] \
+    || [[ "${RESTART_ALL}" == "1" ]] || [[ "${RESTART_ALL_STACK}" == "1" ]] || [[ "${RESTART_ALL_APIS}" == "1" ]] || [[ -n "${RESTART_CATEGORY}" ]] || [[ ${#RESTART_UNITS[@]} -gt 0 ]] || [[ "${DO_MIGRATE}" == "1" ]] || [[ "${SYNC_PROD_CONFIG}" == "1" ]]; then
+    usage_error "--deploy-mkdocs cannot be combined with deploy, systemctl, --migrate, or --sync-prod-config."
+  fi
+  _cli_deploy_mkdocs
   exit $?
 fi
 

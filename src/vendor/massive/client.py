@@ -9,12 +9,38 @@ import ssl
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_REST_BASE = "https://api.polygon.io"
+
+
+def _as_error_str(err: Any) -> str:
+    """Polygon/Massive sometimes returns error as a string, object, or list."""
+    if isinstance(err, str):
+        return err
+    if err is None:
+        return "Unknown error"
+    try:
+        return json.dumps(err, default=str)
+    except (TypeError, ValueError):
+        return str(err)
+
+
+def _polygon_body_error_message(data: Any, http_status: int) -> Optional[str]:
+    """Return a message if JSON indicates logical failure (including HTTP 200 error bodies)."""
+    if not isinstance(data, dict):
+        return None
+    ps = str(data.get("status") or "").upper()
+    if ps in ("ERROR", "NOT_AUTHORIZED", "FAILED"):
+        for key in ("error", "message"):
+            val = data.get(key)
+            if val is not None:
+                return _as_error_str(val)
+        return ps if ps else f"HTTP {http_status}"
+    return None
 
 
 def _redact_url_api_key(url: str) -> str:
@@ -580,6 +606,113 @@ class MassiveClient:
             err = data.get("error", data) if isinstance(data, dict) else str(data)
             return {"results": [], "error": err}
         return data if isinstance(data, dict) else {"results": []}
+
+    # ── Tickers reference (Stocks REST, read-only) ──
+
+    def fetch_reference_tickers(
+        self,
+        *,
+        ticker: Optional[str] = None,
+        instrument_type: Optional[str] = None,
+        market: Optional[str] = None,
+        exchange: Optional[str] = None,
+        search: Optional[str] = None,
+        active: Optional[bool] = None,
+        date: Optional[str] = None,
+        limit: int = 100,
+        sort: str = "ticker",
+        order: str = "asc",
+        cursor: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /v3/reference/tickers — paginated ticker universe (Polygon Stocks reference)."""
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        lim = min(max(int(limit), 1), 1000)
+        params: Dict[str, Any] = {"limit": lim, "sort": sort, "order": order}
+        if ticker:
+            params["ticker"] = ticker.strip()
+        if instrument_type:
+            params["type"] = instrument_type.strip()
+        if market:
+            params["market"] = market.strip()
+        if exchange:
+            params["exchange"] = exchange.strip()
+        if search:
+            params["search"] = search.strip()
+        if active is not None:
+            params["active"] = "true" if active else "false"
+        if date:
+            params["date"] = date.strip()
+        if cursor:
+            params["cursor"] = cursor.strip()
+        status, data = self._get("/v3/reference/tickers", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": _as_error_str(err)}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_ticker_detail(self, ticker: str, *, date: Optional[str] = None) -> Dict[str, Any]:
+        """GET /v3/reference/tickers/{ticker} — single ticker metadata."""
+        sym = (ticker or "").strip()
+        if not sym or not self._api_key:
+            return {"error": "ticker or api key missing"}
+        enc = quote(sym, safe="")
+        params: Dict[str, Any] = {}
+        if date:
+            params["date"] = date.strip()
+        status, data = self._get(f"/v3/reference/tickers/{enc}", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"error": _as_error_str(err)}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"error": logical}
+        return data if isinstance(data, dict) else {"error": "invalid response"}
+
+    def fetch_ticker_types(
+        self,
+        *,
+        asset_class: Optional[str] = None,
+        locale: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /v3/reference/tickers/types — instrument type codes."""
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        params: Dict[str, Any] = {}
+        if asset_class:
+            params["asset_class"] = asset_class.strip()
+        if locale:
+            params["locale"] = locale.strip()
+        status, data = self._get("/v3/reference/tickers/types", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": _as_error_str(err)}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_related_companies(self, ticker: str) -> Dict[str, Any]:
+        """GET /v1/related-companies/{ticker} — peer / related tickers."""
+        sym = (ticker or "").strip().upper()
+        if not sym or not self._api_key:
+            return {"error": "ticker or api key missing"}
+        enc = quote(sym, safe="")
+        status, data = self._get(f"/v1/related-companies/{enc}")
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"error": _as_error_str(err)}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"error": logical}
+        return data if isinstance(data, dict) else {"error": "invalid response"}
 
     # ── Market Ops (cross-asset reference, read-only) ──
 

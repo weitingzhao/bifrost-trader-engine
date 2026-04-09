@@ -1202,6 +1202,217 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
 
                 raise ValueError(f"unknown trades_quotes mode: {mode}")
 
+            if kind in (
+                "stock_reference_universe",
+                "stock_reference_overview",
+                "stock_reference_related",
+                "stock_reference_instrument_types",
+            ):
+                from src.persistence.postgres.stock_reference import (
+                    SYNC_KIND_UNIVERSE,
+                    all_stock_symbols,
+                    get_reference_state,
+                    get_stocks_id_for_symbol,
+                    next_cursor_from_api_response,
+                    replace_instrument_types,
+                    replace_related_for_stocks_id,
+                    row_from_ticker_detail,
+                    row_from_ticker_list_item,
+                    symbols_needing_overview,
+                    upsert_reference_state,
+                    upsert_stock_row,
+                )
+                from src.vendor.massive.reference_cache_keys import (
+                    invalidate_search_caches,
+                    invalidate_stock_cache,
+                    key_instrument_types,
+                    key_peers,
+                    redis_client_from_status_config,
+                )
+
+                rds = redis_client_from_status_config(status_cfg)
+                cur = conn.cursor()
+
+                if kind == "stock_reference_universe":
+                    max_pages = max(1, int(payload.get("max_pages") or 50))
+                    reset = bool(payload.get("reset_cursor"))
+                    cursor_in = (payload.get("cursor") or "").strip() or None
+                    if reset:
+                        cursor = None
+                        upsert_reference_state(cur, SYNC_KIND_UNIVERSE, None, "running")
+                        conn.commit()
+                    else:
+                        cursor = cursor_in
+                        if cursor is None:
+                            st = get_reference_state(cur, SYNC_KIND_UNIVERSE)
+                            if st and st.get("last_cursor"):
+                                cursor = (st.get("last_cursor") or "").strip() or None
+                    total = 0
+                    pages = 0
+                    last_next: Optional[str] = None
+                    while pages < max_pages:
+                        lim = min(1000, max(1, int(payload.get("limit") or 1000)))
+                        sort_f = (payload.get("sort") or "ticker").strip() or "ticker"
+                        order_f = (payload.get("order") or "asc").strip() or "asc"
+                        data = client.fetch_reference_tickers(
+                            market="stocks",
+                            limit=lim,
+                            sort=sort_f,
+                            order=order_f,
+                            cursor=cursor,
+                        )
+                        if data.get("error"):
+                            raise RuntimeError(str(data["error"]))
+                        results = data.get("results") or []
+                        if not isinstance(results, list):
+                            results = []
+                        for row in results:
+                            m = row_from_ticker_list_item(row if isinstance(row, dict) else {})
+                            if not m:
+                                continue
+                            upsert_stock_row(cur, m)
+                            total += 1
+                        conn.commit()
+                        last_next = next_cursor_from_api_response(data)
+                        upsert_reference_state(cur, SYNC_KIND_UNIVERSE, last_next, "running")
+                        conn.commit()
+                        if rds:
+                            invalidate_search_caches(rds)
+                        if not last_next:
+                            upsert_reference_state(cur, SYNC_KIND_UNIVERSE, None, "done")
+                            conn.commit()
+                            break
+                        cursor = last_next
+                        pages += 1
+                        _rest_throttle()
+                    if rds:
+                        invalidate_search_caches(rds)
+                    result = {
+                        "ok": True,
+                        "kind": kind,
+                        "summary": {
+                            "rows_upserted": total,
+                            "pages": pages,
+                            "next_cursor": last_next,
+                        },
+                    }
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
+                if kind == "stock_reference_overview":
+                    mode = (payload.get("mode") or "stale").strip().lower()
+                    stale_h = int(payload.get("stale_hours") or 720)
+                    if mode == "all":
+                        syms = all_stock_symbols(cur)
+                    elif mode == "symbols":
+                        syms_raw = payload.get("symbols") or []
+                        if isinstance(syms_raw, str):
+                            syms = [
+                                x.strip().upper()
+                                for x in syms_raw.replace(",", " ").split()
+                                if x.strip()
+                            ]
+                        elif isinstance(syms_raw, list):
+                            syms = [str(x).strip().upper() for x in syms_raw if str(x).strip()]
+                        else:
+                            syms = []
+                    else:
+                        syms = symbols_needing_overview(cur, stale_h)
+                    n_ok = 0
+                    errors: List[str] = []
+                    for sym in syms:
+                        _rest_throttle()
+                        det = client.fetch_ticker_detail(sym)
+                        if det.get("error"):
+                            errors.append(f"{sym}: {det.get('error')}")
+                            continue
+                        cols = row_from_ticker_detail(det)
+                        if not cols.get("symbol"):
+                            errors.append(f"{sym}: no symbol in response")
+                            continue
+                        upsert_stock_row(cur, cols)
+                        conn.commit()
+                        if rds:
+                            invalidate_stock_cache(rds, sym)
+                        n_ok += 1
+                    result = {
+                        "ok": True,
+                        "kind": kind,
+                        "summary": {
+                            "symbols_requested": len(syms),
+                            "symbols_upserted": n_ok,
+                            "errors_sample": errors[:20],
+                        },
+                    }
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
+                if kind == "stock_reference_related":
+                    mode = (payload.get("mode") or "symbols").strip().lower()
+                    if mode == "all":
+                        syms = all_stock_symbols(cur)
+                    else:
+                        syms_raw = payload.get("symbols") or []
+                        if isinstance(syms_raw, str):
+                            syms = [
+                                x.strip().upper()
+                                for x in syms_raw.replace(",", " ").split()
+                                if x.strip()
+                            ]
+                        elif isinstance(syms_raw, list):
+                            syms = [str(x).strip().upper() for x in syms_raw if str(x).strip()]
+                        else:
+                            syms = []
+                    n_ok = 0
+                    fetched_at = datetime.now(timezone.utc)
+                    for sym in syms:
+                        _rest_throttle()
+                        sid = get_stocks_id_for_symbol(cur, sym)
+                        if not sid:
+                            continue
+                        rel = client.fetch_related_companies(sym)
+                        if rel.get("error"):
+                            continue
+                        raw = rel.get("results") or []
+                        if not isinstance(raw, list):
+                            raw = []
+                        replace_related_for_stocks_id(cur, sid, raw, fetched_at)
+                        conn.commit()
+                        if rds:
+                            invalidate_stock_cache(rds, sym)
+                            try:
+                                rds.delete(key_peers(sym))
+                            except Exception:
+                                pass
+                        n_ok += 1
+                    result = {
+                        "ok": True,
+                        "kind": kind,
+                        "summary": {"symbols_processed": n_ok, "total_requested": len(syms)},
+                    }
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
+                if kind == "stock_reference_instrument_types":
+                    ac = (payload.get("asset_class") or "").strip() or None
+                    loc = (payload.get("locale") or "").strip() or None
+                    data = client.fetch_ticker_types(asset_class=ac, locale=loc)
+                    if data.get("error"):
+                        raise RuntimeError(str(data["error"]))
+                    res = data.get("results") or []
+                    if not isinstance(res, list):
+                        res = []
+                    n = replace_instrument_types(cur, res)
+                    conn.commit()
+                    if rds:
+                        try:
+                            rds.delete(key_instrument_types(loc or "*", ac or "*"))
+                        except Exception:
+                            pass
+                    result = {"ok": True, "kind": kind, "summary": {"rows": n}}
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
             raise ValueError(f"unknown kind: {kind}")
         except Exception as e:
             conn.rollback()

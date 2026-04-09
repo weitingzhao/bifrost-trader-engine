@@ -117,9 +117,9 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 - **Redis 地址**：若 Management 主机需要读取另一台（如 192.168.10.70）上 Daemon 写入的行情，将 `redis.host` 指向该服务器 IP。
 - **可选**：`server.skip_monitor_ib: true`（config 中），启用后 `run_server.py` **不**校验 YAML 中的 `ib` 段，且 `startup_event` 不初始化 `AccountIbClient` / `MarketIbClient`，避免 Management 机器连接 IB。正常运行 Status Server（与 Engine 同栈或需监控 IB）时应提供完整 `ib:`，勿依赖此项。
 
-### 2.10 外部研究数据源：Massive / Polygon（R-A6）
+### 2.10 外部研究数据源：Massive / Polygon（R-A6、R-A7）
 
-**定位**：**Massive（Polygon）** 为期权研究与发现（R-OD1、R-A6）的**主力数据源**，通过 HTTPS REST 与 WebSocket 获取延迟期权数据。**与 IB/TWS 完全独立**——不占用 `client_id`，不经过 Mac Mini，不受 IB Pacing 限制。
+**定位**：**Massive（Polygon）** 为**期权**研究与发现（R-OD1、**R-A6**）及**美股标的参考数据**（**R-A7**，Stocks 参考类 REST 持久化）的**主力数据源**，通过 HTTPS REST 与 WebSocket（期权）获取数据。**R-A6** 与 **R-A7** 共享同一 **`massive.api_key`**、限流与非功能边界（密钥不入库、前端不直连、Worker 退避）；Celery **`massive` queue** 与 Worker 可按**任务类型**（期权回填、标的 universe、Overview、Related、Types 等）共存或分任务名，以实现为准。**与 IB/TWS 完全独立**——不占用 `client_id`，不经过 Mac Mini，不受 IB Pacing 限制。
 
 **配置**（`config.yaml` 或环境变量）：
 - `massive.api_key`（或 `MASSIVE_API_KEY`）：API 密钥，不入库、不暴露给前端。
@@ -163,6 +163,21 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 └──────────────────────────────────────────────────┘
 ```
 
+**Stocks 参考数据（R-A7）**与上图**并行**：经 **Massive Stocks REST**（非期权 WS）由 **Celery 或同步任务** 写入 **PostgreSQL**（`stocks`、`ticker_instrument_types`、`stock_related_tickers` 等，见 §2.10.9 与 [DATABASE.md](DATABASE.md)）；**不**经过 `run_massive_ws.py` 的 **`massive:channel`** / 合约报价路径。
+
+```mermaid
+flowchart LR
+  MassiveStocksREST[Massive_Stocks_REST_ref]
+  Worker[Celery_or_sync_worker]
+  PGStocks[(PostgreSQL_stocks_peers_types)]
+  RedisCache["Redis_massive_ingestor_cache"]
+  ResearchAPI[FastAPI_research]
+  MassiveStocksREST --> Worker
+  Worker --> PGStocks
+  ResearchAPI --> RedisCache
+  ResearchAPI --> PGStocks
+```
+
 **部署说明**：上图逻辑不变；物理上 `/research/...` 等路由可由 **独立 FastAPI 进程**（如 `scripts/run_server_massive.py` → `backend.research`）提供，与 Monitor（`run_server.py`）分端口监听，见 §4.0。
 
 #### 2.10.1 REST API 行为约定
@@ -177,6 +192,10 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 | `GET /research/option-trades?...` | 逐笔成交（分页 + 时间范围）。**仅当** `massive.features.trades_enabled=true` 时返回数据，否则 403 或空列表 + 说明 tier。 | 不可用 | 可用 |
 | `POST /research/massive/sync` | 入队异步拉取任务，返回 `job_id`；kind 参数指定任务类型。 | 可用（trades 除外） | 全部 |
 | `GET /research/massive/jobs/{id}` | 查询异步任务状态与结果。 | 可用 | 可用 |
+| `GET /research/stocks/search` 等（规划） | 标的联想/搜索：读 **Redis 缓存（命中）→ PostgreSQL**；不全量下发 universe 至浏览器。路径与查询参数以实现为准。 | 与参考 API / 套餐一致 | 同左 |
+| `GET /research/stocks/{symbol}` 等（规划） | 单标的详情（`stocks` 行 + 可选缓存）。 | 同左 | 同左 |
+| `GET /research/stocks/{symbol}/related` 等（规划） | Related Tickers：读 **`stock_related_tickers`**（及 join `stocks` 展示名称等）。 | 同左 | 同左 |
+| `GET /research/ticker-instrument-types` 等（规划） | Ticker Types 词典：可读 PG 或 **`massive:ingestor:cache:instrument_types:*`**。 | 同左 | 同左 |
 
 #### 2.10.2 WebSocket 行为约定
 
@@ -197,12 +216,13 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 - **Research → Option Discovery**：展示数据源 badge **Massive · 15 min delayed**；表格列：strike、bid/ask、last、IV、Greeks（来自落地快照）、OI（日终）。
 - **Trades Tab/列**：无 Developer tier 时**隐藏**「Tape/Trades」Tab 或列，或显示升级提示（英文文案 `Trades data requires Options Developer subscription`）。
 - **Settings / About**（可选）：展示当前 `tier` 与能力列表。
+- **R-A7（标的参考）**：标的选择、详情、peers 等 UI 文案**英文**；延迟/套餐提示与 Option Discovery 的 **Massive · 15 min delayed** 规则**一致或引用**（以参考接口实际条款与实现为准）。
 - **所有 UI 文案使用英文**（遵守 workspace rule）。
 
 #### 2.10.5 Worker 行为约定
 
 - **Celery queue**：`massive`（与 IB `bars` 分离）；`concurrency` 按 Massive 限流设 1–N。
-- **任务类型**：历史聚合回填、日 OI 拉取、快照批量、**Trades 回填**（仅 flag 开时入队与执行）；文件下载（若使用 Unlimited File Downloads）可作独立 task 解压/导入 staging 再 MERGE。
+- **任务类型**：历史聚合回填、日 OI 拉取、快照批量、**Trades 回填**（仅 flag 开时入队与执行）；**R-A7** Stocks 参考：**universe**（All Tickers 分页 + checkpoint）、**overview**（按标的 enrichment）、**related**（Related Tickers）、**instrument_types**（词典）；文件下载（若使用 Unlimited File Downloads）可作独立 task 解压/导入 staging 再 MERGE。
 - **重试与幂等**：429/5xx 指数退避；写入按供应商唯一 ID（`massive_trade_id`、bar 唯一键）UPSERT。
 - **启动**：`celery -A src.workers.celery_app worker -l info -Q massive --concurrency=N`（与 `bars` worker 可同机不同进程并行）。
 
@@ -218,7 +238,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 #### 2.10.7 详细说明与追踪
 
-上述 §2.10 定义了 Massive 数据源的**架构约定**与**行为边界**。表结构、迁移与实现进度以 **[DATABASE.md](DATABASE.md)** 与 **[plans/CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)** 为准；历史分项实施计划文档已移除，不再单独维护。
+上述 §2.10 定义了 Massive 数据源的**架构约定**与**行为边界**；**§2.10.9** 补充 **R-A7** 标的维表在 PostgreSQL 与 **`massive:ingestor:cache:*`** 中的分工。表结构、迁移与实现进度以 **[DATABASE.md](DATABASE.md)** 与 **[plans/CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)** 为准；历史分项实施计划文档已移除，不再单独维护。
 
 #### 2.10.8 IB ingestor 与 Redis Pub/Sub（调试）
 
@@ -229,6 +249,27 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 **如何订阅全部 tick 通知**：对 **`ib:ingester:channel`** 执行 **`SUBSCRIBE`**（或 Redis Insight **Pub/Sub** 工具中**手动输入**该频道名并连接；勿依赖「从列表里选频道」，列表可能为空）。收到消息后按 `contract_key` 再 **`GET ib:ingester:tick:{contract_key}`** 取完整 JSON。勿使用 `ib:ingester:ticks`（不存在）；tick 明细在键前缀 **`ib:ingester:tick:`** 下，不是按合约各建一个 Pub/Sub 频道。
 
 **CLI 验证**：`redis-cli -h … -p … SUBSCRIBE ib:ingester:channel`（会话会阻塞，仅用于排障）。短时 **`MONITOR`** 可看到 `PUBLISH` 命令，勿长期开启。
+
+#### 2.10.9 Stocks 参考数据（R-A7）：PostgreSQL 与 Redis 分工
+
+与 [REQUIREMENTS.md](REQUIREMENTS.md) **§3.5.1（R-A7）** 对应，本节约定**标的维表**在 **PostgreSQL** 与 **Redis** 中的职责，并与 **`ib:ingester:*`**、期权 ingest 的 **`massive:channel`** 区分。
+
+- **PostgreSQL（权威）**：
+  - **`stocks`**：标的/公司主档（`stocks_id`、唯一 `symbol` 等）；**`ticker_instrument_types`**：类型词典；**`stock_related_tickers`**：Related 边表（`from_stocks_id` → `stocks`，`to_symbol`，`rank` 等）。
+  - 可选 **`job_*`**（如 `job_stock_reference_sync`）存 **All Tickers** 同步的 **checkpoint**（`last_cursor` 等），命名与 [DATABASE.md](DATABASE.md)、[.cursor/rules/database-design.mdc](../.cursor/rules/database-design.mdc) 一致。
+  - 与 **`option_contracts.symbol`**（underlying）等通过 **`symbol` 规范化（大写）** 关联；列级细节以 **DATABASE.md** 迁移后章节为准。
+
+- **Redis 命名空间**（类比 **`ib:ingester:*`** 中「tick + 轻量通知」与「健康哈希」分离）：
+  - **期权实时流**（既有）：**`massive:channel`**、**`massive:meta:subscriptions`**、合约键 **`massive:{contract_key}`** 等——**不**用于 R-A7 标的维表。
+  - **页面/API 热缓存（可丢、TTL）**：统一前缀 **`massive:ingestor:cache:*`**，例如：
+    - **`massive:ingestor:cache:stock:{SYMBOL}`** — 单标的聚合展示字段（STRING JSON 或 HASH）；
+    - **`massive:ingestor:cache:search:{normalized_query}`** — 联想/搜索结果短 TTL；
+    - **`massive:ingestor:cache:instrument_types:{locale}:{asset_class}`** — Ticker Types 整包（可选）。
+  - **健康与运维**（既有）：**`bifrost:health:ws_massive_option`** 等 **`bifrost:health:*`**——**不**写入 `massive:ingestor:cache:*`。
+
+- **读路径**：FastAPI **GET** 优先 **Redis（命中）→ PostgreSQL**；未命中可回填缓存。**写路径**：**仅 Worker/同步任务** 写 **PG**，随后 **删除或覆盖** 相关 **`massive:ingestor:cache:*`** key（或依赖 TTL）。
+
+- **Worker**：与 §2.10.5 **`massive` queue** 一致；R-A7 任务 **kind** 含 **universe / overview / related / instrument_types**；**429/5xx 退避**与 **UPSERT 幂等**同节。
 
 ### 2.11 IB Ingestor、IB Account Agent、IB Operator 与 Engine（目标职责）
 

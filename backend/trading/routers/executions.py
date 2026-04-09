@@ -23,6 +23,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["executions"])
 
 
+def _fmt_db_id_list(ids: Any, *, max_show: int = 48) -> str:
+    """Format ``executions_raw_tws_id`` lists for API message text (truncate long lists)."""
+    if not ids:
+        return "none"
+    try:
+        nums = [int(x) for x in list(ids)]
+    except (TypeError, ValueError):
+        return "none"
+    if len(nums) <= max_show:
+        return "[" + ", ".join(str(i) for i in nums) + "]"
+    head = nums[:max_show]
+    return "[" + ", ".join(str(i) for i in head) + f", … +{len(nums) - max_show} more]"
+
+
 def _publish_tws_fetch_system_message(
     config: dict,
     *,
@@ -232,8 +246,10 @@ def post_executions_fetch_flex(request: Request, body: Dict[str, Any] = Body(def
 def post_executions_fetch_flex_upload(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """Upload Flex Trades XML and upsert into account_executions. Body: { "xml": "<FlexStatement ...>...</FlexStatement>" }"""
     control_via_db = request.app.state.control_via_db
+    reader = request.app.state.reader
     raw_xml = (body.get("xml") or "").strip()
-    return upsert_executions_from_uploaded_flex_xml(control_via_db, raw_xml)
+    cfg = getattr(reader, "_config", None)
+    return upsert_executions_from_uploaded_flex_xml(control_via_db, raw_xml, config=cfg)
 
 
 @router.post("/executions")
@@ -402,9 +418,14 @@ async def post_executions_fetch(
     ins = int(stats_out.get("tws_raw_inserted") or 0)
     skip = int(stats_out.get("tws_raw_skipped_duplicate") or 0)
     missing_raw = bool(stats_out.get("tws_raw_missing_table"))
+    ins_ids = list(stats_out.get("tws_raw_inserted_ids") or [])
+    upd_ids = list(stats_out.get("tws_raw_updated_ids") or [])
+    sk_ids = list(stats_out.get("tws_raw_skipped_ids") or [])
     msg = (
         f"Fetched {fetched_total} execution(s) from IB (primary {fetched_primary}, secondary {fetched_secondary}). "
-        f"New rows in executions_raw_tws: {ins}; skipped duplicate exec_id: {skip}."
+        f"executions_raw_tws: inserted {ins} row(s), ids {_fmt_db_id_list(ins_ids)}; "
+        f"updated {len(upd_ids)} row(s), ids {_fmt_db_id_list(upd_ids)} (TWS path is insert-or-skip, usually 0); "
+        f"skipped duplicate exec_id: {skip}, existing row ids {_fmt_db_id_list(sk_ids)}."
     )
     if missing_raw:
         msg += " (executions_raw_tws missing or unavailable; stats may be incomplete.)"
@@ -431,6 +452,9 @@ async def post_executions_fetch(
         "tws_raw_inserted": ins,
         "tws_raw_skipped_duplicate": skip,
         "tws_raw_missing_table": missing_raw,
+        "tws_raw_inserted_ids": ins_ids,
+        "tws_raw_updated_ids": upd_ids,
+        "tws_raw_skipped_ids": sk_ids,
         "message": msg,
     }
     if secondary_error:

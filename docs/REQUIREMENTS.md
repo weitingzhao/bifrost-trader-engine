@@ -28,6 +28,7 @@
 | | **R-A5** | 未成交订单可观测（事件驱动）：以事件驱动方式获取并展示当前未成交订单（Limit 挂单等）。 | §3.3.1 |
 | | **R-A3** | 复盘辅助行情可获取：为复盘与风控分析提供辅助行情数据（如 K 线、历史 tick 等）。 | §3.4 |
 | | **R-A6** | Massive 期权研究数据：从 Massive（Polygon）获取期权链、快照、聚合 K 线、Greeks/IV、日终 OI、参考数据与公司行动等，作为期权研究主力数据源；分级能力（Starter / Developer）。 | §3.5 |
+| | **R-A7** | 美股标的参考数据：从 Massive（Polygon）Stocks 参考类 REST（All Tickers、Ticker Overview、Ticker Types、Related Tickers）拉取并持久化至 PostgreSQL，支持更新策略与查询/联想（含 Research UI）；与 R-A6 互补；**不依赖 IB** 作为标的元数据来源。 | §3.5.1 |
 | | **R-M6** | 标的与持仓当前市价可获取：监控页须能获取并展示交易标的与持仓的当前市价（spot/last/mid 等），供评估持仓盈亏、期权虚实与风险。 | §3.2 |
 | **d. 策略编辑、回测与历史统计** | **R-H2** | 历史统计：基于历史数据做胜率、盈亏分布、按日/周/月汇总、对冲次数与滑点等。 | §4.1 |
 | | **R-B1** | 策略 PnL 优化：在历史数据上对比不同参数的理论 P&L、收益曲线、回撤等，优化策略回报。 | §4.2 |
@@ -114,6 +115,7 @@
 ### 2.7 期权发现入口（R-OD1）
 
 - **目标**：在 Research 下提供 **Option Discovery** 子页，作为按到期询价与机会发现的入口；操作者可选择标的（来自 Watchlist STK）与到期日，展示该到期下的期权报价、Greeks/IV、日终 OI 等。
+- **标的维表（R-A7）**：Option Discovery 的标的选择可与 **`stocks` 持久化维表**（Massive Stocks 参考同步，见 §3.5.1）**逐步对齐**，与 Watchlist STK 并存，减少重复输入与符号歧义。
 - **主力数据源**：**Massive（Polygon）**（R-A6）为 Option Discovery 的**主力研究数据源**——链与到期、Snapshot 快照、延迟 Greeks/IV、日终 Open Interest 等均优先从 Massive 获取；**IB** 作交叉校验或在 Massive 不可用（如 API Key 未配置、Management 模式）时的**降级路径**（可选、分阶段）。
 - **延迟披露**：Massive Starter 订阅为 **15 分钟延迟**数据，界面须在相关数据区域标注 `Massive · 15 min delayed`，避免与 IB 实盘行情混淆或误用于自动下单决策。
 - **范围**：第一步为 **UI 与占位 API**——Research 二级菜单新增「Option Discovery」、新页面含标的选择（Watchlist STK）、到期选择（占位）、占位表格/说明；后端提供 `GET /research/option-expirations?symbol=...&provider=massive|ib|auto`，可返回空列表或 mock 到期。后续步骤：接入 Massive / IB 返回真实到期与行权价、期权快照与发现逻辑。
@@ -167,6 +169,7 @@
 - **范围**：
   - **标的**：除当前持仓外，支持 **Watchlist**（自选/待操作标的，可含股票与期权，含当前持仓、未持仓与曾持仓）；Watchlist 落库持久化，服务重启不丢失。
   - **数据源**：**IB** 为复盘/回测用 K 线的既有来源；**期权研究专用**数据（链、Snapshot、分钟/秒聚合 K 线、Greeks/IV、日终 Open Interest）以 **Massive（Polygon）** 为**优先回填与展示来源**（R-A6）。写入 option_day / option_min 等表时附带 `source` 列（`ib` 或 `massive`）区分来源。按标的与周期从对应数据源拉取并写入库，减少重复请求。
+  - **标的元数据与符号解析**：上市股票类**参考信息**（名称、交易所、类型、关联标的等）以 **Massive Stocks 参考 API 同步落库**（**R-A7**，§3.5.1）为**主路径**，**不**依赖 IB 作为该类元数据的权威来源；与 K 线、报价数据源划分相互独立。
   - **K 线**：股票与期权**分表存储**——股票日线 **stock_day**、股票分钟/小时线 **stock_min**（周期 1 min、5 mins、1 hour）；期权日线 **option_day**、期权分钟/小时线 **option_min**。日 K 为主；分钟/小时线供复盘与短期回测。
   - **拉取策略**：首次按标的拉取时可请求**全部历史**；后续根据**最新一根 K 线距离当前的时间**智能决定请求的 duration，避免重复拉取已入库区间。
   - **报价**：持仓与 Watchlist 标的的**当前报价**（bid/ask/last/mid）可获取；Watchlist 的报价在拉取后**写入 contract_quote_live**（与持仓共用），供前端统一展示与后续使用。
@@ -197,6 +200,17 @@
   - **限流**：即使 Massive 标称 unlimited API 调用，Worker 仍应在请求间留退避间隔（429/5xx 指数退避），遵守供应商 ToS。
   - **前端不直连 Massive**：密钥保护与 CORS 限制，所有请求经后端代理或落库后读取。
 - **与分步计划**：纳入期权研究阶段；具体实现顺序见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+
+### 3.5.1 美股标的参考数据（R-A7）
+
+- **目标**：建立可复用的**美股（及按需扩展）标的维表**：universe 列表（All Tickers）+ 单标的详情（Ticker Overview）+ 类型词典（Ticker Types）+ 关联标的边关系（Related Tickers），供 Option Discovery（§2.7）、分析页、Watchlist 选标等复用；与 **R-A6** 期权数据互补。
+- **数据源**：**Massive Stocks REST**——**All Tickers**（cursor 分页）、**Ticker Overview**（单标的）、**Ticker Types**、**Related Tickers**；与 [ARCHITECTURE.md](ARCHITECTURE.md) §2.10 一致：**前端不直连 Massive**，API Key 仅存服务端。
+- **持久化（业务表名）**：**`stocks`**（主档，`stocks_id` 主键、`symbol` UNIQUE）、**`ticker_instrument_types`**、**`stock_related_tickers`**；可选 **`job_*`** 表存 universe 同步游标/checkpoint。**表名保持业务语义**，不使用供应商前缀表名；**将来**若多数据源并存可增 `source` 列（当前需求不强制）。列清单与约束以 **[DATABASE.md](DATABASE.md)** 为准（随迁移补充 §2.14.1 等章节）。
+- **功能**：
+  - **存储与更新**：后台任务分页同步 universe、按标的 enrichment（Overview）、Related 按 from 标的批量刷新、Types 词典低频全量更新；**幂等、429/5xx 指数退避**与 R-A6 非功能一致。
+  - **查询**：按 symbol 精确读、筛选、**联想/搜索**（服务端接口，**不全量**下发明细到浏览器）。
+- **UI**：Research 或 Settings → Feed 等：**标的选择/搜索**、**详情与 peers** 以**落库/API**为准；与 Massive Stock Feed 页**原始代理调试**并存时，**生产分析路径以 PostgreSQL/API 为准**，代理仅作排障与能力验证。
+- **边界**：与 R-A6 相同——**不得**将 Massive 侧数据作为 ExecutionGuard 或自动下单决策输入；界面展示须与套餐/延迟一致（如 Starter 下 **15 分钟延迟**类提示，与实现及 Massive 文档对齐），避免与 IB 实盘行情混淆。
 
 ### 3.6 IB 边缘服务与 Daemon 边界（目标架构，R-IB1～R-IB4）
 

@@ -58,6 +58,12 @@ import {
 import { SettingsSectionIcon } from './pages/settings/SettingsSectionIcon'
 import logoImg from '../img/logo.png'
 import { fmtPctCompact, fmtUsdCompact } from './utils/format'
+import {
+  IB_CONNECTION_MSG_AUTO_DISMISS_SEC,
+  IB_OPERATOR_COMMAND_LIFETIME_SEC,
+  SYSTEM_MESSAGE_BACKEND_TTL_SEC,
+  isIbOperatorCommandMessage,
+} from './utils/systemMessageLifecycle'
 import { ingestRedisHealthLamp } from './utils/socketIngestLamp'
 import {
   computeLiveNavLamp,
@@ -76,12 +82,15 @@ import './App.css'
 import './styles/settings-celery.css'
 
 const THEME_KEY = 'bifrost-monitor-theme'
-// Keep messages for 1 hour (matching backend TTL). The MessageCenter component
-// handles the 10-second toast window internally.
-const SYSTEM_MESSAGE_BACKEND_TTL_SEC = 3600
 const SYSTEM_MESSAGE_BOOTSTRAP_LIMIT = 50
-// IB connection status messages auto-dismiss after this window (they are high-frequency events).
-const IB_CONNECTION_MSG_AUTO_DISMISS_SEC = 30
+
+/** Header ⋮ → Docs: MkDocs handbook (not Monitor /docs). Dev: `python scripts/run_docs.py`. Prod: static `/mkdocs/` after `./scripts/bifrost_ssh.sh --deploy-mkdocs`. */
+function mkdocsHandbookHref(): string {
+  const explicit = import.meta.env.VITE_MKDOCS_URL?.trim()
+  if (explicit) return explicit
+  if (import.meta.env.DEV) return 'http://127.0.0.1:8000/'
+  return '/mkdocs/'
+}
 
 type StreamTone = 'neutral' | 'positive' | 'negative'
 
@@ -344,6 +353,7 @@ export default function App() {
   const messageCenterRef = useRef<MessageCenterHandle>(null) as RefObject<MessageCenterHandle>
   const [msgDismissedIds, setMsgDismissedIds] = useState<Set<string>>(() => new Set())
   const ibAutoDismissTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const ibOperatorCmdDismissTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   const dismissMessage = useCallback((id: string) => {
     setMsgDismissedIds((prev) => new Set([...prev, id]))
@@ -696,6 +706,29 @@ export default function App() {
     // Cancel timers for messages that have been pruned from state
     for (const [id, timer] of timers) {
       if (!systemMessages.some((m) => m.message_id === id)) {
+        clearTimeout(timer)
+        timers.delete(id)
+      }
+    }
+  }, [systemMessages])
+
+  // Auto-dismiss portfolio command messages (TWS fetch, Flex fetch/upload, …) after 10 minutes.
+  useEffect(() => {
+    const timers = ibOperatorCmdDismissTimersRef.current
+    const now = Date.now() / 1000
+    for (const m of systemMessages) {
+      if (!isIbOperatorCommandMessage(m)) continue
+      if (timers.has(m.message_id)) continue
+      const age = now - Number(m.occurred_at || 0)
+      const delayMs = Math.max(0, (IB_OPERATOR_COMMAND_LIFETIME_SEC - age) * 1000)
+      const id = m.message_id
+      timers.set(id, setTimeout(() => {
+        setMsgDismissedIds((prev) => new Set([...prev, id]))
+        timers.delete(id)
+      }, delayMs))
+    }
+    for (const [id, timer] of timers) {
+      if (!systemMessages.some((msg) => msg.message_id === id)) {
         clearTimeout(timer)
         timers.delete(id)
       }
@@ -1557,7 +1590,7 @@ export default function App() {
               </div>
               <div className="app-header-menu-docs-version-row" role="presentation">
                 <a
-                  href="/docs"
+                  href={mkdocsHandbookHref()}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="app-header-menu-item app-header-menu-docs-link"
