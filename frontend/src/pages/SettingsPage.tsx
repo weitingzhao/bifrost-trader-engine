@@ -77,6 +77,7 @@ import { SettingsShell } from './settings/SettingsShell'
 import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
 import { OptionCoveragePage } from './OptionCoveragePage'
 import { StockCoveragePage } from './StockCoveragePage'
+import { MassiveStockCoveragePage } from './MassiveStockCoveragePage'
 import { useDeferredStart } from '../hooks/useDeferredStart'
 import type { SettingsApiHealthProbesState } from '../hooks/useSettingsApiHealthProbes'
 import { fetchMarketIngestServices, type MarketIngestServiceRow } from '../api/ops/ops'
@@ -843,7 +844,7 @@ export function SettingsPage({
           <div className={`settings-sidebar-parent ${isMassiveStockFeedActive ? 'active' : ''}`}>
             <a href={`#${FEED_MASSIVE_STOCK_ID}`} className="settings-sidebar-parent-label">
               <SettingsSectionIcon name="feed-massive-stock" />
-              Massive Stock
+              Stock Data
             </a>
             <button
               type="button"
@@ -851,7 +852,7 @@ export function SettingsPage({
               onClick={() => setMassiveStockExpanded(e => !e)}
               aria-expanded={massiveStockExpanded}
               aria-controls="settings-feed-massive-stock-subs"
-              aria-label={massiveStockExpanded ? 'Collapse Massive Stock capabilities' : 'Expand Massive Stock capabilities'}
+              aria-label={massiveStockExpanded ? 'Collapse Stock Data capabilities' : 'Expand Stock Data capabilities'}
             >
               ▼
             </button>
@@ -1017,6 +1018,8 @@ export function SettingsPage({
       ) : isCoverageSection ? (
         currentHash === 'coverage-stock' ? (
           <StockCoveragePage status={status} />
+        ) : currentHash === 'coverage-massive-stock' ? (
+          <MassiveStockCoveragePage status={status} />
         ) : (
           <OptionCoveragePage status={status} />
         )
@@ -1032,7 +1035,7 @@ export function SettingsPage({
           <FeedMassiveStockPage
             status={status}
             onGoToFeed={() => { window.location.hash = '#feed-ib-stock' }}
-            breadcrumbLabel="Massive Stock"
+            breadcrumbLabel="Stock Data"
           />
         ) : (
           <DataPage

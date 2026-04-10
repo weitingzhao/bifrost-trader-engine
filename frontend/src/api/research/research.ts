@@ -1,5 +1,6 @@
 import { getMassiveApiBase, getDocsApiBase, getOpsApiBase, getResearchApiBase, joinServiceBase } from '../shared/apiRouting'
 import { fetchWithTimeout } from '../shared/fetchTimeout'
+import type { JobQueueStatusCounts } from '../ops/bars'
 import { opsAuthHeaders, opsControlFailureMessage, type OpsCapabilities } from '../ops/ops'
 
 function massiveUrl(path: string): string {
@@ -624,17 +625,89 @@ export interface MassiveJobApiRow {
   updated_ts?: number
 }
 
+export async function fetchMassiveJobsSummary(celeryQueue: string): Promise<{
+  ok: boolean
+  counts: JobQueueStatusCounts
+  error?: string
+}> {
+  const q = new URLSearchParams()
+  if (celeryQueue.trim()) q.set('celery_queue', celeryQueue.trim())
+  const r = await fetch(opsMassiveJobsUrl(`/summary?${q.toString()}`), { headers: opsAuthHeaders() })
+  const j = await r.json().catch(() => ({}))
+  const c = j.counts as Record<string, unknown> | undefined
+  const counts: JobQueueStatusCounts = {
+    pending: typeof c?.pending === 'number' ? c.pending : 0,
+    running: typeof c?.running === 'number' ? c.running : 0,
+    done: typeof c?.done === 'number' ? c.done : 0,
+    failed: typeof c?.failed === 'number' ? c.failed : 0,
+  }
+  return {
+    ok: r.ok && j.ok !== false,
+    counts,
+    error: typeof j.error === 'string' ? j.error : undefined,
+  }
+}
+
+export async function postMassiveJobsClearDone(celeryQueue: string): Promise<{
+  ok: boolean
+  deleted: number
+  error?: string
+}> {
+  const q = new URLSearchParams()
+  if (celeryQueue.trim()) q.set('celery_queue', celeryQueue.trim())
+  const qs = q.toString()
+  const r = await fetch(opsMassiveJobsUrl(`/clear-done${qs ? `?${qs}` : ''}`), {
+    method: 'POST',
+    headers: opsAuthHeaders(),
+  })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: r.ok && j.ok !== false,
+    deleted: typeof j.deleted === 'number' ? j.deleted : 0,
+    error: typeof j.error === 'string' ? j.error : undefined,
+  }
+}
+
+export async function postRetryFailedMassiveJobs(
+  celeryQueue: string,
+  limit = 200,
+): Promise<{
+  ok: boolean
+  error?: string
+  reset?: number
+  enqueued?: number
+  enqueue_errors?: { job_id: string; error: string }[]
+}> {
+  const params = new URLSearchParams({ limit: String(Math.max(1, Math.min(2000, limit))) })
+  if (celeryQueue.trim()) params.set('celery_queue', celeryQueue.trim())
+  const r = await fetch(opsMassiveJobsUrl(`/retry-failed?${params}`), {
+    method: 'POST',
+    headers: opsAuthHeaders(),
+  })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: r.ok && j.ok === true,
+    error: typeof j.error === 'string' ? j.error : undefined,
+    reset: typeof j.reset === 'number' ? j.reset : undefined,
+    enqueued: typeof j.enqueued === 'number' ? j.enqueued : undefined,
+    enqueue_errors: Array.isArray(j.enqueue_errors) ? j.enqueue_errors : undefined,
+  }
+}
+
 export async function fetchMassiveJobsList(options?: {
   limit?: number
   offset?: number
   status?: string
   kind?: string
+  /** Broker queue slice (massive, massive_high, massive_stocks, massive_stocks_high). */
+  celery_queue?: string
 }): Promise<{ ok: boolean; jobs: MassiveJobApiRow[]; error?: string }> {
   const q = new URLSearchParams()
   if (options?.limit != null) q.set('limit', String(options.limit))
   if (options?.offset != null) q.set('offset', String(options.offset))
   if (options?.status?.trim()) q.set('status', options.status.trim())
   if (options?.kind?.trim()) q.set('kind', options.kind.trim())
+  if (options?.celery_queue?.trim()) q.set('celery_queue', options.celery_queue.trim())
   const r = await fetch(opsMassiveJobsUrl(`?${q.toString()}`), { headers: opsAuthHeaders() })
   const j = await r.json().catch(() => ({}))
   if (!j.ok) {
@@ -666,13 +739,17 @@ export async function deleteMassiveJob(jobId: string): Promise<{ ok: boolean; er
   return { ok: r.ok && j.ok !== false, error: typeof j.error === 'string' ? j.error : undefined }
 }
 
-export async function deleteAllMassiveJobs(status?: string | null): Promise<{
+export async function deleteAllMassiveJobs(
+  status?: string | null,
+  celeryQueue?: string | null,
+): Promise<{
   ok: boolean
   deleted: number
   error?: string
 }> {
   const params = new URLSearchParams()
   if (status && status !== 'all') params.set('status', status)
+  if (celeryQueue?.trim()) params.set('celery_queue', celeryQueue.trim())
   const qs = params.toString()
   const r = await fetch(opsMassiveJobsUrl(`/purge${qs ? `?${qs}` : ''}`), {
     method: 'POST',
@@ -692,8 +769,12 @@ export async function deleteAllMassiveJobs(status?: string | null): Promise<{
   }
 }
 
-export async function trimMassiveJobs(keep: number): Promise<{ ok: boolean; deleted: number; error?: string }> {
+export async function trimMassiveJobs(
+  keep: number,
+  celeryQueue?: string | null,
+): Promise<{ ok: boolean; deleted: number; error?: string }> {
   const params = new URLSearchParams({ keep: String(keep) })
+  if (celeryQueue?.trim()) params.set('celery_queue', celeryQueue.trim())
   const r = await fetch(opsMassiveJobsUrl(`/trim?${params}`), { method: 'POST', headers: opsAuthHeaders() })
   const j = await r.json().catch(() => ({}))
   return {

@@ -211,8 +211,8 @@ export async function fetchOpsAudit(limit = 100): Promise<{
 
 export interface QueueSummaryRow {
   name: string
-  pending_broker: number
-  running_celery: number
+  pending_broker: number | null
+  running_celery: number | null
   done_db: number | null
   failed_db: number | null
   db_totals_shared?: boolean

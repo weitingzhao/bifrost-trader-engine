@@ -74,7 +74,7 @@ def effective_ib_operator_settings(config: Dict[str, Any]) -> Dict[str, Any]:
         # Celery bars backfill (fetch_bars_range RPC) can run for a long time; separate from default 120s API calls.
         "bars_backfill_request_timeout_sec": float(raw.get("bars_backfill_request_timeout_sec") or 7200),
         # Idle operator process only refreshes Redis on this interval (unlike ingestor, which updates on ticks).
-        "health_refresh_sec": float(raw.get("health_refresh_sec") or 3),
+        "health_refresh_sec": float(raw.get("health_refresh_sec") or 30),
         # Large range backfills return many bar rows in one RPC; default 4 MiB (override in YAML if needed).
         "max_result_bytes": int(raw.get("max_result_bytes") or (4 * 1024 * 1024)),
         "block_ms": int(raw.get("block_ms") or 5000),

@@ -18,7 +18,10 @@ from src.ib_operator.health_redis import (
     operator_health_dict_from_redis_hash,
 )
 from src.ib_operator.protocol import PROTOCOL_VERSION, new_req_id, result_key
-from src.monitor.integrations.ib_probe_derived import attach_ib_probe_derived
+from src.monitor.integrations.ib_probe_derived import (
+    attach_ib_probe_derived,
+    attach_service_heartbeat_derived,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -269,10 +272,26 @@ def build_monitor_ib_status(
         except (TypeError, ValueError):
             out["last_msg_age_s"] = None
         out["reconnects"] = int(out["host"].get("reconnects") or 0)
+        try:
+            _sh_iv = float(health.get("service_heartbeat_interval_sec") or 0)
+            _sh_last = float(health.get("last_service_heartbeat_at") or 0)
+        except (TypeError, ValueError):
+            _sh_iv = 0.0
+            _sh_last = 0.0
+        if _sh_iv > 0:
+            attach_service_heartbeat_derived(
+                out,
+                interval_sec=_sh_iv,
+                last_heartbeat_at=_sh_last,
+                now=_now_ts,
+            )
+        _shr = (health.get("service_heartbeat_reconnect_in_progress") or "").strip()
+        out["service_heartbeat_reconnect_in_progress"] = _shr if _shr else None
     else:
         out["service_alive"] = False
         out["operator_alive"] = False
         out["msg_count"] = 0
         out["last_msg_age_s"] = None
         out["reconnects"] = 0
+        out["service_heartbeat_reconnect_in_progress"] = None
     return out

@@ -16,9 +16,11 @@ export const SUPPORTED_CELERY_QUEUE_NAMES = [
 
 export type CeleryRuntimeLamp = 'green' | 'yellow' | 'red' | 'none'
 
-/** Queue names Ops reports in /ops/queues/summary, or defaults when the list is empty. */
-export function supportedQueueNamesFromSummary(rows: QueueSummaryRow[]): string[] {
-  if (rows.length > 0) return rows.map(r => r.name)
+/**
+ * Queues the runtime lamp treats as required (canonical app queues).
+ * Excludes Redis-discovered extras so stray broker lists do not force yellow.
+ */
+export function supportedQueueNamesFromSummary(_rows: QueueSummaryRow[]): string[] {
   return [...SUPPORTED_CELERY_QUEUE_NAMES]
 }
 
@@ -72,9 +74,6 @@ export function dedupedQueueSummaryTotals(rows: QueueSummaryRow[]): {
   const massivePrimary =
     rows.find(r => r.name === 'massive') ??
     rows.find(r => MASSIVE_LIKE_QUEUE_NAMES.includes(r.name as (typeof MASSIVE_LIKE_QUEUE_NAMES)[number]))
-  const massiveLikeRows = MASSIVE_LIKE_QUEUE_NAMES.map(n => rows.find(r => r.name === n)).filter(
-    (x): x is QueueSummaryRow => x != null,
-  )
   const out = {
     pending_broker: null as number | null,
     running_celery: null as number | null,
@@ -83,22 +82,41 @@ export function dedupedQueueSummaryTotals(rows: QueueSummaryRow[]): {
   }
   let pb = 0
   let pbHas = false
-  let rc = 0
-  let rcHas = false
-  for (const row of [bars, ...massiveLikeRows]) {
-    if (!row) continue
+  for (const row of rows) {
     const p = row.pending_broker
     if (p != null && Number.isFinite(p)) {
       pb += p
       pbHas = true
     }
-    const r = row.running_celery
-    if (r != null && Number.isFinite(r)) {
-      rc += r
+  }
+  out.pending_broker = pbHas ? pb : null
+
+  let rc = 0
+  let rcHas = false
+  const br = bars?.running_celery
+  if (br != null && Number.isFinite(br)) {
+    rc += br
+    rcHas = true
+  }
+  const massiveRun =
+    rows.find(r => r.name === 'massive')?.running_celery ??
+    MASSIVE_LIKE_QUEUE_NAMES.map(n => rows.find(r => r.name === n)?.running_celery).find(
+      x => x != null && Number.isFinite(x as number),
+    )
+  if (massiveRun != null && Number.isFinite(massiveRun)) {
+    rc += massiveRun
+    rcHas = true
+  }
+  for (const row of rows) {
+    if (row.name === 'bars' || MASSIVE_LIKE_QUEUE_NAMES.includes(row.name as (typeof MASSIVE_LIKE_QUEUE_NAMES)[number])) {
+      continue
+    }
+    const x = row.running_celery
+    if (x != null && Number.isFinite(x)) {
+      rc += x
       rcHas = true
     }
   }
-  out.pending_broker = pbHas ? pb : null
   out.running_celery = rcHas ? rc : null
   if (massivePrimary) {
     const d = massivePrimary.done_db

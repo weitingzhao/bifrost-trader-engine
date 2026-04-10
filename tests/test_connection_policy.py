@@ -28,3 +28,4 @@ def test_merge_ib_policy_into_effective_ib() -> None:
 def test_operator_effective_health_refresh_sec() -> None:
     assert operator_effective_health_refresh_sec({"health_refresh_sec": 3}, 5.0) == 5.0
     assert operator_effective_health_refresh_sec({"health_refresh_sec": 10}, 5.0) == 10.0
+    assert operator_effective_health_refresh_sec({}, 15.0) == 30.0

@@ -283,7 +283,7 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
         </button>
         {' / '}
         Option Coverage
-        <InfoTooltip text="Daily option pipeline status, then Greeks/IV and coverage metrics from Massive snapshot endpoints. Chain snapshots persist to PostgreSQL; contract and unified return data without writing." />
+        <InfoTooltip text="Daily option pipeline status, then Greeks/IV and coverage metrics from Massive snapshot endpoints. Massive data is delayed (~15 minutes). Chain snapshots persist to PostgreSQL; contract and unified return data without writing." />
       </h2>
 
       <DailyDataChecklistSection configured={Boolean(configured)} />

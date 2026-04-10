@@ -1109,12 +1109,163 @@
   box-sizing: border-box;
 }
 
+/* Celery control: primary sections (Overview / Runtime / Job queues) */
+.dashboard-celery-main-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: var(--space-4);
+  padding-bottom: 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.dashboard-celery-main-tab {
+  padding: 0.45rem 1rem;
+  font-size: var(--text-small);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  border-radius: 8px 8px 0 0;
+}
+.dashboard-celery-main-tab:hover {
+  color: var(--color-text-main);
+  background: rgba(255, 255, 255, 0.04);
+}
+.dashboard-celery-main-tab--active {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+.dashboard-celery-tab-panel {
+  min-width: 0;
+}
+
+/* Merged queue summary: above main tabs (broker + PG + actions) */
+.dashboard-celery-top-queue-summary {
+  margin-bottom: var(--space-4);
+}
+.dashboard-celery-top-queue-summary .dashboard-queue-summary-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.dashboard-celery-top-queue-summary-table {
+  min-width: 58rem;
+  font-size: var(--text-small);
+}
+.dashboard-celery-top-queue-summary-pg {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.dashboard-celery-top-queue-summary-pg--pending {
+  color: var(--color-text-main);
+}
+.dashboard-celery-top-queue-summary-pg--running {
+  color: #fde047;
+}
+.dashboard-celery-top-queue-summary-pg--done {
+  color: #86efac;
+}
+.dashboard-celery-top-queue-summary-pg--failed {
+  color: #fca5a5;
+}
+.dashboard-celery-top-queue-summary-actions {
+  text-align: right;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.dashboard-celery-top-queue-summary-action-icons {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+.dashboard-celery-flash-msg {
+  margin-bottom: var(--space-3);
+}
+
 /* Celery page: Massive + Bars queues (tabs, toolbar, confirm) */
 .celery-queue-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.25rem;
   margin-bottom: var(--space-3);
   border-bottom: 1px solid var(--color-border);
+}
+.celery-queue-tabs--profiles {
+  gap: 0.35rem;
+}
+
+/* Job queues: one sheet — all queues, PG counts + per-row actions */
+.celery-job-queue-sheet {
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: rgba(0, 0, 0, 0.12);
+}
+.celery-job-queue-sheet-head {
+  margin-bottom: var(--space-2);
+}
+.celery-job-queue-sheet-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.celery-job-queue-sheet-title {
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.celery-job-queue-sheet-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.celery-job-queue-sheet-table {
+  margin: 0;
+  min-width: 44rem;
+  font-size: var(--text-small);
+}
+.celery-job-queue-sheet-table th,
+.celery-job-queue-sheet-table td {
+  white-space: nowrap;
+}
+.celery-job-queue-sheet-table td:first-child {
+  white-space: normal;
+  max-width: 14rem;
+}
+.celery-job-queue-sheet-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.celery-job-queue-sheet-num--done {
+  color: #86efac;
+}
+.celery-job-queue-sheet-num--failed {
+  color: #fca5a5;
+}
+.celery-job-queue-sheet-num--running {
+  color: #fde047;
+}
+.celery-job-queue-sheet-num--pending {
+  color: var(--color-text-main);
+}
+.celery-job-queue-sheet-actions {
+  text-align: right;
+}
+.celery-job-queue-sheet-btn {
+  font-size: var(--text-small);
+  padding: 0.3rem 0.55rem;
+  margin-left: 0.35rem;
+}
+.celery-job-queue-sheet-btn:first-child {
+  margin-left: 0;
+}
+.celery-job-queue-sheet-empty {
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: var(--space-2);
 }
 .celery-queue-tab {
   padding: 0.4rem 0.85rem;
@@ -1910,7 +2061,13 @@
   word-break: break-word;
 }
 
-/* Socket Services table: IB Client ID under service label */
+/* Socket Services ingest table: Connection column (IB clients, Massive last msg) */
+.ingest-services-table .ingest-services-connection-cell {
+  vertical-align: top;
+  min-width: min(22rem, 42vw);
+}
+
+/* Socket Services table: IB Client ID row (Connection column) */
 .socket-ib-client-id-wrap {
   display: flex;
   align-items: center;
@@ -3091,6 +3248,14 @@
 
 .dashboard-celery-instances-broker-row > .dashboard-section {
   min-width: 0;
+}
+
+/* Workers conditions tab: console, then runtime snapshot, below the instances/broker row */
+.dashboard-celery-tab-panel > .dashboard-console-section {
+  margin-top: var(--space-5);
+}
+.dashboard-celery-tab-panel > .dashboard-snapshot {
+  margin-top: var(--space-4);
 }
 
 /* ── Console ── */

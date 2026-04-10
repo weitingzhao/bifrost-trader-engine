@@ -90,5 +90,5 @@ def operator_effective_health_refresh_sec(
     probe_interval_sec: float,
 ) -> float:
     """Idle health loop interval: at least YAML health_refresh_sec and global probe interval."""
-    hr = float((ib_operator_cfg or {}).get("health_refresh_sec") or 3)
+    hr = float((ib_operator_cfg or {}).get("health_refresh_sec") or 30)
     return max(hr, float(probe_interval_sec))

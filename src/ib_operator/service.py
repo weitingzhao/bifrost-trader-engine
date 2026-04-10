@@ -34,7 +34,11 @@ from src.ib_operator.redis_io import (
     write_result,
     xreadgroup_recover_nogroup,
 )
-from src.monitor.integrations.ib_clients import AccountIbClient, OperatorIbClient
+from src.monitor.integrations.ib_clients import (
+    AccountIbClient,
+    OperatorIbClient,
+    SERVICE_HEARTBEAT_CONNECT_TIMEOUT_SEC,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,13 +71,26 @@ def _write_health_sync(
     key: str,
     probe_interval_sec: float,
     tracker: Optional[IbConnectionStatusTracker] = None,
+    *,
+    service_heartbeat_interval_sec: Optional[float] = None,
+    last_service_heartbeat_at: Optional[float] = None,
+    service_heartbeat_reconnect_in_progress: Optional[str] = None,
 ) -> None:
     try:
         asyncio.run(executor.record_ib_probe(probe_interval_sec))
     except Exception as e:
         logger.debug("IB Operator record_ib_probe: %s", e)
     h = executor.health_dict()
-    h["updated_at"] = time.time()
+    now = time.time()
+    h["updated_at"] = now
+    if service_heartbeat_reconnect_in_progress is not None:
+        h["service_heartbeat_reconnect_in_progress"] = service_heartbeat_reconnect_in_progress
+    if service_heartbeat_interval_sec is not None and last_service_heartbeat_at is not None:
+        iv = float(service_heartbeat_interval_sec)
+        lh = float(last_service_heartbeat_at)
+        h["service_heartbeat_interval_sec"] = iv
+        h["last_service_heartbeat_at"] = lh
+        h["next_service_heartbeat_in_s"] = max(0.0, lh + iv - now) if lh > 0 else iv
     mapping = operator_health_dict_to_redis_hash(h)
     try:
         # Do not DELETE the hash: Ops stores bifrost_ops_control_env on bifrost:health:ws_ib_operator (same key)
@@ -204,31 +221,31 @@ def run_ib_operator_loop(
     # Publish Redis health before blocking on IB connect. Otherwise Ops may HSET only
     # bifrost_ops_control_env on this key after systemd start while connect_all() retries
     # TWS for a long time — leaving a hash with no host_* fields until connect returns.
-    _write_health_sync(r, executor, health_key, probe_iv, tracker)
-    last_health = time.time()
+    last_service_heartbeat_at = time.time()
+    _write_health_sync(
+        r,
+        executor,
+        health_key,
+        probe_iv,
+        tracker,
+        service_heartbeat_interval_sec=health_refresh,
+        last_service_heartbeat_at=last_service_heartbeat_at,
+    )
 
     try:
         asyncio.run(executor.connect_all())
     except Exception as e:
         logger.warning("IB Operator initial connect failed (will retry on demand): %s", e)
-        tracker.update(
-            slot="host",
-            status="reconnecting",
-            client_id=int(ib_eff["client_id_operator"]),
-            occurred_at=time.time(),
-            reason="Initial connect failed",
-        )
-        if ib_eff.get("ib2_host"):
-            tracker.update(
-                slot="secondary",
-                status="reconnecting",
-                client_id=int(ib_eff.get("ib2_client_id_operator") or 0) or None,
-                occurred_at=time.time(),
-                reason="Initial connect failed",
-            )
 
-    _write_health_sync(r, executor, health_key, probe_iv, tracker)
-    last_health = time.time()
+    _write_health_sync(
+        r,
+        executor,
+        health_key,
+        probe_iv,
+        tracker,
+        service_heartbeat_interval_sec=health_refresh,
+        last_service_heartbeat_at=last_service_heartbeat_at,
+    )
     stop = stop_event or threading.Event()
 
     def should_stop() -> bool:
@@ -236,37 +253,101 @@ def run_ib_operator_loop(
 
     while not should_stop():
         now = time.time()
-        if now - last_health >= health_refresh:
-            # Retry connect for any disconnected slot (host or secondary) so Redis health
-            # stays in sync with TWS and the UI shows green once TWS is reachable again.
+        if now - last_service_heartbeat_at >= health_refresh:
+            # Service heartbeat: one reconnect attempt per tick (no inner retry storm); failures wait for next tick.
             hd_try = executor.health_dict()
             host_ok = bool((hd_try.get("host") or {}).get("connected"))
-            sec_info = hd_try.get("secondary")
-            sec_ok = bool((sec_info or {}).get("connected")) if sec_info is not None else True
-            if not host_ok or not sec_ok:
-                if not host_ok:
-                    tracker.update(
-                        slot="host",
-                        status="reconnecting",
-                        client_id=int((hd_try.get("host") or {}).get("client_id") or ib_eff["client_id_operator"]),
-                        occurred_at=now,
-                        reason="Health refresh reconnect",
+            if not host_ok:
+                # One attempt per slot; failures are isolated (Secondary is still attempted afterward).
+                # No Message Center "reconnecting" events here — connected/disconnected come from Redis health after _write_health_sync.
+                _hid = int((hd_try.get("host") or {}).get("client_id") or 0)
+                _write_health_sync(
+                    r,
+                    executor,
+                    health_key,
+                    probe_iv,
+                    tracker,
+                    service_heartbeat_interval_sec=health_refresh,
+                    last_service_heartbeat_at=last_service_heartbeat_at,
+                    service_heartbeat_reconnect_in_progress=f"Host (client {_hid})",
+                )
+                async def _hb_host() -> None:
+                    await asyncio.wait_for(
+                        executor.connect_primary_only(max_connect_attempts=1),
+                        timeout=SERVICE_HEARTBEAT_CONNECT_TIMEOUT_SEC,
                     )
-                if sec_info is not None and not sec_ok:
-                    tracker.update(
-                        slot="secondary",
-                        status="reconnecting",
-                        client_id=int((sec_info or {}).get("client_id") or ib_eff.get("ib2_client_id_operator") or 0)
-                        or None,
-                        occurred_at=now,
-                        reason="Health refresh reconnect",
-                    )
+
                 try:
-                    asyncio.run(executor.connect_all())
+                    asyncio.run(_hb_host())
+                except asyncio.TimeoutError:
+                    logger.debug(
+                        "IB Operator service heartbeat Host connect timed out after %.0fs",
+                        SERVICE_HEARTBEAT_CONNECT_TIMEOUT_SEC,
+                    )
                 except Exception as e:
-                    logger.debug("IB Operator health-tick connect retry: %s", e)
-            _write_health_sync(r, executor, health_key, probe_iv, tracker)
-            last_health = now
+                    logger.debug("IB Operator service heartbeat Host connect: %s", e)
+                finally:
+                    _write_health_sync(
+                        r,
+                        executor,
+                        health_key,
+                        probe_iv,
+                        tracker,
+                        service_heartbeat_interval_sec=health_refresh,
+                        last_service_heartbeat_at=last_service_heartbeat_at,
+                        service_heartbeat_reconnect_in_progress="",
+                    )
+            hd_sec = executor.health_dict()
+            sec_block = hd_sec.get("secondary")
+            if isinstance(sec_block, dict) and not bool(sec_block.get("connected")):
+                _sid = int(sec_block.get("client_id") or 0)
+                _write_health_sync(
+                    r,
+                    executor,
+                    health_key,
+                    probe_iv,
+                    tracker,
+                    service_heartbeat_interval_sec=health_refresh,
+                    last_service_heartbeat_at=last_service_heartbeat_at,
+                    service_heartbeat_reconnect_in_progress=f"Secondary (client {_sid})",
+                )
+                async def _hb_secondary() -> None:
+                    await asyncio.wait_for(
+                        executor.connect_secondary_only(max_connect_attempts=1),
+                        timeout=SERVICE_HEARTBEAT_CONNECT_TIMEOUT_SEC,
+                    )
+
+                try:
+                    asyncio.run(_hb_secondary())
+                except asyncio.TimeoutError:
+                    logger.debug(
+                        "IB Operator service heartbeat Secondary connect timed out after %.0fs",
+                        SERVICE_HEARTBEAT_CONNECT_TIMEOUT_SEC,
+                    )
+                except Exception as e:
+                    logger.debug("IB Operator service heartbeat Secondary connect: %s", e)
+                finally:
+                    _write_health_sync(
+                        r,
+                        executor,
+                        health_key,
+                        probe_iv,
+                        tracker,
+                        service_heartbeat_interval_sec=health_refresh,
+                        last_service_heartbeat_at=last_service_heartbeat_at,
+                        service_heartbeat_reconnect_in_progress="",
+                    )
+            last_service_heartbeat_at = now
+            _write_health_sync(
+                r,
+                executor,
+                health_key,
+                probe_iv,
+                tracker,
+                service_heartbeat_interval_sec=health_refresh,
+                last_service_heartbeat_at=last_service_heartbeat_at,
+                service_heartbeat_reconnect_in_progress="",
+            )
 
         entries = []
         try:
@@ -325,8 +406,15 @@ def run_ib_operator_loop(
             write_result(r, rk, body or '{"ok":false,"error":"encode"}', ttl_sec=result_ttl)
             ack_message(r, stream, group, entry_id)
             executor.note_cmd_processed()
-            _write_health_sync(r, executor, health_key, probe_iv, tracker)
-            last_health = time.time()
+            _write_health_sync(
+                r,
+                executor,
+                health_key,
+                probe_iv,
+                tracker,
+                service_heartbeat_interval_sec=health_refresh,
+                last_service_heartbeat_at=last_service_heartbeat_at,
+            )
 
     logger.info("IB Operator stopping: disconnecting IB clients")
     try:

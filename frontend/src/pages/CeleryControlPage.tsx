@@ -9,6 +9,14 @@ import {
   clearCeleryLogs,
 } from '../api/monitor/logs'
 import {
+  fetchAggregatedJobQueuesSummary,
+  postBarsJobsClearDone,
+  postMassiveJobsClearDone,
+  postRetryFailedBarsJobs,
+  postRetryFailedMassiveJobs,
+} from '../api'
+import type { AggregatedJobQueueSummaryRow } from '../api'
+import {
   fetchOpsWorkers,
   fetchOpsCapabilities,
   fetchQueueSummary,
@@ -31,12 +39,9 @@ import {
   type QueueSummaryRow,
 } from '../api/ops/ops'
 import { CeleryJobQueuesSection } from './celery/CeleryJobQueuesSection'
+import { CeleryTopQueueSummary } from './celery/CeleryTopQueueSummary'
 import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
-import {
-  computeCeleryRuntimeLamp,
-  dedupedQueueSummaryTotals,
-  supportedQueueNamesFromSummary,
-} from '../utils/celeryRuntime'
+import { computeCeleryRuntimeLamp, supportedQueueNamesFromSummary } from '../utils/celeryRuntime'
 import { opsHostEnvFromConfigProfile } from '../utils/opsHostEnvPill'
 
 export interface CeleryControlPageProps {
@@ -46,28 +51,6 @@ export interface CeleryControlPageProps {
 }
 
 type LampColor = 'green' | 'yellow' | 'red' | 'none'
-
-/** Per-queue consumer coverage (Celery inspect + broker). */
-function queueCoverageLamp(
-  queueName: string,
-  brokerConnected: boolean | undefined,
-  workerList: WorkerSummary[],
-): { lamp: LampColor; title: string } {
-  if (brokerConnected !== true) {
-    return { lamp: 'red', title: 'Broker not connected' }
-  }
-  const covered = workerList.some(w => (w.queues ?? []).includes(queueName))
-  if (covered) {
-    return {
-      lamp: 'green',
-      title: `At least one worker consumes queue “${queueName}”`,
-    }
-  }
-  return {
-    lamp: 'yellow',
-    title: `No worker in this snapshot consumes queue “${queueName}”`,
-  }
-}
 
 function workerLamp(status: string): LampColor {
   if (status === 'running_healthy') return 'green'
@@ -97,20 +80,6 @@ function fmtRelative(epochSec: number | null): string {
   if (delta < 3600) return `${Math.floor(delta / 60)}m ago`
   if (delta < 86400) return `${Math.floor(delta / 3600)}h ago`
   return `${Math.floor(delta / 86400)}d ago`
-}
-
-function fmtQueueCell(n: number | null | undefined): string {
-  if (n == null || Number.isNaN(n)) return '—'
-  return String(n)
-}
-
-function formatQueueLabel(name: string): string {
-  if (name === 'massive_stocks_high') return 'Massive stocks (high priority)'
-  if (name === 'massive_stocks') return 'Massive stocks'
-  if (name === 'massive_high') return 'Massive options (high priority)'
-  if (name === 'massive') return 'Massive options'
-  if (name === 'bars') return 'Bars (IB)'
-  return name
 }
 
 /** Celery nodename is ``worker{id}@{hostname}`` — return host part for cross-machine hints. */
@@ -340,6 +309,11 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
 
   const [queueSummary, setQueueSummary] = useState<QueueSummaryRow[]>([])
   const [queueSummaryDb, setQueueSummaryDb] = useState<boolean | null>(null)
+  const [aggregatedJobRows, setAggregatedJobRows] = useState<AggregatedJobQueueSummaryRow[]>([])
+  /** While set, both action icon buttons are disabled for that Celery queue row. */
+  const [topQueueActionBusy, setTopQueueActionBusy] = useState<string | null>(null)
+  const [flashMsg, setFlashMsg] = useState<{ text: string; isErr: boolean } | null>(null)
+  const jobListReloadRef = useRef<((clearedQueue?: string) => void) | null>(null)
 
   // Worker scaling
   const [instances, setInstances] = useState<SystemdInstance[]>([])
@@ -365,6 +339,9 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   const [caps, setCaps] = useState<OpsCapabilities | null>(null)
   const [tokenInput, setTokenInput] = useState('')
   const [authPanelOpen, setAuthPanelOpen] = useState(false)
+
+  /** Main sections: job DB queues first; workers conditions (instances, broker, console, runtime snapshot). */
+  const [celerySectionTab, setCelerySectionTab] = useState<'overview' | 'jobs'>('jobs')
 
   /** Coalesce concurrent /ops/workers (Celery inspect) calls — 5s poll + void refresh must not stack. */
   const workersRefreshPromiseRef = useRef<Promise<void> | null>(null)
@@ -436,6 +413,10 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             fetchBrokerStatusExtended().catch(() => null),
             fetchWorkerProfiles().catch(() => ({ ok: false, profiles: [] as WorkerProfileInfo[], count: 0 })),
             fetchOpsHealth().catch(() => null),
+            fetchAggregatedJobQueuesSummary().catch(() => ({
+              ok: false as const,
+              rows: [] as AggregatedJobQueueSummaryRow[],
+            })),
           ])
           const qRes =
             settled[0].status === 'fulfilled'
@@ -451,6 +432,10 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               ? settled[3].value
               : { ok: false, profiles: [] as WorkerProfileInfo[], count: 0 }
           const healthRes = settled[4].status === 'fulfilled' ? settled[4].value : null
+          const aggRes =
+            settled[5].status === 'fulfilled'
+              ? settled[5].value
+              : { ok: false as const, rows: [] as AggregatedJobQueueSummaryRow[] }
           if (healthRes && typeof healthRes.config_profile === 'string' && healthRes.config_profile.trim()) {
             setOpsConfigProfile(healthRes.config_profile.trim())
           } else if (healthRes) {
@@ -463,6 +448,11 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           } else {
             setQueueSummary([])
             setQueueSummaryDb(null)
+          }
+          if (aggRes.ok) {
+            setAggregatedJobRows(aggRes.rows)
+          } else {
+            setAggregatedJobRows([])
           }
           if (iRes.ok) setInstances(iRes.instances)
           if (bRes?.ok && bRes.broker) {
@@ -722,13 +712,14 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   }
 
   // ── Console handlers ──────────────────────────────────────────────────
-  /** Opens a console stream (used by Runtime Snapshot cards; does not toggle off). */
+  /** Opens a console stream from Runtime Snapshot cards; switches to Workers conditions and scrolls to Console. */
   const selectConsole = useCallback((target: ConsoleTarget) => {
     if (target === 'none') {
       setConsoleTarget('none')
       setConsoleUrl('')
       return
     }
+    setCelerySectionTab('overview')
     setConsoleTarget(target)
     if (target === 'broker') {
       setConsoleUrl(brokerConsoleUrl())
@@ -749,6 +740,9 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
       setConsoleTarget('none')
       setConsoleUrl('')
       return
+    }
+    if (target !== 'none') {
+      setCelerySectionTab('overview')
     }
     setConsoleTarget(target)
     if (target === 'broker') {
@@ -787,8 +781,68 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
     workers,
     supportedCeleryQueueNames,
   )
-  const queueSummaryDeduped =
-    queueSummary.length > 0 ? dedupedQueueSummaryTotals(queueSummary) : null
+  const captureJobListReload = useCallback((fn: (clearedQueue?: string) => void) => {
+    jobListReloadRef.current = fn
+  }, [])
+
+  const refreshAfterJobMutation = useCallback(() => void loadAll(), [loadAll])
+
+  const executeClearDoneTop = useCallback(
+    async (row: AggregatedJobQueueSummaryRow) => {
+      const q = row.celery_queue
+      setTopQueueActionBusy(q)
+      try {
+        if (row.pipeline === 'massive') {
+          const r = await postMassiveJobsClearDone(row.celery_queue)
+          if (!r.ok) throw new Error(r.error ?? 'Clear failed')
+          setFlashMsg({ text: `Deleted ${r.deleted} done job(s).`, isErr: false })
+        } else {
+          const r = await postBarsJobsClearDone()
+          if (!r.ok) throw new Error(r.error ?? 'Clear failed')
+          setFlashMsg({ text: `Deleted ${r.deleted} done job(s).`, isErr: false })
+        }
+        await loadAll()
+        jobListReloadRef.current?.(row.celery_queue)
+      } catch (e) {
+        setFlashMsg({ text: e instanceof Error ? e.message : 'Operation failed', isErr: true })
+      } finally {
+        setTopQueueActionBusy(null)
+      }
+    },
+    [loadAll],
+  )
+
+  const executeResetFailedTop = useCallback(
+    async (row: AggregatedJobQueueSummaryRow) => {
+      const q = row.celery_queue
+      setTopQueueActionBusy(q)
+      try {
+        if (row.pipeline === 'massive') {
+          const r = await postRetryFailedMassiveJobs(row.celery_queue, 500)
+          if (!r.ok) throw new Error(r.error ?? 'Reset failed')
+          setFlashMsg({
+            text: `Reset ${r.reset ?? 0} job(s), enqueued ${r.enqueued ?? 0}.${r.enqueue_errors?.length ? ' Some enqueue errors.' : ''}`,
+            isErr: Boolean(r.enqueue_errors?.length),
+          })
+        } else {
+          const r = await postRetryFailedBarsJobs(500)
+          if (!r.ok) throw new Error(r.error ?? 'Reset failed')
+          setFlashMsg({
+            text: `Reset ${r.reset ?? 0} job(s), enqueued ${r.enqueued ?? 0}.${r.enqueue_errors?.length ? ' Some enqueue errors.' : ''}`,
+            isErr: Boolean(r.enqueue_errors?.length),
+          })
+        }
+        await loadAll()
+        jobListReloadRef.current?.(row.celery_queue)
+      } catch (e) {
+        setFlashMsg({ text: e instanceof Error ? e.message : 'Operation failed', isErr: true })
+      } finally {
+        setTopQueueActionBusy(null)
+      }
+    },
+    [loadAll],
+  )
+
   const opsHostEnvPill = useMemo(() => opsHostEnvFromConfigProfile(opsConfigProfile), [opsConfigProfile])
   const opsHostEnvPillTitle = useMemo(() => {
     const raw = opsConfigProfile?.trim() || 'unknown'
@@ -874,10 +928,11 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               <SettingsSidebarLampGlyph id="celery" />
             </span>
             Celery
-            <InfoTooltip text="Queue summary, worker scaling, runtime snapshot, consoles, broker control, and job queues." />
+            <InfoTooltip text="Queue summary (above tabs): broker + PostgreSQL job counts for every queue; same on all tabs. Job queues: PostgreSQL job tables per Celery queue. Workers conditions: worker instances, Redis control, live consoles, and runtime snapshot." />
           </h2>
           <p className="settings-page-subtitle">
-            Queue summary, worker instances, runtime snapshot, console, Redis / broker control, and job queues.
+            Queue summary at the top applies to all tabs. Job queues lists PostgreSQL jobs per Celery queue. Workers
+            conditions includes worker instances, Redis, console, and runtime snapshot.
           </p>
         </div>
         <div className="dashboard-auth-bar dashboard-auth-bar--celery-header">
@@ -939,118 +994,85 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           {error}. Keep previous data on screen; retrying in next poll cycle.
         </div>
       ) : null}
+
+      {flashMsg ? (
+        <p
+          className={`status-page-msg dashboard-celery-flash-msg ${flashMsg.isErr ? 'err' : 'ok'}`}
+          role={flashMsg.isErr ? 'alert' : 'status'}
+        >
+          {flashMsg.text}
+        </p>
+      ) : null}
+
+      <CeleryTopQueueSummary
+        queueSummary={queueSummary}
+        queueSummaryDb={queueSummaryDb}
+        aggregatedRows={aggregatedJobRows}
+        loading={loading}
+        actionBusyQueue={topQueueActionBusy}
+        workers={workers}
+        brokerConnected={broker?.connected}
+        opsHostEnvPill={opsHostEnvPill}
+        opsHostEnvPillTitle={opsHostEnvPillTitle}
+        runtimeCeleryLamp={runtimeCeleryLamp}
+        runtimeCeleryStatusText={runtimeCeleryStatusText}
+        onClearDone={executeClearDoneTop}
+        onResetFailed={executeResetFailedTop}
+      />
+
+      <div
+        className="dashboard-celery-main-tabs"
+        role="tablist"
+        aria-label="Celery page sections"
+      >
+        <button
+          type="button"
+          role="tab"
+          id="celery-tab-jobs"
+          aria-selected={celerySectionTab === 'jobs'}
+          tabIndex={celerySectionTab === 'jobs' ? 0 : -1}
+          className={`dashboard-celery-main-tab ${celerySectionTab === 'jobs' ? 'dashboard-celery-main-tab--active' : ''}`}
+          onClick={() => setCelerySectionTab('jobs')}
+        >
+          Job queues
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="celery-tab-workers-conditions"
+          aria-selected={celerySectionTab === 'overview'}
+          tabIndex={celerySectionTab === 'overview' ? 0 : -1}
+          className={`dashboard-celery-main-tab ${celerySectionTab === 'overview' ? 'dashboard-celery-main-tab--active' : ''}`}
+          onClick={() => setCelerySectionTab('overview')}
+        >
+          Workers conditions
+        </button>
+      </div>
+
       <div className="dashboard-grid settings-page-groups">
           <div className="dashboard-celery-group">
-          {/* ── Queue summary ──────────────────────────────────── */}
-          <section className="replay-section dashboard-section dashboard-queue-summary" aria-labelledby="dashboard-queue-summary-head">
-            <h3 id="dashboard-queue-summary-head" className="page-title-with-tooltip">
-              Queue summary
-              <InfoTooltip text="Per queue: broker pending, active/reserved counts, and PostgreSQL job table totals where configured. Status = whether any worker consumes this queue on the current broker snapshot; Host = Ops stack (GET /ops/health)." />
-            </h3>
-            {queueSummaryDb === false && (
-              <p className="dashboard-queue-summary-hint">PostgreSQL job totals unavailable (check ops config or DB).</p>
-            )}
-            {queueSummary.length === 0 ? (
-              <div className="dashboard-empty">
-                {loading ? 'Loading queue summary…' : 'No queue summary from Ops API.'}
-              </div>
-            ) : (
-              <div className="dashboard-queue-summary-table-wrap">
-                <table className="table-operations dashboard-queue-summary-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 36 }}>Status</th>
-                      <th style={{ width: 88 }}>
-                        Host
-                        <InfoTooltip text="Ops API stack from GET /ops/health (config_profile): Dev or Prod for this session, same as Socket Services." />
-                      </th>
-                      <th>Queue</th>
-                      <th>
-                        Pending
-                        <InfoTooltip text="Messages waiting on the Redis broker (LLEN)." />
-                      </th>
-                      <th>
-                        Running
-                        <InfoTooltip text="Celery tasks currently active or reserved for this queue (delivery routing key)." />
-                      </th>
-                      <th>
-                        Done
-                        <InfoTooltip text="Rows with status done in the job table for this pipeline." />
-                      </th>
-                      <th>
-                        Failed
-                        <InfoTooltip text="Rows with status failed in the job table for this pipeline." />
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {queueSummary.map(row => {
-                      const qCov = queueCoverageLamp(row.name, broker?.connected, workers)
-                      return (
-                        <tr key={row.name}>
-                          <td>
-                            <span
-                              className={`title-inline-lamp lamp-icon ${qCov.lamp}`}
-                              title={qCov.title}
-                              aria-label={qCov.title}
-                              role="img"
-                            >
-                              <span aria-hidden>●</span>
-                            </span>
-                          </td>
-                          <td title={opsHostEnvPillTitle}>
-                            <OpsHostEnvPillBadge pill={opsHostEnvPill} className="dashboard-celery-env-pill" />
-                          </td>
-                          <td>
-                            <code className="dashboard-queue-name">{formatQueueLabel(row.name)}</code>
-                            {row.db_totals_shared ? (
-                              <span
-                                className="dashboard-queue-shared-mark"
-                                title="Same job_massive_backfill row counts as other Massive-like queue rows"
-                              >
-                                {' '}
-                                *
-                              </span>
-                            ) : null}
-                          </td>
-                          <td>{fmtQueueCell(row.pending_broker)}</td>
-                          <td>{fmtQueueCell(row.running_celery)}</td>
-                          <td>{fmtQueueCell(row.done_db)}</td>
-                          <td>{fmtQueueCell(row.failed_db)}</td>
-                        </tr>
-                      )
-                    })}
-                    {queueSummaryDeduped ? (
-                      <tr className="dashboard-queue-summary-totals-row">
-                        <td>
-                          <span
-                            className={`title-inline-lamp lamp-icon ${runtimeCeleryLamp}`}
-                            title={runtimeCeleryStatusText}
-                            aria-label={runtimeCeleryStatusText}
-                            role="img"
-                          >
-                            <span aria-hidden>●</span>
-                          </span>
-                        </td>
-                        <td title={opsHostEnvPillTitle}>
-                          <OpsHostEnvPillBadge pill={opsHostEnvPill} className="dashboard-celery-env-pill" />
-                        </td>
-                        <td>
-                          <strong>Total</strong>
-                          <InfoTooltip text="Bars plus all Massive-like broker columns summed; DB done/failed once from shared job_massive_backfill." />
-                        </td>
-                        <td>{fmtQueueCell(queueSummaryDeduped.pending_broker)}</td>
-                        <td>{fmtQueueCell(queueSummaryDeduped.running_celery)}</td>
-                        <td>{fmtQueueCell(queueSummaryDeduped.done_db)}</td>
-                        <td>{fmtQueueCell(queueSummaryDeduped.failed_db)}</td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
+          {/* ── Tab: Job queues ── */}
+          <div
+            role="tabpanel"
+            id="celery-panel-jobs"
+            aria-labelledby="celery-tab-jobs"
+            hidden={celerySectionTab !== 'jobs'}
+            className="dashboard-celery-tab-panel"
+          >
+            <CeleryJobQueuesSection
+              onJobCountsChanged={refreshAfterJobMutation}
+              onProvideJobListReload={captureJobListReload}
+            />
+          </div>
 
+          {/* ── Tab: Workers conditions — instances + broker, console, runtime snapshot ── */}
+          <div
+            role="tabpanel"
+            id="celery-panel-workers-conditions"
+            aria-labelledby="celery-tab-workers-conditions"
+            hidden={celerySectionTab !== 'overview'}
+            className="dashboard-celery-tab-panel"
+          >
           <div className="dashboard-celery-instances-broker-row">
             {/* ── Worker Scaling ─────────────────────────────────── */}
             <section className="replay-section dashboard-section dashboard-scaling" aria-labelledby="dashboard-scale-head">
@@ -1208,7 +1230,46 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             </section>
           </div>
 
-          {/* ── Runtime Snapshot ──────────────────────────────── */}
+          {/* ── Console (below worker instances + broker) ── */}
+          <section
+            ref={consoleSectionRef}
+            id="dashboard-console-section"
+            className={`replay-section dashboard-section dashboard-console-section${consoleTarget !== 'none' && (consoleTarget === 'broker' ? !!consoleUrl : true) ? ' dashboard-console-section--active' : ''}`}
+            aria-labelledby="dashboard-console-head"
+          >
+            <h3 id="dashboard-console-head" className="page-title-with-tooltip">
+              Console
+              <InfoTooltip text="Broker: Ops SSE (journald or tail of BIFROST_BROKER_CONSOLE_LOG on macOS). Worker: per-worker Redis stream via Ops /ops/console/worker (tail/clear: /ops/celery/logs)." />
+            </h3>
+            <div className="dashboard-console-selector">
+              <button
+                type="button"
+                className={`dashboard-filter-btn ${consoleTarget === 'broker' ? 'active' : ''}`}
+                onClick={() => openConsole('broker')}
+              >
+                Broker (Redis)
+              </button>
+              {workers.map(w => (
+                <button
+                  key={w.worker_id}
+                  type="button"
+                  className={`dashboard-filter-btn ${consoleTarget === w.worker_id ? 'active' : ''}`}
+                  onClick={() => openConsole(w.worker_id)}
+                >
+                  {w.worker_id}
+                </button>
+              ))}
+            </div>
+            {consoleTarget === 'broker' && consoleUrl ? (
+              <LogConsole url={consoleUrl} />
+            ) : consoleTarget !== 'none' && consoleTarget !== 'broker' ? (
+              <DashboardWorkerRedisConsole key={consoleTarget} workerId={consoleTarget} />
+            ) : (
+              <div className="dashboard-empty">Select a target above to open a live console stream.</div>
+            )}
+          </section>
+
+          {/* ── Runtime Snapshot (below Console) ── */}
           <section className="replay-section dashboard-section dashboard-snapshot" aria-labelledby="dashboard-snapshot-head">
             <h3 id="dashboard-snapshot-head" className="page-title-with-tooltip">
               Runtime Snapshot
@@ -1375,49 +1436,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               </div>
             )}
           </section>
-
-          {/* ── Console Monitor ────────────────────────────────── */}
-          <section
-            ref={consoleSectionRef}
-            id="dashboard-console-section"
-            className={`replay-section dashboard-section dashboard-console-section${consoleTarget !== 'none' && (consoleTarget === 'broker' ? !!consoleUrl : true) ? ' dashboard-console-section--active' : ''}`}
-            aria-labelledby="dashboard-console-head"
-          >
-            <h3 id="dashboard-console-head" className="page-title-with-tooltip">
-              Console
-              <InfoTooltip text="Broker: Ops SSE (journald or tail of BIFROST_BROKER_CONSOLE_LOG on macOS). Worker: per-worker Redis stream via Ops /ops/console/worker (tail/clear: /ops/celery/logs)." />
-            </h3>
-            <div className="dashboard-console-selector">
-              <button
-                type="button"
-                className={`dashboard-filter-btn ${consoleTarget === 'broker' ? 'active' : ''}`}
-                onClick={() => openConsole('broker')}
-              >
-                Broker (Redis)
-              </button>
-              {workers.map(w => (
-                <button
-                  key={w.worker_id}
-                  type="button"
-                  className={`dashboard-filter-btn ${consoleTarget === w.worker_id ? 'active' : ''}`}
-                  onClick={() => openConsole(w.worker_id)}
-                >
-                  {w.worker_id}
-                </button>
-              ))}
-            </div>
-            {consoleTarget === 'broker' && consoleUrl ? (
-              <LogConsole url={consoleUrl} />
-            ) : consoleTarget !== 'none' && consoleTarget !== 'broker' ? (
-              <DashboardWorkerRedisConsole key={consoleTarget} workerId={consoleTarget} />
-            ) : (
-              <div className="dashboard-empty">Select a target above to open a live console stream.</div>
-            )}
-          </section>
-
-
-
-          <CeleryJobQueuesSection />
+          </div>
 
           </div>
         </div>

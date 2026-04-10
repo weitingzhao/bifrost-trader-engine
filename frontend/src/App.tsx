@@ -1386,7 +1386,6 @@ export default function App() {
             <div className="app-header-menu" role="menu" aria-label="App menu">
               {(() => {
                 const activeMsgCount = systemMessages.filter((m) => !msgDismissedIds.has(m.message_id)).length
-                if (activeMsgCount === 0) return null
                 return (
                   <>
                     <button
@@ -1394,13 +1393,15 @@ export default function App() {
                       role="menuitem"
                       className="app-header-menu-item app-header-menu-item-messages"
                       onClick={() => { messageCenterRef.current?.openDrawer(); setHeaderMenuOpen(false) }}
-                      title="View system messages"
+                      title={activeMsgCount > 0 ? 'View system messages' : 'View system messages (none active)'}
                     >
                       <svg viewBox="0 0 20 20" width="15" height="15" fill="currentColor" style={{ flexShrink: 0 }} aria-hidden>
                         <path d="M10 2a6 6 0 00-6 6v2.586l-1.707 1.707A1 1 0 003 14h14a1 1 0 00.707-1.707L16 10.586V8a6 6 0 00-6-6zM8.5 17a1.5 1.5 0 003 0H8.5z" />
                       </svg>
                       Messages
-                      <span className="app-header-menu-msg-count">{activeMsgCount}</span>
+                      {activeMsgCount > 0 ? (
+                        <span className="app-header-menu-msg-count">{activeMsgCount}</span>
+                      ) : null}
                     </button>
                     <div className="app-header-menu-divider" role="presentation" />
                   </>
@@ -1527,10 +1528,10 @@ export default function App() {
                   window.location.hash = `#${FEED_MASSIVE_STOCK_ID}`
                   setHeaderMenuOpen(false)
                 }}
-                title="Settings → Feed → Massive Stock"
+                title="Settings → Feed → Stock Data"
               >
                 <SettingsSectionIcon name="feed-massive-stock" />
-                Massive Stock
+                Stock Data
               </button>
               <button
                 type="button"

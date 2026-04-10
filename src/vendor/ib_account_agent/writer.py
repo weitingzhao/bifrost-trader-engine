@@ -40,6 +40,10 @@ class IbAccountAgentRedisWriter:
         secondary_ib_probe_at: float = 0.0,
         secondary_ib_probe_ok: bool = False,
         secondary_ib_probe_interval_sec: float = 0.0,
+        service_heartbeat_interval_sec: float = 0.0,
+        last_service_heartbeat_at: float = 0.0,
+        next_service_heartbeat_in_s: float = 0.0,
+        service_heartbeat_reconnect_in_progress: str = "",
     ) -> None:
         # `connected` / `client_id` = Host slot (backward compat with older readers).
         # `host_connected` / `host_client_id` explicit for Monitor /status (same idea as IB Operator).
@@ -60,6 +64,10 @@ class IbAccountAgentRedisWriter:
             "secondary_ib_probe_at": str(secondary_ib_probe_at),
             "secondary_ib_probe_ok": "1" if secondary_ib_probe_ok else "0",
             "secondary_ib_probe_interval_sec": str(secondary_ib_probe_interval_sec),
+            "service_heartbeat_interval_sec": str(service_heartbeat_interval_sec),
+            "last_service_heartbeat_at": str(last_service_heartbeat_at),
+            "next_service_heartbeat_in_s": str(next_service_heartbeat_in_s),
+            "service_heartbeat_reconnect_in_progress": service_heartbeat_reconnect_in_progress or "",
         }
         if secondary_connected is not None:
             m["secondary_connected"] = "1" if secondary_connected else "0"

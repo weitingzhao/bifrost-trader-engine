@@ -42,6 +42,9 @@ export {
   trimBarsJobs,
   postRetryBarsJob,
   postRetryFailedBarsJobs,
+  fetchBarsJobsSummary,
+  fetchAggregatedJobQueuesSummary,
+  postBarsJobsClearDone,
   fetchBars,
   fetchOptionBars,
   fetchBarStats,
@@ -51,7 +54,7 @@ export {
   fetchBarsBenchmark,
   deleteBarsForSymbol,
 } from './ops/bars'
-export type { BarsJob } from './ops/bars'
+export type { AggregatedJobQueueSummaryRow, BarsJob, JobQueueStatusCounts } from './ops/bars'
 export {
   postWatchlistEodRefresh,
   fetchWatchlistEodRefreshPreview,
@@ -77,6 +80,9 @@ export {
   postMassiveApiCoverageSync,
   postMassiveStocksApiCoverageSync,
   fetchMassiveJobsList,
+  fetchMassiveJobsSummary,
+  postMassiveJobsClearDone,
+  postRetryFailedMassiveJobs,
   deleteMassiveJob,
   deleteAllMassiveJobs,
   trimMassiveJobs,

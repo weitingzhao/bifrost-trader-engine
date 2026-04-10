@@ -418,6 +418,7 @@ def get_status(request: Request) -> Dict[str, Any]:
             from src.app.config import get_effective_ib_config
             from src.monitor.integrations.ib_probe_derived import (
                 attach_ib_probe_derived,
+                attach_service_heartbeat_derived,
                 parse_redis_probe_triple,
             )
             from src.vendor.massive.config import get_massive_settings
@@ -511,6 +512,23 @@ def get_status(request: Request) -> Dict[str, Any]:
                         probe_ok=_ipok,
                         stale_mult=_probe_stale_mult,
                         now=_status_now,
+                    )
+                    try:
+                        _sh_iv = float(_ih.get("service_heartbeat_interval_sec") or 0)
+                        _sh_last = float(_ih.get("last_service_heartbeat_at") or 0)
+                    except (TypeError, ValueError):
+                        _sh_iv = 0.0
+                        _sh_last = 0.0
+                    if _sh_iv > 0:
+                        attach_service_heartbeat_derived(
+                            ib_ingestor_info,
+                            interval_sec=_sh_iv,
+                            last_heartbeat_at=_sh_last,
+                            now=_status_now,
+                        )
+                    _shr = (_ih.get("service_heartbeat_reconnect_in_progress") or "").strip()
+                    ib_ingestor_info["service_heartbeat_reconnect_in_progress"] = (
+                        _shr if _shr else None
                     )
             ib_ingestor = ib_ingestor_info
 
@@ -617,6 +635,23 @@ def get_status(request: Request) -> Dict[str, Any]:
                             stale_mult=_probe_stale_mult,
                             now=_status_now,
                         )
+                    try:
+                        _ash_iv = float(_ah.get("service_heartbeat_interval_sec") or 0)
+                        _ash_last = float(_ah.get("last_service_heartbeat_at") or 0)
+                    except (TypeError, ValueError):
+                        _ash_iv = 0.0
+                        _ash_last = 0.0
+                    if _ash_iv > 0:
+                        attach_service_heartbeat_derived(
+                            ib_account_agent_info,
+                            interval_sec=_ash_iv,
+                            last_heartbeat_at=_ash_last,
+                            now=_status_now,
+                        )
+                    _ashr = (_ah.get("service_heartbeat_reconnect_in_progress") or "").strip()
+                    ib_account_agent_info["service_heartbeat_reconnect_in_progress"] = (
+                        _ashr if _ashr else None
+                    )
             ib_account_agent = ib_account_agent_info
         except Exception:
             massive = None

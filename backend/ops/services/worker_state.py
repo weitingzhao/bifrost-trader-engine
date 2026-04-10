@@ -5,6 +5,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import logging
+import re
 import time
 import threading
 from typing import Any, Dict, List, Optional, Tuple
@@ -25,6 +26,9 @@ SUPPORTED_CELERY_QUEUES: Tuple[str, ...] = (
     "massive_high",
     "massive",
 )
+
+# Redis list keys that look like Celery broker queues (SCAN discovery; excludes streams / result keys).
+_CELERY_QUEUE_LIST_NAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,63}$")
 
 
 class WorkerStateService:
@@ -482,30 +486,126 @@ class WorkerStateService:
             logger.debug("queue summary PG counts failed: %s", e)
             return None, None
 
+    def _queues_from_worker_profiles(self) -> set[str]:
+        try:
+            from backend.ops.worker_profiles import WorkerProfileRegistry
+
+            reg = WorkerProfileRegistry.from_config(self._config)
+            out: set[str] = set()
+            for p in reg.profiles.values():
+                out.update(p.queues)
+            return out
+        except Exception as e:
+            logger.debug("worker_profiles queues: %s", e)
+            return set()
+
+    @classmethod
+    def _redis_key_excluded_from_queue_discovery(cls, key: str) -> bool:
+        kl = key.lower()
+        if key.startswith("bifrost:"):
+            return True
+        if kl.startswith("celery-task-meta-"):
+            return True
+        if "unacked" in kl:
+            return True
+        if kl.startswith("_kombu"):
+            return True
+        return False
+
+    def _redis_discovered_queue_names_scan(self, r: Any) -> set[str]:
+        """LIST keys that look like Celery broker queues (bounded SCAN)."""
+        out: set[str] = set()
+        scanned = 0
+        max_keys = 4096
+        try:
+            for key in r.scan_iter(count=256):
+                scanned += 1
+                if scanned > max_keys:
+                    break
+                if not isinstance(key, str):
+                    continue
+                if not _CELERY_QUEUE_LIST_NAME_RE.match(key):
+                    continue
+                if self._redis_key_excluded_from_queue_discovery(key):
+                    continue
+                try:
+                    t = r.type(key)
+                    ts = t if isinstance(t, str) else (t.decode() if isinstance(t, bytes) else str(t))
+                except Exception:
+                    continue
+                if ts != "list":
+                    continue
+                out.add(key)
+        except Exception as e:
+            logger.debug("redis queue name scan: %s", e)
+        return out
+
     def queue_summaries(self) -> Dict[str, Any]:
-        """Per supported queue from DB-only job totals (no Redis/Celery inspect)."""
+        """Per-queue Redis LLEN plus PostgreSQL job totals for known pipelines.
+
+        Rows include all ``SUPPORTED_CELERY_QUEUES``, then any extra names from
+        ``ops.worker_profiles`` and Redis LIST keys discovered via SCAN (custom
+        Celery queues not listed in config still show up when present on the broker).
+        """
         bars_db, massive_db = self._pg_status_counts()
+        profile_queues = self._queues_from_worker_profiles()
+        canonical = set(SUPPORTED_CELERY_QUEUES)
+        extras: set[str] = set(profile_queues) - canonical
+        ordered: List[str] = []
+        llens: Dict[str, Optional[int]] = {}
+
+        try:
+            import redis as _redis
+
+            r = _redis.from_url(
+                self._broker_url,
+                decode_responses=True,
+                socket_connect_timeout=2,
+                socket_timeout=4,
+            )
+            r.ping()
+            discovered = self._redis_discovered_queue_names_scan(r)
+            extras |= discovered - canonical
+            ordered = list(SUPPORTED_CELERY_QUEUES) + sorted(extras)
+            for q in ordered:
+                try:
+                    llens[q] = int(r.llen(q))
+                except Exception:
+                    llens[q] = None
+        except Exception as e:
+            logger.debug("queue_summaries redis: %s", e)
+            ordered = list(SUPPORTED_CELERY_QUEUES) + sorted(extras)
+            for q in ordered:
+                llens[q] = None
+
         rows: List[Dict[str, Any]] = []
-        for q in SUPPORTED_CELERY_QUEUES:
+        for q in ordered:
+            pending_broker = llens.get(q)
             if q == "bars":
-                pending_broker = bars_db.get("pending") if bars_db else None
-                running_celery = bars_db.get("running") if bars_db else None
-                done_db = bars_db.get("done") if bars_db else None
-                failed_db = bars_db.get("failed") if bars_db else None
+                row = {
+                    "name": q,
+                    "pending_broker": pending_broker,
+                    "running_celery": (bars_db.get("running") if bars_db else None),
+                    "done_db": (bars_db.get("done") if bars_db else None),
+                    "failed_db": (bars_db.get("failed") if bars_db else None),
+                }
+            elif q in SUPPORTED_CELERY_QUEUES:
+                row = {
+                    "name": q,
+                    "pending_broker": pending_broker,
+                    "running_celery": (massive_db.get("running") if massive_db else None),
+                    "done_db": (massive_db.get("done") if massive_db else None),
+                    "failed_db": (massive_db.get("failed") if massive_db else None),
+                    "db_totals_shared": True,
+                }
             else:
-                pending_broker = massive_db.get("pending") if massive_db else None
-                running_celery = massive_db.get("running") if massive_db else None
-                done_db = massive_db.get("done") if massive_db else None
-                failed_db = massive_db.get("failed") if massive_db else None
-            row: Dict[str, Any] = {
-                "name": q,
-                "pending_broker": pending_broker,
-                "running_celery": running_celery,
-                "done_db": done_db,
-                "failed_db": failed_db,
-            }
-            if q != "bars":
-                row["db_totals_shared"] = True
+                row = {
+                    "name": q,
+                    "pending_broker": pending_broker,
+                    "running_celery": None,
+                    "done_db": None,
+                    "failed_db": None,
+                }
             rows.append(row)
         return {
             "queues": rows,

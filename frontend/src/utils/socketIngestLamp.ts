@@ -26,7 +26,7 @@ export function ingestRedisTruthyConnected(v: unknown): boolean {
 const IB_OPERATOR_HEALTH_FRESH_MAX_S = 180
 
 /** True when Monitor exposes IB probe fields and they indicate failure or staleness (zombie writer). */
-function ibSlotProbeUnhealthy(
+export function ibSlotProbeUnhealthy(
   slot:
     | {
         ib_probe_stale?: boolean

@@ -37,6 +37,7 @@ os.chdir(str(_PROJECT_ROOT))
 from backend.monitor.routers.deps import IB_INGESTOR_LOG_STREAM_KEY
 from src.bifrost.message_center import IbConnectionStatusTracker
 from src.core.logging_redis_stream import RedisStreamLogHandler
+from src.monitor.integrations.ib_clients import SERVICE_HEARTBEAT_CONNECT_TIMEOUT_SEC
 
 _IB_INGESTOR_LOG_STREAM_MAXLEN = 2000
 
@@ -278,10 +279,9 @@ class IbIngestorApp:
         self._last_ib_probe_at = 0.0
         self._last_ib_probe_ok = False
         self._ib_probe_interval_sec = 5.0
-        self._reconnect_base_sec = 2.0
-        self._reconnect_max_sec = 60.0
-        self._reconnect_max_exp = 6
         self._session_disconnected = asyncio.Event()
+        self._service_heartbeat_interval_sec = 30.0
+        self._last_service_heartbeat_at = 0.0
 
     def _max_subscriptions(self) -> int:
         try:
@@ -304,14 +304,14 @@ class IbIngestorApp:
                 pass
 
         from src.app.config import get_effective_ib_config
-        from src.ib.connection_policy import reconnect_delay_s
         from src.monitor.integrations.ib_clients import MarketIbClient
 
         ib_eff = get_effective_ib_config(self._cfg)
         self._ib_probe_interval_sec = float(ib_eff["ib_probe_interval_sec"])
-        self._reconnect_base_sec = float(ib_eff["ib_reconnect_base_sec"])
-        self._reconnect_max_sec = float(ib_eff["ib_reconnect_max_sec"])
-        self._reconnect_max_exp = int(ib_eff["ib_reconnect_max_exp"])
+        self._service_heartbeat_interval_sec = max(
+            self._ib_probe_interval_sec,
+            float(self._st.get("health_refresh_sec") or 30),
+        )
         self._client_id = int(ib_eff["client_id_ib_ingestor"])
         host = str(ib_eff["host"])
         port = int(ib_eff.get("port_market_data", ib_eff["port"]))
@@ -324,6 +324,8 @@ class IbIngestorApp:
             cid,
             self._max_subscriptions(),
         )
+
+        self._last_service_heartbeat_at = time.time()
 
         while not self._stop.is_set():
             client = MarketIbClient(host, port, cid, name="IbIngestor")
@@ -338,13 +340,9 @@ class IbIngestorApp:
                 break
 
             self._reconnects += 1
-            delay = reconnect_delay_s(
-                self._reconnects,
-                base=self._reconnect_base_sec,
-                max_s=self._reconnect_max_sec,
-                max_exp=self._reconnect_max_exp,
-            )
+            delay = self._service_heartbeat_interval_sec
             now = time.time()
+            sh = self._ingest_heartbeat_meta(now)
             self._writer.update_health(
                 self._client_id,
                 False,
@@ -354,6 +352,7 @@ class IbIngestorApp:
                 ib_probe_at=0.0,
                 ib_probe_ok=False,
                 ib_probe_interval_sec=self._ib_probe_interval_sec,
+                **sh,
             )
             self._status_tracker.update(
                 slot="host",
@@ -362,28 +361,27 @@ class IbIngestorApp:
                 occurred_at=now,
                 reason="Session ended",
             )
-            self._status_tracker.update(
-                slot="host",
-                status="reconnecting",
-                client_id=self._client_id or None,
-                occurred_at=now,
-                reason="Waiting for reconnect backoff",
+            logger.info(
+                "Next session reconnect in %.1fs (service heartbeat, attempt %d)…",
+                delay,
+                self._reconnects,
             )
-            logger.info("Reconnecting in %.1fs (attempt %d)…", delay, self._reconnects)
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=delay)
             except asyncio.TimeoutError:
                 pass
 
+        _now = time.time()
         self._writer.update_health(
             self._client_id,
             False,
-            time.time(),
+            _now,
             self._reconnects,
             self._msg_count,
             ib_probe_at=0.0,
             ib_probe_ok=False,
             ib_probe_interval_sec=self._ib_probe_interval_sec,
+            **self._ingest_heartbeat_meta(_now),
         )
         self._status_tracker.update(
             slot="host",
@@ -398,12 +396,24 @@ class IbIngestorApp:
             self._reconnects,
         )
 
+    def _ingest_heartbeat_meta(self, now: float) -> Dict[str, float]:
+        iv = float(self._service_heartbeat_interval_sec)
+        lh = float(self._last_service_heartbeat_at)
+        nx = max(0.0, lh + iv - now) if lh > 0 else iv
+        return {
+            "service_heartbeat_interval_sec": iv,
+            "last_service_heartbeat_at": lh,
+            "next_service_heartbeat_in_s": nx,
+        }
+
     def _push_health(
         self,
         *,
         connected: bool,
         last_msg_ts: float,
+        service_heartbeat_reconnect_in_progress: str = "",
     ) -> None:
+        _now = time.time()
         self._writer.update_health(
             self._client_id,
             connected,
@@ -413,6 +423,8 @@ class IbIngestorApp:
             ib_probe_at=self._last_ib_probe_at,
             ib_probe_ok=self._last_ib_probe_ok,
             ib_probe_interval_sec=self._ib_probe_interval_sec,
+            service_heartbeat_reconnect_in_progress=service_heartbeat_reconnect_in_progress,
+            **self._ingest_heartbeat_meta(_now),
         )
         self._status_tracker.update(
             slot="host",
@@ -573,12 +585,39 @@ class IbIngestorApp:
         """Freshen last_msg_ts / wire connected in Redis without treating meta-only writes as IB probe success."""
         while not self._stop.is_set():
             ts = self._last_msg_ts or time.time()
+            now = time.time()
             cl = self._session_ib_client
+            if self._last_service_heartbeat_at <= 0:
+                self._last_service_heartbeat_at = now
+            if now - self._last_service_heartbeat_at >= self._service_heartbeat_interval_sec:
+                self._last_service_heartbeat_at = now
+                if cl is not None and not cl.connected_snapshot():
+                    self._push_health(
+                        connected=False,
+                        last_msg_ts=ts,
+                        service_heartbeat_reconnect_in_progress=f"Host (client {self._client_id})",
+                    )
+                    try:
+                        await asyncio.wait_for(
+                            cl.ensure_connected(max_connect_attempts=1),
+                            timeout=SERVICE_HEARTBEAT_CONNECT_TIMEOUT_SEC,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.debug(
+                            "IB ingestor service heartbeat reconnect timed out after %.0fs",
+                            SERVICE_HEARTBEAT_CONNECT_TIMEOUT_SEC,
+                        )
+                    except Exception as e:
+                        logger.debug("IB ingestor service heartbeat reconnect: %s", e)
             wire = cl.connected_snapshot() if cl is not None else False
             if not wire and cl is not None:
                 self._session_disconnected.set()
             try:
-                self._push_health(connected=wire, last_msg_ts=ts)
+                self._push_health(
+                    connected=wire,
+                    last_msg_ts=ts,
+                    service_heartbeat_reconnect_in_progress="",
+                )
             except Exception as e:
                 logger.debug("heartbeat meta: %s", e)
             try:

@@ -136,6 +136,86 @@ export async function trimBarsJobs(keep: number): Promise<{ ok: boolean; deleted
   }
 }
 
+export interface JobQueueStatusCounts {
+  pending: number
+  running: number
+  done: number
+  failed: number
+}
+
+/** One row per Celery queue (GET /ops/jobs/queues/summary). */
+export interface AggregatedJobQueueSummaryRow {
+  profile_key: string
+  label: string
+  celery_queue: string
+  pipeline: 'bars' | 'massive'
+  counts: JobQueueStatusCounts
+}
+
+export async function fetchAggregatedJobQueuesSummary(): Promise<{
+  ok: boolean
+  rows: AggregatedJobQueueSummaryRow[]
+  error?: string
+}> {
+  const r = await fetch(joinServiceBase(getOpsApiBase(), '/ops/jobs/queues/summary'), { headers: opsAuthHeaders() })
+  const j = await r.json().catch(() => ({}))
+  const raw = Array.isArray(j.rows) ? j.rows : []
+  const rows: AggregatedJobQueueSummaryRow[] = raw.map((row: unknown) => {
+    const o = row as Record<string, unknown>
+    const c = o.counts as Record<string, unknown> | undefined
+    const counts: JobQueueStatusCounts = {
+      pending: typeof c?.pending === 'number' ? c.pending : 0,
+      running: typeof c?.running === 'number' ? c.running : 0,
+      done: typeof c?.done === 'number' ? c.done : 0,
+      failed: typeof c?.failed === 'number' ? c.failed : 0,
+    }
+    const pipeline: 'bars' | 'massive' = o.pipeline === 'bars' ? 'bars' : 'massive'
+    return {
+      profile_key: String(o.profile_key ?? ''),
+      label: String(o.label ?? o.celery_queue ?? ''),
+      celery_queue: String(o.celery_queue ?? ''),
+      pipeline,
+      counts,
+    }
+  })
+  return {
+    ok: r.ok && j.ok !== false,
+    rows,
+    error: typeof j.error === 'string' ? j.error : undefined,
+  }
+}
+
+export async function fetchBarsJobsSummary(): Promise<{
+  ok: boolean
+  counts: JobQueueStatusCounts
+  error?: string
+}> {
+  const r = await fetch(opsBarsJobsUrl('/summary'), { headers: opsAuthHeaders() })
+  const j = await r.json().catch(() => ({}))
+  const c = j.counts as Record<string, unknown> | undefined
+  const counts: JobQueueStatusCounts = {
+    pending: typeof c?.pending === 'number' ? c.pending : 0,
+    running: typeof c?.running === 'number' ? c.running : 0,
+    done: typeof c?.done === 'number' ? c.done : 0,
+    failed: typeof c?.failed === 'number' ? c.failed : 0,
+  }
+  return {
+    ok: r.ok && j.ok !== false,
+    counts,
+    error: typeof j.error === 'string' ? j.error : undefined,
+  }
+}
+
+export async function postBarsJobsClearDone(): Promise<{ ok: boolean; deleted: number; error?: string }> {
+  const r = await fetch(opsBarsJobsUrl('/clear-done'), { method: 'POST', headers: opsAuthHeaders() })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: r.ok && j.ok !== false,
+    deleted: typeof j.deleted === 'number' ? j.deleted : 0,
+    error: typeof j.error === 'string' ? j.error : undefined,
+  }
+}
+
 /** Reset one failed job to pending and re-queue Celery (requires Ops operator token). */
 export async function postRetryBarsJob(jobId: string): Promise<{ ok: boolean; error?: string; job?: BarsJob }> {
   const r = await fetch(opsBarsJobsUrl(`/${encodeURIComponent(jobId)}/retry`), {

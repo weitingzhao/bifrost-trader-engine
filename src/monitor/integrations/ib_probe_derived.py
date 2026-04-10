@@ -56,3 +56,23 @@ def parse_redis_probe_triple(
     except (TypeError, ValueError):
         iv = 0.0
     return pa, ok, iv
+
+
+def attach_service_heartbeat_derived(
+    target: Dict[str, Any],
+    *,
+    interval_sec: float,
+    last_heartbeat_at: float,
+    now: float,
+) -> None:
+    """Countdown to next main-thread service heartbeat (process alive + reconnect gate)."""
+    iv = float(interval_sec or 0.0)
+    if iv <= 0:
+        return
+    lh = float(last_heartbeat_at or 0.0)
+    target["service_heartbeat_interval_sec"] = iv
+    target["last_service_heartbeat_at"] = lh if lh > 0 else None
+    if lh <= 0:
+        target["next_service_heartbeat_in_s"] = iv
+    else:
+        target["next_service_heartbeat_in_s"] = max(0.0, lh + iv - now)

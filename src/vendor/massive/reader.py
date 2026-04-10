@@ -160,6 +160,7 @@ def list_job_massive_backfill(
     offset: int = 0,
     status_filter: Optional[str] = None,
     kind_filter: Optional[str] = None,
+    celery_queue: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Latest Massive sync jobs, newest first."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
@@ -174,6 +175,12 @@ def list_job_massive_backfill(
     if kind_filter and str(kind_filter).strip():
         conditions.append("kind = %s")
         params_list.append(str(kind_filter).strip().lower())
+    cq = (celery_queue or "").strip()
+    if cq:
+        qcond, qparams = _massive_celery_queue_condition(cq)
+        if qcond:
+            conditions.append(f"({qcond})")
+            params_list.extend(qparams)
     where_sql = (" WHERE " + " AND ".join(conditions)) if conditions else ""
     sql = f"""
         SELECT job_massive_backfill_id, kind, payload, status, result, celery_task_id, created_at, updated_at
@@ -199,6 +206,32 @@ def list_job_massive_backfill(
 
 
 _VALID_MASSIVE_JOB_STATUS = frozenset({"pending", "running", "done", "failed"})
+
+
+def _massive_celery_queue_condition(celery_queue: str) -> Tuple[Optional[str], List[Any]]:
+    """SQL predicate for rows routed to ``celery_queue`` (see ``celery_queue_for_massive_job``)."""
+    from src.massive.celery_queues import STOCK_REFERENCE_KINDS
+
+    cq = (celery_queue or "").strip()
+    if not cq:
+        return None, []
+    stock = sorted(STOCK_REFERENCE_KINDS)
+    ph = ",".join(["%s"] * len(stock))
+    pri_low = "lower(coalesce(payload->>'priority','')) <> 'high'"
+    pri_high = "lower(coalesce(payload->>'priority','')) = 'high'"
+    not_stock = f"(kind NOT IN ({ph}))"
+    is_stock = f"(kind IN ({ph}))"
+    sp = list(stock)
+    if cq == "massive":
+        return f"{not_stock} AND {pri_low}", sp
+    if cq == "massive_high":
+        return f"{not_stock} AND {pri_high}", sp
+    if cq == "massive_stocks":
+        return f"{is_stock} AND {pri_low}", sp
+    if cq == "massive_stocks_high":
+        return f"{is_stock} AND {pri_high}", sp
+    logger.warning("unknown massive celery_queue filter %r — no SQL filter applied", cq)
+    return None, []
 
 
 def delete_job_massive_backfill(status_config: dict, job_id: Any) -> bool:
@@ -227,11 +260,18 @@ def delete_job_massive_backfill(status_config: dict, job_id: Any) -> bool:
         return False
 
 
-def delete_all_job_massive_backfill(status_config: dict, status_filter: Optional[str] = None) -> int:
-    """Delete all Massive jobs, or only rows matching status. Returns number of rows deleted."""
+def delete_all_job_massive_backfill(
+    status_config: dict,
+    status_filter: Optional[str] = None,
+    celery_queue: Optional[str] = None,
+) -> int:
+    """Delete Massive jobs, optionally scoped by status and/or Celery queue routing."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return 0
     sf = (status_filter or "").strip().lower()
+    cq = (celery_queue or "").strip()
+    qcond, qparams = _massive_celery_queue_condition(cq) if cq else (None, [])
+    qsql = f" AND ({qcond})" if qcond else ""
     try:
         params = _get_conn_params(status_config)
         conn = psycopg2.connect(**params)
@@ -239,11 +279,17 @@ def delete_all_job_massive_backfill(status_config: dict, status_filter: Optional
             with conn.cursor() as cur:
                 if sf in _VALID_MASSIVE_JOB_STATUS:
                     cur.execute(
-                        "DELETE FROM job_massive_backfill WHERE status = %s",
-                        (sf,),
+                        f"DELETE FROM job_massive_backfill WHERE status = %s{qsql}",
+                        (sf, *qparams),
                     )
                 else:
-                    cur.execute("DELETE FROM job_massive_backfill")
+                    if qcond:
+                        cur.execute(
+                            f"DELETE FROM job_massive_backfill WHERE ({qcond})",
+                            tuple(qparams),
+                        )
+                    else:
+                        cur.execute("DELETE FROM job_massive_backfill")
                 deleted = cur.rowcount
             conn.commit()
             return int(deleted)
@@ -254,28 +300,49 @@ def delete_all_job_massive_backfill(status_config: dict, status_filter: Optional
         return 0
 
 
-def trim_job_massive_backfill(status_config: dict, keep: int = 200) -> int:
-    """Keep the newest `keep` rows by job_massive_backfill_id; delete older. Returns deleted count."""
+def trim_job_massive_backfill(
+    status_config: dict, keep: int = 200, celery_queue: Optional[str] = None,
+) -> int:
+    """Keep the newest ``keep`` rows (globally or within one Celery queue slice); delete older."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return 0
     k = max(1, min(int(keep), 50_000))
+    cq = (celery_queue or "").strip()
+    qcond, qparams = _massive_celery_queue_condition(cq) if cq else (None, [])
     try:
         params = _get_conn_params(status_config)
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    WITH kept AS (
-                        SELECT job_massive_backfill_id FROM job_massive_backfill
-                        ORDER BY job_massive_backfill_id DESC
-                        LIMIT %s
+                if qcond:
+                    cur.execute(
+                        f"""
+                        WITH ranked AS (
+                            SELECT job_massive_backfill_id,
+                                   ROW_NUMBER() OVER (ORDER BY job_massive_backfill_id DESC) AS rn
+                            FROM job_massive_backfill
+                            WHERE ({qcond})
+                        )
+                        DELETE FROM job_massive_backfill
+                        WHERE job_massive_backfill_id IN (
+                            SELECT job_massive_backfill_id FROM ranked WHERE rn > %s
+                        )
+                        """,
+                        tuple(qparams) + (k,),
                     )
-                    DELETE FROM job_massive_backfill
-                    WHERE job_massive_backfill_id NOT IN (SELECT job_massive_backfill_id FROM kept)
-                    """,
-                    (k,),
-                )
+                else:
+                    cur.execute(
+                        """
+                        WITH kept AS (
+                            SELECT job_massive_backfill_id FROM job_massive_backfill
+                            ORDER BY job_massive_backfill_id DESC
+                            LIMIT %s
+                        )
+                        DELETE FROM job_massive_backfill
+                        WHERE job_massive_backfill_id NOT IN (SELECT job_massive_backfill_id FROM kept)
+                        """,
+                        (k,),
+                    )
                 deleted = cur.rowcount
             conn.commit()
             return int(deleted)
@@ -284,6 +351,94 @@ def trim_job_massive_backfill(status_config: dict, keep: int = 200) -> int:
     except Exception as e:
         logger.warning("trim_job_massive_backfill failed: %s", e)
         return 0
+
+
+def count_job_massive_backfill_by_status(
+    status_config: dict,
+    celery_queue: Optional[str] = None,
+) -> Dict[str, int]:
+    """Return counts per status, optionally scoped to one broker queue slice."""
+    labels = ("pending", "running", "done", "failed")
+    out: Dict[str, int] = {s: 0 for s in labels}
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return out
+    cq = (celery_queue or "").strip()
+    qcond: Optional[str]
+    qparams: List[Any]
+    if cq:
+        qcond, qparams = _massive_celery_queue_condition(cq)
+        if not qcond:
+            return out
+        where_sql = f" WHERE ({qcond})"
+    else:
+        where_sql = ""
+        qparams = []
+    sql = f"SELECT status, COUNT(*)::bigint FROM job_massive_backfill{where_sql} GROUP BY status"
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql, tuple(qparams))
+                for row in cur.fetchall() or []:
+                    st = str(row[0] or "").strip().lower()
+                    if st in out:
+                        out[st] = int(row[1])
+            return out
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("count_job_massive_backfill_by_status failed: %s", e)
+        return out
+
+
+def reset_failed_job_massive_backfill_batch(
+    status_config: dict,
+    celery_queue: Optional[str],
+    limit: int,
+) -> List[Dict[str, Any]]:
+    """Set failed rows to pending (cleared result) for re-enqueue; returns updated rows (oldest failed first)."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return []
+    lim = max(1, min(int(limit), 2000))
+    cq = (celery_queue or "").strip()
+    if cq:
+        qcond, qparams = _massive_celery_queue_condition(cq)
+        if not qcond:
+            return []
+        where_failed = f"status = 'failed' AND ({qcond})"
+        params_sel = tuple(qparams) + (lim,)
+    else:
+        where_failed = "status = 'failed'"
+        params_sel = (lim,)
+    sql = f"""
+        WITH sel AS (
+            SELECT job_massive_backfill_id FROM job_massive_backfill
+            WHERE {where_failed}
+            ORDER BY job_massive_backfill_id ASC
+            LIMIT %s
+        )
+        UPDATE job_massive_backfill j
+        SET status = 'pending', result = NULL, updated_at = now(), celery_task_id = NULL
+        FROM sel
+        WHERE j.job_massive_backfill_id = sel.job_massive_backfill_id
+        RETURNING j.job_massive_backfill_id, j.kind, j.payload, j.status, j.result,
+                  j.celery_task_id, j.created_at, j.updated_at
+    """
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(sql, params_sel)
+                rows = cur.fetchall()
+            conn.commit()
+            return [dict(r) for r in rows] if rows else []
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("reset_failed_job_massive_backfill_batch failed: %s", e)
+        return []
 
 
 def _publish_massive_job_redis(job_id: int, status: str, result: Optional[Dict[str, Any]] = None) -> None:

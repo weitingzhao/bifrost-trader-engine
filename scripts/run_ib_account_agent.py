@@ -19,7 +19,7 @@ import signal
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Dict, List, Optional
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -29,6 +29,7 @@ os.chdir(str(_PROJECT_ROOT))
 from backend.monitor.routers.deps import IB_ACCOUNT_AGENT_LOG_STREAM_KEY
 from src.bifrost.message_center import IbConnectionStatusTracker
 from src.core.logging_redis_stream import RedisStreamLogHandler
+from src.monitor.integrations.ib_clients import SERVICE_HEARTBEAT_CONNECT_TIMEOUT_SEC
 
 _LOG_STREAM_MAXLEN = 2000
 
@@ -90,6 +91,27 @@ HOST_FAIL_ITERATIONS_BEFORE_SESSION_RESET = 15
 # After ensure_connected, ib_insync may lag before isConnected() is true on the client loop.
 _POST_CONNECT_SNAPSHOT_ATTEMPTS = 20
 _POST_CONNECT_SNAPSHOT_DELAY_SEC = 0.25
+
+
+async def _heartbeat_reconnect_one_slot(client: Any, *, slot_label: str) -> None:
+    """Single service-heartbeat reconnect for one IB client; errors/timeouts stay local."""
+    try:
+        await asyncio.wait_for(
+            client.ensure_connected(max_connect_attempts=1),
+            timeout=SERVICE_HEARTBEAT_CONNECT_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        logger.debug(
+            "IB account agent service heartbeat %s connect timed out after %.0fs",
+            slot_label,
+            SERVICE_HEARTBEAT_CONNECT_TIMEOUT_SEC,
+        )
+    except Exception as e:
+        logger.debug(
+            "IB account agent service heartbeat %s connect: %s",
+            slot_label,
+            e,
+        )
 
 
 def _merged_open_orders(hc: Any, sc: Any) -> List[Dict[str, Any]]:
@@ -174,14 +196,23 @@ class IbAccountAgentApp:
         self._sec_cid: Optional[int] = None
         self._fill_rows: List[Dict[str, Any]] = []
         self._ib_probe_interval_sec = 5.0
-        self._reconnect_base_sec = 2.0
-        self._reconnect_max_sec = 60.0
-        self._reconnect_max_exp = 6
         self._host_probe_at = 0.0
         self._host_probe_ok = False
         self._sec_probe_at = 0.0
         self._sec_probe_ok = False
         self._session_disconnected = asyncio.Event()
+        self._service_heartbeat_interval_sec = 30.0
+        self._last_service_heartbeat_at = 0.0
+
+    def _agent_heartbeat_meta(self, now: float) -> Dict[str, float]:
+        iv = float(self._service_heartbeat_interval_sec)
+        lh = float(self._last_service_heartbeat_at)
+        nx = max(0.0, lh + iv - now) if lh > 0 else iv
+        return {
+            "service_heartbeat_interval_sec": iv,
+            "last_service_heartbeat_at": lh,
+            "next_service_heartbeat_in_s": nx,
+        }
 
     def _bump(self) -> None:
         self._msg_count += 1
@@ -234,6 +265,7 @@ class IbAccountAgentApp:
         secondary: Any,
         host_alive: bool = True,
     ) -> None:
+        _now = time.time()
         self._writer.update_health(
             self._host_cid,
             host_ok,
@@ -249,6 +281,7 @@ class IbAccountAgentApp:
             secondary_ib_probe_at=sec_probe_at,
             secondary_ib_probe_ok=sec_probe_ok,
             secondary_ib_probe_interval_sec=self._ib_probe_interval_sec,
+            **self._agent_heartbeat_meta(_now),
         )
         self._status_tracker.update(
             slot="host",
@@ -273,14 +306,16 @@ class IbAccountAgentApp:
                 pass
 
         from src.app.config import get_effective_ib_config
-        from src.ib.connection_policy import reconnect_delay_s
         from src.monitor.integrations.ib_clients import MarketIbClient
 
         ib_eff = get_effective_ib_config(self._cfg)
         self._ib_probe_interval_sec = float(ib_eff["ib_probe_interval_sec"])
-        self._reconnect_base_sec = float(ib_eff["ib_reconnect_base_sec"])
-        self._reconnect_max_sec = float(ib_eff["ib_reconnect_max_sec"])
-        self._reconnect_max_exp = int(ib_eff["ib_reconnect_max_exp"])
+        aa_st = self._cfg.get("ib_account_agent")
+        aa_st = aa_st if isinstance(aa_st, dict) else {}
+        self._service_heartbeat_interval_sec = max(
+            self._ib_probe_interval_sec,
+            float(aa_st.get("health_refresh_sec") or 30),
+        )
         self._host_cid = int(ib_eff["client_id_account_agent"])
         host = str(ib_eff["host"])
         port = int(ib_eff["port"])
@@ -323,7 +358,10 @@ class IbAccountAgentApp:
             secondary_ib_probe_at=0.0,
             secondary_ib_probe_ok=False,
             secondary_ib_probe_interval_sec=self._ib_probe_interval_sec,
+            **self._agent_heartbeat_meta(time.time()),
         )
+
+        self._last_service_heartbeat_at = time.time()
 
         while not self._stop.is_set():
             try:
@@ -336,16 +374,12 @@ class IbAccountAgentApp:
             if self._stop.is_set():
                 break
             self._reconnects += 1
-            delay = reconnect_delay_s(
-                self._reconnects,
-                base=self._reconnect_base_sec,
-                max_s=self._reconnect_max_sec,
-                max_exp=self._reconnect_max_exp,
-            )
+            delay = self._service_heartbeat_interval_sec
+            _now = time.time()
             self._writer.update_health(
                 self._host_cid,
                 False,
-                time.time(),
+                _now,
                 self._reconnects,
                 self._msg_count,
                 secondary_connected=False if secondary is not None else None,
@@ -356,6 +390,7 @@ class IbAccountAgentApp:
                 secondary_ib_probe_at=0.0,
                 secondary_ib_probe_ok=False,
                 secondary_ib_probe_interval_sec=self._ib_probe_interval_sec,
+                **self._agent_heartbeat_meta(_now),
             )
             self._status_tracker.update(
                 slot="host",
@@ -363,13 +398,6 @@ class IbAccountAgentApp:
                 client_id=self._host_cid or None,
                 occurred_at=time.time(),
                 reason="Session ended",
-            )
-            self._status_tracker.update(
-                slot="host",
-                status="reconnecting",
-                client_id=self._host_cid or None,
-                occurred_at=time.time(),
-                reason="Waiting for reconnect backoff",
             )
             if secondary is not None:
                 self._status_tracker.update(
@@ -379,23 +407,21 @@ class IbAccountAgentApp:
                     occurred_at=time.time(),
                     reason="Session ended",
                 )
-                self._status_tracker.update(
-                    slot="secondary",
-                    status="reconnecting",
-                    client_id=self._sec_cid,
-                    occurred_at=time.time(),
-                    reason="Waiting for reconnect backoff",
-                )
-            logger.info("Reconnecting in %.1fs (attempt %d)…", delay, self._reconnects)
+            logger.info(
+                "Next session reconnect in %.1fs (service heartbeat, attempt %d)…",
+                delay,
+                self._reconnects,
+            )
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=delay)
             except asyncio.TimeoutError:
                 pass
 
+        _now = time.time()
         self._writer.update_health(
             self._host_cid,
             False,
-            time.time(),
+            _now,
             self._reconnects,
             self._msg_count,
             secondary_connected=False if secondary is not None else None,
@@ -407,6 +433,7 @@ class IbAccountAgentApp:
             secondary_ib_probe_at=0.0,
             secondary_ib_probe_ok=False,
             secondary_ib_probe_interval_sec=self._ib_probe_interval_sec,
+            **self._agent_heartbeat_meta(_now),
         )
         self._status_tracker.update(
             slot="host",
@@ -439,6 +466,12 @@ class IbAccountAgentApp:
         the connect/disconnect lifecycle, safe to read under CPython's GIL).
         This lets the probe advance ``host_ib_probe_at`` every interval
         regardless of how long account-snapshot RPCs take.
+
+        **Service heartbeat (Host + Secondary)**: one ``ensure_connected(1)`` per
+        disconnected slot per tick (wall-clock capped by
+        ``SERVICE_HEARTBEAT_CONNECT_TIMEOUT_SEC``). Host and Secondary reconnects run
+        **in parallel** so one slot timing out or failing does not delay the other.
+        Probe/Redis fields use state after reconnect attempts when a heartbeat tick runs.
         """
         while not self._stop.is_set():
             try:
@@ -458,6 +491,58 @@ class IbAccountAgentApp:
             )
             if not host_ok:
                 self._session_disconnected.set()
+
+            if self._last_service_heartbeat_at <= 0:
+                self._last_service_heartbeat_at = now
+
+            if now - self._last_service_heartbeat_at >= self._service_heartbeat_interval_sec:
+                self._last_service_heartbeat_at = now
+                need_host = not bool(getattr(primary, "_connected_state", False))
+                need_sec = secondary is not None and not bool(
+                    getattr(secondary, "_connected_state", False)
+                )
+                hb_tasks: List[Awaitable[None]] = []
+                if need_host:
+                    hb_tasks.append(_heartbeat_reconnect_one_slot(primary, slot_label="Host"))
+                if need_sec:
+                    hb_tasks.append(
+                        _heartbeat_reconnect_one_slot(secondary, slot_label="Secondary")
+                    )
+                if hb_tasks:
+                    _parts: List[str] = []
+                    if need_host:
+                        _parts.append(f"Host (client {self._host_cid})")
+                    if need_sec:
+                        _parts.append(f"Secondary (client {self._sec_cid})")
+                    _hint = ", ".join(_parts)
+                    try:
+                        self._writer.update_health(
+                            self._host_cid,
+                            host_ok,
+                            self._last_msg_ts or now,
+                            self._reconnects,
+                            self._msg_count,
+                            secondary_connected=sec_ok if secondary is not None else None,
+                            secondary_client_id=self._sec_cid,
+                            host_ib_probe_at=now,
+                            host_ib_probe_ok=host_ok,
+                            host_ib_probe_interval_sec=self._ib_probe_interval_sec,
+                            secondary_ib_probe_at=now if secondary is not None else 0.0,
+                            secondary_ib_probe_ok=sec_ok,
+                            secondary_ib_probe_interval_sec=self._ib_probe_interval_sec,
+                            service_heartbeat_reconnect_in_progress=_hint,
+                            **self._agent_heartbeat_meta(time.time()),
+                        )
+                    except Exception as e:
+                        logger.debug("heartbeat reconnect hint: %s", e)
+                    await asyncio.gather(*hb_tasks)
+                host_ok = bool(getattr(primary, "_connected_state", False))
+                sec_ok = (
+                    bool(getattr(secondary, "_connected_state", False))
+                    if secondary is not None
+                    else False
+                )
+
             self._host_probe_at = now
             self._host_probe_ok = host_ok
             if secondary is not None:
@@ -478,6 +563,8 @@ class IbAccountAgentApp:
                     secondary_ib_probe_at=now if secondary is not None else 0.0,
                     secondary_ib_probe_ok=sec_ok,
                     secondary_ib_probe_interval_sec=self._ib_probe_interval_sec,
+                    service_heartbeat_reconnect_in_progress="",
+                    **self._agent_heartbeat_meta(time.time()),
                 )
             except Exception as e:
                 logger.debug("ib probe health: %s", e)
@@ -488,14 +575,16 @@ class IbAccountAgentApp:
         secondary: Any,
         timeout: float,
     ) -> None:
-        await primary.ensure_connected()
-        self._reconnects = 0
-        self._session_disconnected.clear()
-        for _ in range(_POST_CONNECT_SNAPSHOT_ATTEMPTS):
-            if primary.connected_snapshot():
-                break
-            await asyncio.sleep(_POST_CONNECT_SNAPSHOT_DELAY_SEC)
-        if secondary is not None:
+        async def _host_connect_and_settle() -> None:
+            await primary.ensure_connected()
+            for _ in range(_POST_CONNECT_SNAPSHOT_ATTEMPTS):
+                if primary.connected_snapshot():
+                    break
+                await asyncio.sleep(_POST_CONNECT_SNAPSHOT_DELAY_SEC)
+
+        async def _secondary_connect_and_settle() -> None:
+            if secondary is None:
+                return
             try:
                 await secondary.ensure_connected()
                 for _ in range(_POST_CONNECT_SNAPSHOT_ATTEMPTS):
@@ -504,6 +593,21 @@ class IbAccountAgentApp:
                     await asyncio.sleep(_POST_CONNECT_SNAPSHOT_DELAY_SEC)
             except Exception as e:
                 logger.warning("Secondary connect failed: %s", e)
+
+        self._reconnects = 0
+        self._session_disconnected.clear()
+        if secondary is None:
+            await _host_connect_and_settle()
+        else:
+            hp, sp = await asyncio.gather(
+                _host_connect_and_settle(),
+                _secondary_connect_and_settle(),
+                return_exceptions=True,
+            )
+            if isinstance(hp, BaseException):
+                raise hp
+            if isinstance(sp, BaseException) and not isinstance(sp, Exception):
+                raise sp
 
         hc = primary.connector
         sc = secondary.connector if secondary else None

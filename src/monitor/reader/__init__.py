@@ -22,6 +22,7 @@ from src.portfolio.reader.accounts import (
     write_account_executions_to_db,
 )
 from src.monitor.reader.market import (
+    count_job_bars_backfill_by_status,
     delete_all_job_bars_backfill,
     delete_job_bars_backfill,
     delete_stock_bars_for_symbol,
@@ -44,6 +45,7 @@ from src.monitor.reader.settings import (
 __all__ = [
     "StatusReader",
     "batch_update_execution_strategy",
+    "count_job_bars_backfill_by_status",
     "delete_all_job_bars_backfill",
     "delete_job_bars_backfill",
     "delete_one_execution",

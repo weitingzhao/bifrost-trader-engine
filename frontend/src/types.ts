@@ -174,6 +174,12 @@ export interface SocketIbOperator {
   secondary?: SocketIbOperatorSlot
   account?: SocketIbOperatorSlot
   market?: SocketIbOperatorSlot
+  /** Main-thread service heartbeat (cmd RPC process); same semantics as ingestor / account agent. */
+  service_heartbeat_interval_sec?: number | null
+  last_service_heartbeat_at?: number | null
+  next_service_heartbeat_in_s?: number | null
+  /** Which IB client slot is attempting reconnect during the current heartbeat tick (from Redis). */
+  service_heartbeat_reconnect_in_progress?: string | null
 }
 
 export interface StatusMonitor {
@@ -246,6 +252,12 @@ export interface StatusSocketIbIngestor {
   ib_probe_ok?: boolean
   next_ib_probe_in_s?: number | null
   ib_probe_stale?: boolean
+  /** Main-thread service heartbeat: process alive + one reconnect attempt per tick when needed. */
+  service_heartbeat_interval_sec?: number | null
+  last_service_heartbeat_at?: number | null
+  next_service_heartbeat_in_s?: number | null
+  /** Which IB client slot is attempting reconnect during the current heartbeat tick (from Redis). */
+  service_heartbeat_reconnect_in_progress?: string | null
 }
 
 /** GET /status `socket.ib_account_agent` — Host + optional Secondary (same slot shape as IB Operator). */
@@ -263,6 +275,11 @@ export interface StatusSocketIbAccountAgent {
   client_id?: number | null
   host?: SocketIbOperatorSlot | null
   secondary?: SocketIbOperatorSlot | null
+  service_heartbeat_interval_sec?: number | null
+  last_service_heartbeat_at?: number | null
+  next_service_heartbeat_in_s?: number | null
+  /** Which IB client slot(s) are attempting reconnect during the current heartbeat tick (from Redis). */
+  service_heartbeat_reconnect_in_progress?: string | null
 }
 
 /**

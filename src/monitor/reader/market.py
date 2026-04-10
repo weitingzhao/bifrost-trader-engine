@@ -682,6 +682,32 @@ def get_job_bars_backfill_list(
         raise
 
 
+def count_job_bars_backfill_by_status(status_config: dict) -> Dict[str, int]:
+    """Return counts per status for the full bars backfill table."""
+    labels = ("pending", "running", "done", "failed")
+    out: Dict[str, int] = {s: 0 for s in labels}
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return out
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT status, COUNT(*)::bigint FROM job_bars_backfill GROUP BY status",
+                )
+                for row in cur.fetchall() or []:
+                    st = str(row[0] or "").strip().lower()
+                    if st in out:
+                        out[st] = int(row[1])
+            return out
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("count_job_bars_backfill_by_status failed: %s", e)
+        return out
+
+
 def delete_job_bars_backfill(status_config: dict, job_id: Any) -> bool:
     """Delete one job_bars_backfill row by job_bars_backfill_id. Returns True if deleted (or not found)."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):

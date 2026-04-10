@@ -18,6 +18,10 @@ from src.connector.ib import IBConnector, IBConnectionDroppedError
 
 logger = logging.getLogger(__name__)
 
+# Wall-clock cap for one service-heartbeat reconnect attempt (Host / Secondary).
+# If IB does not complete within this window, the attempt is abandoned until the next tick.
+SERVICE_HEARTBEAT_CONNECT_TIMEOUT_SEC = 5.0
+
 
 class BaseMonitorIbClient:
     """Base class for monitor-side IB clients.
@@ -156,29 +160,45 @@ class BaseMonitorIbClient:
         future = asyncio.run_coroutine_threadsafe(coro, loop)
         return await asyncio.wrap_future(future)
 
-    async def ensure_connected(self) -> None:
+    async def ensure_connected(self, *, max_connect_attempts: Optional[int] = None) -> None:
         """Ensure there is an active IB connection.
 
         Lazily creates IBConnector and connects. Subsequent calls are no-ops when already connected.
-        """
-        await self._run_on_client_loop(self._ensure_connected_impl())
 
-    async def _ensure_connected_impl(self) -> None:
+        ``max_connect_attempts``:
+        - ``None`` (default): up to 10 client_id steps + multi-port (startup / full reconnect).
+        - ``1``: single attempt per caller (service heartbeat tick — no extra retries until next tick).
+        """
+        await self._run_on_client_loop(self._ensure_connected_impl(max_connect_attempts))
+
+    async def _ensure_connected_impl(self, max_connect_attempts: Optional[int] = None) -> None:
         if self.connected:
             return
         assert self._lock is not None
         async with self._lock:
             if self.connected:
                 return
-            logger.info(
-                "[monitor_ib] connecting %s to %s:%s clientId=%s (will try +1, +2, ... if in use)",
-                self.name,
-                self.host,
-                self.port,
-                self.client_id,
-            )
+            heartbeat = max_connect_attempts == 1
+            limit = 10 if max_connect_attempts is None else max(1, int(max_connect_attempts))
+            port_steps = 1 if heartbeat else 5
+            if heartbeat:
+                logger.info(
+                    "[monitor_ib] heartbeat reconnect %s → %s:%s clientId=%s (single attempt)",
+                    self.name,
+                    self.host,
+                    self.port,
+                    self.client_id,
+                )
+            else:
+                logger.info(
+                    "[monitor_ib] connecting %s to %s:%s clientId=%s (will try +1, +2, ... if in use)",
+                    self.name,
+                    self.host,
+                    self.port,
+                    self.client_id,
+                )
             self._connector = IBConnector(host=self.host, port=self.port, client_id=self.client_id)
-            ok = await self._connector.connect(max_attempts=10, max_port_steps=5)
+            ok = await self._connector.connect(max_attempts=limit, max_port_steps=port_steps)
             if not ok:
                 self.last_error = "connect_failed"
                 self._connected_state = False

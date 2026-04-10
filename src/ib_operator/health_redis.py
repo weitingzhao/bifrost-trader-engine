@@ -89,6 +89,9 @@ def operator_health_dict_to_redis_hash(h: Dict[str, Any]) -> Dict[str, str]:
     svc_alive = jsonish_connected(h.get("service_alive", h.get("operator_alive", True)))
     h_probe_at = float(host.get("ib_probe_at") or 0)
     h_probe_iv = float(host.get("ib_probe_interval_sec") or 0)
+    sh_iv = float(h.get("service_heartbeat_interval_sec") or 0)
+    sh_last = float(h.get("last_service_heartbeat_at") or 0)
+    sh_next = float(h.get("next_service_heartbeat_in_s") or 0)
     mapping: Dict[str, str] = {
         "host_connected": "1" if jsonish_connected(host.get("connected")) else "0",
         "host_client_id": str(int(host.get("client_id") or 0)),
@@ -101,6 +104,13 @@ def operator_health_dict_to_redis_hash(h: Dict[str, Any]) -> Dict[str, str]:
         "msg_count": str(cmd_count),
         "last_msg_ts": str(last_cmd if last_cmd > 0 else updated),
         "updated_at": str(updated),
+        "service_heartbeat_interval_sec": str(sh_iv),
+        "last_service_heartbeat_at": str(sh_last),
+        "next_service_heartbeat_in_s": str(sh_next),
+        "service_heartbeat_reconnect_in_progress": (
+            "" if h.get("service_heartbeat_reconnect_in_progress") is None
+            else str(h.get("service_heartbeat_reconnect_in_progress"))
+        ),
     }
     sec = h.get("secondary")
     if sec is None and h.get("account2") is not None:
@@ -147,6 +157,9 @@ def operator_health_dict_from_redis_hash(m: Dict[str, str]) -> Optional[Dict[str
         except (TypeError, ValueError):
             return default
 
+    _sh_iv = _probe_float("service_heartbeat_interval_sec")
+    _sh_last = _probe_float("last_service_heartbeat_at")
+    _sh_next = _probe_float("next_service_heartbeat_in_s")
     out: Dict[str, Any] = {
         "host": {
             "connected": _truthy_field(_field_map(m, "host_connected", "operator_connected")),
@@ -159,6 +172,12 @@ def operator_health_dict_from_redis_hash(m: Dict[str, str]) -> Optional[Dict[str
         },
         "service_alive": _truthy_field(host_alive_raw),
         "msg_count": _mc,
+        "service_heartbeat_interval_sec": _sh_iv,
+        "last_service_heartbeat_at": _sh_last,
+        "next_service_heartbeat_in_s": _sh_next,
+        "service_heartbeat_reconnect_in_progress": (
+            (m.get("service_heartbeat_reconnect_in_progress") or "").strip()
+        ),
     }
     try:
         out["last_msg_ts"] = float(m.get("last_msg_ts") or 0)

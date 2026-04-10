@@ -1501,3 +1501,39 @@ def beat_refresh_expirations() -> Dict[str, Any]:
         return {"ok": True, "skipped": True, "reason": "empty watchlist"}
     batch = get_expiration_cache_settings(config)["beat_batch_size"]
     return refresh_expirations_watchlist_batch(config, config, symbols, max_symbols=batch)
+
+
+def reenqueue_massive_job_from_row(control_via_db: dict, row: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Submit ``run_massive_job`` on the correct queue after a row was reset to pending (Ops retry-failed)."""
+    try:
+        jid = int(row["job_massive_backfill_id"])
+    except (TypeError, ValueError, KeyError):
+        return False, "invalid_job_id"
+    kind = str(row.get("kind") or "").strip()
+    if not kind:
+        return False, "missing_kind"
+    payload = row.get("payload") or {}
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    priority_high = str(payload.get("priority") or "").strip().lower() == "high"
+    from src.massive.celery_queues import celery_queue_for_massive_job
+    from src.vendor.massive.reader import update_job_massive_backfill_celery_task_id
+
+    qname = celery_queue_for_massive_job(kind, priority_high=priority_high)
+    try:
+        async_result = run_massive_job.apply_async(args=[jid], queue=qname)
+        update_job_massive_backfill_celery_task_id(control_via_db, jid, async_result.id)
+    except Exception as e:
+        logger.exception("reenqueue_massive_job_from_row job_id=%s: %s", jid, e)
+        from src.vendor.massive.reader import update_job_massive_backfill_result
+
+        update_job_massive_backfill_result(
+            control_via_db, jid, "failed", {"ok": False, "error": str(e)},
+        )
+        return False, str(e)
+    return True, None

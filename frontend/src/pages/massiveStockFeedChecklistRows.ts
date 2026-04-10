@@ -16,7 +16,7 @@ const rows: ChecklistRow[] = [
     tierMin: 'starter',
     projectStatus: 'implemented',
     verification:
-      'Settings → Feed → Massive Stock → Tickers: each sub-tab has Execute → JSON. '
+      'Settings → Feed → Stock Data → Tickers: each sub-tab has Execute → JSON. '
       + 'Proxies: GET /research/massive/tickers, GET /research/massive/tickers/{ticker}, GET /research/massive/tickers/types, GET /research/massive/related-companies/{ticker}.',
     purpose:
       'Foundation layer for stock research: discover and filter the full Massive ticker universe, enrich any ticker with company '

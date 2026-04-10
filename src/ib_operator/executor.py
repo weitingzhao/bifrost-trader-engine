@@ -195,10 +195,18 @@ class IbOperatorExecutor:
             out["secondary"] = None
         return out
 
-    async def connect_all(self) -> None:
-        await self._primary.ensure_connected()
+    async def connect_all(self, *, max_connect_attempts: Optional[int] = None) -> None:
+        await self.connect_primary_only(max_connect_attempts=max_connect_attempts)
+        await self.connect_secondary_only(max_connect_attempts=max_connect_attempts)
+
+    async def connect_primary_only(self, *, max_connect_attempts: Optional[int] = None) -> None:
+        """Connect Host slot only (heartbeat retries must not block Secondary)."""
+        await self._primary.ensure_connected(max_connect_attempts=max_connect_attempts)
+
+    async def connect_secondary_only(self, *, max_connect_attempts: Optional[int] = None) -> None:
+        """Connect Secondary slot only."""
         if self._account_secondary is not None:
-            await self._account_secondary.ensure_connected()
+            await self._account_secondary.ensure_connected(max_connect_attempts=max_connect_attempts)
 
     async def record_ib_probe(self, interval_sec: float) -> None:
         """Record per-slot IB liveness from connected_snapshot (Socket Services probe fields)."""

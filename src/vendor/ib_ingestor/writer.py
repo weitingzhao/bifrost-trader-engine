@@ -38,6 +38,10 @@ class IbIngestorRedisWriter:
         ib_probe_at: float = 0.0,
         ib_probe_ok: bool = False,
         ib_probe_interval_sec: float = 0.0,
+        service_heartbeat_interval_sec: float = 0.0,
+        last_service_heartbeat_at: float = 0.0,
+        next_service_heartbeat_in_s: float = 0.0,
+        service_heartbeat_reconnect_in_progress: str = "",
     ) -> None:
         m: Dict[str, str] = {
             "client_id": str(client_id),
@@ -49,6 +53,10 @@ class IbIngestorRedisWriter:
             "ib_probe_at": str(ib_probe_at),
             "ib_probe_ok": "1" if ib_probe_ok else "0",
             "ib_probe_interval_sec": str(ib_probe_interval_sec),
+            "service_heartbeat_interval_sec": str(service_heartbeat_interval_sec),
+            "last_service_heartbeat_at": str(last_service_heartbeat_at),
+            "next_service_heartbeat_in_s": str(next_service_heartbeat_in_s),
+            "service_heartbeat_reconnect_in_progress": service_heartbeat_reconnect_in_progress or "",
         }
         self._rds.hset(IB_INGESTER_META_HEALTH, mapping=m)
 

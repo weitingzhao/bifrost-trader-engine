@@ -27,6 +27,7 @@ import {
 } from '../utils/ingestOpsShared'
 import {
   aggregateIngestRedisHealthLamp,
+  ibSlotProbeUnhealthy,
   ingestRedisHealthLamp,
   ingestRedisTruthyConnected,
   localControlAgentLamp,
@@ -88,6 +89,70 @@ function IbProbeBadge({ nextInS, stale }: { nextInS: number; stale: boolean }) {
       {label}
     </span>
   )
+}
+
+/** Countdown to next main-process service heartbeat (IB Broker Services). */
+function ServiceHeartbeatBadge({ nextInS }: { nextInS: number }) {
+  const isSoon = nextInS <= 2
+  const bg = isSoon ? 'rgba(59,130,246,0.2)' : 'rgba(148,163,184,0.2)'
+  const color = isSoon ? '#93c5fd' : '#cbd5e1'
+  const border = isSoon ? '1px solid rgba(59,130,246,0.45)' : '1px solid rgba(148,163,184,0.35)'
+  return (
+    <span
+      title="Main process service heartbeat — each tick checks IB client slots; at most one reconnect attempt per tick (next attempt on the following tick if still down)."
+      style={{
+        display: 'inline-flex', alignItems: 'center',
+        padding: '1px 8px', borderRadius: 99,
+        fontSize: '0.72rem', fontWeight: 700,
+        fontVariantNumeric: 'tabular-nums',
+        letterSpacing: '0.01em', lineHeight: 1.65,
+        background: bg, color, border,
+        verticalAlign: 'middle', marginLeft: 4,
+        minWidth: 38, justifyContent: 'center',
+      }}
+    >
+      ~{Math.ceil(nextInS)}s
+    </span>
+  )
+}
+
+function serviceHeartbeatLiveNextS(
+  svcId: string,
+  status: StatusResponse | null,
+  elapsed: number,
+): number | null {
+  const sid = svcId === 'ib_market' ? 'ib_ingestor' : svcId
+  const raw =
+    sid === 'ib_ingestor'
+      ? status?.socket?.ib_ingestor?.next_service_heartbeat_in_s
+      : sid === 'ib_account_agent'
+        ? status?.socket?.ib_account_agent?.next_service_heartbeat_in_s
+        : sid === 'ib_operator'
+          ? status?.socket?.ib_operator?.next_service_heartbeat_in_s
+          : null
+  if (raw == null || !Number.isFinite(Number(raw))) return null
+  return Math.max(0, Number(raw) - elapsed)
+}
+
+/** Which IB client slot(s) the service is reconnecting during the current heartbeat tick (Redis). */
+function serviceHeartbeatReconnectHint(
+  svcId: string,
+  status: StatusResponse | null,
+): string | null {
+  const sid = svcId === 'ib_market' ? 'ib_ingestor' : svcId
+  let raw: string | null | undefined
+  if (sid === 'ib_ingestor') {
+    raw = status?.socket?.ib_ingestor?.service_heartbeat_reconnect_in_progress
+  } else if (sid === 'ib_account_agent') {
+    raw = status?.socket?.ib_account_agent?.service_heartbeat_reconnect_in_progress
+  } else if (sid === 'ib_operator') {
+    raw = status?.socket?.ib_operator?.service_heartbeat_reconnect_in_progress
+  } else {
+    return null
+  }
+  if (typeof raw !== 'string') return null
+  const t = raw.trim()
+  return t !== '' ? t : null
 }
 
 /** Colored pill badge for Massive WS last-message age (ticks live via elapsed). */
@@ -203,6 +268,29 @@ function enrichIbClientSlotsWithProbe(
   return slots
 }
 
+/** Per-slot IB liveness: same rules as Redis ingest row lamp (stale / probe failed ⇒ not “green”). */
+function ibClientIdSlotProbeUnhealthy(
+  svcId: string,
+  slot: IbClientIdSlot,
+  status: StatusResponse | null,
+): boolean {
+  const sid = svcId === 'ib_market' ? 'ib_ingestor' : svcId
+  if (sid === 'ib_ingestor') {
+    return ibSlotProbeUnhealthy(status?.socket?.ib_ingestor)
+  }
+  if (sid === 'ib_account_agent') {
+    const aa = status?.socket?.ib_account_agent
+    const block = slot.label === 'Sec' ? aa?.secondary : aa?.host
+    return ibSlotProbeUnhealthy(block)
+  }
+  if (sid === 'ib_operator') {
+    const op = status?.socket?.ib_operator
+    const block = slot.label === 'Sec' ? op?.secondary : op?.host
+    return ibSlotProbeUnhealthy(block)
+  }
+  return false
+}
+
 /**
  * Client IDs for IB ingest rows (only called when `ibIngestClientIdShouldShow` is true).
  * ib_ingestor: live Monitor /status when present, else YAML.
@@ -272,21 +360,29 @@ function ibIngestClientIdSlots(
       const secRun = aa?.secondary?.client_id
       const secCfg = cfg?.port?.account_agent_secondary
       const secApiLive = ingestRedisTruthyConnected(aa?.secondary?.connected)
+      /** Sec slot lamp: green only when Secondary API is up *and* Host is up (Host is primary for this process). */
+      const secSlotReady = secApiLive && hostLive
       if (secRun != null && Number.isFinite(Number(secRun))) {
         slots.push({
           label: 'Sec',
           id: Number(secRun),
-          title: secApiLive
+          title: secSlotReady
             ? 'Client ID for IB Account Agent Secondary IB API (socket.ib_account_agent.secondary).'
-            : 'Secondary client_id in /status while secondary_connected is false.',
-          slotConnected: secApiLive,
+            : !secApiLive
+              ? 'Secondary client_id in /status while secondary_connected is false.'
+              : 'Secondary IB API reports connected, but Host is not connected — slot stays not-ready until Host is up.',
+          slotConnected: secSlotReady,
         })
       } else if (secCfg != null && Number.isFinite(Number(secCfg))) {
         slots.push({
           label: 'Sec',
           id: Number(secCfg),
-          title: 'Secondary account_agent client_id from config when exposed; else YAML ib2 client_id.account_agent.',
-          slotConnected: secApiLive,
+          title: secSlotReady
+            ? 'Secondary account_agent client_id from config when exposed; else YAML ib2 client_id.account_agent.'
+            : !secApiLive
+              ? 'Secondary account_agent client_id from config; live secondary_connected is false.'
+              : 'Secondary may be up on IB, but Host is not connected — not-ready until Host is up.',
+          slotConnected: secSlotReady,
         })
       } else {
         slots.push({
@@ -332,22 +428,28 @@ function ibIngestClientIdSlots(
       const secRun = op?.secondary?.client_id
       const secCfg = cfg?.port?.operator_secondary
       const secApiLive = ingestRedisTruthyConnected(op?.secondary?.connected)
+      const secSlotReady = secApiLive && hostApiLive
       if (secRun != null && Number.isFinite(Number(secRun))) {
         slots.push({
           label: 'Sec',
           id: Number(secRun),
-          title: secApiLive
+          title: secSlotReady
             ? 'Client ID used by the live IB Operator Secondary IB API connection (Monitor socket.ib_operator.secondary; secondary_connected).'
-            : 'Redis secondary_client_id in Monitor /status while secondary_connected is false. Same as Host: client_id in the hash does not prove IB API login; lamp uses secondary_connected.',
-          slotConnected: secApiLive,
+            : !secApiLive
+              ? 'Redis secondary_client_id in Monitor /status while secondary_connected is false. Same as Host: client_id in the hash does not prove IB API login; lamp uses secondary_connected.'
+              : 'Secondary IB API reports connected, but Host is not connected — slot stays not-ready until Host is up.',
+          slotConnected: secSlotReady,
         })
       } else if (secCfg != null && Number.isFinite(Number(secCfg))) {
         slots.push({
           label: 'Sec',
           id: Number(secCfg),
-          title:
-            'Client ID from config (merged YAML ib2_client_id_operator / operator_secondary) for IB Operator Secondary. Live Secondary slot not reporting an ID yet.',
-          slotConnected: secApiLive,
+          title: secSlotReady
+            ? 'Client ID from config (merged YAML ib2_client_id_operator / operator_secondary) for IB Operator Secondary. Live Secondary slot not reporting an ID yet.'
+            : !secApiLive
+              ? 'Secondary client_id from config; live secondary_connected is false.'
+              : 'Secondary may be up on IB, but Host is not connected — not-ready until Host is up.',
+          slotConnected: secSlotReady,
         })
       } else {
         slots.push({
@@ -495,6 +597,9 @@ function ServiceRow(props: {
     svc.id === 'massive_ws' && massive?.last_msg_age_s != null
       ? Math.max(0, Math.floor(massive.last_msg_age_s + elapsed))
       : null
+  const liveServiceHeartbeatS = category === 'IB' ? serviceHeartbeatLiveNextS(svc.id, status, elapsed) : null
+  const heartbeatReconnectHint =
+    category === 'IB' ? serviceHeartbeatReconnectHint(svc.id, status) : null
 
   return (
     <tr>
@@ -511,9 +616,34 @@ function ServiceRow(props: {
         <div className="massive-api-doc-hint" style={{ marginTop: 3 }}>
           <code>{svc.systemd_unit}</code>
         </div>
-        {/* IB: Client ID + live probe countdown badges */}
-        {showIbClientId ? (
-          <div className="socket-ib-client-id-wrap" style={{ marginTop: 6 }}>
+      </td>
+      <td className="massive-api-kv-label ingest-services-connection-cell">
+        {category === 'IB' && liveServiceHeartbeatS != null ? (
+          <div
+            className="massive-api-doc-hint"
+            style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}
+          >
+            <span style={{ margin: 0 }}>Service heartbeat</span>
+            <ServiceHeartbeatBadge nextInS={liveServiceHeartbeatS} />
+          </div>
+        ) : null}
+        {category === 'IB' && heartbeatReconnectHint ? (
+          <div
+            className="massive-api-doc-hint"
+            style={{ marginTop: liveServiceHeartbeatS != null ? 6 : 0, maxWidth: 440 }}
+            title="This client is attempting a heartbeat reconnect now (5s timeout per attempt; next try on the following heartbeat)."
+          >
+            Reconnecting: {heartbeatReconnectHint}
+          </div>
+        ) : null}
+        {/* IB Broker Services: IB Client slots + liveness (separate from Service name column) */}
+        {category === 'IB' && showIbClientId ? (
+          <div
+            className="socket-ib-client-id-wrap"
+            style={{
+              marginTop: liveServiceHeartbeatS != null || heartbeatReconnectHint != null ? 8 : 0,
+            }}
+          >
             <span className="massive-api-doc-hint">IB Client ID</span>
             {ibClientSlots.length === 0 ? (
               <span className="massive-api-doc-hint" title="Not available from Monitor /status or ib_client.">
@@ -526,6 +656,21 @@ function ServiceRow(props: {
                     ? Math.max(0, slot.nextProbeInSec - elapsed)
                     : null
                 const showProbe = slot.lastIbProbeLabel != null && slot.lastIbProbeLabel !== '—'
+                const probeBad =
+                  slot.slotConnected != null ? ibClientIdSlotProbeUnhealthy(svc.id, slot, status) : false
+                const slotLampGreen = slot.slotConnected === true && !probeBad
+                const slotLampTitleWithLabel = !slot.label
+                  ? ''
+                  : slotLampGreen
+                    ? `${slot.label} IB API connected (liveness OK)`
+                    : probeBad && slot.slotConnected === true
+                      ? `${slot.label}: Redis connected but liveness probe stale or failed`
+                      : `${slot.label} IB API disconnected`
+                const slotLampTitleNoLabel = slotLampGreen
+                  ? 'IB API connected (liveness OK)'
+                  : probeBad && slot.slotConnected === true
+                    ? 'Redis connected but liveness probe stale or failed'
+                    : 'IB API disconnected'
                 return (
                   <span
                     key={`${slot.label ?? 'ingest'}-${i}`}
@@ -536,16 +681,16 @@ function ServiceRow(props: {
                       <span className="massive-api-doc-hint" style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         {slot.slotConnected != null ? (
                           <span
-                            className={`ib-slot-lamp ib-slot-lamp--${slot.slotConnected ? 'green' : 'red'}`}
-                            title={slot.slotConnected ? `${slot.label} IB API connected` : `${slot.label} IB API disconnected`}
+                            className={`ib-slot-lamp ib-slot-lamp--${slotLampGreen ? 'green' : 'red'}`}
+                            title={slotLampTitleWithLabel}
                           />
                         ) : null}
                         {slot.label}
                       </span>
                     ) : slot.slotConnected != null ? (
                       <span
-                        className={`ib-slot-lamp ib-slot-lamp--${slot.slotConnected ? 'green' : 'red'}`}
-                        title={slot.slotConnected ? 'IB API connected' : 'IB API disconnected'}
+                        className={`ib-slot-lamp ib-slot-lamp--${slotLampGreen ? 'green' : 'red'}`}
+                        title={slotLampTitleNoLabel}
                       />
                     ) : null}
                     {slot.id != null ? (
@@ -584,9 +729,14 @@ function ServiceRow(props: {
             ) : null}
           </div>
         ) : null}
-        {/* Massive WS: live last-message heartbeat */}
+        {category === 'IB' && !showIbClientId && liveServiceHeartbeatS == null ? (
+          <span className="massive-api-doc-hint" title="Connection details when the process is up or Redis reports activity.">
+            —
+          </span>
+        ) : null}
+        {/* Massive WS: feed connection (last message) */}
         {svc.id === 'massive_ws' && massive ? (
-          <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <span className="massive-api-doc-hint" style={{ margin: 0 }}>Last msg</span>
             {liveMassiveMsgAgeS != null ? (
               <MassiveAgeBadge ageS={liveMassiveMsgAgeS} />
@@ -599,6 +749,12 @@ function ServiceRow(props: {
               </span>
             ) : null}
           </div>
+        ) : null}
+        {svc.id === 'massive_ws' && !massive ? (
+          <span className="massive-api-doc-hint">—</span>
+        ) : null}
+        {category !== 'IB' && svc.id !== 'massive_ws' ? (
+          <span className="massive-api-doc-hint">—</span>
         ) : null}
       </td>
       <td>{logicalText}</td>
@@ -727,6 +883,7 @@ export function IngestServicesTable(props: {
             <InfoTooltip text="Only one of Dev or Prod may run each service against the same Redis: bifrost_ops_control_env and bifrost_ops_control_host on the meta hash record which stack and host last started it from Ops. Starting elsewhere is rejected if the lease differs or if health still shows a fresh active writer. After Stop, Ops clears those fields and rewrites health to disconnected so Status updates." />
           </th>
           <th className="massive-api-kv-label">Service</th>
+          <th className="massive-api-kv-label">Connection</th>
           <th>Redis / logical</th>
           <th>Actions</th>
         </tr>
@@ -741,7 +898,7 @@ export function IngestServicesTable(props: {
               }}
             >
               <td
-                colSpan={5}
+                colSpan={6}
                 style={{
                   padding: '6px 10px',
                   fontSize: '0.68rem',

@@ -6,13 +6,9 @@ import {
   fetchMassiveStatus,
   fetchMassiveTickerDetail,
   fetchMassiveTickerTypes,
-  fetchStockReferenceDetail,
-  fetchStockReferenceInstrumentTypes,
-  fetchStockReferenceRelated,
-  fetchStockReferenceSearch,
   postMassiveStocksApiCoverageSync,
 } from '../api'
-import type { MassiveStatusResponse, StockReferenceSearchRow } from '../api'
+import type { MassiveStatusResponse } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import stockChecklistRows from './massiveStockFeedChecklistRows'
 import type { ChecklistRow } from './massiveStockFeedChecklistRows'
@@ -30,6 +26,7 @@ import {
   type EffectiveServiceStatus,
 } from './massive/massiveStockChecklistStatus'
 import { FeedMassiveServiceBlock } from './massive/FeedMassiveServiceBlock'
+import { MassiveStockReferenceDbSection } from './massive/MassiveStockReferenceDbSection'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -144,7 +141,7 @@ interface FeedMassiveStockPageProps {
 export function FeedMassiveStockPage({
   status: _status,
   onGoToFeed,
-  breadcrumbLabel = 'Massive Stock',
+  breadcrumbLabel = 'Stock Data',
 }: FeedMassiveStockPageProps) {
   const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
   const [highlightedCapabilityId, setHighlightedCapabilityId] = useState<string | null>(null)
@@ -188,15 +185,6 @@ export function FeedMassiveStockPage({
   const [tkRelBusy, setTkRelBusy] = useState(false)
   const [tkRelErr, setTkRelErr] = useState<string | null>(null)
   const [tkRelResult, setTkRelResult] = useState<Record<string, unknown> | null>(null)
-
-  const [tkRefDbQ, setTkRefDbQ] = useState('A')
-  const [tkRefDbSym, setTkRefDbSym] = useState('AAPL')
-  const [tkRefDbBusy, setTkRefDbBusy] = useState(false)
-  const [tkRefDbErr, setTkRefDbErr] = useState<string | null>(null)
-  const [tkRefDbSearchRows, setTkRefDbSearchRows] = useState<StockReferenceSearchRow[]>([])
-  const [tkRefDbDetail, setTkRefDbDetail] = useState<Record<string, unknown> | null>(null)
-  const [tkRefDbRelated, setTkRefDbRelated] = useState<Record<string, unknown> | null>(null)
-  const [tkRefDbTypesRows, setTkRefDbTypesRows] = useState<Record<string, unknown>[] | null>(null)
 
   // Ticker Overview form fields
   const [tkOvTicker, setTkOvTicker] = useState('AAPL')
@@ -316,79 +304,6 @@ export function FeedMassiveStockPage({
       setTkRelBusy(false)
     }
   }, [tkRelTicker])
-
-  const runRefDbSearch = useCallback(async () => {
-    const q = tkRefDbQ.trim()
-    if (!q) {
-      setTkRefDbErr('Query is required')
-      return
-    }
-    setTkRefDbBusy(true)
-    setTkRefDbErr(null)
-    setTkRefDbSearchRows([])
-    try {
-      const res = await fetchStockReferenceSearch({ q, limit: 30 })
-      if (!res.ok) {
-        setTkRefDbErr(res.error ?? 'Request failed')
-        return
-      }
-      setTkRefDbSearchRows(res.results ?? [])
-    } catch (e: unknown) {
-      setTkRefDbErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setTkRefDbBusy(false)
-    }
-  }, [tkRefDbQ])
-
-  const runRefDbLoadDetail = useCallback(async () => {
-    const s = tkRefDbSym.trim()
-    if (!s) {
-      setTkRefDbErr('Symbol is required')
-      return
-    }
-    setTkRefDbBusy(true)
-    setTkRefDbErr(null)
-    setTkRefDbDetail(null)
-    setTkRefDbRelated(null)
-    try {
-      const [d, rel] = await Promise.all([
-        fetchStockReferenceDetail(s),
-        fetchStockReferenceRelated(s),
-      ])
-      if (!d.ok) {
-        setTkRefDbErr(d.error ?? 'Detail request failed')
-        return
-      }
-      if (!rel.ok) {
-        setTkRefDbErr(rel.error ?? 'Related request failed')
-        return
-      }
-      setTkRefDbDetail(d.stock ?? null)
-      setTkRefDbRelated(rel.data ?? null)
-    } catch (e: unknown) {
-      setTkRefDbErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setTkRefDbBusy(false)
-    }
-  }, [tkRefDbSym])
-
-  const runRefDbTypes = useCallback(async () => {
-    setTkRefDbBusy(true)
-    setTkRefDbErr(null)
-    setTkRefDbTypesRows(null)
-    try {
-      const res = await fetchStockReferenceInstrumentTypes({ asset_class: 'stocks', locale: 'us' })
-      if (!res.ok) {
-        setTkRefDbErr(res.error ?? 'Request failed')
-        return
-      }
-      setTkRefDbTypesRows(res.results ?? [])
-    } catch (e: unknown) {
-      setTkRefDbErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setTkRefDbBusy(false)
-    }
-  }, [])
 
   const toggleCap = useCallback((id: string) => {
     setCapExpanded(prev => ({ ...prev, [id]: !prev[id] }))
@@ -975,108 +890,10 @@ export function FeedMassiveStockPage({
 
             {/* ── Reference (PostgreSQL) ───────────────────────────────────── */}
             {tkSubTab === 'reference_db' ? (
-              <div
-                className="feed-massive-agg-tab-panel"
-                role="tabpanel"
-                id="feed-massive-stk-tk-panel-refdb"
-                aria-labelledby="feed-massive-stk-tk-tab-refdb"
-              >
-                <div className="feed-massive-agg-sub-doc">
-                  <p>
-                    <strong>Use case:</strong> Query synced rows in PostgreSQL (<code>stocks</code>,{' '}
-                    <code>stock_related_tickers</code>, <code>ticker_instrument_types</code>) with optional Redis cache.
-                    Populate data via Celery jobs (<code>POST /research/massive/jobs/stock-reference</code>). Workers
-                    must listen on <code>massive_stocks</code> / <code>massive_stocks_high</code> (priority), not the
-                    options queues <code>massive</code> / <code>massive_high</code>.
-                  </p>
-                  <p className="feed-massive-agg-sub-endpoint">
-                    <code>GET /research/massive/stocks/search</code>
-                    {' · '}
-                    <code>GET /research/massive/stocks/&#123;symbol&#125;</code>
-                    {' · '}
-                    <code>GET /research/massive/instrument-types</code>
-                  </p>
-                </div>
-
-                <div className="feed-massive-form-grid">
-                  <label className="feed-massive-field">
-                    <span className="form-label">Search query</span>
-                    <input
-                      className="form-input"
-                      value={tkRefDbQ}
-                      onChange={e => setTkRefDbQ(e.target.value)}
-                      disabled={tkRefDbBusy}
-                      placeholder="AAPL or Apple"
-                      autoComplete="off"
-                    />
-                  </label>
-                  <label className="feed-massive-field">
-                    <span className="form-label">Symbol (detail + related)</span>
-                    <input
-                      className="form-input"
-                      value={tkRefDbSym}
-                      onChange={e => setTkRefDbSym(e.target.value)}
-                      disabled={tkRefDbBusy}
-                      placeholder="AAPL"
-                      autoComplete="off"
-                    />
-                  </label>
-                </div>
-
-                <div style={{ marginTop: 'var(--space-3)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={tkRefDbBusy} onClick={runRefDbSearch}>
-                    {tkRefDbBusy ? 'Loading\u2026' : 'Search (DB)'}
-                  </button>
-                  <button type="button" className="btn btn-secondary" disabled={tkRefDbBusy} onClick={runRefDbLoadDetail}>
-                    {tkRefDbBusy ? 'Loading\u2026' : 'Load detail + related'}
-                  </button>
-                  <button type="button" className="btn btn-secondary" disabled={tkRefDbBusy} onClick={runRefDbTypes}>
-                    {tkRefDbBusy ? 'Loading\u2026' : 'Instrument types (DB)'}
-                  </button>
-                </div>
-
-                {tkRefDbErr ? (
-                  <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>
-                    {tkRefDbErr}
-                  </p>
-                ) : null}
-
-                {tkRefDbSearchRows.length > 0 ? (
-                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
-                    <summary>Search results ({tkRefDbSearchRows.length})</summary>
-                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '16rem' }}>
-                      {JSON.stringify(tkRefDbSearchRows, null, 2)}
-                    </pre>
-                  </details>
-                ) : null}
-
-                {tkRefDbDetail ? (
-                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
-                    <summary>Stock row</summary>
-                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '24rem' }}>
-                      {JSON.stringify(tkRefDbDetail, null, 2)}
-                    </pre>
-                  </details>
-                ) : null}
-
-                {tkRefDbRelated ? (
-                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
-                    <summary>Related (DB)</summary>
-                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '20rem' }}>
-                      {JSON.stringify(tkRefDbRelated, null, 2)}
-                    </pre>
-                  </details>
-                ) : null}
-
-                {tkRefDbTypesRows ? (
-                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
-                    <summary>Instrument types ({tkRefDbTypesRows.length})</summary>
-                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '24rem' }}>
-                      {JSON.stringify(tkRefDbTypesRows, null, 2)}
-                    </pre>
-                  </details>
-                ) : null}
-              </div>
+              <MassiveStockReferenceDbSection
+                panelId="feed-massive-stk-tk-panel-refdb"
+                ariaLabelledBy="feed-massive-stk-tk-tab-refdb"
+              />
             ) : null}
 
           </div>
@@ -1225,7 +1042,7 @@ export function FeedMassiveStockPage({
       </section>
 
       {/* Sticky nav with capability chips */}
-      <nav className="feed-massive-tab-nav-section feed-massive-cap-nav-sticky" aria-label="Massive Stock capabilities">
+      <nav className="feed-massive-tab-nav-section feed-massive-cap-nav-sticky" aria-label="Stock Data capabilities">
         <div className="feed-massive-cap-sheet">
           <p className="feed-massive-cap-hint">
             Capabilities grouped by delivery channel. Click a group header to show or hide chips; click a chip to jump and expand that section.

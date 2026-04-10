@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   deleteAllBarsJobs,
   deleteAllMassiveJobs,
@@ -7,12 +7,13 @@ import {
   trimBarsJobs,
   trimMassiveJobs,
 } from '../../api'
+import { fetchWorkerProfiles } from '../../api/ops/ops'
+import type { WorkerProfileInfo } from '../../api/ops/ops'
 import type { BarsJob, MassiveJobApiRow } from '../../api'
 import { barsJobResultTitle, formatBarsJobResult } from '../data/barsJobFormat'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import { fmtTs } from '../../utils/format'
 
-type QueueTab = 'massive' | 'bars'
 type StatusFilter = 'all' | 'pending' | 'running' | 'done' | 'failed'
 
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
@@ -24,6 +25,43 @@ const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
 ]
 
 const LIMIT_OPTIONS = [10, 25, 50, 100] as const
+
+/** One tab per worker profile queue (from GET /ops/workers/profiles, fallback matches config.worker_profiles). */
+export interface JobQueueTab {
+  id: string
+  label: string
+  celeryQueue: string
+  pipeline: 'bars' | 'massive'
+}
+
+const FALLBACK_JOB_QUEUE_TABS: JobQueueTab[] = [
+  { id: 'ib', label: 'IB', celeryQueue: 'bars', pipeline: 'bars' },
+  { id: 'massive', label: 'Massive options', celeryQueue: 'massive', pipeline: 'massive' },
+  { id: 'massive_high', label: 'Massive options (high priority)', celeryQueue: 'massive_high', pipeline: 'massive' },
+  { id: 'massive_stocks', label: 'Massive stocks', celeryQueue: 'massive_stocks', pipeline: 'massive' },
+  { id: 'massive_stocks_high', label: 'Massive stocks (high priority)', celeryQueue: 'massive_stocks_high', pipeline: 'massive' },
+]
+
+function tabsFromProfiles(profiles: WorkerProfileInfo[]): JobQueueTab[] {
+  const out: JobQueueTab[] = []
+  const seenQueues = new Set<string>()
+  for (const p of profiles) {
+    const qs = (p.queues ?? []).map(q => String(q).trim()).filter(Boolean)
+    if (qs.length === 0) continue
+    for (const q of qs) {
+      if (seenQueues.has(q)) continue
+      seenQueues.add(q)
+      const id = qs.length > 1 ? `${p.key}__${q}` : p.key
+      out.push({
+        id,
+        label: qs.length > 1 ? `${p.label} (${q})` : p.label,
+        celeryQueue: q,
+        pipeline: q === 'bars' ? 'bars' : 'massive',
+      })
+    }
+  }
+  return out
+}
 
 /** Toolbar icon size — compact for a lighter look */
 const CELERY_QUEUE_ICON_PX = 15
@@ -114,8 +152,17 @@ function jobStatusBadgeClass(st: string | undefined): string {
   return 'feed-massive-badge feed-massive-badge--pending'
 }
 
-export function CeleryJobQueuesSection() {
-  const [tab, setTab] = useState<QueueTab>('massive')
+export interface CeleryJobQueuesSectionProps {
+  /** After delete/trim/refresh — parent refreshes broker + aggregated job counts (e.g. loadAll). */
+  onJobCountsChanged?: () => void | Promise<void>
+  /** Register a callback so the parent can reload this tab’s job list after top-level Clear done / Reset failed. */
+  onProvideJobListReload?: (fn: (clearedQueue?: string) => void) => void
+}
+
+export function CeleryJobQueuesSection(props: CeleryJobQueuesSectionProps = {}) {
+  const { onJobCountsChanged, onProvideJobListReload } = props
+  const [queueTabs, setQueueTabs] = useState<JobQueueTab[]>(FALLBACK_JOB_QUEUE_TABS)
+  const [activeTabId, setActiveTabId] = useState<string>(FALLBACK_JOB_QUEUE_TABS[0].id)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [limit, setLimit] = useState<number>(25)
   const [keepLast, setKeepLast] = useState<string>('100')
@@ -134,33 +181,59 @@ export function CeleryJobQueuesSection() {
     title: string
     message: string
     confirming: boolean
+    confirmLabel?: string
     action: () => Promise<void>
   } | null>(null)
 
-  const loadMassive = useCallback(async () => {
-    setMassiveLoading(true)
-    setMassiveError(null)
-    try {
-      const res = await fetchMassiveJobsList({
-        limit,
-        offset: 0,
-        status: statusFilter === 'all' ? undefined : statusFilter,
-      })
-      if (!res.ok) {
-        setMassiveError(res.error ?? 'Failed to load jobs')
-        setMassiveJobs([])
-        return
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetchWorkerProfiles()
+        if (res.ok && res.profiles?.length) {
+          const t = tabsFromProfiles(res.profiles)
+          if (t.length > 0) {
+            setQueueTabs(t)
+            setActiveTabId(prev => (t.some(x => x.id === prev) ? prev : t[0].id))
+          }
+        }
+      } catch {
+        /* keep FALLBACK_JOB_QUEUE_TABS */
       }
-      setMassiveJobs(res.jobs)
-    } catch (e) {
-      setMassiveError(e instanceof Error ? e.message : 'Failed to load jobs')
-      setMassiveJobs([])
-    } finally {
-      setMassiveLoading(false)
-    }
-  }, [limit, statusFilter])
+    })()
+  }, [])
 
-  const loadBars = useCallback(async () => {
+  const activeTab = queueTabs.find(t => t.id === activeTabId) ?? queueTabs[0]
+  const activeTabRef = useRef(activeTab)
+  activeTabRef.current = activeTab
+
+  const loadMassiveQueue = useCallback(
+    async (celeryQueue: string) => {
+      setMassiveLoading(true)
+      setMassiveError(null)
+      try {
+        const res = await fetchMassiveJobsList({
+          limit,
+          offset: 0,
+          status: statusFilter === 'all' ? undefined : statusFilter,
+          celery_queue: celeryQueue,
+        })
+        if (!res.ok) {
+          setMassiveError(res.error ?? 'Failed to load jobs')
+          setMassiveJobs([])
+          return
+        }
+        setMassiveJobs(res.jobs)
+      } catch (e) {
+        setMassiveError(e instanceof Error ? e.message : 'Failed to load jobs')
+        setMassiveJobs([])
+      } finally {
+        setMassiveLoading(false)
+      }
+    },
+    [limit, statusFilter],
+  )
+
+  const loadBarsQueue = useCallback(async () => {
     setBarsLoading(true)
     setBarsError(null)
     try {
@@ -176,64 +249,96 @@ export function CeleryJobQueuesSection() {
     }
   }, [limit, statusFilter])
 
+  const reloadListForTopAction = useCallback((clearedQueue?: string) => {
+    const t = activeTabRef.current
+    if (clearedQueue != null && t && t.celeryQueue !== clearedQueue) return
+    if (!t) return
+    if (t.pipeline === 'massive') void loadMassiveQueue(t.celeryQueue)
+    else void loadBarsQueue()
+  }, [loadMassiveQueue, loadBarsQueue])
+
   useEffect(() => {
-    if (tab === 'massive') void loadMassive()
-    else void loadBars()
-  }, [tab, loadMassive, loadBars])
+    onProvideJobListReload?.(reloadListForTopAction)
+  }, [onProvideJobListReload, reloadListForTopAction])
+
+  useEffect(() => {
+    const tab = queueTabs.find(t => t.id === activeTabId)
+    if (!tab) return
+    if (tab.pipeline === 'massive') {
+      void loadMassiveQueue(tab.celeryQueue)
+    } else {
+      void loadBarsQueue()
+    }
+  }, [activeTabId, queueTabs, loadMassiveQueue, loadBarsQueue])
 
   const refresh = () => {
     setActionMsg(null)
-    if (tab === 'massive') void loadMassive()
-    else void loadBars()
+    if (!activeTab) return
+    void onJobCountsChanged?.()
+    if (activeTab.pipeline === 'massive') void loadMassiveQueue(activeTab.celeryQueue)
+    else void loadBarsQueue()
   }
 
   const openDeleteAll = () => {
+    if (!activeTab) return
     const scope =
       statusFilter === 'all'
-        ? 'all jobs in this queue'
+        ? 'all jobs in this queue slice'
         : `all jobs with status “${statusFilter}”`
     setConfirm({
-      title: tab === 'massive' ? 'Delete Massive options queue jobs' : 'Delete bars backfill jobs',
+      title:
+        activeTab.pipeline === 'bars'
+          ? 'Delete bars backfill jobs'
+          : `Delete Massive jobs (queue “${activeTab.celeryQueue}”)`,
       message: `This will permanently delete ${scope}. This cannot be undone.`,
       confirming: false,
       action: async () => {
-        if (tab === 'massive') {
-          const r = await deleteAllMassiveJobs(statusFilter === 'all' ? null : statusFilter)
+        if (activeTab.pipeline === 'massive') {
+          const r = await deleteAllMassiveJobs(
+            statusFilter === 'all' ? null : statusFilter,
+            activeTab.celeryQueue,
+          )
           if (!r.ok) throw new Error(r.error ?? 'Delete failed')
           setActionMsg({ text: `Deleted ${r.deleted} job(s).`, isErr: false })
-          await loadMassive()
+          await loadMassiveQueue(activeTab.celeryQueue)
         } else {
           const r = await deleteAllBarsJobs(statusFilter === 'all' ? null : statusFilter)
           if (!r.ok) throw new Error(r.error ?? 'Delete failed')
           setActionMsg({ text: `Deleted ${r.deleted} job(s).`, isErr: false })
-          await loadBars()
+          await loadBarsQueue()
         }
+        void onJobCountsChanged?.()
       },
     })
   }
 
   const openTrim = () => {
+    if (!activeTab) return
     const n = parseInt(keepLast, 10)
     if (!Number.isFinite(n) || n < 1 || n > 50000) {
       setActionMsg({ text: 'Enter a number between 1 and 50000 for “keep last”.', isErr: true })
       return
     }
     setConfirm({
-      title: tab === 'massive' ? 'Trim Massive options job table' : 'Trim bars backfill job table',
-      message: `Keep only the newest ${n} job(s) by ID. Older rows will be deleted. This cannot be undone.`,
+      title:
+        activeTab.pipeline === 'bars'
+          ? 'Trim bars backfill job table'
+          : `Trim Massive jobs (queue “${activeTab.celeryQueue}”)`,
+      message: `Keep only the newest ${n} job(s) by ID in this queue slice. Older rows will be deleted. This cannot be undone.`,
       confirming: false,
       action: async () => {
-        if (tab === 'massive') {
-          const r = await trimMassiveJobs(n)
+        if (activeTab.pipeline === 'massive') {
+          const r = await trimMassiveJobs(n, activeTab.celeryQueue)
           if (!r.ok) throw new Error(r.error ?? 'Trim failed')
           setActionMsg({ text: `Removed ${r.deleted} older job(s); kept ${n} newest.`, isErr: false })
-          await loadMassive()
+          await loadMassiveQueue(activeTab.celeryQueue)
         } else {
           const r = await trimBarsJobs(n)
           if (!r.ok) throw new Error(r.error ?? 'Trim failed')
           setActionMsg({ text: `Removed ${r.deleted} older job(s); kept ${n} newest.`, isErr: false })
-          await loadBars()
+          await loadBarsQueue()
         }
+        void onJobCountsChanged?.()
       },
     })
   }
@@ -251,43 +356,35 @@ export function CeleryJobQueuesSection() {
     }
   }
 
-  const loading = tab === 'massive' ? massiveLoading : barsLoading
-  const err = tab === 'massive' ? massiveError : barsError
+  const loading = activeTab?.pipeline === 'massive' ? massiveLoading : barsLoading
+  const err = activeTab?.pipeline === 'massive' ? massiveError : barsError
 
   return (
     <section className="replay-section dashboard-section dashboard-celery-queues" aria-labelledby="celery-queues-head">
       <div className="celery-queues-header">
         <h3 id="celery-queues-head" className="page-title-with-tooltip" style={{ margin: 0 }}>
           Queues
-          <InfoTooltip text="Massive options jobs (massive, massive_high), stock-reference jobs (massive_stocks, massive_stocks_high), and bars backfill. Filter by status, delete in bulk, or trim to keep only the newest N rows." />
+          <InfoTooltip text="Queue summary (above main tabs) shows all queues. Tabs follow ops.worker_profiles (GET /ops/workers/profiles). Each tab lists PostgreSQL jobs for that Celery queue: bars → job_bars_backfill; Massive* → job_massive_backfill filtered by routing. Delete/trim apply to the active queue slice only." />
         </h3>
       </div>
 
-      <div className="celery-queue-tabs" role="tablist" aria-label="Job queue type">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'massive'}
-          className={`celery-queue-tab ${tab === 'massive' ? 'celery-queue-tab--active' : ''}`}
-          onClick={() => {
-            setTab('massive')
-            setActionMsg(null)
-          }}
-        >
-          Massive options
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'bars'}
-          className={`celery-queue-tab ${tab === 'bars' ? 'celery-queue-tab--active' : ''}`}
-          onClick={() => {
-            setTab('bars')
-            setActionMsg(null)
-          }}
-        >
-          Bars backfill queue
-        </button>
+      <div className="celery-queue-tabs celery-queue-tabs--profiles" role="tablist" aria-label="Job queue by worker profile">
+        {queueTabs.map(t => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTabId === t.id}
+            className={`celery-queue-tab ${activeTabId === t.id ? 'celery-queue-tab--active' : ''}`}
+            title={`Celery queue: ${t.celeryQueue}`}
+            onClick={() => {
+              setActiveTabId(t.id)
+              setActionMsg(null)
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
       <div className="celery-queue-toolbar">
@@ -383,7 +480,9 @@ export function CeleryJobQueuesSection() {
       </div>
 
       <p className="section-hint celery-queue-hint">
-        {tab === 'massive' ? (
+        <code className="dashboard-queue-name">{activeTab?.celeryQueue ?? '—'}</code>
+        {' — '}
+        {activeTab?.pipeline === 'massive' ? (
           <>
             Full Massive controls: <a href="#feed-massive-option">Massive Option</a>.
           </>
@@ -406,7 +505,7 @@ export function CeleryJobQueuesSection() {
         </p>
       ) : null}
 
-      {tab === 'massive' ? (
+      {activeTab?.pipeline === 'massive' ? (
         <div className="feed-massive-table-wrap">
           <table className="data-table">
             <thead>
@@ -506,7 +605,7 @@ export function CeleryJobQueuesSection() {
                 Cancel
               </button>
               <button type="button" className="btn btn-danger" disabled={confirm.confirming} onClick={() => void runConfirm()}>
-                {confirm.confirming ? '…' : 'Confirm'}
+                {confirm.confirming ? '…' : (confirm.confirmLabel ?? 'Confirm')}
               </button>
             </div>
           </div>
