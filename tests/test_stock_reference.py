@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 from src.persistence.postgres.ticker_reference import (
+    count_ticker_overview_coverage,
+    count_ticker_related_coverage,
+    count_ticker_types_rows,
+    count_tickers_rows,
+    list_tickers_filled_related_page,
+    list_tickers_missing_overview_page,
+    list_tickers_missing_related_page,
     next_cursor_from_api_response,
+    normalize_ticker_ref_kind,
     row_from_ticker_detail,
     row_from_ticker_list_item,
+    symbols_missing_overview_only,
 )
 
 
@@ -77,3 +86,111 @@ def test_next_cursor_from_next_url():
 
 def test_next_cursor_plain():
     assert next_cursor_from_api_response({"next_cursor": "xyz"}) == "xyz"
+
+
+def test_normalize_ticker_ref_kind_maps_legacy_instrument_types():
+    assert normalize_ticker_ref_kind("ticker_reference_instrument_types") == "ticker_reference_ticker_types"
+    assert normalize_ticker_ref_kind("stock_reference_instrument_types") == "ticker_reference_ticker_types"
+    assert normalize_ticker_ref_kind("ticker_reference_ticker_types") == "ticker_reference_ticker_types"
+
+
+def test_symbols_missing_overview_only_returns_tickers_without_overview_row():
+    class _Cur:
+        def execute(self, *_a, **_k):
+            return None
+
+        def fetchall(self):
+            return [("AAA",), ("ZZZ",)]
+
+    assert symbols_missing_overview_only(_Cur()) == ["AAA", "ZZZ"]
+
+
+def test_count_ticker_overview_coverage_maps_row():
+    class _Cur:
+        def execute(self, *_a, **_k):
+            return None
+
+        def fetchone(self):
+            return (10000, 9200, 800)
+
+    assert count_ticker_overview_coverage(_Cur()) == {
+        "total_tickers": 10000,
+        "filled": 9200,
+        "missing": 800,
+    }
+
+
+def test_list_tickers_missing_overview_page_respects_limit():
+    class _Cur:
+        def execute(self, sql, params):
+            self.params = params
+
+        def fetchall(self):
+            return [("A",), ("B",)]
+
+    cur = _Cur()
+    assert list_tickers_missing_overview_page(cur, 2, 10) == ["A", "B"]
+    assert cur.params == (2, 10)
+
+
+def test_count_ticker_related_coverage_maps_row():
+    class _Cur:
+        def execute(self, *_a, **_k):
+            return None
+
+        def fetchone(self):
+            return (5000, 800, 4200)
+
+    assert count_ticker_related_coverage(_Cur()) == {
+        "total_tickers": 5000,
+        "filled": 800,
+        "missing": 4200,
+    }
+
+
+def test_list_tickers_missing_related_page_params():
+    class _Cur:
+        def execute(self, _sql, params):
+            self.params = params
+
+        def fetchall(self):
+            return [("Z",)]
+
+    cur = _Cur()
+    assert list_tickers_missing_related_page(cur, 3, 99) == ["Z"]
+    assert cur.params == (3, 99)
+
+
+def test_list_tickers_filled_related_page_params():
+    class _Cur:
+        def execute(self, _sql, params):
+            self.params = params
+
+        def fetchall(self):
+            return [("A",), ("B",)]
+
+    cur = _Cur()
+    assert list_tickers_filled_related_page(cur, 2, 0) == ["A", "B"]
+    assert cur.params == (2, 0)
+
+
+def test_count_tickers_rows():
+    class _Cur:
+        def execute(self, *_a, **_k):
+            return None
+
+        def fetchone(self):
+            return (42_000,)
+
+    assert count_tickers_rows(_Cur()) == 42000
+
+
+def test_count_ticker_types_rows():
+    class _Cur:
+        def execute(self, *_a, **_k):
+            return None
+
+        def fetchone(self):
+            return (128,)
+
+    assert count_ticker_types_rows(_Cur()) == 128

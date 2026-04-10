@@ -517,11 +517,11 @@ def fetch_related_with_names(cur: Any, ticker: str) -> Tuple[Optional[int], List
     return tid, out
 
 
-def list_instrument_types(cur: Any) -> List[Dict[str, Any]]:
+def list_ticker_types(cur: Any) -> List[Dict[str, Any]]:
     cur.execute(
         """
-        SELECT ticker_instrument_types_id, code, description, asset_class, locale, created_at
-        FROM ticker_instrument_types
+        SELECT ticker_types_id, code, description, asset_class, locale, created_at
+        FROM ticker_types
         ORDER BY asset_class, code, locale
         """
     )
@@ -533,7 +533,7 @@ def list_instrument_types(cur: Any) -> List[Dict[str, Any]]:
 
 
 def symbols_needing_overview(cur: Any, stale_hours: int = 720) -> List[str]:
-    """Tickers with missing or stale ``ticker_reference_details``."""
+    """Tickers with missing or stale ``ticker_overview``."""
     h = max(1, int(stale_hours))
     cur.execute(
         """
@@ -549,18 +549,146 @@ def symbols_needing_overview(cur: Any, stale_hours: int = 720) -> List[str]:
     return [str(r[0]) for r in cur.fetchall() if r and r[0]]
 
 
+def symbols_missing_overview_only(cur: Any) -> List[str]:
+    """Tickers in ``tickers`` with no row in ``ticker_overview`` (``tickers`` vs ``ticker_overview`` gap)."""
+    cur.execute(
+        """
+        SELECT t.ticker FROM tickers t
+        LEFT JOIN ticker_overview d ON d.tickers_id = t.tickers_id
+        WHERE d.tickers_id IS NULL
+        ORDER BY t.ticker
+        """
+    )
+    return [str(r[0]) for r in cur.fetchall() if r and r[0]]
+
+
+def count_ticker_overview_coverage(cur: Any) -> Dict[str, int]:
+    """Row counts for ``tickers`` vs ``ticker_overview`` (missing = no overview row; filled = has row)."""
+    cur.execute(
+        """
+        SELECT
+          (SELECT COUNT(*)::bigint FROM tickers) AS total_tickers,
+          (SELECT COUNT(*)::bigint FROM tickers t
+            INNER JOIN ticker_overview d ON d.tickers_id = t.tickers_id) AS filled,
+          (SELECT COUNT(*)::bigint FROM tickers t
+            LEFT JOIN ticker_overview d ON d.tickers_id = t.tickers_id
+            WHERE d.tickers_id IS NULL) AS missing
+        """
+    )
+    row = cur.fetchone()
+    if not row:
+        return {"total_tickers": 0, "filled": 0, "missing": 0}
+    return {
+        "total_tickers": int(row[0] or 0),
+        "filled": int(row[1] or 0),
+        "missing": int(row[2] or 0),
+    }
+
+
+def list_tickers_missing_overview_page(cur: Any, limit: int, offset: int) -> List[str]:
+    """Paged tickers in ``tickers`` with no ``ticker_overview`` row (ordered by ticker)."""
+    lim = max(1, min(int(limit), 2000))
+    off = max(0, int(offset))
+    cur.execute(
+        """
+        SELECT t.ticker FROM tickers t
+        LEFT JOIN ticker_overview d ON d.tickers_id = t.tickers_id
+        WHERE d.tickers_id IS NULL
+        ORDER BY t.ticker
+        LIMIT %s OFFSET %s
+        """,
+        (lim, off),
+    )
+    return [str(r[0]) for r in cur.fetchall() if r and r[0]]
+
+
+def count_ticker_related_coverage(cur: Any) -> Dict[str, int]:
+    """Counts for ``tickers`` vs ``ticker_related_tickers`` (missing = no rows as from_tickers_id)."""
+    cur.execute(
+        """
+        SELECT
+          (SELECT COUNT(*)::bigint FROM tickers) AS total_tickers,
+          (SELECT COUNT(*)::bigint FROM tickers t
+            WHERE EXISTS (
+              SELECT 1 FROM ticker_related_tickers r WHERE r.from_tickers_id = t.tickers_id
+            )) AS filled,
+          (SELECT COUNT(*)::bigint FROM tickers t
+            WHERE NOT EXISTS (
+              SELECT 1 FROM ticker_related_tickers r WHERE r.from_tickers_id = t.tickers_id
+            )) AS missing
+        """
+    )
+    row = cur.fetchone()
+    if not row:
+        return {"total_tickers": 0, "filled": 0, "missing": 0}
+    return {
+        "total_tickers": int(row[0] or 0),
+        "filled": int(row[1] or 0),
+        "missing": int(row[2] or 0),
+    }
+
+
+def list_tickers_missing_related_page(cur: Any, limit: int, offset: int) -> List[str]:
+    """Paged tickers with no ``ticker_related_tickers`` rows for ``from_tickers_id``."""
+    lim = max(1, min(int(limit), 2000))
+    off = max(0, int(offset))
+    cur.execute(
+        """
+        SELECT t.ticker FROM tickers t
+        WHERE NOT EXISTS (
+          SELECT 1 FROM ticker_related_tickers r WHERE r.from_tickers_id = t.tickers_id
+        )
+        ORDER BY t.ticker
+        LIMIT %s OFFSET %s
+        """,
+        (lim, off),
+    )
+    return [str(r[0]) for r in cur.fetchall() if r and r[0]]
+
+
+def list_tickers_filled_related_page(cur: Any, limit: int, offset: int) -> List[str]:
+    """Distinct tickers that have at least one related peer row (ordered by ticker)."""
+    lim = max(1, min(int(limit), 2000))
+    off = max(0, int(offset))
+    cur.execute(
+        """
+        SELECT DISTINCT t.ticker FROM tickers t
+        INNER JOIN ticker_related_tickers r ON r.from_tickers_id = t.tickers_id
+        ORDER BY t.ticker
+        LIMIT %s OFFSET %s
+        """,
+        (lim, off),
+    )
+    return [str(r[0]) for r in cur.fetchall() if r and r[0]]
+
+
+def count_tickers_rows(cur: Any) -> int:
+    """Total rows in ``tickers`` (universe table)."""
+    cur.execute("SELECT COUNT(*)::bigint FROM tickers")
+    row = cur.fetchone()
+    return int(row[0] or 0) if row else 0
+
+
+def count_ticker_types_rows(cur: Any) -> int:
+    """Total rows in ``ticker_types`` (instrument type dictionary)."""
+    cur.execute("SELECT COUNT(*)::bigint FROM ticker_types")
+    row = cur.fetchone()
+    return int(row[0] or 0) if row else 0
+
+
 def all_ticker_symbols(cur: Any) -> List[str]:
     cur.execute("SELECT ticker FROM tickers ORDER BY ticker")
     return [str(r[0]) for r in cur.fetchall() if r and r[0]]
 
 
 def normalize_ticker_ref_kind(kind: str) -> str:
-    """Accept legacy ``stock_reference_*`` Celery/API kinds."""
+    """Normalize Celery/API kinds: legacy ``stock_reference_*`` and ``*_instrument_types`` synonyms."""
     k = (kind or "").strip().lower()
     legacy = {
         "stock_reference_universe": "ticker_reference_universe",
         "stock_reference_overview": "ticker_reference_overview",
         "stock_reference_related": "ticker_reference_related",
-        "stock_reference_instrument_types": "ticker_reference_instrument_types",
+        "stock_reference_instrument_types": "ticker_reference_ticker_types",
+        "ticker_reference_instrument_types": "ticker_reference_ticker_types",
     }
     return legacy.get(k, k)

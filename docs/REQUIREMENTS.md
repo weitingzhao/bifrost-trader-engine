@@ -205,7 +205,7 @@
 
 - **目标**：建立可复用的**美股（及按需扩展）标的维表**：universe 列表（All Tickers）+ 单标的详情（Ticker Overview）+ 类型词典（Ticker Types）+ 关联标的边关系（Related Tickers），供 Option Discovery（§2.7）、分析页、Watchlist 选标等复用；与 **R-A6** 期权数据互补。
 - **数据源**：**Massive Stocks REST**——**All Tickers**（cursor 分页）、**Ticker Overview**（单标的）、**Ticker Types**、**Related Tickers**；与 [ARCHITECTURE.md](ARCHITECTURE.md) §2.10 一致：**前端不直连 Massive**，API Key 仅存服务端。
-- **持久化（业务表名）**：**`stocks`**（主档，`stocks_id` 主键、`symbol` UNIQUE）、**`ticker_instrument_types`**、**`stock_related_tickers`**；可选 **`job_*`** 表存 universe 同步游标/checkpoint。**表名保持业务语义**，不使用供应商前缀表名；**将来**若多数据源并存可增 `source` 列（当前需求不强制）。列清单与约束以 **[DATABASE.md](DATABASE.md)** 为准（随迁移补充 §2.14.1 等章节）。
+- **持久化（业务表名）**：**`tickers`**（主档，`tickers_id` 主键、`ticker` UNIQUE）、**`ticker_overview`**、**`ticker_types`**、**`ticker_related_tickers`**；可选 **`job_ticker_reference_state`** 等存 universe 同步游标/checkpoint。**表名保持业务语义**，不使用供应商前缀表名；**将来**若多数据源并存可增 `source` 列（当前需求不强制）。列清单与约束以 **[DATABASE.md](DATABASE.md)** 为准（§2.14.1 等章节）。
 - **功能**：
   - **存储与更新**：后台任务分页同步 universe、按标的 enrichment（Overview）、Related 按 from 标的批量刷新、Types 词典低频全量更新；**幂等、429/5xx 指数退避**与 R-A6 非功能一致。
   - **查询**：按 symbol 精确读、筛选、**联想/搜索**（服务端接口，**不全量**下发明细到浏览器）。

@@ -15,6 +15,7 @@ TICKER_REFERENCE_KINDS: Final[frozenset[str]] = frozenset(
         "ticker_reference_universe",
         "ticker_reference_overview",
         "ticker_reference_related",
+        "ticker_reference_ticker_types",
         "ticker_reference_instrument_types",
         "stock_reference_universe",
         "stock_reference_overview",

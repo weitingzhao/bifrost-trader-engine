@@ -40,6 +40,7 @@ import {
   type WorkerProfileInfo,
   type QueueSummaryRow,
 } from '../api/ops/ops'
+import { parseCeleryQueueFromHash } from '../utils/celeryQueueDeepLink'
 import { CeleryJobQueuesSection, type CeleryJobQueuesSectionHandle } from './celery/CeleryJobQueuesSection'
 import { CeleryTopQueueSummary } from './celery/CeleryTopQueueSummary'
 import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
@@ -302,6 +303,9 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   const [confirmVariant, setConfirmVariant] = useState<'default' | 'scale-remove'>('default')
   const [scaleRemoveForce, setScaleRemoveForce] = useState(false)
   const scaleRemoveForceRef = useRef(false)
+  /** Bulk "Remove all instances": pass force to each scale remove (SIGKILL after graceful stop). */
+  const [scaleRemoveAllForce, setScaleRemoveAllForce] = useState(false)
+  const scaleRemoveAllForceRef = useRef(false)
 
   const resetConfirmDialog = useCallback(() => {
     setConfirmState(INITIAL_CONFIRM)
@@ -640,21 +644,25 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
       setScaleMsg({ text: 'No worker instances to remove', isErr: true })
       return
     }
+    const forceAll = scaleRemoveAllForceRef.current
     setConfirmVariant('default')
     setScaleRemoveForce(false)
     setConfirmState({
       open: true,
       title: 'Remove all worker instances?',
-      message: `This will stop ${ids.length} unit(s) on this Ops control host: ${ids.join(', ')}. Workers on other machines using the same broker are not affected.`,
+      message: forceAll
+        ? `This will stop ${ids.length} unit(s) on this Ops control host: ${ids.join(', ')}. Force is on: each unit gets graceful stop first, then SIGKILL on this host if still active. Workers on other machines using the same broker are not affected.`
+        : `This will stop ${ids.length} unit(s) on this Ops control host: ${ids.join(', ')}. Workers on other machines using the same broker are not affected.`,
       confirming: false,
       confirmLabel: 'Confirm delete',
       action: async () => {
         setConfirmState(prev => ({ ...prev, confirming: true }))
         setScaleBusy(true)
         const errors: string[] = []
+        const force = scaleRemoveAllForceRef.current
         try {
           for (const instanceId of ids) {
-            const res = await scaleWorker({ action: 'remove', instance_id: instanceId })
+            const res = await scaleWorker({ action: 'remove', instance_id: instanceId, force })
             if (!res.ok) errors.push(`${instanceId}: ${res.error ?? 'Failed'}`)
           }
           await loadAll()
@@ -784,7 +792,11 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   useEffect(() => {
     const scrollCelery = () => {
       const h = window.location.hash.replace(/^#/, '')
-      if (h !== 'settings-celery' && h !== 'settings-dashboard-celery') return
+      const isCelery =
+        h === 'settings-celery' ||
+        h === 'settings-dashboard-celery' ||
+        h.startsWith('settings-celery-queue-')
+      if (!isCelery) return
       requestAnimationFrame(() => {
         document.getElementById('settings-celery-control')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       })
@@ -814,6 +826,25 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
       document.getElementById('celery-panel-jobs')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     })
   }, [])
+
+  /** Deep link: `#settings-celery-queue-<name>` opens Job queues tab and selects that Celery queue. */
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined
+    const applyQueueHash = () => {
+      const q = parseCeleryQueueFromHash(window.location.hash)
+      if (!q) return
+      if (t) clearTimeout(t)
+      t = setTimeout(() => {
+        navigateToJobQueueFromSummary(q)
+      }, 100)
+    }
+    applyQueueHash()
+    window.addEventListener('hashchange', applyQueueHash)
+    return () => {
+      window.removeEventListener('hashchange', applyQueueHash)
+      if (t) clearTimeout(t)
+    }
+  }, [navigateToJobQueueFromSummary])
 
   const navigateToJobQueueStatusFromSummary = useCallback(
     (celeryQueue: string, status: 'pending' | 'running' | 'done' | 'failed') => {
@@ -1221,15 +1252,54 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                 >
                   {scaleBusy ? 'Working…' : 'Add all profiles'}
                 </button>
-                <button
-                  type="button"
-                  className="btn btn-danger dashboard-btn"
-                  onClick={onScaleRemoveAllClick}
-                  disabled={scaleBusy || instances.length === 0 || !canOperate}
-                  title="Stop every listed worker unit on this host"
+                <div
+                  className="dashboard-scale-remove-all-group"
+                  role="group"
+                  aria-label="Remove all worker instances"
                 >
-                  Remove all instances
-                </button>
+                  <button
+                    type="button"
+                    className="btn btn-danger dashboard-btn"
+                    onClick={onScaleRemoveAllClick}
+                    disabled={scaleBusy || instances.length === 0 || !canOperate}
+                    title="Stop every listed worker unit on this host"
+                  >
+                    Remove all instances
+                  </button>
+                  <span className="dashboard-scale-remove-all-force-label" id="celery-remove-all-force-label">
+                    Force
+                  </span>
+                  <div
+                    className="replay-bubble-switch dashboard-celery-remove-all-force-switch"
+                    role="group"
+                    aria-labelledby="celery-remove-all-force-label"
+                  >
+                    <button
+                      type="button"
+                      className={`replay-bubble-switch-btn ${!scaleRemoveAllForce ? 'active' : ''}`}
+                      onClick={() => {
+                        scaleRemoveAllForceRef.current = false
+                        setScaleRemoveAllForce(false)
+                      }}
+                      disabled={scaleBusy || instances.length === 0 || !canOperate}
+                      title="Graceful stop only (default)"
+                    >
+                      Off
+                    </button>
+                    <button
+                      type="button"
+                      className={`replay-bubble-switch-btn ${scaleRemoveAllForce ? 'active' : ''}`}
+                      onClick={() => {
+                        scaleRemoveAllForceRef.current = true
+                        setScaleRemoveAllForce(true)
+                      }}
+                      disabled={scaleBusy || instances.length === 0 || !canOperate}
+                      title="After graceful stop, SIGKILL if the unit is still active on this host"
+                    >
+                      On
+                    </button>
+                  </div>
+                </div>
               </div>
             </section>
 

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import type { RefJobTrackItem } from './stockReferenceJobHelpers'
 import {
   countActiveRefJobs,
+  formatRefJobIdShort,
   isRefJobTerminal,
   refJobKindShortLabel,
   summarizeRefJobResult,
@@ -12,6 +13,14 @@ function statusTone(status: string): 'ok' | 'err' | 'run' {
   if (s === 'failed') return 'err'
   if (s === 'done') return 'ok'
   return 'run'
+}
+
+function formatEnqueueTime(ts: number): string {
+  try {
+    return new Date(ts).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'medium' })
+  } catch {
+    return '—'
+  }
 }
 
 export function TickerReferenceJobsSheet({
@@ -53,6 +62,7 @@ export function TickerReferenceJobsSheet({
 
   const activeN = countActiveRefJobs(items)
   const hasCompleted = items.some(isRefJobTerminal)
+  const sorted = [...items].sort((a, b) => b.enqueuedAt - a.enqueuedAt)
 
   return (
     <div
@@ -62,7 +72,7 @@ export function TickerReferenceJobsSheet({
     >
       <aside
         ref={asideRef}
-        className="ref-jobs-sheet"
+        className="ref-jobs-sheet ref-jobs-sheet--wide"
         role="dialog"
         aria-modal="true"
         aria-labelledby="ref-jobs-sheet-title"
@@ -94,63 +104,78 @@ export function TickerReferenceJobsSheet({
           </button>
         </div>
 
-        <div className="ref-jobs-sheet-list" role="list">
-          {items.length === 0 ? (
+        <div className="ref-jobs-sheet-table-wrap">
+          {sorted.length === 0 ? (
             <p className="ref-jobs-sheet-empty">Enqueue a job to see status here.</p>
           ) : (
-            [...items]
-              .sort((a, b) => b.enqueuedAt - a.enqueuedAt)
-              .map(item => {
-                const tone = statusTone(item.streamError ? 'failed' : item.status)
-                return (
-                  <div key={item.jobId} className="ref-jobs-sheet-row" role="listitem">
-                    <div className="ref-jobs-sheet-row-head">
-                      <span className="ref-jobs-sheet-kind">{refJobKindShortLabel(item.kind)}</span>
-                      <span
-                        className={`ref-jobs-sheet-status ref-jobs-sheet-status--${tone}`}
-                        title="Job status"
-                      >
-                        {item.streamError ? 'failed' : item.status}
-                      </span>
-                      {item.deduplicated ? (
-                        <span className="ref-jobs-sheet-badge" title="Merged with an existing queued job">
-                          Deduplicated
+            <table className="ref-jobs-table">
+              <thead>
+                <tr>
+                  <th scope="col">Time</th>
+                  <th scope="col">Kind</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Dedup</th>
+                  <th scope="col">Job ID</th>
+                  <th scope="col">Summary</th>
+                  <th scope="col">Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map(item => {
+                  const tone = statusTone(item.streamError ? 'failed' : item.status)
+                  const statusLabel = item.streamError ? 'failed' : item.status
+                  return (
+                    <tr key={item.jobId} className="ref-jobs-table-row">
+                      <td className="ref-jobs-table-time">{formatEnqueueTime(item.enqueuedAt)}</td>
+                      <td className="ref-jobs-table-kind">{refJobKindShortLabel(item.kind)}</td>
+                      <td>
+                        <span
+                          className={`ref-jobs-sheet-status ref-jobs-sheet-status--${tone}`}
+                          title="Job status"
+                        >
+                          {statusLabel}
                         </span>
-                      ) : null}
-                    </div>
-                    <div className="ref-jobs-sheet-row-id">
-                      <code className="ref-jobs-sheet-job-id">{item.jobId}</code>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => {
-                          void navigator.clipboard?.writeText(item.jobId).catch(() => {})
-                        }}
-                      >
-                        Copy ID
-                      </button>
-                    </div>
-                    {item.streamError ? (
-                      <p className="status-page-msg err ref-jobs-sheet-err" role="alert">
-                        {item.streamError}
-                      </p>
-                    ) : null}
-                    <p className="ref-jobs-sheet-summary">
-                      <span style={{ color: 'var(--color-text-muted)' }}>Summary</span> {summarizeRefJobResult(item.job)}
-                    </p>
-                    {item.job?.result != null ? (
-                      <details className="feed-massive-details-debug ref-jobs-sheet-details">
-                        <summary>Full result JSON</summary>
-                        <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '12rem' }}>
-                          {typeof item.job.result === 'string'
-                            ? item.job.result
-                            : JSON.stringify(item.job.result, null, 2)}
-                        </pre>
-                      </details>
-                    ) : null}
-                  </div>
-                )
-              })
+                        {item.streamError ? (
+                          <p className="ref-jobs-table-stream-err" role="alert">
+                            {item.streamError}
+                          </p>
+                        ) : null}
+                      </td>
+                      <td className="ref-jobs-table-dedup">{item.deduplicated ? 'Yes' : '—'}</td>
+                      <td className="ref-jobs-table-id-cell">
+                        <code className="ref-jobs-table-job-id" title={item.jobId}>
+                          {formatRefJobIdShort(item.jobId)}
+                        </code>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm ref-jobs-table-copy"
+                          onClick={() => {
+                            void navigator.clipboard?.writeText(item.jobId).catch(() => {})
+                          }}
+                        >
+                          Copy
+                        </button>
+                      </td>
+                      <td className="ref-jobs-table-summary">{summarizeRefJobResult(item.job)}</td>
+                      <td className="ref-jobs-table-details-cell">
+                        {item.job?.result != null ? (
+                          <details className="feed-massive-details-debug ref-jobs-sheet-details">
+                            <summary>JSON</summary>
+                            <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '10rem' }}>
+                              {typeof item.job.result === 'string'
+                                ? item.job.result
+                                : JSON.stringify(item.job.result, null, 2)}
+                            </pre>
+                          </details>
+                        ) : (
+                          <span className="ref-jobs-table-dash">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           )}
         </div>
 

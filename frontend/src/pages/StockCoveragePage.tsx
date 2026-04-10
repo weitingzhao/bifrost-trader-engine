@@ -26,7 +26,7 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
         </button>
         {' / '}
         Stock IB (Realtime)
-        <InfoTooltip text="IB-backed coverage of Watchlist stocks and reference indices by bar period. Includes backfill controls for end-of-day pulls and index refresh. For delayed Massive stock reference data, use Data Coverage → Stock Data." />
+        <InfoTooltip text="IB-backed coverage of Watchlist stocks and reference indices by bar period. Includes backfill controls for end-of-day pulls and index refresh. For delayed Massive stock reference data, use Data Coverage → Massive Stock." />
       </h2>
 
       <DataCoveragePanel

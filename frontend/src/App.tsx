@@ -1528,10 +1528,10 @@ export default function App() {
                   window.location.hash = `#${FEED_MASSIVE_STOCK_ID}`
                   setHeaderMenuOpen(false)
                 }}
-                title="Settings → Feed → Stock Data"
+                title="Settings → Feed → Massive Stock"
               >
                 <SettingsSectionIcon name="feed-massive-stock" />
-                Stock Data
+                Massive Stock
               </button>
               <button
                 type="button"

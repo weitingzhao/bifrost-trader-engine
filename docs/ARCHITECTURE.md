@@ -163,7 +163,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 └──────────────────────────────────────────────────┘
 ```
 
-**Stocks 参考数据（R-A7）**与上图**并行**：经 **Massive Stocks REST**（非期权 WS）由 **Celery 或同步任务** 写入 **PostgreSQL**（`stocks`、`ticker_instrument_types`、`stock_related_tickers` 等，见 §2.10.9 与 [DATABASE.md](DATABASE.md)）；**不**经过 `run_massive_ws.py` 的 **`massive:channel`** / 合约报价路径。
+**Stocks 参考数据（R-A7）**与上图**并行**：经 **Massive Stocks REST**（非期权 WS）由 **Celery 或同步任务** 写入 **PostgreSQL**（`tickers`、`ticker_types`、`ticker_related_tickers` 等，见 §2.10.9 与 [DATABASE.md](DATABASE.md)）；**不**经过 `run_massive_ws.py` 的 **`massive:channel`** / 合约报价路径。
 
 ```mermaid
 flowchart LR
@@ -195,7 +195,7 @@ flowchart LR
 | `GET /research/stocks/search` 等（规划） | 标的联想/搜索：读 **Redis 缓存（命中）→ PostgreSQL**；不全量下发 universe 至浏览器。路径与查询参数以实现为准。 | 与参考 API / 套餐一致 | 同左 |
 | `GET /research/stocks/{symbol}` 等（规划） | 单标的详情（`stocks` 行 + 可选缓存）。 | 同左 | 同左 |
 | `GET /research/stocks/{symbol}/related` 等（规划） | Related Tickers：读 **`stock_related_tickers`**（及 join `stocks` 展示名称等）。 | 同左 | 同左 |
-| `GET /research/ticker-instrument-types` 等（规划） | Ticker Types 词典：可读 PG 或 **`massive:ingestor:cache:instrument_types:*`**。 | 同左 | 同左 |
+| `GET /research/massive/reference/ticker-types` 等 | Ticker Types 词典：可读 PG **`ticker_types`** 或 **`massive:ingestor:cache:ticker_types:*`**。 | 同左 | 同左 |
 
 #### 2.10.2 WebSocket 行为约定
 
@@ -222,7 +222,7 @@ flowchart LR
 #### 2.10.5 Worker 行为约定
 
 - **Celery queue**：`massive`（与 IB `bars` 分离）；`concurrency` 按 Massive 限流设 1–N。
-- **任务类型**：历史聚合回填、日 OI 拉取、快照批量、**Trades 回填**（仅 flag 开时入队与执行）；**R-A7** Stocks 参考：**universe**（All Tickers 分页 + checkpoint）、**overview**（按标的 enrichment）、**related**（Related Tickers）、**instrument_types**（词典）；文件下载（若使用 Unlimited File Downloads）可作独立 task 解压/导入 staging 再 MERGE。
+- **任务类型**：历史聚合回填、日 OI 拉取、快照批量、**Trades 回填**（仅 flag 开时入队与执行）；**R-A7** Stocks 参考：**universe**（All Tickers 分页 + checkpoint）、**overview**（按标的 enrichment）、**related**（Related Tickers）、**ticker_types**（类型词典）；文件下载（若使用 Unlimited File Downloads）可作独立 task 解压/导入 staging 再 MERGE。
 - **重试与幂等**：429/5xx 指数退避；写入按供应商唯一 ID（`massive_trade_id`、bar 唯一键）UPSERT。
 - **启动**：`celery -A src.workers.celery_app worker -l info -Q massive --concurrency=N`（与 `bars` worker 可同机不同进程并行）。
 
@@ -255,7 +255,7 @@ flowchart LR
 与 [REQUIREMENTS.md](REQUIREMENTS.md) **§3.5.1（R-A7）** 对应，本节约定**标的维表**在 **PostgreSQL** 与 **Redis** 中的职责，并与 **`ib:ingester:*`**、期权 ingest 的 **`massive:channel`** 区分。
 
 - **PostgreSQL（权威）**：
-  - **`stocks`**：标的/公司主档（`stocks_id`、唯一 `symbol` 等）；**`ticker_instrument_types`**：类型词典；**`stock_related_tickers`**：Related 边表（`from_stocks_id` → `stocks`，`to_symbol`，`rank` 等）。
+  - **`tickers`**：标的/公司主档（`tickers_id`、唯一 `ticker` 等）；**`ticker_types`**：类型词典；**`ticker_related_tickers`**：Related 边表（`from_tickers_id` → `tickers`，`to_symbol`，`rank` 等）。
   - 可选 **`job_*`**（如 `job_stock_reference_sync`）存 **All Tickers** 同步的 **checkpoint**（`last_cursor` 等），命名与 [DATABASE.md](DATABASE.md)、[.cursor/rules/database-design.mdc](../.cursor/rules/database-design.mdc) 一致。
   - 与 **`option_contracts.symbol`**（underlying）等通过 **`symbol` 规范化（大写）** 关联；列级细节以 **DATABASE.md** 迁移后章节为准。
 
@@ -264,12 +264,12 @@ flowchart LR
   - **页面/API 热缓存（可丢、TTL）**：统一前缀 **`massive:ingestor:cache:*`**，例如：
     - **`massive:ingestor:cache:stock:{SYMBOL}`** — 单标的聚合展示字段（STRING JSON 或 HASH）；
     - **`massive:ingestor:cache:search:{normalized_query}`** — 联想/搜索结果短 TTL；
-    - **`massive:ingestor:cache:instrument_types:{locale}:{asset_class}`** — Ticker Types 整包（可选）。
+    - **`massive:ingestor:cache:ticker_types:{locale}:{asset_class}`** — Ticker Types 整包（可选）。
   - **健康与运维**（既有）：**`bifrost:health:ws_massive_option`** 等 **`bifrost:health:*`**——**不**写入 `massive:ingestor:cache:*`。
 
 - **读路径**：FastAPI **GET** 优先 **Redis（命中）→ PostgreSQL**；未命中可回填缓存。**写路径**：**仅 Worker/同步任务** 写 **PG**，随后 **删除或覆盖** 相关 **`massive:ingestor:cache:*`** key（或依赖 TTL）。
 
-- **Worker**：与 §2.10.5 **`massive` queue** 一致；R-A7 任务 **kind** 含 **universe / overview / related / instrument_types**；**429/5xx 退避**与 **UPSERT 幂等**同节。
+- **Worker**：与 §2.10.5 **`massive` queue** 一致；R-A7 任务 **kind** 含 **universe / overview / related / ticker_types**；**429/5xx 退避**与 **UPSERT 幂等**同节。
 
 ### 2.11 IB Ingestor、IB Account Agent、IB Operator 与 Engine（目标职责）
 

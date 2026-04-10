@@ -40,8 +40,12 @@ import {
 import { CAPABILITY_GROUP_LABELS, CAPABILITY_GROUP_ORDER, type CapabilityGroup } from './massiveFeedChecklistRows'
 import { feedMassiveSvcAnchorId } from './massive/feedMassiveAnchors'
 import { isMassiveOptionFeedHash, parseFeedMassiveTabFromHash } from './massive/feedMassiveTabUtils'
-import { isMassiveStockFeedHash, parseFeedMassiveStockTabFromHash } from './massive/feedMassiveStockTabUtils'
-import { feedMassiveStockSvcAnchorId } from './massive/feedMassiveStockTabUtils'
+import {
+  feedMassiveStockSvcAnchorId,
+  isMassiveStockFeedHash,
+  parseFeedMassiveStockTabFromHash,
+  parseFeedMassiveStockTickersSubTabFromHash,
+} from './massive/feedMassiveStockTabUtils'
 import {
   effectiveChecklistProjectStatus as stockEffectiveStatus,
   groupedStockChecklistRows,
@@ -261,7 +265,9 @@ export function SettingsPage({
     if (h === 'settings-subscribe') return 'settings-subscribe'
     if (h === 'settings-daemon' || h === 'settings-system-daemon' || h === 'settings-system') return 'settings-daemon'
     if (h === 'settings-system-monitor' || h === 'settings-system-server') return 'settings-api'
-    if (h === 'settings-celery' || h === 'settings-dashboard-celery') return 'settings-celery'
+    if (h === 'settings-celery' || h === 'settings-dashboard-celery' || h.startsWith('settings-celery-queue-')) {
+      return 'settings-celery'
+    }
     if (
       h === 'settings-market-ingest' ||
       h === 'settings-ib-connector' ||
@@ -844,7 +850,7 @@ export function SettingsPage({
           <div className={`settings-sidebar-parent ${isMassiveStockFeedActive ? 'active' : ''}`}>
             <a href={`#${FEED_MASSIVE_STOCK_ID}`} className="settings-sidebar-parent-label">
               <SettingsSectionIcon name="feed-massive-stock" />
-              Stock Data
+              Massive Stock
             </a>
             <button
               type="button"
@@ -852,7 +858,7 @@ export function SettingsPage({
               onClick={() => setMassiveStockExpanded(e => !e)}
               aria-expanded={massiveStockExpanded}
               aria-controls="settings-feed-massive-stock-subs"
-              aria-label={massiveStockExpanded ? 'Collapse Stock Data capabilities' : 'Expand Stock Data capabilities'}
+              aria-label={massiveStockExpanded ? 'Collapse Massive Stock capabilities' : 'Expand Massive Stock capabilities'}
             >
               ▼
             </button>
@@ -861,9 +867,14 @@ export function SettingsPage({
             {groupedStockChecklistRows().map(({ group, rows: groupRows }) => {
               const capGroupOpen = massiveStockCapGroupExpanded[group]
               const fromTab = parseFeedMassiveStockTabFromHash(`#${currentHash}`)
+              const fromTkSub = parseFeedMassiveStockTickersSubTabFromHash(`#${currentHash}`)
               const groupHasActive = groupRows.some(row => {
                 const anchor = feedMassiveStockSvcAnchorId(row.id)
-                return currentHash === anchor || fromTab === row.id
+                return (
+                  currentHash === anchor ||
+                  fromTab === row.id ||
+                  (row.id === 'stock-tickers' && fromTkSub != null)
+                )
               })
               return (
                 <div key={group} className="settings-sidebar-massive-group">
@@ -907,7 +918,10 @@ export function SettingsPage({
                       const eff = stockEffectiveStatus(row, configured, tierOk, tradesOk)
                       const isTierLimited = eff === 'not-on-tier'
                       const anchor = feedMassiveStockSvcAnchorId(row.id)
-                      const childActive = currentHash === anchor || fromTab === row.id
+                      const childActive =
+                        currentHash === anchor ||
+                        fromTab === row.id ||
+                        (row.id === 'stock-tickers' && fromTkSub != null)
                       return (
                         <a
                           key={row.id}
@@ -1035,7 +1049,7 @@ export function SettingsPage({
           <FeedMassiveStockPage
             status={status}
             onGoToFeed={() => { window.location.hash = '#feed-ib-stock' }}
-            breadcrumbLabel="Stock Data"
+            breadcrumbLabel="Massive Stock"
           />
         ) : (
           <DataPage

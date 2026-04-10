@@ -620,6 +620,289 @@ def get_stock_reference_search_legacy(
     return _ticker_ref_search_impl(request, q, limit)
 
 
+def _ticker_ref_overview_coverage_impl(request: Request) -> Dict[str, Any]:
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.persistence.postgres.ticker_reference import count_ticker_overview_coverage
+
+    cfg = _pg_configured(request)
+    if not cfg:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    params = _get_conn_params(cfg)
+    conn = psycopg2.connect(**params)
+    try:
+        with conn.cursor() as cur:
+            counts = count_ticker_overview_coverage(cur)
+    finally:
+        conn.close()
+    return {"ok": True, **counts}
+
+
+@router.get("/research/massive/reference/tickers/overview-coverage")
+def get_ticker_reference_overview_coverage(request: Request) -> Dict[str, Any]:
+    """Counts for ``tickers`` vs ``ticker_overview`` (missing gap + filled). Registered before ``.../tickers/{ticker}``."""
+    return _ticker_ref_overview_coverage_impl(request)
+
+
+def _ticker_ref_missing_overview_impl(request: Request, limit: int, offset: int) -> Dict[str, Any]:
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.persistence.postgres.ticker_reference import (
+        count_ticker_overview_coverage,
+        list_tickers_missing_overview_page,
+    )
+
+    cfg = _pg_configured(request)
+    if not cfg:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    params = _get_conn_params(cfg)
+    conn = psycopg2.connect(**params)
+    try:
+        with conn.cursor() as cur:
+            counts = count_ticker_overview_coverage(cur)
+            total_missing = int(counts.get("missing") or 0)
+            tickers = list_tickers_missing_overview_page(cur, limit, offset)
+    finally:
+        conn.close()
+    loaded = offset + len(tickers)
+    has_more = total_missing > 0 and loaded < total_missing
+    return {
+        "ok": True,
+        "tickers": tickers,
+        "limit": limit,
+        "offset": offset,
+        "total_missing": total_missing,
+        "has_more": has_more,
+    }
+
+
+@router.get("/research/massive/reference/tickers/missing-overview")
+def get_ticker_reference_missing_overview(
+    request: Request,
+    limit: int = Query(500, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
+) -> Dict[str, Any]:
+    """Paged tickers with no ``ticker_overview`` row. Registered before ``.../tickers/{ticker}``."""
+    return _ticker_ref_missing_overview_impl(request, limit, offset)
+
+
+def _ticker_ref_related_coverage_impl(request: Request) -> Dict[str, Any]:
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.persistence.postgres.ticker_reference import count_ticker_related_coverage
+
+    cfg = _pg_configured(request)
+    if not cfg:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    params = _get_conn_params(cfg)
+    conn = psycopg2.connect(**params)
+    try:
+        with conn.cursor() as cur:
+            counts = count_ticker_related_coverage(cur)
+    finally:
+        conn.close()
+    return {"ok": True, **counts}
+
+
+@router.get("/research/massive/reference/tickers/related-coverage")
+def get_ticker_reference_related_coverage(request: Request) -> Dict[str, Any]:
+    """Counts for ``tickers`` vs ``ticker_related_tickers`` (from_tickers_id)."""
+    return _ticker_ref_related_coverage_impl(request)
+
+
+def _ticker_ref_missing_related_impl(request: Request, limit: int, offset: int) -> Dict[str, Any]:
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.persistence.postgres.ticker_reference import (
+        count_ticker_related_coverage,
+        list_tickers_missing_related_page,
+    )
+
+    cfg = _pg_configured(request)
+    if not cfg:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    params = _get_conn_params(cfg)
+    conn = psycopg2.connect(**params)
+    try:
+        with conn.cursor() as cur:
+            counts = count_ticker_related_coverage(cur)
+            total_missing = int(counts.get("missing") or 0)
+            tickers = list_tickers_missing_related_page(cur, limit, offset)
+    finally:
+        conn.close()
+    loaded = offset + len(tickers)
+    has_more = total_missing > 0 and loaded < total_missing
+    return {
+        "ok": True,
+        "tickers": tickers,
+        "limit": limit,
+        "offset": offset,
+        "total_missing": total_missing,
+        "has_more": has_more,
+    }
+
+
+@router.get("/research/massive/reference/tickers/missing-related")
+def get_ticker_reference_missing_related(
+    request: Request,
+    limit: int = Query(500, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
+) -> Dict[str, Any]:
+    """Paged tickers with no related rows (``ticker_related_tickers``)."""
+    return _ticker_ref_missing_related_impl(request, limit, offset)
+
+
+def _ticker_ref_filled_related_impl(request: Request, limit: int, offset: int) -> Dict[str, Any]:
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.persistence.postgres.ticker_reference import (
+        count_ticker_related_coverage,
+        list_tickers_filled_related_page,
+    )
+
+    cfg = _pg_configured(request)
+    if not cfg:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    params = _get_conn_params(cfg)
+    conn = psycopg2.connect(**params)
+    try:
+        with conn.cursor() as cur:
+            counts = count_ticker_related_coverage(cur)
+            total_filled = int(counts.get("filled") or 0)
+            tickers = list_tickers_filled_related_page(cur, limit, offset)
+    finally:
+        conn.close()
+    loaded = offset + len(tickers)
+    has_more = total_filled > 0 and loaded < total_filled
+    return {
+        "ok": True,
+        "tickers": tickers,
+        "limit": limit,
+        "offset": offset,
+        "total_filled": total_filled,
+        "has_more": has_more,
+    }
+
+
+@router.get("/research/massive/reference/tickers/filled-related")
+def get_ticker_reference_filled_related(
+    request: Request,
+    limit: int = Query(500, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
+) -> Dict[str, Any]:
+    """Paged tickers that have at least one related row."""
+    return _ticker_ref_filled_related_impl(request, limit, offset)
+
+
+def _ticker_types_db_impl(
+    request: Request,
+    asset_class: str = "*",
+    locale: str = "*",
+) -> Dict[str, Any]:
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.persistence.postgres.ticker_reference import list_ticker_types
+    from src.vendor.massive.reference_cache_keys import (
+        CACHE_TTL_TICKER_TYPES_SEC,
+        key_ticker_types,
+        redis_client_from_status_config,
+    )
+
+    cfg = _pg_configured(request)
+    if not cfg:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    loc = (locale or "*").strip() or "*"
+    ac = (asset_class or "*").strip() or "*"
+    rds = redis_client_from_status_config(cfg)
+    k = key_ticker_types(loc, ac)
+    if rds:
+        try:
+            raw = rds.get(k)
+            if raw:
+                return {"ok": True, "cached": True, "results": json.loads(raw)}
+        except (json.JSONDecodeError, TypeError):
+            pass
+    params = _get_conn_params(cfg)
+    conn = psycopg2.connect(**params)
+    try:
+        with conn.cursor() as cur:
+            rows = list_ticker_types(cur)
+    finally:
+        conn.close()
+    if rds:
+        try:
+            rds.setex(k, CACHE_TTL_TICKER_TYPES_SEC, json.dumps(rows, default=str))
+        except Exception:
+            pass
+    return {"ok": True, "cached": False, "results": rows}
+
+
+def _ticker_ref_universe_count_impl(request: Request) -> Dict[str, Any]:
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.persistence.postgres.ticker_reference import count_tickers_rows
+
+    cfg = _pg_configured(request)
+    if not cfg:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    params = _get_conn_params(cfg)
+    conn = psycopg2.connect(**params)
+    try:
+        with conn.cursor() as cur:
+            n = count_tickers_rows(cur)
+    finally:
+        conn.close()
+    return {"ok": True, "total_tickers": n}
+
+
+@router.get("/research/massive/reference/tickers/universe-count")
+def get_ticker_reference_universe_count(request: Request) -> Dict[str, Any]:
+    """Row count for ``public.tickers``. Registered before ``.../tickers/{ticker}``."""
+    return _ticker_ref_universe_count_impl(request)
+
+
+def _ticker_ref_ticker_types_count_impl(request: Request) -> Dict[str, Any]:
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.persistence.postgres.ticker_reference import count_ticker_types_rows
+
+    cfg = _pg_configured(request)
+    if not cfg:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    params = _get_conn_params(cfg)
+    conn = psycopg2.connect(**params)
+    try:
+        with conn.cursor() as cur:
+            n = count_ticker_types_rows(cur)
+    finally:
+        conn.close()
+    return {"ok": True, "total_ticker_types": n}
+
+
+@router.get("/research/massive/reference/ticker-types/count")
+def get_ticker_types_row_count(request: Request) -> Dict[str, Any]:
+    """Row count for ``public.ticker_types``. Registered before ``.../ticker-types`` (list)."""
+    return _ticker_ref_ticker_types_count_impl(request)
+
+
+@router.get("/research/massive/reference/ticker-types")
+def get_ticker_types_db(
+    request: Request,
+    asset_class: str = Query("*"),
+    locale: str = Query("*"),
+) -> Dict[str, Any]:
+    """Ticker type dictionary from ``ticker_types`` (synced via Celery)."""
+    return _ticker_types_db_impl(request, asset_class, locale)
+
+
 def _ticker_ref_related_impl(request: Request, symbol: str) -> Dict[str, Any]:
     import psycopg2
 
@@ -719,7 +1002,7 @@ def _ticker_ref_detail_impl(request: Request, symbol: str) -> Dict[str, Any]:
 
 @router.get("/research/massive/reference/tickers/{ticker}")
 def get_ticker_reference_detail(request: Request, ticker: str) -> Dict[str, Any]:
-    """Single merged row from ``tickers`` + ``ticker_reference_details``."""
+    """Single merged row from ``tickers`` + ``ticker_overview``."""
     return _ticker_ref_detail_impl(request, ticker)
 
 
@@ -738,44 +1021,8 @@ def get_instrument_types_db(
     asset_class: str = Query("*"),
     locale: str = Query("*"),
 ) -> Dict[str, Any]:
-    """Instrument type dictionary from ``ticker_instrument_types``."""
-    import psycopg2
-
-    from src.persistence.postgres.connection import _get_conn_params
-    from src.persistence.postgres.ticker_reference import list_instrument_types
-    from src.vendor.massive.reference_cache_keys import (
-        CACHE_TTL_INSTRUMENT_TYPES_SEC,
-        key_instrument_types,
-        redis_client_from_status_config,
-    )
-
-    cfg = _pg_configured(request)
-    if not cfg:
-        return {"ok": False, "error": "PostgreSQL not configured"}
-    loc = (locale or "*").strip() or "*"
-    ac = (asset_class or "*").strip() or "*"
-    rds = redis_client_from_status_config(cfg)
-    k = key_instrument_types(loc, ac)
-    if rds:
-        try:
-            raw = rds.get(k)
-            if raw:
-                return {"ok": True, "cached": True, "results": json.loads(raw)}
-        except (json.JSONDecodeError, TypeError):
-            pass
-    params = _get_conn_params(cfg)
-    conn = psycopg2.connect(**params)
-    try:
-        with conn.cursor() as cur:
-            rows = list_instrument_types(cur)
-    finally:
-        conn.close()
-    if rds:
-        try:
-            rds.setex(k, CACHE_TTL_INSTRUMENT_TYPES_SEC, json.dumps(rows, default=str))
-        except Exception:
-            pass
-    return {"ok": True, "cached": False, "results": rows}
+    """Deprecated: use ``GET /research/massive/reference/ticker-types``."""
+    return _ticker_types_db_impl(request, asset_class, locale)
 
 
 @router.post("/research/massive/jobs/ticker-reference")
@@ -799,7 +1046,7 @@ def post_jobs_ticker_reference(request: Request, body: Dict[str, Any] = Body(...
             "ticker_reference_universe",
             "ticker_reference_overview",
             "ticker_reference_related",
-            "ticker_reference_instrument_types",
+            "ticker_reference_ticker_types",
         }
     )
     if kind not in allowed:
@@ -1063,6 +1310,7 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
             "ticker_reference_universe",
             "ticker_reference_overview",
             "ticker_reference_related",
+            "ticker_reference_ticker_types",
             "ticker_reference_instrument_types",
             "stock_reference_universe",
             "stock_reference_overview",
@@ -1119,9 +1367,9 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
 async def stream_massive_job_events(
     request: Request,
     job_id: str,
-    timeout_sec: int = Query(180, ge=10, le=600),
+    timeout_sec: int = Query(180, ge=10, le=86400),
 ) -> StreamingResponse:
-    """SSE: poll job row until terminal status or timeout (1s interval)."""
+    """SSE: poll job row until terminal status or timeout (1s interval). Long ticker-reference jobs may run for hours."""
     import time
 
     from src.vendor.massive.reader import get_job_massive_backfill

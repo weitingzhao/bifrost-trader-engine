@@ -87,6 +87,14 @@ class TestMassiveHealth:
         assert body.get("ok") is False
         assert "PostgreSQL" in str(body.get("error", ""))
 
+    def test_ticker_types_db_requires_postgres(self):
+        client = _make_client()
+        r = client.get("/research/massive/reference/ticker-types")
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is False
+        assert "PostgreSQL" in str(body.get("error", ""))
+
 
 class TestMassiveDocs:
     def test_openapi_json_reachable(self):

@@ -365,57 +365,32 @@
 - **索引**：建议 `(symbol, period, bar_time DESC)`。
 - **读取**：GET /bars?sec_type=STK&period=1 min（或 5 mins、1 hour）按 symbol、时间范围查询。
 
-### 2.14.1 表 `stocks`（股票标的参考）
+### 2.14.1 表 `tickers`（Massive 参考标的 / All Tickers）
 
-- **用途**：股票标的参考表；由 Massive REST（All Tickers + Ticker Overview）同步任务写入，供搜索、详情与期权 underlying 对齐。与 watchlist、stock_day 等配合使用。
-- **列**：
+- **用途**：股票标的参考主档；由 Massive REST `GET /v3/reference/tickers`（universe 任务）与 Ticker Overview 同步写入；供搜索、合并详情与期权 underlying 对齐。历史表名 `stocks` 已由迁移并入本表。
+- **主键**：`tickers_id` (bigserial)；**唯一**：`ticker` (text NOT NULL)。
+- **列（节选）**：`name`、`market`、`locale`、`primary_exchange`、`instrument_type`、`active`、货币与 FIGI/CIK 字段、`last_updated_utc`、`delisted_utc`、`created_at`、`updated_at` 等（见 DDL）。
 
-| 列名 | 类型 | 说明 |
-|------|------|------|
-| stocks_id | bigserial | 主键 |
-| symbol | text NOT NULL UNIQUE | 标的代码（大写） |
-| name | text | 公司名称 |
-| exchange | text | 展示/兼容：可与 primary_exchange 同步 |
-| created_at | timestamptz | 创建时间 |
-| instrument_type | text | 类型码（如 CS） |
-| active | boolean | 是否活跃 |
-| list_date | date | 上市日 |
-| locale | text | 如 us |
-| primary_exchange | text | 主交易所 MIC |
-| market | text | 市场分类（如 stocks） |
-| currency_name | text | 计价货币 |
-| cik | text | CIK |
-| composite_figi | text | Composite FIGI |
-| share_class_figi | text | Share class FIGI |
-| ticker_root | text | 根代码 |
-| sic_description | text | SIC 描述 |
-| market_cap | double precision | 市值 |
-| total_employees | integer | 员工数 |
-| address_line1 | text | 地址行 |
-| address_city | text | 城市 |
-| address_state | text | 州/省 |
-| postal_code | text | 邮编 |
-| phone | text | 电话 |
-| description | text | 公司描述（长文本） |
-| icon_url | text | 品牌 icon URL |
-| logo_url | text | 品牌 logo URL |
-| reference_updated_at | timestamptz | 最近参考数据更新时间 |
+- **索引**：`tickers_ticker`；可选 `tickers_active`、`tickers_primary_exchange`、`tickers_instrument_type`（由 DDL 创建）。
 
-- **索引**：`(symbol)`；可选 `(active)`、`(primary_exchange)`、`(instrument_type)`（由 DDL 创建）。
+### 2.14.2 表 `ticker_overview`（Ticker Overview 扩展列）
 
-### 2.14.2 表 `ticker_instrument_types`（工具类型词典）
+- **用途**：存 `GET /v3/reference/tickers/{ticker}` 返回中的扩展字段（行业、地址、描述、品牌 URL 等）；与 `tickers` 一对一（`tickers_id` PK/FK ON DELETE CASCADE）。历史表名 `ticker_reference_details` 已重命名。
+- **列（节选）**：`sector`、`industry`、`exchange`、`list_date`、`ticker_root`、`sic_description`、`market_cap`、`total_employees`、地址列、`phone`、`description`、`icon_url`、`logo_url`、`overview_updated_at`。
 
-- **用途**：存 Massive `GET /v3/reference/tickers/types` 返回的类型码与描述；由任务 `stock_reference_instrument_types` 全量替换写入。
-- **列**：`ticker_instrument_types_id` (bigserial PK)、`code` (text NOT NULL)、`description` (text)、`asset_class` (text NOT NULL DEFAULT '')、`locale` (text NOT NULL DEFAULT '')、`created_at` (timestamptz)。**UNIQUE (code, asset_class, locale)**。
+### 2.14.3 表 `ticker_types`（类型词典）
 
-### 2.14.3 表 `stock_related_tickers`（关联标的边）
+- **用途**：存 Massive `GET /v3/reference/tickers/types` 返回的类型码与描述；由任务 `ticker_reference_ticker_types`（兼容旧名 `ticker_reference_instrument_types`）全量替换写入。历史表名 `ticker_instrument_types` 已重命名。
+- **列**：`ticker_types_id` (bigserial PK)、`code` (text NOT NULL)、`description` (text)、`asset_class` (text NOT NULL DEFAULT '')、`locale` (text NOT NULL DEFAULT '')、`created_at` (timestamptz)。**UNIQUE (code, asset_class, locale)**。
 
-- **用途**：存 Related Companies API 的边：`from_stocks_id` → `stocks`，`to_symbol` 为关联代码（可尚未在 `stocks` 中存在）。
-- **列**：`stock_related_tickers_id` (bigserial PK)、`from_stocks_id` (bigint NOT NULL FK `stocks(stocks_id)` ON DELETE CASCADE)、`to_symbol` (text NOT NULL)、`rank` (integer)、`fetched_at` (timestamptz)。**UNIQUE (from_stocks_id, to_symbol)**。
+### 2.14.4 表 `ticker_related_tickers`（关联标的边）
 
-### 2.14.4 表 `job_stock_reference_state`（同步游标）
+- **用途**：存 Related Companies API 的边：`from_tickers_id` → `tickers`，`to_symbol` 为关联代码（可尚未在 `tickers` 中存在）。
+- **列**：`ticker_related_tickers_id` (bigserial PK)、`from_tickers_id` (bigint NOT NULL FK `tickers(tickers_id)` ON DELETE CASCADE)、`to_symbol` (text NOT NULL)、`rank` (integer)、`fetched_at` (timestamptz)。**UNIQUE (from_tickers_id, to_symbol)**。
 
-- **用途**：全市场 All Tickers 分页游标等状态；`sync_kind` 为主键（如 `universe_stocks`）。
+### 2.14.5 表 `job_ticker_reference_state`（同步游标）
+
+- **用途**：全市场 All Tickers 分页游标等状态；`sync_kind` 为主键（如 `universe_tickers`）。历史表名 `job_stock_reference_state` 已迁移。
 - **列**：`sync_kind` (text PK)、`last_cursor` (text)、`status` (text)、`updated_at` (timestamptz)。
 
 ### 2.15 表 `option_day`（阶段 3 R-A3 扩展：期权日 K 线）
@@ -1453,6 +1428,7 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-03-24 Massive/期权研究相关 DB 升级 | `job_massive_backfill` 增加 `payload_hash` 列 + 部分唯一索引（防重复 pending/running）。新增表 `report_option_max_pain_daily`（§2.16.5a，Max Pain 日报表，含 `computation_detail` jsonb）。`option_snapshots` 迁移为 `PARTITION BY RANGE (snapshot_ts)` 按月分区（新库直接分区建表，已有库自动迁移）。新增物化视图 `option_snapshots_latest`（`DISTINCT ON contract_key`，支持 `REFRESH CONCURRENTLY`）。90 天保留策略：旧分区 DETACH + 归档。 | 行为边界见 [ARCHITECTURE.md](ARCHITECTURE.md) §2.10 |
 | 2026-04-07 Engine Ops 启停与文档 | **无 schema 变更**。§2.5、§5 阶段 2 说明修订：Engine 由 Ops+systemd 或手工启动；Monitor 不 exec；`daemon_heartbeat.graceful_shutdown_at` 仍由进程优雅退出时写入（含 systemd SIGTERM）。 | — |
 | 2026-04-09 Stock reference（Massive） | 扩展 §2.14.1 `stocks`（参考字段与 `reference_updated_at`）；新增 §2.14.2 `ticker_instrument_types`、§2.14.3 `stock_related_tickers`、§2.14.4 `job_stock_reference_state`。同步任务 kinds：`stock_reference_universe`、`stock_reference_overview`、`stock_reference_related`、`stock_reference_instrument_types`；Redis 键 `massive:ingestor:cache:*`。 | 研究 / Massive |
+| 2026-04-10 Massive ticker reference 表名统一 | §2.14.1–2.14.5：`tickers`、`ticker_overview`（原 `ticker_reference_details`）、`ticker_types`（原 `ticker_instrument_types`，PK `ticker_types_id`）、`ticker_related_tickers`、`job_ticker_reference_state`；`pg_ddl` 内 DO 块重命名。任务 kind canonical：`ticker_reference_ticker_types`（旧名仍经 `normalize_ticker_ref_kind` 映射）；HTTP `GET /research/massive/reference/ticker-types`；Redis `massive:ingestor:cache:ticker_types:*`。 | 研究 / Massive |
 
 ---
 

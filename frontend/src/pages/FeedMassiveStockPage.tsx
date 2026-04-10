@@ -13,8 +13,12 @@ import { InfoTooltip } from '../components/InfoTooltip'
 import stockChecklistRows from './massiveStockFeedChecklistRows'
 import type { ChecklistRow } from './massiveStockFeedChecklistRows'
 import { CAPABILITY_GROUP_LABELS, CAPABILITY_GROUP_ORDER, type CapabilityGroup } from './massiveStockFeedChecklistRows'
-import { feedMassiveStockSvcAnchorId } from './massive/feedMassiveStockTabUtils'
-import { parseFeedMassiveStockSvcFromHash, parseFeedMassiveStockTabFromHash } from './massive/feedMassiveStockTabUtils'
+import {
+  feedMassiveStockSvcAnchorId,
+  parseFeedMassiveStockSvcFromHash,
+  parseFeedMassiveStockTabFromHash,
+  parseFeedMassiveStockTickersSubTabFromHash,
+} from './massive/feedMassiveStockTabUtils'
 import {
   checklistEffectiveStatusLabel,
   effectiveChecklistProjectStatus,
@@ -144,7 +148,7 @@ interface FeedMassiveStockPageProps {
 export function FeedMassiveStockPage({
   status: _status,
   onGoToFeed,
-  breadcrumbLabel = 'Stock Data',
+  breadcrumbLabel = 'Massive Stock',
 }: FeedMassiveStockPageProps) {
   const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
   const [highlightedCapabilityId, setHighlightedCapabilityId] = useState<string | null>(null)
@@ -323,29 +327,28 @@ export function FeedMassiveStockPage({
   }, [])
 
   useEffect(() => {
-    const resolveId = (hash: string): string | null => {
-      const fromTab = parseFeedMassiveStockTabFromHash(hash)
-      if (fromTab && stockChecklistRows.some(r => r.id === fromTab)) return fromTab
-      const fromSvc = parseFeedMassiveStockSvcFromHash(hash)
-      if (fromSvc && stockChecklistRows.some(r => r.id === fromSvc)) return fromSvc
-      return null
+    const applyMassiveStockHash = () => {
+      const raw = window.location.hash
+      const tkSub = parseFeedMassiveStockTickersSubTabFromHash(raw)
+      if (tkSub) {
+        setTkSubTab(tkSub)
+        requestAnimationFrame(() => scrollToSection('stock-tickers'))
+        return
+      }
+      const fromTab = parseFeedMassiveStockTabFromHash(raw)
+      const fromSvc = parseFeedMassiveStockSvcFromHash(raw)
+      const id =
+        (fromTab && stockChecklistRows.some(r => r.id === fromTab) ? fromTab : null) ??
+        (fromSvc && stockChecklistRows.some(r => r.id === fromSvc) ? fromSvc : null)
+      if (id) {
+        requestAnimationFrame(() => scrollToSection(id))
+      } else {
+        setHighlightedCapabilityId(null)
+      }
     }
-    const onHashChange = () => {
-      const id = resolveId(window.location.hash)
-      if (id) scrollToSection(id)
-      else setHighlightedCapabilityId(null)
-    }
-    window.addEventListener('hashchange', onHashChange)
-    return () => window.removeEventListener('hashchange', onHashChange)
-  }, [scrollToSection])
-
-  useEffect(() => {
-    const id =
-      parseFeedMassiveStockTabFromHash(window.location.hash) ??
-      parseFeedMassiveStockSvcFromHash(window.location.hash)
-    if (id && stockChecklistRows.some(r => r.id === id)) {
-      requestAnimationFrame(() => scrollToSection(id))
-    }
+    applyMassiveStockHash()
+    window.addEventListener('hashchange', applyMassiveStockHash)
+    return () => window.removeEventListener('hashchange', applyMassiveStockHash)
   }, [scrollToSection])
 
   useEffect(() => {
@@ -1045,7 +1048,7 @@ export function FeedMassiveStockPage({
       </section>
 
       {/* Sticky nav with capability chips */}
-      <nav className="feed-massive-tab-nav-section feed-massive-cap-nav-sticky" aria-label="Stock Data capabilities">
+      <nav className="feed-massive-tab-nav-section feed-massive-cap-nav-sticky" aria-label="Massive Stock capabilities">
         <div className="feed-massive-cap-sheet">
           <p className="feed-massive-cap-hint">
             Capabilities grouped by delivery channel. Click a group header to show or hide chips; click a chip to jump and expand that section.

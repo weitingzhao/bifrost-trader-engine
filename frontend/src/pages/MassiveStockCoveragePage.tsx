@@ -8,10 +8,7 @@ interface MassiveStockCoveragePageProps {
   status: StatusResponse | null
 }
 
-/**
- * Data Coverage → Stock Data: delayed vendor data and PostgreSQL reference sync.
- * Realtime watchlist bars remain under Stock IB (Realtime).
- */
+/** Data Coverage → Massive Stock: reference tools and navigation. */
 export function MassiveStockCoveragePage({ status: _status }: MassiveStockCoveragePageProps) {
   const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
 
@@ -37,7 +34,7 @@ export function MassiveStockCoveragePage({ status: _status }: MassiveStockCovera
           Settings
         </button>
         {' / '}
-        Stock Data
+        Massive Stock
         <InfoTooltip text="Massive (Polygon) stocks: REST and synced reference data are delayed per vendor plan (~15 minutes). For realtime watchlist history and EOD bar pulls, use Data Coverage → Stock IB (Realtime)." />
         {configured && (
           <span className="feed-massive-delay-pill" title={massiveStatus?.delay_notice} style={{ marginLeft: 'var(--space-2)' }}>
@@ -47,11 +44,6 @@ export function MassiveStockCoveragePage({ status: _status }: MassiveStockCovera
       </h2>
 
       <section className="replay-section" aria-label="Massive stocks overview">
-        <p style={{ marginBottom: 'var(--space-3)', color: 'var(--color-text-muted)', maxWidth: '52rem', lineHeight: 1.55 }}>
-          Massive market data for both options and stocks is delayed (typically about 15 minutes). Intraday and realtime
-          updates for the watchlist still come from IB. This page focuses on Massive-backed reference data in PostgreSQL
-          and related maintenance; IB bar coverage and backfill remain on Stock IB (Realtime).
-        </p>
         <div style={{ marginBottom: 'var(--space-4)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
           <button
             type="button"
@@ -65,7 +57,7 @@ export function MassiveStockCoveragePage({ status: _status }: MassiveStockCovera
             className="btn btn-secondary"
             onClick={() => { window.location.hash = '#feed-massive-stock' }}
           >
-            Stock Data (API checklist)
+            Massive Stock (API checklist)
           </button>
         </div>
       </section>

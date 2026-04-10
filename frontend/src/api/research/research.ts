@@ -3,8 +3,30 @@ import { fetchWithTimeout } from '../shared/fetchTimeout'
 import type { JobQueueStatusCounts } from '../ops/bars'
 import { opsAuthHeaders, opsControlFailureMessage, type OpsCapabilities } from '../ops/ops'
 
+/**
+ * Massive REST + PostgreSQL reference routes live on the Massive FastAPI process.
+ * In Vite dev, GET /health often resolves this base to ``http://127.0.0.1:<massive_port>`` while the UI is
+ * ``http://localhost:5173`` — a cross-origin fetch hits CORS and surfaces as "Failed to fetch".
+ * The dev server proxies ``/research/massive`` (see vite.config.ts); use a same-origin path so the proxy applies.
+ */
 function massiveUrl(path: string): string {
-  return joinServiceBase(getMassiveApiBase(), path)
+  const base = getMassiveApiBase()
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    const b = base.replace(/\/$/, '')
+    if (!b) {
+      return normalizedPath
+    }
+    try {
+      const apiOrigin = new URL(b).origin
+      if (apiOrigin !== window.location.origin) {
+        return normalizedPath
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  return joinServiceBase(base, path)
 }
 
 function researchApiUrl(path: string): string {
@@ -1303,20 +1325,235 @@ export async function fetchTickerReferenceSearch(opts: {
   const q = new URLSearchParams()
   q.set('q', opts.q)
   if (opts.limit != null) q.set('limit', String(opts.limit))
-  const r = await fetch(massiveUrl(`/research/massive/reference/tickers/search?${q.toString()}`))
-  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
-  if (!j.ok) {
-    return { ok: false, error: String(j.error ?? r.statusText) }
-  }
-  return {
-    ok: true,
-    cached: Boolean(j.cached),
-    results: (j.results as TickerReferenceSearchRow[]) ?? [],
+  try {
+    const r = await fetch(massiveUrl(`/research/massive/reference/tickers/search?${q.toString()}`))
+    const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+    if (!j.ok) {
+      return { ok: false, error: String(j.error ?? r.statusText) }
+    }
+    return {
+      ok: true,
+      cached: Boolean(j.cached),
+      results: (j.results as TickerReferenceSearchRow[]) ?? [],
+    }
+  } catch (e: unknown) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
   }
 }
 
 /** @deprecated use fetchTickerReferenceSearch */
 export const fetchStockReferenceSearch = fetchTickerReferenceSearch
+
+/** GET ``/research/massive/reference/tickers/overview-coverage`` — universe vs ``ticker_overview`` row counts. */
+export async function fetchTickerReferenceOverviewCoverage(): Promise<{
+  ok: boolean
+  total_tickers?: number
+  missing?: number
+  filled?: number
+  error?: string
+}> {
+  try {
+    const r = await fetch(massiveUrl('/research/massive/reference/tickers/overview-coverage'))
+    const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+    if (!j.ok) {
+      return { ok: false, error: String(j.error ?? r.statusText) }
+    }
+    return {
+      ok: true,
+      total_tickers: typeof j.total_tickers === 'number' ? j.total_tickers : Number(j.total_tickers),
+      missing: typeof j.missing === 'number' ? j.missing : Number(j.missing),
+      filled: typeof j.filled === 'number' ? j.filled : Number(j.filled),
+    }
+  } catch (e: unknown) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
+
+/** ``GET /research/massive/reference/tickers/universe-count`` — row count for ``tickers`` (universe sync). */
+export async function fetchTickerReferenceUniverseCount(): Promise<{
+  ok: boolean
+  total_tickers?: number
+  error?: string
+}> {
+  try {
+    const r = await fetch(massiveUrl('/research/massive/reference/tickers/universe-count'))
+    const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+    if (!j.ok) {
+      return { ok: false, error: String(j.error ?? r.statusText) }
+    }
+    const n = j.total_tickers
+    return {
+      ok: true,
+      total_tickers: typeof n === 'number' ? n : Number(n),
+    }
+  } catch (e: unknown) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
+
+/** ``GET /research/massive/reference/ticker-types/count`` — row count for ``ticker_types``. */
+export async function fetchTickerReferenceTickerTypesRowCount(): Promise<{
+  ok: boolean
+  total_ticker_types?: number
+  error?: string
+}> {
+  try {
+    const r = await fetch(massiveUrl('/research/massive/reference/ticker-types/count'))
+    const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+    if (!j.ok) {
+      return { ok: false, error: String(j.error ?? r.statusText) }
+    }
+    const n = j.total_ticker_types
+    return {
+      ok: true,
+      total_ticker_types: typeof n === 'number' ? n : Number(n),
+    }
+  } catch (e: unknown) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
+
+/** Paged tickers with no ``ticker_overview`` row (same scope as overview job “missing” mode). */
+export async function fetchTickerReferenceMissingOverview(opts: {
+  limit?: number
+  offset?: number
+}): Promise<{
+  ok: boolean
+  tickers?: string[]
+  limit?: number
+  offset?: number
+  total_missing?: number
+  has_more?: boolean
+  error?: string
+}> {
+  const q = new URLSearchParams()
+  if (opts.limit != null) q.set('limit', String(opts.limit))
+  if (opts.offset != null) q.set('offset', String(opts.offset))
+  try {
+    const r = await fetch(
+      massiveUrl(`/research/massive/reference/tickers/missing-overview?${q.toString()}`),
+    )
+    const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+    if (!j.ok) {
+      return { ok: false, error: String(j.error ?? r.statusText) }
+    }
+    const tickers = j.tickers
+    return {
+      ok: true,
+      tickers: Array.isArray(tickers) ? (tickers as string[]) : [],
+      limit: typeof j.limit === 'number' ? j.limit : Number(j.limit),
+      offset: typeof j.offset === 'number' ? j.offset : Number(j.offset),
+      total_missing:
+        typeof j.total_missing === 'number' ? j.total_missing : Number(j.total_missing),
+      has_more: Boolean(j.has_more),
+    }
+  } catch (e: unknown) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
+
+/** GET ``/research/massive/reference/tickers/related-coverage`` — ``tickers`` vs ``ticker_related_tickers`` counts. */
+export async function fetchTickerReferenceRelatedCoverage(): Promise<{
+  ok: boolean
+  total_tickers?: number
+  missing?: number
+  filled?: number
+  error?: string
+}> {
+  try {
+    const r = await fetch(massiveUrl('/research/massive/reference/tickers/related-coverage'))
+    const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+    if (!j.ok) {
+      return { ok: false, error: String(j.error ?? r.statusText) }
+    }
+    return {
+      ok: true,
+      total_tickers: typeof j.total_tickers === 'number' ? j.total_tickers : Number(j.total_tickers),
+      missing: typeof j.missing === 'number' ? j.missing : Number(j.missing),
+      filled: typeof j.filled === 'number' ? j.filled : Number(j.filled),
+    }
+  } catch (e: unknown) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
+
+/** Paged tickers with no rows in ``ticker_related_tickers`` for ``from_tickers_id``. */
+export async function fetchTickerReferenceMissingRelated(opts: {
+  limit?: number
+  offset?: number
+}): Promise<{
+  ok: boolean
+  tickers?: string[]
+  limit?: number
+  offset?: number
+  total_missing?: number
+  has_more?: boolean
+  error?: string
+}> {
+  const q = new URLSearchParams()
+  if (opts.limit != null) q.set('limit', String(opts.limit))
+  if (opts.offset != null) q.set('offset', String(opts.offset))
+  try {
+    const r = await fetch(
+      massiveUrl(`/research/massive/reference/tickers/missing-related?${q.toString()}`),
+    )
+    const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+    if (!j.ok) {
+      return { ok: false, error: String(j.error ?? r.statusText) }
+    }
+    const tickers = j.tickers
+    return {
+      ok: true,
+      tickers: Array.isArray(tickers) ? (tickers as string[]) : [],
+      limit: typeof j.limit === 'number' ? j.limit : Number(j.limit),
+      offset: typeof j.offset === 'number' ? j.offset : Number(j.offset),
+      total_missing:
+        typeof j.total_missing === 'number' ? j.total_missing : Number(j.total_missing),
+      has_more: Boolean(j.has_more),
+    }
+  } catch (e: unknown) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
+
+/** Paged tickers that have at least one related peer row. */
+export async function fetchTickerReferenceFilledRelated(opts: {
+  limit?: number
+  offset?: number
+}): Promise<{
+  ok: boolean
+  tickers?: string[]
+  limit?: number
+  offset?: number
+  total_filled?: number
+  has_more?: boolean
+  error?: string
+}> {
+  const q = new URLSearchParams()
+  if (opts.limit != null) q.set('limit', String(opts.limit))
+  if (opts.offset != null) q.set('offset', String(opts.offset))
+  try {
+    const r = await fetch(
+      massiveUrl(`/research/massive/reference/tickers/filled-related?${q.toString()}`),
+    )
+    const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+    if (!j.ok) {
+      return { ok: false, error: String(j.error ?? r.statusText) }
+    }
+    const tickers = j.tickers
+    return {
+      ok: true,
+      tickers: Array.isArray(tickers) ? (tickers as string[]) : [],
+      limit: typeof j.limit === 'number' ? j.limit : Number(j.limit),
+      offset: typeof j.offset === 'number' ? j.offset : Number(j.offset),
+      total_filled:
+        typeof j.total_filled === 'number' ? j.total_filled : Number(j.total_filled),
+      has_more: Boolean(j.has_more),
+    }
+  } catch (e: unknown) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
 
 export async function fetchTickerReferenceDetail(symbol: string): Promise<{
   ok: boolean
@@ -1372,8 +1609,8 @@ export async function fetchTickerReferenceRelated(symbol: string): Promise<{
 /** @deprecated use fetchTickerReferenceRelated */
 export const fetchStockReferenceRelated = fetchTickerReferenceRelated
 
-/** Instrument types from ``ticker_instrument_types`` (synced via jobs). */
-export async function fetchTickerReferenceInstrumentTypes(opts?: {
+/** Rows from ``ticker_types`` (synced via Celery ``ticker_reference_ticker_types``). */
+export async function fetchTickerTypesFromDb(opts?: {
   asset_class?: string
   locale?: string
 }): Promise<{
@@ -1385,7 +1622,7 @@ export async function fetchTickerReferenceInstrumentTypes(opts?: {
   const q = new URLSearchParams()
   q.set('asset_class', opts?.asset_class ?? '*')
   q.set('locale', opts?.locale ?? '*')
-  const r = await fetch(massiveUrl(`/research/massive/instrument-types?${q.toString()}`))
+  const r = await fetch(massiveUrl(`/research/massive/reference/ticker-types?${q.toString()}`))
   const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
   if (!j.ok) {
     return { ok: false, error: String(j.error ?? r.statusText) }
@@ -1398,13 +1635,17 @@ export async function fetchTickerReferenceInstrumentTypes(opts?: {
   }
 }
 
-/** @deprecated use fetchTickerReferenceInstrumentTypes */
-export const fetchStockReferenceInstrumentTypes = fetchTickerReferenceInstrumentTypes
+/** @deprecated use fetchTickerTypesFromDb */
+export const fetchTickerReferenceInstrumentTypes = fetchTickerTypesFromDb
+
+/** @deprecated use fetchTickerTypesFromDb */
+export const fetchStockReferenceInstrumentTypes = fetchTickerTypesFromDb
 
 export type TickerReferenceJobKind =
   | 'ticker_reference_universe'
   | 'ticker_reference_overview'
   | 'ticker_reference_related'
+  | 'ticker_reference_ticker_types'
   | 'ticker_reference_instrument_types'
   | 'stock_reference_universe'
   | 'stock_reference_overview'

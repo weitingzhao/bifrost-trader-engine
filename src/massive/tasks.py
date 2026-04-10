@@ -21,6 +21,58 @@ from src.workers.celery_app import app  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
+# How often to persist running progress for long per-symbol ticker-reference jobs (DB + SSE poll).
+_TICKER_REF_PROGRESS_EVERY = 50
+
+
+def _emit_massive_job_running_progress(
+    status_cfg: dict,
+    job_id: int,
+    *,
+    kind: str,
+    work_mode: str,
+    total: int,
+    processed: int,
+    current_symbol: Optional[str],
+    symbols_ok: int,
+    symbols_failed: int,
+    errors_sample: List[str],
+) -> None:
+    """Write ``result`` while status stays ``running`` so SSE clients can poll progress."""
+    from src.vendor.massive.reader import update_job_massive_backfill_result
+
+    remaining = max(0, total - processed)
+    pct = round(100.0 * processed / total, 2) if total > 0 else None
+    summary: Dict[str, Any] = {
+        "mode": work_mode,
+        "total_symbols": total,
+        "processed": processed,
+        "remaining": remaining,
+        "symbols_upserted": symbols_ok,
+        "symbols_failed": symbols_failed,
+        "current_symbol": (current_symbol or "").strip() or None,
+        "errors_sample": errors_sample[:20],
+    }
+    if pct is not None:
+        summary["pct"] = pct
+    body: Dict[str, Any] = {
+        "ok": True,
+        "kind": kind,
+        "phase": "running",
+        "summary": summary,
+    }
+    update_job_massive_backfill_result(status_cfg, job_id, "running", body)
+
+
+def _should_emit_ticker_ref_progress(processed: int, total: int, *, every: int = _TICKER_REF_PROGRESS_EVERY) -> bool:
+    if total <= 0:
+        return True
+    if processed <= 0:
+        return True
+    if processed >= total:
+        return True
+    return processed % every == 0
+
 
 def _config_path_for_task() -> Optional[str]:
     for a in sys.argv[1:]:
@@ -1207,6 +1259,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     "ticker_reference_universe",
                     "ticker_reference_overview",
                     "ticker_reference_related",
+                    "ticker_reference_ticker_types",
                     "ticker_reference_instrument_types",
                     "stock_reference_universe",
                     "stock_reference_overview",
@@ -1222,20 +1275,21 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     get_tickers_id_for_ticker,
                     next_cursor_from_api_response,
                     normalize_ticker_ref_kind,
-                    replace_instrument_types,
                     replace_related_for_tickers_id,
+                    replace_ticker_types,
                     row_from_ticker_detail,
                     row_from_ticker_list_item,
+                    symbols_missing_overview_only,
                     symbols_needing_overview,
                     upsert_reference_state,
-                    upsert_ticker_details_row,
+                    upsert_ticker_overview_row,
                     upsert_ticker_row,
                 )
                 from src.vendor.massive.reference_cache_keys import (
                     invalidate_search_caches,
                     invalidate_ticker_cache,
-                    key_instrument_types,
                     key_peers,
+                    key_ticker_types,
                     redis_client_from_status_config,
                 )
 
@@ -1244,8 +1298,17 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 cur = conn.cursor()
 
                 if kind == "ticker_reference_universe":
-                    max_pages = max(1, int(payload.get("max_pages") or 50))
                     reset = bool(payload.get("reset_cursor"))
+                    full_u = bool(payload.get("full_universe"))
+                    mp_raw = payload.get("max_pages")
+                    try:
+                        mp_int = int(mp_raw) if mp_raw is not None else None
+                    except (TypeError, ValueError):
+                        mp_int = None
+                    if full_u or (mp_int is not None and mp_int <= 0):
+                        max_pages: Optional[int] = None
+                    else:
+                        max_pages = max(1, int(mp_raw or 50))
                     cursor_in = (payload.get("cursor") or "").strip() or None
                     if reset:
                         cursor = None
@@ -1260,7 +1323,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     total = 0
                     pages = 0
                     last_next: Optional[str] = None
-                    while pages < max_pages:
+                    while max_pages is None or pages < max_pages:
                         lim = min(1000, max(1, int(payload.get("limit") or 1000)))
                         sort_f = (payload.get("sort") or "ticker").strip() or "ticker"
                         order_f = (payload.get("order") or "asc").strip() or "asc"
@@ -1326,32 +1389,67 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                             syms = [str(x).strip().upper() for x in syms_raw if str(x).strip()]
                         else:
                             syms = []
+                    elif mode == "missing":
+                        syms = symbols_missing_overview_only(cur)
+                    elif mode == "stale":
+                        syms = symbols_needing_overview(cur, stale_h)
                     else:
                         syms = symbols_needing_overview(cur, stale_h)
+                    total_sym = len(syms)
                     n_ok = 0
-                    errors: List[str] = []
-                    for sym in syms:
+                    errors = []
+                    if _should_emit_ticker_ref_progress(0, total_sym):
+                        _emit_massive_job_running_progress(
+                            status_cfg,
+                            job_id,
+                            kind="ticker_reference_overview",
+                            work_mode=mode,
+                            total=total_sym,
+                            processed=0,
+                            current_symbol=None,
+                            symbols_ok=0,
+                            symbols_failed=0,
+                            errors_sample=errors,
+                        )
+                    for idx, sym in enumerate(syms):
                         _rest_throttle()
                         det = client.fetch_ticker_detail(sym)
                         if det.get("error"):
                             errors.append(f"{sym}: {det.get('error')}")
-                            continue
-                        tcols, dcols = row_from_ticker_detail(det)
-                        if not tcols.get("ticker"):
-                            errors.append(f"{sym}: no ticker in response")
-                            continue
-                        tid = upsert_ticker_row(cur, tcols)
-                        upsert_ticker_details_row(cur, tid, dcols)
-                        conn.commit()
-                        if rds:
-                            invalidate_ticker_cache(rds, sym)
-                        n_ok += 1
+                        else:
+                            tcols, dcols = row_from_ticker_detail(det)
+                            if not tcols.get("ticker"):
+                                errors.append(f"{sym}: no ticker in response")
+                            else:
+                                tid = upsert_ticker_row(cur, tcols)
+                                upsert_ticker_overview_row(cur, tid, dcols)
+                                conn.commit()
+                                if rds:
+                                    invalidate_ticker_cache(rds, sym)
+                                n_ok += 1
+                        processed = idx + 1
+                        if _should_emit_ticker_ref_progress(processed, total_sym):
+                            _emit_massive_job_running_progress(
+                                status_cfg,
+                                job_id,
+                                kind="ticker_reference_overview",
+                                work_mode=mode,
+                                total=total_sym,
+                                processed=processed,
+                                current_symbol=sym,
+                                symbols_ok=n_ok,
+                                symbols_failed=len(errors),
+                                errors_sample=errors,
+                            )
                     result = {
                         "ok": True,
                         "kind": kind,
+                        "phase": "done",
                         "summary": {
-                            "symbols_requested": len(syms),
+                            "overview_mode": mode,
+                            "symbols_requested": total_sym,
                             "symbols_upserted": n_ok,
+                            "symbols_failed": len(errors),
                             "errors_sample": errors[:20],
                         },
                     }
@@ -1374,37 +1472,69 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                             syms = [str(x).strip().upper() for x in syms_raw if str(x).strip()]
                         else:
                             syms = []
+                    total_rel = len(syms)
                     n_ok = 0
                     fetched_at = datetime.now(timezone.utc)
-                    for sym in syms:
+                    if _should_emit_ticker_ref_progress(0, total_rel):
+                        _emit_massive_job_running_progress(
+                            status_cfg,
+                            job_id,
+                            kind="ticker_reference_related",
+                            work_mode=mode,
+                            total=total_rel,
+                            processed=0,
+                            current_symbol=None,
+                            symbols_ok=0,
+                            symbols_failed=0,
+                            errors_sample=[],
+                        )
+                    for idx, sym in enumerate(syms):
                         _rest_throttle()
                         tid = get_tickers_id_for_ticker(cur, sym)
-                        if not tid:
-                            continue
-                        rel = client.fetch_related_companies(sym)
-                        if rel.get("error"):
-                            continue
-                        raw = rel.get("results") or []
-                        if not isinstance(raw, list):
-                            raw = []
-                        replace_related_for_tickers_id(cur, tid, raw, fetched_at)
-                        conn.commit()
-                        if rds:
-                            invalidate_ticker_cache(rds, sym)
-                            try:
-                                rds.delete(key_peers(sym))
-                            except Exception:
-                                pass
-                        n_ok += 1
+                        if tid:
+                            rel = client.fetch_related_companies(sym)
+                            if not rel.get("error"):
+                                raw = rel.get("results") or []
+                                if not isinstance(raw, list):
+                                    raw = []
+                                replace_related_for_tickers_id(cur, tid, raw, fetched_at)
+                                conn.commit()
+                                if rds:
+                                    invalidate_ticker_cache(rds, sym)
+                                    try:
+                                        rds.delete(key_peers(sym))
+                                    except Exception:
+                                        pass
+                                n_ok += 1
+                        processed = idx + 1
+                        if _should_emit_ticker_ref_progress(processed, total_rel):
+                            _emit_massive_job_running_progress(
+                                status_cfg,
+                                job_id,
+                                kind="ticker_reference_related",
+                                work_mode=mode,
+                                total=total_rel,
+                                processed=processed,
+                                current_symbol=sym,
+                                symbols_ok=n_ok,
+                                symbols_failed=0,
+                                errors_sample=[],
+                            )
                     result = {
                         "ok": True,
                         "kind": kind,
-                        "summary": {"symbols_processed": n_ok, "total_requested": len(syms)},
+                        "phase": "done",
+                        "summary": {
+                            "related_mode": mode,
+                            "symbols_processed": n_ok,
+                            "total_requested": total_rel,
+                            "rows_attempted": total_rel,
+                        },
                     }
                     update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                     return result
 
-                if kind == "ticker_reference_instrument_types":
+                if kind == "ticker_reference_ticker_types":
                     ac = (payload.get("asset_class") or "").strip() or None
                     loc = (payload.get("locale") or "").strip() or None
                     data = client.fetch_ticker_types(asset_class=ac, locale=loc)
@@ -1413,11 +1543,11 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     res = data.get("results") or []
                     if not isinstance(res, list):
                         res = []
-                    n = replace_instrument_types(cur, res)
+                    n = replace_ticker_types(cur, res)
                     conn.commit()
                     if rds:
                         try:
-                            rds.delete(key_instrument_types(loc or "*", ac or "*"))
+                            rds.delete(key_ticker_types(loc or "*", ac or "*"))
                         except Exception:
                             pass
                     result = {"ok": True, "kind": kind, "summary": {"rows": n}}

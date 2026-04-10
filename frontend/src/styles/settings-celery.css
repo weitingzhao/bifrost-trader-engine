@@ -3245,6 +3245,25 @@ button.dashboard-queue-summary-status-console-nav:focus-visible {
   margin-top: var(--space-2);
 }
 
+.dashboard-scale-remove-all-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dashboard-scale-remove-all-force-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.dashboard-celery-remove-all-force-switch.replay-bubble-switch {
+  flex-shrink: 0;
+}
+
 .dashboard-queue-add-row .dashboard-ctrl-input,
 .dashboard-scale-add-row .dashboard-ctrl-input {
   flex: 1;

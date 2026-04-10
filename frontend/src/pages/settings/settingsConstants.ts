@@ -27,7 +27,7 @@ export const CONFIG_SECTIONS = [
 export const COVERAGE_SUBSECTIONS = [
   { id: 'coverage-option', label: 'Option', icon: 'coverage-option' as const },
   { id: 'coverage-stock', label: 'Stock IB (Realtime)', icon: 'coverage-stock' as const },
-  { id: 'coverage-massive-stock', label: 'Stock Data', icon: 'feed-massive-stock' as const },
+  { id: 'coverage-massive-stock', label: 'Massive Stock', icon: 'feed-massive-stock' as const },
 ] as const
 
 /** Feed: IB Stock (single link). Massive Option/Stock submenus are nested under Feed in SettingsPage. */
