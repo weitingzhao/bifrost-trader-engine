@@ -1,12 +1,13 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   fetchStockReferenceDetail,
   fetchStockReferenceInstrumentTypes,
   fetchStockReferenceRelated,
   fetchStockReferenceSearch,
   postStockReferenceJob,
+  subscribeMassiveJobEvents,
 } from '../../api'
-import type { StockReferenceJobKind, StockReferenceSearchRow } from '../../api'
+import type { MassiveJobApiRow, StockReferenceJobKind, StockReferenceSearchRow } from '../../api'
 
 const DEFAULT_REF_JOB_SYMBOLS = 'AAPL, MSFT, GOOGL'
 
@@ -15,6 +16,26 @@ function parseRefJobSymbols(raw: string): string[] {
     .split(/[\s,]+/)
     .map(s => s.trim().toUpperCase())
     .filter(Boolean)
+}
+
+function summarizeRefJobResult(job: MassiveJobApiRow | undefined): string {
+  const r = job?.result as Record<string, unknown> | undefined
+  if (!r || typeof r !== 'object') return '—'
+  if (typeof r.error === 'string') return r.error
+  const summary = r.summary as Record<string, unknown> | undefined
+  if (summary && typeof summary === 'object') {
+    if (summary.rows_upserted != null) return `rows upserted ${String(summary.rows_upserted)}`
+    if (summary.pages != null) return `pages ${String(summary.pages)}`
+  }
+  if (r.total != null) return `rows ${String(r.total)}`
+  if (r.rows_written != null) return `rows ${String(r.rows_written)}`
+  if (r.rows_upserted != null) return `rows upserted ${String(r.rows_upserted)}`
+  if (r.message != null) return String(r.message)
+  try {
+    return JSON.stringify(r)
+  } catch {
+    return '—'
+  }
 }
 
 export interface MassiveStockReferenceDbSectionProps {
@@ -47,6 +68,22 @@ export function MassiveStockReferenceDbSection({
   const [refJobSymbols, setRefJobSymbols] = useState(DEFAULT_REF_JOB_SYMBOLS)
   const [jobBusy, setJobBusy] = useState<StockReferenceJobKind | null>(null)
   const [jobMsg, setJobMsg] = useState<string | null>(null)
+  const [refJobWatch, setRefJobWatch] = useState<{
+    jobId: string
+    kind: StockReferenceJobKind
+    status: string
+    job?: MassiveJobApiRow
+    streamError?: string
+  } | null>(null)
+  const jobEventsCloseRef = useRef<(() => void) | null>(null)
+
+  useEffect(
+    () => () => {
+      jobEventsCloseRef.current?.()
+      jobEventsCloseRef.current = null
+    },
+    [],
+  )
 
   const enqueueOne = useCallback(
     async (
@@ -69,6 +106,47 @@ export function MassiveStockReferenceDbSection({
         }
         const tag = res.deduplicated ? `${res.job_id ?? '?'} (deduplicated)` : (res.job_id ?? '?')
         setJobMsg(`Enqueued ${kind}: job ${tag}`)
+        const jid = res.job_id
+        if (jid) {
+          jobEventsCloseRef.current?.()
+          setRefJobWatch({
+            jobId: jid,
+            kind,
+            status: res.deduplicated ? 'deduplicated (waiting)' : 'enqueued',
+          })
+          const sub = subscribeMassiveJobEvents(
+            jid,
+            data => {
+              if (!data.ok) {
+                setRefJobWatch(prev =>
+                  prev && prev.jobId === jid
+                    ? {
+                        ...prev,
+                        streamError: data.error ?? 'Job stream error',
+                        status: 'failed',
+                      }
+                    : prev,
+                )
+                return
+              }
+              const j = data.job
+              const st = (j?.status ?? '').trim() || 'running'
+              setRefJobWatch(prev =>
+                prev && prev.jobId === jid
+                  ? {
+                      jobId: jid,
+                      kind,
+                      status: st,
+                      job: j,
+                      streamError: prev.streamError,
+                    }
+                  : prev,
+              )
+            },
+            { timeoutSec: 600 },
+          )
+          jobEventsCloseRef.current = sub.close
+        }
       } catch (e: unknown) {
         setErr(e instanceof Error ? e.message : String(e))
       } finally {
@@ -309,6 +387,68 @@ export function MassiveStockReferenceDbSection({
         <p className="status-page-msg ok" role="status" style={{ marginTop: 'var(--space-2)' }}>
           {jobMsg}
         </p>
+      ) : null}
+
+      {refJobWatch ? (
+        <div
+          className="feed-massive-refdb-job-watch"
+          style={{ marginTop: 'var(--space-3)' }}
+          role="region"
+          aria-label="Stock reference Celery job status"
+        >
+          <div className="form-label" style={{ marginBottom: 'var(--space-2)' }}>
+            Celery job result
+          </div>
+          <div
+            style={{
+              display: 'grid',
+              gap: 'var(--space-2)',
+              fontSize: 'var(--font-size-sm)',
+            }}
+          >
+            <div>
+              <span style={{ color: 'var(--color-text-muted)' }}>Job ID</span>{' '}
+              <code>{refJobWatch.jobId}</code>
+            </div>
+            <div>
+              <span style={{ color: 'var(--color-text-muted)' }}>Kind</span> <code>{refJobWatch.kind}</code>
+            </div>
+            <div>
+              <span style={{ color: 'var(--color-text-muted)' }}>Status</span>{' '}
+              <strong
+                style={{
+                  color:
+                    (refJobWatch.status || '').toLowerCase() === 'failed'
+                      ? 'var(--color-danger, #c00)'
+                      : (refJobWatch.status || '').toLowerCase() === 'done'
+                        ? 'var(--color-success, green)'
+                        : undefined,
+                }}
+              >
+                {refJobWatch.status}
+              </strong>
+            </div>
+            {refJobWatch.streamError ? (
+              <p className="status-page-msg err" role="alert" style={{ margin: 0 }}>
+                {refJobWatch.streamError}
+              </p>
+            ) : null}
+            <div>
+              <span style={{ color: 'var(--color-text-muted)' }}>Summary</span>{' '}
+              {summarizeRefJobResult(refJobWatch.job)}
+            </div>
+            {refJobWatch.job?.result != null ? (
+              <details className="feed-massive-details-debug" open>
+                <summary>Full result JSON</summary>
+                <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '14rem' }}>
+                  {typeof refJobWatch.job.result === 'string'
+                    ? refJobWatch.job.result
+                    : JSON.stringify(refJobWatch.job.result, null, 2)}
+                </pre>
+              </details>
+            ) : null}
+          </div>
+        </div>
       ) : null}
 
       <div className="feed-massive-form-grid">

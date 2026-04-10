@@ -9,6 +9,8 @@ import {
   clearCeleryLogs,
 } from '../api/monitor/logs'
 import {
+  deleteAllBarsJobs,
+  deleteAllMassiveJobs,
   fetchAggregatedJobQueuesSummary,
   postBarsJobsClearDone,
   postMassiveJobsClearDone,
@@ -38,7 +40,7 @@ import {
   type WorkerProfileInfo,
   type QueueSummaryRow,
 } from '../api/ops/ops'
-import { CeleryJobQueuesSection } from './celery/CeleryJobQueuesSection'
+import { CeleryJobQueuesSection, type CeleryJobQueuesSectionHandle } from './celery/CeleryJobQueuesSection'
 import { CeleryTopQueueSummary } from './celery/CeleryTopQueueSummary'
 import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
 import { computeCeleryRuntimeLamp, supportedQueueNamesFromSummary } from '../utils/celeryRuntime'
@@ -314,6 +316,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   const [topQueueActionBusy, setTopQueueActionBusy] = useState<string | null>(null)
   const [flashMsg, setFlashMsg] = useState<{ text: string; isErr: boolean } | null>(null)
   const jobListReloadRef = useRef<((clearedQueue?: string) => void) | null>(null)
+  const jobQueuesNavRef = useRef<CeleryJobQueuesSectionHandle>(null)
 
   // Worker scaling
   const [instances, setInstances] = useState<SystemdInstance[]>([])
@@ -734,6 +737,23 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
     })
   }, [])
 
+  /** Queue summary Status lamp → Workers conditions + Console (worker for queue, else broker). */
+  const navigateToConsoleForQueueCoverage = useCallback(
+    (celeryQueue: string) => {
+      const q = String(celeryQueue).trim()
+      const w = workers.find(x => (x.queues ?? []).includes(q))
+      const target: 'broker' | string = w ? w.worker_id : 'broker'
+      selectConsole(target)
+      scrollConsoleIntoView()
+    },
+    [workers, selectConsole, scrollConsoleIntoView],
+  )
+
+  const navigateToBrokerConsoleFromQueueSummary = useCallback(() => {
+    selectConsole('broker')
+    scrollConsoleIntoView()
+  }, [selectConsole, scrollConsoleIntoView])
+
   /** Toggle same target off (filter buttons only). */
   const openConsole = (target: ConsoleTarget) => {
     if (target === consoleTarget) {
@@ -787,6 +807,25 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
 
   const refreshAfterJobMutation = useCallback(() => void loadAll(), [loadAll])
 
+  const navigateToJobQueueFromSummary = useCallback((celeryQueue: string) => {
+    setCelerySectionTab('jobs')
+    queueMicrotask(() => {
+      jobQueuesNavRef.current?.navigateToQueue(celeryQueue)
+      document.getElementById('celery-panel-jobs')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }, [])
+
+  const navigateToJobQueueStatusFromSummary = useCallback(
+    (celeryQueue: string, status: 'pending' | 'running' | 'done' | 'failed') => {
+      setCelerySectionTab('jobs')
+      queueMicrotask(() => {
+        jobQueuesNavRef.current?.navigateToQueueWithStatus(celeryQueue, status)
+        document.getElementById('celery-panel-jobs')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      })
+    },
+    [],
+  )
+
   const executeClearDoneTop = useCallback(
     async (row: AggregatedJobQueueSummaryRow) => {
       const q = row.celery_queue
@@ -800,6 +839,31 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           const r = await postBarsJobsClearDone()
           if (!r.ok) throw new Error(r.error ?? 'Clear failed')
           setFlashMsg({ text: `Deleted ${r.deleted} done job(s).`, isErr: false })
+        }
+        await loadAll()
+        jobListReloadRef.current?.(row.celery_queue)
+      } catch (e) {
+        setFlashMsg({ text: e instanceof Error ? e.message : 'Operation failed', isErr: true })
+      } finally {
+        setTopQueueActionBusy(null)
+      }
+    },
+    [loadAll],
+  )
+
+  const executeDeleteFailedTop = useCallback(
+    async (row: AggregatedJobQueueSummaryRow) => {
+      const q = row.celery_queue
+      setTopQueueActionBusy(q)
+      try {
+        if (row.pipeline === 'massive') {
+          const r = await deleteAllMassiveJobs('failed', row.celery_queue)
+          if (!r.ok) throw new Error(r.error ?? 'Delete failed')
+          setFlashMsg({ text: `Deleted ${r.deleted} failed job(s).`, isErr: false })
+        } else {
+          const r = await deleteAllBarsJobs('failed')
+          if (!r.ok) throw new Error(r.error ?? 'Delete failed')
+          setFlashMsg({ text: `Deleted ${r.deleted} failed job(s).`, isErr: false })
         }
         await loadAll()
         jobListReloadRef.current?.(row.celery_queue)
@@ -1017,7 +1081,12 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
         runtimeCeleryLamp={runtimeCeleryLamp}
         runtimeCeleryStatusText={runtimeCeleryStatusText}
         onClearDone={executeClearDoneTop}
+        onDeleteFailed={executeDeleteFailedTop}
         onResetFailed={executeResetFailedTop}
+        onNavigateToJobQueue={navigateToJobQueueFromSummary}
+        onNavigateToJobQueueStatus={navigateToJobQueueStatusFromSummary}
+        onNavigateQueueCoverageConsole={navigateToConsoleForQueueCoverage}
+        onNavigateAggregateCoverageConsole={navigateToBrokerConsoleFromQueueSummary}
       />
 
       <div
@@ -1060,6 +1129,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             className="dashboard-celery-tab-panel"
           >
             <CeleryJobQueuesSection
+              ref={jobQueuesNavRef}
               onJobCountsChanged={refreshAfterJobMutation}
               onProvideJobListReload={captureJobListReload}
             />

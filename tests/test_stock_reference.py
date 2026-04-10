@@ -27,6 +27,12 @@ def test_row_from_ticker_list_item_maps_type_and_exchange():
     assert row["active"] is True
     assert row["primary_exchange"] == "XNAS"
     assert row["exchange"] == "XNAS"
+    assert row["sector"] == ""
+
+
+def test_row_from_ticker_list_item_sector_from_api():
+    row = row_from_ticker_list_item({"ticker": "X", "name": "X Corp", "sector": "Technology"})
+    assert row["sector"] == "Technology"
 
 
 def test_row_from_ticker_detail_branding_and_address():

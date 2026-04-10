@@ -330,7 +330,7 @@ _bifrost_status_paint_one_row() {
 # Paint units under the banner (grouped: Architecture / Account / Research / Feed / Socket Services / Daemon). Uses BIFROST_INTERACTIVE_STATUS_*.
 _interactive_paint_remote_status_block() {
   if [[ -z "${BIFROST_INTERACTIVE_STATUS_RAW:-}" ]]; then
-    echo "${C_DIM}  (Menu ${C_GREEN}s${C_DIM} Status loads systemd units from ${DEPLOY_HOST}; in ${C_BOLD}d${C_DIM} use ${C_BOLD}0${C_DIM} = restart all HTTP APIs.)${C_RESET}"
+    echo "${C_DIM}  (Menu ${C_GREEN}s${C_DIM} / ${C_GREEN}3${C_DIM} Status loads systemd units from ${DEPLOY_HOST}; in ${C_BOLD}d${C_DIM} / ${C_BOLD}2${C_DIM} use ${C_BOLD}0${C_DIM} = restart all HTTP APIs.)${C_RESET}"
     return 0
   fi
   echo "${C_BLUE}${C_BOLD}  Units on ${DEPLOY_HOST}${C_RESET} ${C_DIM}· refreshed ${BIFROST_INTERACTIVE_STATUS_AT:-?}${C_RESET}"
@@ -356,9 +356,9 @@ _interactive_paint_remote_status_block() {
 
 _interactive_paint_main_menu() {
   echo "${C_BLUE}${C_BOLD}--- Main menu ---${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}r)${C_RESET} ${C_BOLD}Reboot services${C_RESET} ${C_DIM}(systemctl: 0 / 1–3 / a–d / h3 / words — Engine: Dashboard)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}d)${C_RESET} ${C_BOLD}Deploy${C_RESET} ${C_DIM}(${C_BOLD}0${C_DIM} = deploy+restart all 9 HTTP · ${C_BOLD}1–3${C_DIM}+optional ${C_BOLD}R${C_RESET}${C_DIM} · ${C_BOLD}a–d${C_DIM}+optional ${C_BOLD}R${C_RESET}${C_DIM} · ${C_BOLD}q${C_DIM} = cancel)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}s)${C_RESET} ${C_BOLD}Status:${C_RESET} refresh ${C_DIM}(all bifrost units, summary above)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}r · 1)${C_RESET} ${C_BOLD}Reboot services${C_RESET} ${C_DIM}(systemctl: 0 / 1–3 / a–d / h3 / words — Engine: Dashboard)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}d · 2)${C_RESET} ${C_BOLD}Deploy${C_RESET} ${C_DIM}(${C_BOLD}0${C_DIM} = deploy+restart all 9 HTTP · ${C_BOLD}1–3${C_DIM}+optional ${C_BOLD}R${C_RESET}${C_DIM} · ${C_BOLD}a–d${C_DIM}+optional ${C_BOLD}R${C_RESET}${C_DIM} · ${C_BOLD}q${C_DIM} = cancel)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}s · 3)${C_RESET} ${C_BOLD}Status:${C_RESET} refresh ${C_DIM}(all bifrost units, summary above)${C_RESET}"
   echo "${C_DIM}  db — database${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}db1)${C_RESET} ${C_BOLD}Refresh schema${C_RESET} ${C_DIM}(Dev local / Prod remote)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}db2)${C_RESET} ${C_BOLD}Release locks${C_RESET} ${C_DIM}(dry-run then optional terminate)${C_RESET}"
@@ -432,8 +432,8 @@ Usage (from repo root):
       Interactive menu: open one SSH master (login once; kept until you quit), then run operations in a loop;
       sudo password you enter (or -p) is kept in memory for every menu action until quit or menu tl2 Clear.
       Main menu stays on top; last command output is shown in the bottom pane (20 lines by default; wider after tl1 systemd install; menu o toggles full log vs tail). Same flags as below.
-      Keys: r Reboot services · d Deploy · s Status · db1/db2 schema & locks · tl1–tl6 tooling (nginx/ssh/local remote/MkDocs) · o/v/q.
-      Menu s Status refreshes units grouped by category + Socket Services + Daemon (no bifrost-celery; use Ops UI). Menu tl1 appends repo unit file list + same summary as s. Deploy d: 0 = deploy+restart all 9 HTTP APIs; 1–3 = single units (Engine: Dashboard); a–d = category; q or empty = cancel.
+      Keys: r or 1 Reboot services · d or 2 Deploy · s or 3 Status · db1/db2 schema & locks · tl1–tl6 tooling (nginx/ssh/local remote/MkDocs) · o/v/q.
+      Menu s / 3 Status refreshes units grouped by category + Socket Services + Daemon (no bifrost-celery; use Ops UI). Menu tl1 appends repo unit file list + same summary as s. Deploy d / 2: 0 = deploy+restart all 9 HTTP APIs; 1–3 = single units (Engine: Dashboard); a–d = category; q or empty = cancel.
       Menu tl1 Install systemd: locally render deploy/nginx/bifrost-status.conf from merged prod YAML, rsync it to the server, then register deploy/systemd/*.service + *.target (sudo); install nginx site from that file + nginx -t + reload when nginx is present.
       Menu tl4 Local Mac: pgrep run_massive_ws / IB ingest / IB operator / run_celery + check logs/.ops-ingest-*.pid (this machine; not SSH).
       Menu tl6 MkDocs: mkdocs build + rsync site/ to DEPLOY_PATH only (no app/DB/systemctl; nginx serves /mkdocs/).
@@ -1113,7 +1113,7 @@ REMOTE_EOF
 }
 
 # Interactive: rsync --delete + remote build; optional systemctl restart.
-# Keys align with main menu r (Reboot services) unit legend: 0=all HTTP restart, 1–3=single units (no Engine — use Dashboard), a–d=categories; R suffix = restart after deploy.
+# Keys align with main menu r/1 (Reboot services) unit legend: 0=all HTTP restart, 1–3=single units (no Engine — use Dashboard), a–d=categories; R suffix = restart after deploy.
 _interactive_quick_deploy() {
   local _raw _norm _digit _ltr _want_r _qd_ec
   echo ""
@@ -1454,7 +1454,7 @@ _interactive_db_refresh_schema() {
 set -euo pipefail
 cd "$DEPLOY_PATH"
 if [[ ! -f .venv/bin/activate ]]; then
-  echo "ERROR: .venv missing on remote. Run Deploy (menu d) once to create venv and sync code." >&2
+  echo "ERROR: .venv missing on remote. Run Deploy (menu d or 2) once to create venv and sync code." >&2
   exit 1
 fi
 # shellcheck source=/dev/null
@@ -1498,7 +1498,7 @@ _interactive_db_release_locks() {
 set -euo pipefail
 cd "$DEPLOY_PATH"
 if [[ ! -f .venv/bin/activate ]]; then
-  echo "ERROR: .venv missing on remote. Run Deploy (menu d) first." >&2
+  echo "ERROR: .venv missing on remote. Run Deploy (menu d or 2) first." >&2
   exit 1
 fi
 # shellcheck source=/dev/null
@@ -2115,7 +2115,7 @@ interactive_mode() {
     SUDO_PASSWORD="${SUDO_PASSWORD//$'\r'/}"
     echo ""
     if [[ -z "${SUDO_PASSWORD}" ]]; then
-      _msg_info "No sudo password stored — you will be prompted for sudo when a step runs systemctl (e.g. Deploy d with R)."
+      _msg_info "No sudo password stored — you will be prompted for sudo when a step runs systemctl (e.g. Deploy d/2 with R)."
     else
       _msg_info "sudo password kept in memory for this session (all menu actions) until you quit or choose tl2 Clear."
     fi
@@ -2126,7 +2126,7 @@ interactive_mode() {
 
   while true; do
     _interactive_paint_full
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[r d s db1 db2 tl1 tl2 tl3 tl4 tl5 tl6 o v q]${C_RESET} "
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[r/1 d/2 s/3 db1 db2 tl1 tl2 tl3 tl4 tl5 tl6 o v q]${C_RESET} "
     read -r _ch
     _ch=$(echo "${_ch}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')
     case "${_ch}" in
@@ -2187,15 +2187,15 @@ interactive_mode() {
         BIFROST_SSH_LAST_OUTPUT_LINES=""
         _interactive_deploy_mkdocs
         ;;
-      r)
+      r|1)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
         _interactive_systemctl_one_service
         ;;
-      d)
+      d|2)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
         _interactive_quick_deploy
         ;;
-      s)
+      s|3)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
         _interactive_show_status
         ;;
@@ -2215,7 +2215,7 @@ interactive_mode() {
             cat "${BIFROST_PERSIST_DEPLOY_LOG}"
           fi
         else
-          echo "[INFO] No deploy log saved yet. Run Deploy (menu d) first." >"${BIFROST_SSH_LAST_LOG}"
+          echo "[INFO] No deploy log saved yet. Run Deploy (menu d or 2) first." >"${BIFROST_SSH_LAST_LOG}"
         fi
         ;;
       q|quit)
@@ -2228,9 +2228,9 @@ interactive_mode() {
         BIFROST_SSH_LAST_OUTPUT_LINES=""
         echo "[WARN] systemd install is now menu tl1 (not 8)." >"${BIFROST_SSH_LAST_LOG}"
         ;;
-      1|2|3|4|5|6|7|9)
+      4|5|6|7|9)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
-        echo "[WARN] Main menu no longer uses numbers — use r d s db1 db2 tl1–tl6 o v q (see menu above)." >"${BIFROST_SSH_LAST_LOG}"
+        echo "[WARN] Main menu no longer uses these number keys — use r/1 d/2 s/3 db1 db2 tl1–tl6 o v q (see menu above)." >"${BIFROST_SSH_LAST_LOG}"
         ;;
       l)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
@@ -2246,7 +2246,7 @@ interactive_mode() {
         ;;
       *)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
-        echo "[WARN] Unknown choice — try r d s db1 db2 tl1 tl2 tl3 tl4 tl5 tl6 o v q. (db*=database · tl1=systemd/nginx · tl6=MkDocs · o=full Last output · v=deploy log)" >"${BIFROST_SSH_LAST_LOG}"
+        echo "[WARN] Unknown choice — try r/1 d/2 s/3 db1 db2 tl1 tl2 tl3 tl4 tl5 tl6 o v q. (db*=database · tl1=systemd/nginx · tl6=MkDocs · o=full Last output · v=deploy log)" >"${BIFROST_SSH_LAST_LOG}"
         ;;
     esac
   done

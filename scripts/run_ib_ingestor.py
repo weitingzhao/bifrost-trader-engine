@@ -282,6 +282,8 @@ class IbIngestorApp:
         self._session_disconnected = asyncio.Event()
         self._service_heartbeat_interval_sec = 30.0
         self._last_service_heartbeat_at = 0.0
+        #: Set by service heartbeat after ensure_connected(); main loop re-runs subscriptions ASAP.
+        self._pending_resubscribe = False
 
     def _max_subscriptions(self) -> int:
         try:
@@ -449,11 +451,34 @@ class IbIngestorApp:
             t.cancel()
         return self._stop.is_set() or self._session_disconnected.is_set()
 
+    async def _wait_watchlist_interval_or_interrupt(self) -> bool:
+        """Wait up to ``WATCHLIST_POLL_SEC`` for stop/disconnect.
+
+        Returns True if the session should end. Returns False early when
+        ``_pending_resubscribe`` is set (IB reconnected via service heartbeat but market
+        subscriptions must be re-applied — TWS does not restore tick streams automatically).
+        """
+        deadline = time.monotonic() + float(WATCHLIST_POLL_SEC)
+        while time.monotonic() < deadline:
+            if self._stop.is_set() or self._session_disconnected.is_set():
+                return True
+            if self._pending_resubscribe:
+                self._pending_resubscribe = False
+                logger.info("Resyncing market subscriptions after IB reconnect (service heartbeat)")
+                return False
+            slice_rem = min(1.0, deadline - time.monotonic())
+            if slice_rem <= 0:
+                break
+            if await self._wait_session_or_stop(slice_rem):
+                return True
+        return False
+
     async def _run_connected_session(self, client: Any) -> None:
         await client.ensure_connected()
         self._reconnects = 0
         self._session_ib_client = client
         self._session_disconnected.clear()
+        self._pending_resubscribe = False
         self._status_tracker.update(
             slot="host",
             status="connected",
@@ -485,7 +510,7 @@ class IbIngestorApp:
                     wire = client.connected_snapshot()
                     self._push_health(connected=wire, last_msg_ts=time.time())
                     self._writer.set_subscriptions(set())
-                    if await self._wait_session_or_stop(WATCHLIST_POLL_SEC):
+                    if await self._wait_watchlist_interval_or_interrupt():
                         if self._session_disconnected.is_set():
                             logger.warning("IB disconnected during empty-watchlist wait — ending session for reconnect")
                         return
@@ -526,7 +551,7 @@ class IbIngestorApp:
                     self._max_subscriptions(),
                 )
 
-                if await self._wait_session_or_stop(WATCHLIST_POLL_SEC):
+                if await self._wait_watchlist_interval_or_interrupt():
                     if self._session_disconnected.is_set():
                         logger.warning("IB disconnected — ending session for reconnect")
                     return
@@ -602,6 +627,8 @@ class IbIngestorApp:
                             cl.ensure_connected(max_connect_attempts=1),
                             timeout=SERVICE_HEARTBEAT_CONNECT_TIMEOUT_SEC,
                         )
+                        # API may show connected again but reqMktData subscriptions are lost; re-apply soon.
+                        self._pending_resubscribe = True
                     except asyncio.TimeoutError:
                         logger.debug(
                             "IB ingestor service heartbeat reconnect timed out after %.0fs",

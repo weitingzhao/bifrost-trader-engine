@@ -1,14 +1,14 @@
 /**
  * Ops control plane API — Celery worker status, commands, audit.
  *
- * Base URL resolved via `getOpsApiBase()` (same routing pattern as massive/docs).
+ * Base URL resolved via `getOpsApiBaseForBrowser()` (same routing pattern as massive/docs).
  * All responses follow { ok, ...payload } convention.
  */
 
-import { getOpsApiBase, joinServiceBase } from '../shared/constants'
+import { getOpsApiBaseForBrowser, joinServiceBase } from '../shared/constants'
 
 function opsBase(): string {
-  return getOpsApiBase()
+  return getOpsApiBaseForBrowser()
 }
 
 const OPS_TOKEN_KEY = 'bifrost_ops_token'
@@ -54,6 +54,50 @@ async function parseJsonResponse<T>(r: Response): Promise<T> {
     )
   }
 }
+
+/** Avoids hanging forever when nginx proxy_read_timeout is very large and the server never responds. */
+function isAbortError(e: unknown): boolean {
+  return (
+    (typeof DOMException !== 'undefined' && e instanceof DOMException && e.name === 'AbortError') ||
+    (e instanceof Error && e.name === 'AbortError')
+  )
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const t0 = typeof performance !== 'undefined' ? performance.now() : 0
+  let pathname = url
+  try {
+    pathname =
+      typeof window !== 'undefined'
+        ? new URL(url, window.location.href).pathname
+        : new URL(url, 'http://localhost').pathname
+  } catch {
+    pathname = '/ops/market-ingest/control'
+  }
+  const controller = new AbortController()
+  const id = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } catch (e) {
+    if (isAbortError(e)) {
+      const elapsed =
+        typeof performance !== 'undefined' ? Math.round(performance.now() - t0) : timeoutMs
+      throw new Error(
+        `Timed out after ${Math.round(timeoutMs / 1000)}s (client abort). pathname=${pathname} clientElapsedMs=${elapsed}. If journalctl on bifrost-ops shows this request finished in seconds, the stall is likely between Ops and the browser (proxy/nginx or TLS).`,
+      )
+    }
+    throw e
+  } finally {
+    clearTimeout(id)
+  }
+}
+
+/** Agent start can be ~45s UDS read budget + padding; stop/restart can be longer. */
+const MARKET_INGEST_CONTROL_TIMEOUT_MS = 120_000
 
 /** FastAPI may use `detail` (string or validation array); our routers use `error`. */
 export function opsControlFailureMessage(data: unknown, r: Response): string {
@@ -368,11 +412,15 @@ export async function controlMarketIngest(
   result?: Record<string, unknown>
   error?: string
 }> {
-  const r = await fetch(`${opsBase()}/ops/market-ingest/control`, {
-    method: 'POST',
-    headers: jsonAuthHeaders(),
-    body: JSON.stringify({ service_id: serviceId, action }),
-  })
+  const r = await fetchWithTimeout(
+    `${opsBase()}/ops/market-ingest/control`,
+    {
+      method: 'POST',
+      headers: jsonAuthHeaders(),
+      body: JSON.stringify({ service_id: serviceId, action }),
+    },
+    MARKET_INGEST_CONTROL_TIMEOUT_MS,
+  )
   const data = await parseJsonResponse<{
     ok?: boolean
     error?: string

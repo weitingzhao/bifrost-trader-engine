@@ -83,6 +83,13 @@ def _parse_bool(val: Any) -> Optional[bool]:
     return None
 
 
+def _text_or_empty(val: Any) -> str:
+    """Non-null string for NOT NULL text columns when the API omits the field."""
+    if val is None:
+        return ""
+    return str(val).strip()
+
+
 def row_from_ticker_list_item(row: Dict[str, Any]) -> Dict[str, Any]:
     """Map All Tickers ``results[]`` item → column dict."""
     sym = (row.get("ticker") or row.get("symbol") or "").strip().upper()
@@ -93,6 +100,7 @@ def row_from_ticker_list_item(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "symbol": sym,
         "name": (row.get("name") or "").strip() or None,
+        "sector": _text_or_empty(row.get("sector")),
         "exchange": ex,
         "instrument_type": (row.get("type") or "").strip() or None,
         "active": _parse_bool(row.get("active")),
@@ -149,6 +157,9 @@ def row_from_ticker_detail(body: Dict[str, Any]) -> Dict[str, Any]:
     tr = (d.get("ticker_root") or "").strip() or None
     if tr:
         out["ticker_root"] = tr
+    sec = _text_or_empty(d.get("sector"))
+    if sec:
+        out["sector"] = sec
     return out
 
 
@@ -160,9 +171,12 @@ def upsert_stock_row(cur: Any, cols: Dict[str, Any]) -> int:
     now = datetime.now(timezone.utc)
     cols = dict(cols)
     cols["reference_updated_at"] = now
+    if cols.get("sector") is None:
+        cols["sector"] = ""
     fields = [
         "symbol",
         "name",
+        "sector",
         "exchange",
         "instrument_type",
         "active",
@@ -194,6 +208,7 @@ def upsert_stock_row(cur: Any, cols: Dict[str, Any]) -> int:
     placeholders = ", ".join(["%s"] * len(fields))
     update_parts = [
         "name = COALESCE(EXCLUDED.name, stocks.name)",
+        "sector = COALESCE(NULLIF(EXCLUDED.sector, ''), stocks.sector)",
         "exchange = COALESCE(EXCLUDED.exchange, stocks.exchange)",
         "instrument_type = COALESCE(EXCLUDED.instrument_type, stocks.instrument_type)",
         "active = COALESCE(EXCLUDED.active, stocks.active)",

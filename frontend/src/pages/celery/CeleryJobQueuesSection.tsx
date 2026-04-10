@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import {
   deleteAllBarsJobs,
   deleteAllMassiveJobs,
@@ -89,6 +89,27 @@ function CeleryQueueTrashIcon({ size = CELERY_QUEUE_ICON_PX }: { size?: number }
   )
 }
 
+/** Distinct from trash — circle + X (failed rows purge). */
+function CeleryQueueDeleteFailedIcon({ size = CELERY_QUEUE_ICON_PX }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={CELERY_QUEUE_ICON_STROKE}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="9" />
+      <line x1="9" y1="9" x2="15" y2="15" />
+      <line x1="15" y1="9" x2="9" y2="15" />
+    </svg>
+  )
+}
+
 function CeleryQueueRefreshIcon({ size = CELERY_QUEUE_ICON_PX }: { size?: number }) {
   return (
     <svg
@@ -159,9 +180,20 @@ export interface CeleryJobQueuesSectionProps {
   onProvideJobListReload?: (fn: (clearedQueue?: string) => void) => void
 }
 
-export function CeleryJobQueuesSection(props: CeleryJobQueuesSectionProps = {}) {
+export type CeleryJobQueuesSectionHandle = {
+  navigateToQueue: (celeryQueue: string) => void
+  navigateToQueueWithStatus: (
+    celeryQueue: string,
+    status: 'pending' | 'running' | 'done' | 'failed',
+  ) => void
+}
+
+export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, CeleryJobQueuesSectionProps>(
+  function CeleryJobQueuesSection(props, ref) {
   const { onJobCountsChanged, onProvideJobListReload } = props
   const [queueTabs, setQueueTabs] = useState<JobQueueTab[]>(FALLBACK_JOB_QUEUE_TABS)
+  const queueTabsRef = useRef(queueTabs)
+  queueTabsRef.current = queueTabs
   const [activeTabId, setActiveTabId] = useState<string>(FALLBACK_JOB_QUEUE_TABS[0].id)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [limit, setLimit] = useState<number>(25)
@@ -184,6 +216,22 @@ export function CeleryJobQueuesSection(props: CeleryJobQueuesSectionProps = {}) 
     confirmLabel?: string
     action: () => Promise<void>
   } | null>(null)
+
+  useImperativeHandle(ref, () => ({
+    navigateToQueue: (celeryQueue: string) => {
+      const q = String(celeryQueue).trim()
+      const tab = queueTabsRef.current.find(t => t.celeryQueue === q)
+      if (tab) setActiveTabId(tab.id)
+    },
+    navigateToQueueWithStatus: (celeryQueue: string, status) => {
+      const q = String(celeryQueue).trim()
+      const tab = queueTabsRef.current.find(t => t.celeryQueue === q)
+      if (tab) {
+        setActiveTabId(tab.id)
+        setStatusFilter(status)
+      }
+    },
+  }))
 
   useEffect(() => {
     void (async () => {
@@ -279,30 +327,51 @@ export function CeleryJobQueuesSection(props: CeleryJobQueuesSectionProps = {}) 
     else void loadBarsQueue()
   }
 
-  const openDeleteAll = () => {
+  const openDeleteDone = () => {
     if (!activeTab) return
-    const scope =
-      statusFilter === 'all'
-        ? 'all jobs in this queue slice'
-        : `all jobs with status “${statusFilter}”`
     setConfirm({
       title:
         activeTab.pipeline === 'bars'
-          ? 'Delete bars backfill jobs'
-          : `Delete Massive jobs (queue “${activeTab.celeryQueue}”)`,
-      message: `This will permanently delete ${scope}. This cannot be undone.`,
+          ? 'Delete done bars backfill jobs'
+          : `Delete done Massive jobs (queue “${activeTab.celeryQueue}”)`,
+      message:
+        'This will permanently delete all rows with status done in this queue slice. This cannot be undone.',
       confirming: false,
       action: async () => {
         if (activeTab.pipeline === 'massive') {
-          const r = await deleteAllMassiveJobs(
-            statusFilter === 'all' ? null : statusFilter,
-            activeTab.celeryQueue,
-          )
+          const r = await deleteAllMassiveJobs('done', activeTab.celeryQueue)
           if (!r.ok) throw new Error(r.error ?? 'Delete failed')
           setActionMsg({ text: `Deleted ${r.deleted} job(s).`, isErr: false })
           await loadMassiveQueue(activeTab.celeryQueue)
         } else {
-          const r = await deleteAllBarsJobs(statusFilter === 'all' ? null : statusFilter)
+          const r = await deleteAllBarsJobs('done')
+          if (!r.ok) throw new Error(r.error ?? 'Delete failed')
+          setActionMsg({ text: `Deleted ${r.deleted} job(s).`, isErr: false })
+          await loadBarsQueue()
+        }
+        void onJobCountsChanged?.()
+      },
+    })
+  }
+
+  const openDeleteFailed = () => {
+    if (!activeTab) return
+    setConfirm({
+      title:
+        activeTab.pipeline === 'bars'
+          ? 'Delete failed bars backfill jobs'
+          : `Delete failed Massive jobs (queue “${activeTab.celeryQueue}”)`,
+      message:
+        'This will permanently delete all rows with status failed in this queue slice. This cannot be undone.',
+      confirming: false,
+      action: async () => {
+        if (activeTab.pipeline === 'massive') {
+          const r = await deleteAllMassiveJobs('failed', activeTab.celeryQueue)
+          if (!r.ok) throw new Error(r.error ?? 'Delete failed')
+          setActionMsg({ text: `Deleted ${r.deleted} job(s).`, isErr: false })
+          await loadMassiveQueue(activeTab.celeryQueue)
+        } else {
+          const r = await deleteAllBarsJobs('failed')
           if (!r.ok) throw new Error(r.error ?? 'Delete failed')
           setActionMsg({ text: `Deleted ${r.deleted} job(s).`, isErr: false })
           await loadBarsQueue()
@@ -364,7 +433,7 @@ export function CeleryJobQueuesSection(props: CeleryJobQueuesSectionProps = {}) 
       <div className="celery-queues-header">
         <h3 id="celery-queues-head" className="page-title-with-tooltip" style={{ margin: 0 }}>
           Queues
-          <InfoTooltip text="Queue summary (above main tabs) shows all queues. Tabs follow ops.worker_profiles (GET /ops/workers/profiles). Each tab lists PostgreSQL jobs for that Celery queue: bars → job_bars_backfill; Massive* → job_massive_backfill filtered by routing. Delete/trim apply to the active queue slice only." />
+          <InfoTooltip text="Queue summary (above main tabs) shows all queues. Tabs follow ops.worker_profiles (GET /ops/workers/profiles). Each tab lists PostgreSQL jobs for that Celery queue: bars → job_bars_backfill; Massive* → job_massive_backfill filtered by routing. Delete done (trash icon) and Delete failed (circle with X) remove only those statuses in the active queue slice; trim applies to row age by ID." />
         </h3>
       </div>
 
@@ -447,12 +516,21 @@ export function CeleryJobQueuesSection(props: CeleryJobQueuesSectionProps = {}) 
         <div className="celery-queue-toolbar-spacer" />
         <button
           type="button"
-          className="celery-queue-icon-btn celery-queue-icon-btn--delete"
-          onClick={openDeleteAll}
-          title="Delete all jobs matching the current status filter"
-          aria-label="Delete all jobs matching the current status filter"
+          className="celery-queue-icon-btn celery-queue-icon-btn--delete-done"
+          onClick={openDeleteDone}
+          title="Delete all jobs with status done in this queue slice"
+          aria-label="Delete all jobs with status done in this queue slice"
         >
           <CeleryQueueTrashIcon />
+        </button>
+        <button
+          type="button"
+          className="celery-queue-icon-btn celery-queue-icon-btn--delete-failed"
+          onClick={openDeleteFailed}
+          title="Delete all jobs with status failed in this queue slice"
+          aria-label="Delete all jobs with status failed in this queue slice"
+        >
+          <CeleryQueueDeleteFailedIcon />
         </button>
         <div className="celery-queue-keep-group">
           <label className="celery-queue-field celery-queue-field--inline">
@@ -613,4 +691,6 @@ export function CeleryJobQueuesSection(props: CeleryJobQueuesSectionProps = {}) 
       ) : null}
     </section>
   )
-}
+})
+
+CeleryJobQueuesSection.displayName = 'CeleryJobQueuesSection'

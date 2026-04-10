@@ -1,8 +1,10 @@
 import {
   getServerApiBase,
+  getServerApiBaseForBrowser,
   getMassiveApiBase,
   getDocsApiBase,
   getOpsApiBase,
+  getOpsApiBaseForBrowser,
   getMarketApiBase,
   getResearchApiBase,
   initApiRouting,
@@ -11,9 +13,11 @@ import {
 
 export {
   getServerApiBase,
+  getServerApiBaseForBrowser,
   getMassiveApiBase,
   getDocsApiBase,
   getOpsApiBase,
+  getOpsApiBaseForBrowser,
   getMarketApiBase,
   getResearchApiBase,
   initApiRouting,
@@ -22,5 +26,5 @@ export {
 
 /** Main bifrost-server API prefix (empty = same origin). Set after `initApiRouting()` in main.tsx. */
 export function apiBase(): string {
-  return getServerApiBase()
+  return getServerApiBaseForBrowser()
 }

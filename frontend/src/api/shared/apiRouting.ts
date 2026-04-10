@@ -314,6 +314,62 @@ export function getOpsApiBase(): string {
   return opsBase
 }
 
+/** Map host so localhost / 127.0.0.1 / ::1 compare equal. */
+function _loopbackHostKey(hostname: string): string {
+  const h = hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1') {
+    return '__loopback__'
+  }
+  return h
+}
+
+/**
+ * Align configured API origin with the page (same nginx entry). When GET /health resolves
+ * ``http://127.0.0.1:port`` or ``http://localhost:port`` but the user opens the UI from a LAN
+ * host, fetch/EventSource would hit the wrong machine — SSE (system messages, log streams) never
+ * receives events even though Redis/backend on the server is fine.
+ */
+function _browserAlignApiBaseToPage(rawBase: string): string {
+  if (typeof window === 'undefined') {
+    return rawBase
+  }
+  const t = rawBase.trim()
+  if (!t) {
+    return rawBase
+  }
+  try {
+    const pageUrl = new URL(window.location.href)
+    const apiUrl = new URL(t.includes('://') ? t : `http://${t}`, window.location.origin)
+
+    const pageKey = _loopbackHostKey(pageUrl.hostname)
+    const apiKey = _loopbackHostKey(apiUrl.hostname)
+
+    if (pageKey !== apiKey) {
+      return ''
+    }
+
+    if (pageKey === '__loopback__') {
+      const pagePort = pageUrl.port || (pageUrl.protocol === 'https:' ? '443' : '80')
+      const apiPort = apiUrl.port || (apiUrl.protocol === 'https:' ? '443' : '80')
+      const apiIsBareDefaultPort = apiUrl.port === ''
+      if (apiIsBareDefaultPort && apiPort !== pagePort) {
+        return ''
+      }
+    }
+  } catch {
+    return rawBase
+  }
+  return rawBase
+}
+
+export function getServerApiBaseForBrowser(): string {
+  return _browserAlignApiBaseToPage(serverBase)
+}
+
+export function getOpsApiBaseForBrowser(): string {
+  return _browserAlignApiBaseToPage(opsBase)
+}
+
 export function getTradingApiBase(): string {
   return tradingBase
 }

@@ -1185,6 +1185,66 @@
   margin-bottom: var(--space-3);
 }
 
+/* Queue summary: jump to Job queues tab / status filter */
+button.dashboard-queue-summary-queue-nav {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  max-width: 100%;
+}
+button.dashboard-queue-summary-queue-nav:hover .dashboard-queue-name {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+button.dashboard-queue-summary-pg-nav {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0.1rem 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  cursor: pointer;
+  text-align: right;
+}
+button.dashboard-queue-summary-pg-nav:hover {
+  text-decoration: underline;
+  filter: brightness(1.08);
+}
+
+/* Queue summary Status lamp → Workers conditions / Console */
+button.dashboard-queue-summary-status-console-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+  vertical-align: middle;
+}
+button.dashboard-queue-summary-status-console-nav:hover {
+  filter: brightness(1.15);
+  transform: scale(1.08);
+}
+button.dashboard-queue-summary-status-console-nav:focus-visible {
+  outline: 2px solid var(--color-accent, #6ea8fe);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 /* Celery page: Massive + Bars queues (tabs, toolbar, confirm) */
 .celery-queue-tabs {
   display: flex;
@@ -1403,6 +1463,55 @@
   transform-origin: 50% 50%;
 }
 
+/* Delete done — wastebasket (distinct from failed purge icon) */
+.celery-queue-icon-btn--delete-done {
+  border: 1px solid color-mix(in srgb, var(--color-danger) 55%, var(--color-border));
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--color-danger) 90%, #fff) 0%,
+    var(--color-danger) 52%,
+    color-mix(in srgb, var(--color-danger) 90%, #1a0505) 100%
+  );
+  color: #fff;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.18) inset,
+    0 2px 8px color-mix(in srgb, var(--color-danger) 32%, transparent);
+}
+.celery-queue-icon-btn--delete-done:hover {
+  filter: brightness(1.05);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.2) inset,
+    0 3px 12px color-mix(in srgb, var(--color-danger) 40%, transparent);
+}
+.celery-queue-icon-btn--delete-done:active {
+  filter: brightness(0.97);
+}
+
+/* Delete failed — circle + X, amber/warning tone vs red trash */
+.celery-queue-icon-btn--delete-failed {
+  border: 1px solid color-mix(in srgb, #c2410c 50%, var(--color-border));
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, #ea580c 88%, #fff) 0%,
+    #c2410c 52%,
+    color-mix(in srgb, #9a3412 95%, #1a0a00) 100%
+  );
+  color: #fff8f0;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.16) inset,
+    0 2px 8px color-mix(in srgb, #c2410c 35%, transparent);
+}
+.celery-queue-icon-btn--delete-failed:hover {
+  filter: brightness(1.06);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.2) inset,
+    0 3px 12px color-mix(in srgb, #c2410c 42%, transparent);
+}
+.celery-queue-icon-btn--delete-failed:active {
+  filter: brightness(0.97);
+}
+
+/* Legacy alias — top queue summary / older markup */
 .celery-queue-icon-btn--delete {
   border: 1px solid color-mix(in srgb, var(--color-danger) 55%, var(--color-border));
   background: linear-gradient(

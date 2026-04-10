@@ -81,6 +81,27 @@ function TopQueueResetFailedIcon({ size = TOP_Q_ICON_PX }: { size?: number }) {
   )
 }
 
+/** Matches Job queues toolbar — circle + X (purge failed rows, not retry). */
+function TopQueueDeleteFailedIcon({ size = TOP_Q_ICON_PX }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={TOP_Q_ICON_STROKE}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="9" />
+      <line x1="9" y1="9" x2="15" y2="15" />
+      <line x1="15" y1="9" x2="9" y2="15" />
+    </svg>
+  )
+}
+
 function formatQueueLabel(name: string): string {
   if (name === 'massive_stocks_high') return 'Massive stocks (high priority)'
   if (name === 'massive_stocks') return 'Massive stocks'
@@ -105,7 +126,20 @@ export interface CeleryTopQueueSummaryProps {
   runtimeCeleryLamp: LampColor
   runtimeCeleryStatusText: string
   onClearDone: (row: AggregatedJobQueueSummaryRow) => void | Promise<void>
+  /** Permanently delete all failed rows for this queue slice (PostgreSQL). */
+  onDeleteFailed: (row: AggregatedJobQueueSummaryRow) => void | Promise<void>
   onResetFailed: (row: AggregatedJobQueueSummaryRow) => void | Promise<void>
+  /** Switch to Job queues tab and select the profile tab for this Celery queue name. */
+  onNavigateToJobQueue?: (celeryQueue: string) => void
+  /** Same tab + set status filter to Pending / Running / Done / Failed. */
+  onNavigateToJobQueueStatus?: (
+    celeryQueue: string,
+    status: 'pending' | 'running' | 'done' | 'failed',
+  ) => void
+  /** Status lamp: Workers conditions → Console (worker for this queue, else broker). */
+  onNavigateQueueCoverageConsole?: (celeryQueue: string) => void
+  /** Totals row Status lamp: Workers conditions → Broker console (aggregate). */
+  onNavigateAggregateCoverageConsole?: () => void
 }
 
 /**
@@ -125,7 +159,12 @@ export function CeleryTopQueueSummary({
   runtimeCeleryLamp,
   runtimeCeleryStatusText,
   onClearDone,
+  onDeleteFailed,
   onResetFailed,
+  onNavigateToJobQueue,
+  onNavigateToJobQueueStatus,
+  onNavigateQueueCoverageConsole,
+  onNavigateAggregateCoverageConsole,
 }: CeleryTopQueueSummaryProps) {
   const aggByQueue = useMemo(() => new Map(aggregatedRows.map(r => [r.celery_queue, r])), [aggregatedRows])
 
@@ -174,7 +213,7 @@ export function CeleryTopQueueSummary({
     >
       <h3 id="dashboard-celery-top-queue-summary-head" className="page-title-with-tooltip">
         Queue summary
-        <InfoTooltip text="Broker: Redis LLEN (pending messages) and Celery inspect counts (active + reserved for this routing key). PostgreSQL: job table rows by status per Celery queue (GET /ops/jobs/queues/summary). Extra Redis LIST keys appear as broker-only rows until listed in worker profiles." />
+        <InfoTooltip text="Broker: Redis LLEN (pending messages) and Celery inspect counts (active + reserved for this routing key). PostgreSQL: job table rows by status per Celery queue (GET /ops/jobs/queues/summary). Extra Redis LIST keys appear as broker-only rows until listed in worker profiles. Click a queue name to open the Job queues tab for that queue. Click Pending / Running / Done / Failed to open Job queues with that status filter; Alt+click the same cell to open Workers conditions → Console for that queue (worker if any consumes it, else broker). Click the Status lamp for the same Console shortcut." />
       </h3>
       {queueSummaryDb === false && (
         <p className="dashboard-queue-summary-hint">PostgreSQL job totals unavailable (check ops config or DB).</p>
@@ -188,7 +227,10 @@ export function CeleryTopQueueSummary({
           <table className="table-operations dashboard-queue-summary-table dashboard-celery-top-queue-summary-table">
             <thead>
               <tr>
-                <th style={{ width: 36 }}>Status</th>
+                <th style={{ width: 36 }}>
+                  Status
+                  <InfoTooltip text="Queue consumer coverage (Celery inspect). Click a row lamp to open Workers conditions → Console for that queue (worker that consumes it, else broker). Click the totals lamp for the broker console." />
+                </th>
                 <th style={{ width: 88 }}>
                   Host
                   <InfoTooltip text="Ops API stack from GET /ops/health (config_profile): Dev or Prod for this session." />
@@ -204,21 +246,24 @@ export function CeleryTopQueueSummary({
                 </th>
                 <th>
                   Pending
-                  <InfoTooltip text="PostgreSQL job rows with status pending for this queue slice." />
+                  <InfoTooltip text="PostgreSQL job rows with status pending for this queue slice. Click: Job queues filter. Alt+click: Workers conditions → Console for this queue." />
                 </th>
                 <th>
                   Running
-                  <InfoTooltip text="PostgreSQL job rows with status running for this queue slice." />
+                  <InfoTooltip text="PostgreSQL job rows with status running for this queue slice. Click: Job queues filter. Alt+click: Workers conditions → Console for this queue." />
                 </th>
                 <th>
                   Done
-                  <InfoTooltip text="PostgreSQL job rows with status done for this queue slice." />
+                  <InfoTooltip text="PostgreSQL job rows with status done for this queue slice. Click: Job queues filter. Alt+click: Workers conditions → Console for this queue." />
                 </th>
                 <th>
                   Failed
-                  <InfoTooltip text="PostgreSQL job rows with status failed for this queue slice." />
+                  <InfoTooltip text="PostgreSQL job rows with status failed for this queue slice. Click: Job queues filter. Alt+click: Workers conditions → Console for this queue." />
                 </th>
-                <th scope="col">Actions</th>
+                <th scope="col">
+                  Actions
+                  <InfoTooltip text="Clear done (trash): delete done rows. Delete failed (circle with X): permanently remove failed rows. Reset failed (arrows): re-queue failed jobs as pending." />
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -227,43 +272,162 @@ export function CeleryTopQueueSummary({
                 return (
                   <tr key={qs.name}>
                     <td>
-                      <span
-                        className={`title-inline-lamp lamp-icon ${qCov.lamp}`}
-                        title={qCov.title}
-                        aria-label={qCov.title}
-                        role="img"
-                      >
-                        <span aria-hidden>●</span>
-                      </span>
+                      {onNavigateQueueCoverageConsole ? (
+                        <button
+                          type="button"
+                          className={`dashboard-queue-summary-status-console-nav title-inline-lamp lamp-icon ${qCov.lamp}`}
+                          title={`${qCov.title} — Open Workers conditions → Console for this queue`}
+                          aria-label={`Open console for queue ${qs.name}: ${qCov.title}`}
+                          onClick={() => onNavigateQueueCoverageConsole(qs.name)}
+                        >
+                          <span aria-hidden>●</span>
+                        </button>
+                      ) : (
+                        <span
+                          className={`title-inline-lamp lamp-icon ${qCov.lamp}`}
+                          title={qCov.title}
+                          aria-label={qCov.title}
+                          role="img"
+                        >
+                          <span aria-hidden>●</span>
+                        </span>
+                      )}
                     </td>
                     <td title={opsHostEnvPillTitle}>
                       <OpsHostEnvPillBadge pill={opsHostEnvPill} className="dashboard-celery-env-pill" />
                     </td>
                     <td>
-                      <code className="dashboard-queue-name">{formatQueueLabel(qs.name)}</code>
-                      {qs.db_totals_shared ? (
-                        <span
-                          className="dashboard-queue-shared-mark"
-                          title="Broker/Celery inspect columns may mirror shared Massive aggregates from Ops; PostgreSQL columns are per-queue."
+                      {onNavigateToJobQueue ? (
+                        <button
+                          type="button"
+                          className="dashboard-queue-summary-queue-nav"
+                          title="Open Job queues tab for this queue"
+                          aria-label={`Open Job queues tab for queue ${qs.name}`}
+                          onClick={() => onNavigateToJobQueue(qs.name)}
                         >
-                          {' '}
-                          *
-                        </span>
-                      ) : null}
+                          <code className="dashboard-queue-name">{formatQueueLabel(qs.name)}</code>
+                          {qs.db_totals_shared ? (
+                            <span
+                              className="dashboard-queue-shared-mark"
+                              title="Broker/Celery inspect columns may mirror shared Massive aggregates from Ops; PostgreSQL columns are per-queue."
+                            >
+                              {' '}
+                              *
+                            </span>
+                          ) : null}
+                        </button>
+                      ) : (
+                        <>
+                          <code className="dashboard-queue-name">{formatQueueLabel(qs.name)}</code>
+                          {qs.db_totals_shared ? (
+                            <span
+                              className="dashboard-queue-shared-mark"
+                              title="Broker/Celery inspect columns may mirror shared Massive aggregates from Ops; PostgreSQL columns are per-queue."
+                            >
+                              {' '}
+                              *
+                            </span>
+                          ) : null}
+                        </>
+                      )}
                     </td>
                     <td>{loading ? '…' : fmtQueueCell(qs.pending_broker)}</td>
                     <td>{loading ? '…' : fmtQueueCell(qs.running_celery)}</td>
                     <td className="dashboard-celery-top-queue-summary-pg dashboard-celery-top-queue-summary-pg--pending">
-                      {loading ? '…' : agg ? fmtQueueCell(agg.counts.pending) : '—'}
+                      {loading ? (
+                        '…'
+                      ) : agg && onNavigateToJobQueueStatus ? (
+                        <button
+                          type="button"
+                          className="dashboard-queue-summary-pg-nav"
+                          title="Open Job queues: Pending filter (Alt+click: Console for this queue)"
+                          aria-label="Open Job queues with Pending status filter"
+                          onClick={e => {
+                            if (e.altKey && onNavigateQueueCoverageConsole) {
+                              e.preventDefault()
+                              onNavigateQueueCoverageConsole(agg.celery_queue)
+                              return
+                            }
+                            onNavigateToJobQueueStatus(agg.celery_queue, 'pending')
+                          }}
+                        >
+                          {fmtQueueCell(agg.counts.pending)}
+                        </button>
+                      ) : (
+                        (agg ? fmtQueueCell(agg.counts.pending) : '—')
+                      )}
                     </td>
                     <td className="dashboard-celery-top-queue-summary-pg dashboard-celery-top-queue-summary-pg--running">
-                      {loading ? '…' : agg ? fmtQueueCell(agg.counts.running) : '—'}
+                      {loading ? (
+                        '…'
+                      ) : agg && onNavigateToJobQueueStatus ? (
+                        <button
+                          type="button"
+                          className="dashboard-queue-summary-pg-nav"
+                          title="Open Job queues: Running filter (Alt+click: Console for this queue)"
+                          aria-label="Open Job queues with Running status filter"
+                          onClick={e => {
+                            if (e.altKey && onNavigateQueueCoverageConsole) {
+                              e.preventDefault()
+                              onNavigateQueueCoverageConsole(agg.celery_queue)
+                              return
+                            }
+                            onNavigateToJobQueueStatus(agg.celery_queue, 'running')
+                          }}
+                        >
+                          {fmtQueueCell(agg.counts.running)}
+                        </button>
+                      ) : (
+                        (agg ? fmtQueueCell(agg.counts.running) : '—')
+                      )}
                     </td>
                     <td className="dashboard-celery-top-queue-summary-pg dashboard-celery-top-queue-summary-pg--done">
-                      {loading ? '…' : agg ? fmtQueueCell(agg.counts.done) : '—'}
+                      {loading ? (
+                        '…'
+                      ) : agg && onNavigateToJobQueueStatus ? (
+                        <button
+                          type="button"
+                          className="dashboard-queue-summary-pg-nav"
+                          title="Open Job queues: Done filter (Alt+click: Console for this queue)"
+                          aria-label="Open Job queues with Done status filter"
+                          onClick={e => {
+                            if (e.altKey && onNavigateQueueCoverageConsole) {
+                              e.preventDefault()
+                              onNavigateQueueCoverageConsole(agg.celery_queue)
+                              return
+                            }
+                            onNavigateToJobQueueStatus(agg.celery_queue, 'done')
+                          }}
+                        >
+                          {fmtQueueCell(agg.counts.done)}
+                        </button>
+                      ) : (
+                        (agg ? fmtQueueCell(agg.counts.done) : '—')
+                      )}
                     </td>
                     <td className="dashboard-celery-top-queue-summary-pg dashboard-celery-top-queue-summary-pg--failed">
-                      {loading ? '…' : agg ? fmtQueueCell(agg.counts.failed) : '—'}
+                      {loading ? (
+                        '…'
+                      ) : agg && onNavigateToJobQueueStatus ? (
+                        <button
+                          type="button"
+                          className="dashboard-queue-summary-pg-nav"
+                          title="Open Job queues: Failed filter (Alt+click: Console for this queue)"
+                          aria-label="Open Job queues with Failed status filter"
+                          onClick={e => {
+                            if (e.altKey && onNavigateQueueCoverageConsole) {
+                              e.preventDefault()
+                              onNavigateQueueCoverageConsole(agg.celery_queue)
+                              return
+                            }
+                            onNavigateToJobQueueStatus(agg.celery_queue, 'failed')
+                          }}
+                        >
+                          {fmtQueueCell(agg.counts.failed)}
+                        </button>
+                      ) : (
+                        (agg ? fmtQueueCell(agg.counts.failed) : '—')
+                      )}
                     </td>
                     <td className="dashboard-celery-top-queue-summary-actions">
                       {agg ? (
@@ -281,6 +445,20 @@ export function CeleryTopQueueSummary({
                             onClick={() => void onClearDone(agg)}
                           >
                             <TopQueueClearDoneIcon />
+                          </button>
+                          <button
+                            type="button"
+                            className="celery-queue-icon-btn celery-queue-icon-btn--delete-failed"
+                            title="Permanently delete all rows with status failed for this queue (PostgreSQL)"
+                            aria-label="Delete failed jobs for this queue"
+                            disabled={
+                              loading ||
+                              actionBusyQueue === agg.celery_queue ||
+                              agg.counts.failed === 0
+                            }
+                            onClick={() => void onDeleteFailed(agg)}
+                          >
+                            <TopQueueDeleteFailedIcon />
                           </button>
                           <button
                             type="button"
@@ -307,14 +485,26 @@ export function CeleryTopQueueSummary({
               {merged.length > 0 ? (
                 <tr className="dashboard-queue-summary-totals-row">
                   <td>
-                    <span
-                      className={`title-inline-lamp lamp-icon ${runtimeCeleryLamp}`}
-                      title={runtimeCeleryStatusText}
-                      aria-label={runtimeCeleryStatusText}
-                      role="img"
-                    >
-                      <span aria-hidden>●</span>
-                    </span>
+                    {onNavigateAggregateCoverageConsole ? (
+                      <button
+                        type="button"
+                        className={`dashboard-queue-summary-status-console-nav title-inline-lamp lamp-icon ${runtimeCeleryLamp}`}
+                        title={`${runtimeCeleryStatusText} — Open Workers conditions → Broker console`}
+                        aria-label={`Open broker console: ${runtimeCeleryStatusText}`}
+                        onClick={() => onNavigateAggregateCoverageConsole()}
+                      >
+                        <span aria-hidden>●</span>
+                      </button>
+                    ) : (
+                      <span
+                        className={`title-inline-lamp lamp-icon ${runtimeCeleryLamp}`}
+                        title={runtimeCeleryStatusText}
+                        aria-label={runtimeCeleryStatusText}
+                        role="img"
+                      >
+                        <span aria-hidden>●</span>
+                      </span>
+                    )}
                   </td>
                   <td title={opsHostEnvPillTitle}>
                     <OpsHostEnvPillBadge pill={opsHostEnvPill} className="dashboard-celery-env-pill" />
