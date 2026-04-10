@@ -142,7 +142,8 @@ def get_massive_daily_checklist(
 @router.post("/research/massive/api-coverage/sync")
 def post_massive_api_coverage_sync() -> Dict[str, Any]:
     """Sync docs/plans/massive_api_coverage.html to frontend/public/plans for UI embed."""
-    root = Path(__file__).resolve().parents[2]
+    # routes.py is backend/massive/routers/ — repo root is parents[3], not parents[2] (backend/).
+    root = Path(__file__).resolve().parents[3]
     src = root / "docs" / "plans" / "massive_api_coverage.html"
     dst = root / "frontend" / "public" / "plans" / "massive_api_coverage.html"
     if not src.is_file():
@@ -163,7 +164,7 @@ def post_massive_api_coverage_sync() -> Dict[str, Any]:
 @router.post("/research/massive/stocks-api-coverage/sync")
 def post_massive_stocks_api_coverage_sync() -> Dict[str, Any]:
     """Sync docs/plans/massive_stocks_api_coverage.html to frontend/public/plans for UI embed."""
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[3]
     src = root / "docs" / "plans" / "massive_stocks_api_coverage.html"
     dst = root / "frontend" / "public" / "plans" / "massive_stocks_api_coverage.html"
     if not src.is_file():
@@ -548,7 +549,8 @@ def get_massive_ticker_types(
     return {"ok": True, "data": data}
 
 
-# ── Stock reference (PostgreSQL + Redis cache) ───────────────────────────────
+# ── Ticker reference (PostgreSQL + Redis cache) ─────────────────────────────
+# Paths under ``/reference/tickers/`` avoid collision with ``GET .../tickers/{ticker:path}`` (upstream proxy).
 
 
 def _pg_configured(request: Request) -> Optional[dict]:
@@ -558,17 +560,15 @@ def _pg_configured(request: Request) -> Optional[dict]:
     return db
 
 
-@router.get("/research/massive/stocks/search")
-def get_stock_reference_search(
+def _ticker_ref_search_impl(
     request: Request,
-    q: str = Query("", max_length=128),
-    limit: int = Query(20, ge=1, le=100),
+    q: str,
+    limit: int,
 ) -> Dict[str, Any]:
-    """Autocomplete over ``stocks`` (symbol prefix + name ILIKE)."""
     import psycopg2
 
     from src.persistence.postgres.connection import _get_conn_params
-    from src.persistence.postgres.stock_reference import search_stocks
+    from src.persistence.postgres.ticker_reference import search_tickers
     from src.vendor.massive.reference_cache_keys import (
         CACHE_TTL_SEARCH_SEC,
         key_search,
@@ -593,7 +593,7 @@ def get_stock_reference_search(
     conn = psycopg2.connect(**params)
     try:
         with conn.cursor() as cur:
-            rows = search_stocks(cur, q, limit)
+            rows = search_tickers(cur, q, limit)
     finally:
         conn.close()
     if rds and cache_key and nq:
@@ -604,13 +604,27 @@ def get_stock_reference_search(
     return {"ok": True, "cached": False, "results": rows}
 
 
-@router.get("/research/massive/stocks/{symbol}/related")
-def get_stock_reference_related(request: Request, symbol: str) -> Dict[str, Any]:
-    """Related tickers from ``stock_related_tickers`` (+ peer names from ``stocks``)."""
+@router.get("/research/massive/reference/tickers/search")
+def get_ticker_reference_search(request: Request, q: str = Query("", max_length=128), limit: int = Query(20, ge=1, le=100)) -> Dict[str, Any]:
+    """Autocomplete over ``tickers`` (ticker prefix + name ILIKE)."""
+    return _ticker_ref_search_impl(request, q, limit)
+
+
+@router.get("/research/massive/stocks/search")
+def get_stock_reference_search_legacy(
+    request: Request,
+    q: str = Query("", max_length=128),
+    limit: int = Query(20, ge=1, le=100),
+) -> Dict[str, Any]:
+    """Deprecated: use ``GET /research/massive/reference/tickers/search``."""
+    return _ticker_ref_search_impl(request, q, limit)
+
+
+def _ticker_ref_related_impl(request: Request, symbol: str) -> Dict[str, Any]:
     import psycopg2
 
     from src.persistence.postgres.connection import _get_conn_params
-    from src.persistence.postgres.stock_reference import fetch_related_with_names
+    from src.persistence.postgres.ticker_reference import fetch_related_with_names
     from src.vendor.massive.reference_cache_keys import (
         CACHE_TTL_PEERS_SEC,
         key_peers,
@@ -636,10 +650,10 @@ def get_stock_reference_related(request: Request, symbol: str) -> Dict[str, Any]
     conn = psycopg2.connect(**params)
     try:
         with conn.cursor() as cur:
-            sid, peers = fetch_related_with_names(cur, sym)
+            tid, peers = fetch_related_with_names(cur, sym)
     finally:
         conn.close()
-    payload = {"from_stocks_id": sid, "symbol": sym, "related": peers}
+    payload = {"from_tickers_id": tid, "symbol": sym, "ticker": sym, "related": peers}
     if rds:
         try:
             rds.setex(key_peers(sym), CACHE_TTL_PEERS_SEC, json.dumps(payload, default=str))
@@ -648,16 +662,26 @@ def get_stock_reference_related(request: Request, symbol: str) -> Dict[str, Any]
     return {"ok": True, "cached": False, "data": payload}
 
 
-@router.get("/research/massive/stocks/{symbol}")
-def get_stock_reference_detail(request: Request, symbol: str) -> Dict[str, Any]:
-    """Single row from ``stocks`` by symbol."""
+@router.get("/research/massive/reference/tickers/{ticker}/related")
+def get_ticker_reference_related(request: Request, ticker: str) -> Dict[str, Any]:
+    """Related tickers from ``ticker_related_tickers`` (+ peer names from ``tickers``)."""
+    return _ticker_ref_related_impl(request, ticker)
+
+
+@router.get("/research/massive/stocks/{symbol}/related")
+def get_stock_reference_related_legacy(request: Request, symbol: str) -> Dict[str, Any]:
+    """Deprecated: use ``GET /research/massive/reference/tickers/{ticker}/related``."""
+    return _ticker_ref_related_impl(request, symbol)
+
+
+def _ticker_ref_detail_impl(request: Request, symbol: str) -> Dict[str, Any]:
     import psycopg2
 
     from src.persistence.postgres.connection import _get_conn_params
-    from src.persistence.postgres.stock_reference import fetch_stock_detail_dict
+    from src.persistence.postgres.ticker_reference import fetch_ticker_detail_merged
     from src.vendor.massive.reference_cache_keys import (
-        CACHE_TTL_STOCK_SEC,
-        key_stock,
+        CACHE_TTL_TICKER_SEC,
+        key_ticker,
         normalize_symbol,
         redis_client_from_status_config,
     )
@@ -671,26 +695,41 @@ def get_stock_reference_detail(request: Request, symbol: str) -> Dict[str, Any]:
     rds = redis_client_from_status_config(cfg)
     if rds:
         try:
-            raw = rds.get(key_stock(sym))
+            raw = rds.get(key_ticker(sym))
             if raw:
-                return {"ok": True, "cached": True, "stock": json.loads(raw)}
+                return {"ok": True, "cached": True, "ticker": json.loads(raw)}
         except (json.JSONDecodeError, TypeError):
             pass
     params = _get_conn_params(cfg)
     conn = psycopg2.connect(**params)
     try:
         with conn.cursor() as cur:
-            row = fetch_stock_detail_dict(cur, sym)
+            row = fetch_ticker_detail_merged(cur, sym)
     finally:
         conn.close()
     if not row:
         return {"ok": False, "error": "Not found", "symbol": sym}
     if rds:
         try:
-            rds.setex(key_stock(sym), CACHE_TTL_STOCK_SEC, json.dumps(row, default=str))
+            rds.setex(key_ticker(sym), CACHE_TTL_TICKER_SEC, json.dumps(row, default=str))
         except Exception:
             pass
-    return {"ok": True, "cached": False, "stock": row}
+    return {"ok": True, "cached": False, "ticker": row}
+
+
+@router.get("/research/massive/reference/tickers/{ticker}")
+def get_ticker_reference_detail(request: Request, ticker: str) -> Dict[str, Any]:
+    """Single merged row from ``tickers`` + ``ticker_reference_details``."""
+    return _ticker_ref_detail_impl(request, ticker)
+
+
+@router.get("/research/massive/stocks/{symbol}")
+def get_stock_reference_detail_legacy(request: Request, symbol: str) -> Dict[str, Any]:
+    """Deprecated: use ``GET /research/massive/reference/tickers/{ticker}``."""
+    out = _ticker_ref_detail_impl(request, symbol)
+    if out.get("ok") and isinstance(out.get("ticker"), dict):
+        out["stock"] = out["ticker"]
+    return out
 
 
 @router.get("/research/massive/instrument-types")
@@ -703,7 +742,7 @@ def get_instrument_types_db(
     import psycopg2
 
     from src.persistence.postgres.connection import _get_conn_params
-    from src.persistence.postgres.stock_reference import list_instrument_types
+    from src.persistence.postgres.ticker_reference import list_instrument_types
     from src.vendor.massive.reference_cache_keys import (
         CACHE_TTL_INSTRUMENT_TYPES_SEC,
         key_instrument_types,
@@ -739,29 +778,32 @@ def get_instrument_types_db(
     return {"ok": True, "cached": False, "results": rows}
 
 
+@router.post("/research/massive/jobs/ticker-reference")
 @router.post("/research/massive/jobs/stock-reference")
-def post_jobs_stock_reference(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """Enqueue stock reference Celery job (``stock_reference_*`` kinds)."""
+def post_jobs_ticker_reference(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Enqueue ticker reference Celery job (``ticker_reference_*`` kinds; legacy ``stock_reference_*`` accepted)."""
     from src.vendor.massive.config import get_massive_settings
     from src.massive.tasks import run_massive_job
     from src.vendor.massive.reader import insert_job_massive_backfill, update_job_massive_backfill_celery_task_id
+    from src.persistence.postgres.ticker_reference import normalize_ticker_ref_kind
 
     reader = getattr(request.app.state, "reader", None)
     cfg = reader._config if reader else {}
     ms = get_massive_settings(cfg)
 
-    kind = (body.get("kind") or "").strip().lower()
+    kind_raw = (body.get("kind") or "").strip().lower()
+    kind = normalize_ticker_ref_kind(kind_raw)
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
     allowed = frozenset(
         {
-            "stock_reference_universe",
-            "stock_reference_overview",
-            "stock_reference_related",
-            "stock_reference_instrument_types",
+            "ticker_reference_universe",
+            "ticker_reference_overview",
+            "ticker_reference_related",
+            "ticker_reference_instrument_types",
         }
     )
     if kind not in allowed:
-        return {"ok": False, "error": f"Invalid kind; allowed: {sorted(allowed)}"}
+        return {"ok": False, "error": f"Invalid kind; allowed: {sorted(allowed)} (legacy stock_reference_* also accepted)"}
 
     if not ms["api_key"]:
         return {"ok": False, "error": "Massive API key not configured"}
@@ -991,16 +1033,18 @@ def get_massive_hist_trades(
 
 @router.post("/research/massive/sync")
 def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """Enqueue Celery job (queue depends on kind: options → massive/massive_high, stock ref → massive_stocks*)."""
+    """Enqueue Celery job (queue depends on kind: options → massive/massive_high, ticker ref → massive_stocks*)."""
     from src.vendor.massive.config import get_massive_settings
     from src.massive.tasks import run_massive_job
     from src.vendor.massive.reader import insert_job_massive_backfill, update_job_massive_backfill_celery_task_id
+    from src.persistence.postgres.ticker_reference import normalize_ticker_ref_kind
 
     reader = getattr(request.app.state, "reader", None)
     cfg = reader._config if reader else {}
     ms = get_massive_settings(cfg)
 
-    kind = (body.get("kind") or "").strip().lower()
+    kind_raw = (body.get("kind") or "").strip().lower()
+    kind = normalize_ticker_ref_kind(kind_raw)
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
     allowed = frozenset(
         {
@@ -1016,13 +1060,17 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
             "max_pain",
             "reconcile",
             "trim_jobs",
+            "ticker_reference_universe",
+            "ticker_reference_overview",
+            "ticker_reference_related",
+            "ticker_reference_instrument_types",
             "stock_reference_universe",
             "stock_reference_overview",
             "stock_reference_related",
             "stock_reference_instrument_types",
         }
     )
-    if kind not in allowed:
+    if kind_raw not in allowed:
         return {"ok": False, "error": f"Invalid kind; allowed: {sorted(allowed)}"}
 
     if kind == "trades" and not ms["trades_enabled"]:

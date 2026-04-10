@@ -11,7 +11,8 @@ import re
 from typing import Any, Optional
 
 # TTL seconds
-CACHE_TTL_STOCK_SEC = 3600
+CACHE_TTL_TICKER_SEC = 3600
+CACHE_TTL_STOCK_SEC = 3600  # deprecated alias
 CACHE_TTL_SEARCH_SEC = 120
 CACHE_TTL_INSTRUMENT_TYPES_SEC = 86400
 CACHE_TTL_PEERS_SEC = 1800
@@ -33,8 +34,13 @@ def normalize_search_key(q: str) -> str:
     return s or ""
 
 
+def key_ticker(symbol: str) -> str:
+    return f"{MASSIVE_INGESTOR_CACHE_PREFIX}:ticker:{normalize_symbol(symbol)}"
+
+
 def key_stock(symbol: str) -> str:
-    return f"{MASSIVE_INGESTOR_CACHE_PREFIX}:stock:{normalize_symbol(symbol)}"
+    """Deprecated: use ``key_ticker``."""
+    return key_ticker(symbol)
 
 
 def key_search(normalized_q: str) -> str:
@@ -55,14 +61,19 @@ def key_peers(symbol: str) -> str:
     return f"{MASSIVE_INGESTOR_CACHE_PREFIX}:peers:{normalize_symbol(symbol)}"
 
 
-def invalidate_stock_cache(rds: Any, symbol: str) -> None:
+def invalidate_ticker_cache(rds: Any, symbol: str) -> None:
     if not rds:
         return
     try:
-        rds.delete(key_stock(symbol))
+        rds.delete(key_ticker(symbol))
         rds.delete(key_peers(symbol))
     except Exception:
         pass
+
+
+def invalidate_stock_cache(rds: Any, symbol: str) -> None:
+    """Deprecated: use ``invalidate_ticker_cache``."""
+    invalidate_ticker_cache(rds, symbol)
 
 
 def redis_client_from_status_config(cfg: Any) -> Any:

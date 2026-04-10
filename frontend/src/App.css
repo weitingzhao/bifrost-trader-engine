@@ -8340,6 +8340,209 @@ th {
   margin-top: var(--space-3);
 }
 
+/* Stock Data — Reference jobs tracking sheet (Massive PostgreSQL enqueue) */
+.ref-jobs-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  justify-content: flex-end;
+  align-items: stretch;
+}
+
+.ref-jobs-sheet {
+  width: min(28rem, 100vw);
+  max-width: 100%;
+  background: var(--color-bg, var(--color-surface));
+  border-left: 1px solid var(--color-border);
+  padding: var(--space-4);
+  overflow-y: auto;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15);
+  outline: none;
+}
+
+.ref-jobs-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.ref-jobs-sheet-title {
+  margin: 0;
+  font-size: var(--text-h3, 1.1rem);
+}
+
+.ref-jobs-sheet-meta {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-sm, 0.875rem);
+  color: var(--color-text-muted);
+  line-height: 1.45;
+}
+
+.ref-jobs-sheet-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.ref-jobs-sheet-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-height: min(60vh, 28rem);
+  overflow-y: auto;
+  padding-right: var(--space-1);
+}
+
+.ref-jobs-sheet-empty {
+  margin: 0;
+  padding: var(--space-4) 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+.ref-jobs-sheet-row {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 6px);
+  background: var(--color-surface-elevated, var(--color-bg));
+}
+
+.ref-jobs-sheet-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.ref-jobs-sheet-kind {
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+}
+
+.ref-jobs-sheet-status {
+  font-size: var(--text-caption, 0.75rem);
+  font-weight: 600;
+  text-transform: lowercase;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+}
+
+.ref-jobs-sheet-status--ok {
+  color: var(--color-success, green);
+  background: color-mix(in srgb, var(--color-success, green) 12%, transparent);
+}
+
+.ref-jobs-sheet-status--err {
+  color: var(--color-danger, #c00);
+  background: color-mix(in srgb, var(--color-danger, #c00) 12%, transparent);
+}
+
+.ref-jobs-sheet-status--run {
+  color: var(--color-text-muted);
+  background: color-mix(in srgb, var(--color-text-muted) 14%, transparent);
+}
+
+.ref-jobs-sheet-badge {
+  font-size: var(--text-caption, 0.7rem);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
+
+.ref-jobs-sheet-row-id {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.ref-jobs-sheet-job-id {
+  font-size: var(--font-size-sm);
+  word-break: break-all;
+}
+
+.ref-jobs-sheet-err {
+  margin: 0 0 var(--space-2) !important;
+  font-size: var(--font-size-sm);
+}
+
+.ref-jobs-sheet-summary {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+
+.ref-jobs-sheet-details {
+  margin-top: var(--space-2);
+}
+
+.ref-jobs-sheet-footer {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.ref-jobs-sheet-footer-hint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.ref-jobs-sheet-link {
+  display: inline;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-link, var(--color-accent));
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ref-jobs-sheet-link:hover {
+  opacity: 0.9;
+}
+
+.feed-massive-refdb-jobs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.feed-massive-refdb-jobs-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ref-jobs-active-pill {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-text-muted) 8%, transparent);
+}
+
 /* Long option chain table: contain scroll inside layer 4 */
 #od-layer-4 .od-chain-table-wrap {
   max-height: min(70vh, 32rem);

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { StatusResponse } from '../types'
 import { fetchMassiveStatus, type MassiveStatusResponse } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
-import { MassiveStockReferenceDbSection } from './massive/MassiveStockReferenceDbSection'
+import { MassiveTickerReferenceDbSection } from './massive/MassiveTickerReferenceDbSection'
 
 interface MassiveStockCoveragePageProps {
   status: StatusResponse | null
@@ -73,9 +73,9 @@ export function MassiveStockCoveragePage({ status: _status }: MassiveStockCovera
       <section className="replay-section" aria-labelledby="massive-stock-coverage-refdb-title">
         <h3 id="massive-stock-coverage-refdb-title" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
           Reference (PostgreSQL)
-          <InfoTooltip text="Search and verify synced stock reference rows. Populate via Celery stock_reference_* jobs on massive_stocks queues." />
+          <InfoTooltip text="Search and verify synced ticker reference rows. Populate via Celery ticker_reference_* jobs on massive_stocks queues." />
         </h3>
-        <MassiveStockReferenceDbSection
+        <MassiveTickerReferenceDbSection
           panelId="massive-stock-coverage-refdb"
           ariaLabelledBy="massive-stock-coverage-refdb-title"
         />

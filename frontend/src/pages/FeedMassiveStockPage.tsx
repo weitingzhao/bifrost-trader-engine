@@ -26,7 +26,10 @@ import {
   type EffectiveServiceStatus,
 } from './massive/massiveStockChecklistStatus'
 import { FeedMassiveServiceBlock } from './massive/FeedMassiveServiceBlock'
-import { MassiveStockReferenceDbSection } from './massive/MassiveStockReferenceDbSection'
+import { MassiveTickerReferenceDbSection } from './massive/MassiveTickerReferenceDbSection'
+
+/** `frontend/public/plans/` — must respect Vite `base` so `/plans/...` works when not deployed at domain root. */
+const MASSIVE_STOCKS_COVERAGE_PLAN_URL = `${import.meta.env.BASE_URL}plans/massive_stocks_api_coverage.html`
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -890,7 +893,7 @@ export function FeedMassiveStockPage({
 
             {/* ── Reference (PostgreSQL) ───────────────────────────────────── */}
             {tkSubTab === 'reference_db' ? (
-              <MassiveStockReferenceDbSection
+              <MassiveTickerReferenceDbSection
                 panelId="feed-massive-stk-tk-panel-refdb"
                 ariaLabelledBy="feed-massive-stk-tk-tab-refdb"
               />
@@ -993,7 +996,7 @@ export function FeedMassiveStockPage({
           </div>
           <div className="feed-massive-api-coverage-actions">
             <a
-              href="/plans/massive_stocks_api_coverage.html"
+              href={MASSIVE_STOCKS_COVERAGE_PLAN_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="btn-secondary"
@@ -1034,7 +1037,7 @@ export function FeedMassiveStockPage({
           <div className="feed-massive-api-coverage-frame-wrap">
             <iframe
               title="Massive Stocks API coverage sheet"
-              src="/plans/massive_stocks_api_coverage.html?embed=1"
+              src={`${MASSIVE_STOCKS_COVERAGE_PLAN_URL}?embed=1`}
               className="feed-massive-api-coverage-iframe"
             />
           </div>

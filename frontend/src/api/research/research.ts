@@ -1276,9 +1276,10 @@ export async function fetchMassiveRelatedCompanies(ticker: string): Promise<Mass
   }
 }
 
-/** PostgreSQL-backed stock reference: search autocomplete. */
-export interface StockReferenceSearchRow {
-  stocks_id: number
+/** PostgreSQL-backed ticker reference: search autocomplete. */
+export interface TickerReferenceSearchRow {
+  tickers_id: number
+  ticker: string
   symbol: string
   name: string | null
   exchange: string | null
@@ -1287,19 +1288,22 @@ export interface StockReferenceSearchRow {
   active: boolean | null
 }
 
-export async function fetchStockReferenceSearch(opts: {
+/** @deprecated use TickerReferenceSearchRow */
+export type StockReferenceSearchRow = TickerReferenceSearchRow
+
+export async function fetchTickerReferenceSearch(opts: {
   q: string
   limit?: number
 }): Promise<{
   ok: boolean
-  results?: StockReferenceSearchRow[]
+  results?: TickerReferenceSearchRow[]
   cached?: boolean
   error?: string
 }> {
   const q = new URLSearchParams()
   q.set('q', opts.q)
   if (opts.limit != null) q.set('limit', String(opts.limit))
-  const r = await fetch(massiveUrl(`/research/massive/stocks/search?${q.toString()}`))
+  const r = await fetch(massiveUrl(`/research/massive/reference/tickers/search?${q.toString()}`))
   const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
   if (!j.ok) {
     return { ok: false, error: String(j.error ?? r.statusText) }
@@ -1307,36 +1311,52 @@ export async function fetchStockReferenceSearch(opts: {
   return {
     ok: true,
     cached: Boolean(j.cached),
-    results: (j.results as StockReferenceSearchRow[]) ?? [],
+    results: (j.results as TickerReferenceSearchRow[]) ?? [],
   }
 }
 
+/** @deprecated use fetchTickerReferenceSearch */
+export const fetchStockReferenceSearch = fetchTickerReferenceSearch
+
+export async function fetchTickerReferenceDetail(symbol: string): Promise<{
+  ok: boolean
+  ticker?: Record<string, unknown>
+  cached?: boolean
+  error?: string
+}> {
+  const r = await fetch(
+    massiveUrl(`/research/massive/reference/tickers/${encodeURIComponent(symbol.trim())}`),
+  )
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  if (!j.ok) {
+    return { ok: false, error: String(j.error ?? r.statusText) }
+  }
+  return {
+    ok: true,
+    cached: Boolean(j.cached),
+    ticker: typeof j.ticker === 'object' && j.ticker != null ? (j.ticker as Record<string, unknown>) : undefined,
+  }
+}
+
+/** @deprecated use fetchTickerReferenceDetail */
 export async function fetchStockReferenceDetail(symbol: string): Promise<{
   ok: boolean
   stock?: Record<string, unknown>
   cached?: boolean
   error?: string
 }> {
-  const r = await fetch(massiveUrl(`/research/massive/stocks/${encodeURIComponent(symbol.trim())}`))
-  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
-  if (!j.ok) {
-    return { ok: false, error: String(j.error ?? r.statusText) }
-  }
-  return {
-    ok: true,
-    cached: Boolean(j.cached),
-    stock: typeof j.stock === 'object' && j.stock != null ? (j.stock as Record<string, unknown>) : undefined,
-  }
+  const r = await fetchTickerReferenceDetail(symbol)
+  return { ...r, stock: r.ticker }
 }
 
-export async function fetchStockReferenceRelated(symbol: string): Promise<{
+export async function fetchTickerReferenceRelated(symbol: string): Promise<{
   ok: boolean
   data?: Record<string, unknown>
   cached?: boolean
   error?: string
 }> {
   const r = await fetch(
-    massiveUrl(`/research/massive/stocks/${encodeURIComponent(symbol.trim())}/related`),
+    massiveUrl(`/research/massive/reference/tickers/${encodeURIComponent(symbol.trim())}/related`),
   )
   const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
   if (!j.ok) {
@@ -1349,8 +1369,11 @@ export async function fetchStockReferenceRelated(symbol: string): Promise<{
   }
 }
 
+/** @deprecated use fetchTickerReferenceRelated */
+export const fetchStockReferenceRelated = fetchTickerReferenceRelated
+
 /** Instrument types from ``ticker_instrument_types`` (synced via jobs). */
-export async function fetchStockReferenceInstrumentTypes(opts?: {
+export async function fetchTickerReferenceInstrumentTypes(opts?: {
   asset_class?: string
   locale?: string
 }): Promise<{
@@ -1375,18 +1398,28 @@ export async function fetchStockReferenceInstrumentTypes(opts?: {
   }
 }
 
-export type StockReferenceJobKind =
+/** @deprecated use fetchTickerReferenceInstrumentTypes */
+export const fetchStockReferenceInstrumentTypes = fetchTickerReferenceInstrumentTypes
+
+export type TickerReferenceJobKind =
+  | 'ticker_reference_universe'
+  | 'ticker_reference_overview'
+  | 'ticker_reference_related'
+  | 'ticker_reference_instrument_types'
   | 'stock_reference_universe'
   | 'stock_reference_overview'
   | 'stock_reference_related'
   | 'stock_reference_instrument_types'
 
-export async function postStockReferenceJob(body: {
-  kind: StockReferenceJobKind
+/** @deprecated use TickerReferenceJobKind */
+export type StockReferenceJobKind = TickerReferenceJobKind
+
+export async function postTickerReferenceJob(body: {
+  kind: TickerReferenceJobKind
   payload?: Record<string, unknown>
   priority?: string
 }): Promise<{ ok: boolean; job_id?: string; deduplicated?: boolean; error?: string }> {
-  const r = await fetch(massiveUrl('/research/massive/jobs/stock-reference'), {
+  const r = await fetch(massiveUrl('/research/massive/jobs/ticker-reference'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -1401,6 +1434,9 @@ export async function postStockReferenceJob(body: {
     deduplicated: Boolean(j.deduplicated),
   }
 }
+
+/** @deprecated use postTickerReferenceJob */
+export const postStockReferenceJob = postTickerReferenceJob
 
 export interface TechnicalIndicatorParams {
   ticker: string

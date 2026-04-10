@@ -1,13 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import {
-  fetchStockReferenceDetail,
-  fetchStockReferenceInstrumentTypes,
-  fetchStockReferenceRelated,
-  fetchStockReferenceSearch,
-  postStockReferenceJob,
+  fetchTickerReferenceDetail,
+  fetchTickerReferenceInstrumentTypes,
+  fetchTickerReferenceRelated,
+  fetchTickerReferenceSearch,
+  postTickerReferenceJob,
   subscribeMassiveJobEvents,
 } from '../../api'
-import type { MassiveJobApiRow, StockReferenceJobKind, StockReferenceSearchRow } from '../../api'
+import type { TickerReferenceJobKind, TickerReferenceSearchRow } from '../../api'
+import { TickerReferenceJobsSheet } from './TickerReferenceJobsSheet'
+import {
+  MAX_REF_JOBS_TRACKED,
+  countActiveRefJobs,
+  isRefJobTerminal,
+  type RefJobTrackItem,
+} from './stockReferenceJobHelpers'
 
 const DEFAULT_REF_JOB_SYMBOLS = 'AAPL, MSFT, GOOGL'
 
@@ -18,27 +25,21 @@ function parseRefJobSymbols(raw: string): string[] {
     .filter(Boolean)
 }
 
-function summarizeRefJobResult(job: MassiveJobApiRow | undefined): string {
-  const r = job?.result as Record<string, unknown> | undefined
-  if (!r || typeof r !== 'object') return '—'
-  if (typeof r.error === 'string') return r.error
-  const summary = r.summary as Record<string, unknown> | undefined
-  if (summary && typeof summary === 'object') {
-    if (summary.rows_upserted != null) return `rows upserted ${String(summary.rows_upserted)}`
-    if (summary.pages != null) return `pages ${String(summary.pages)}`
+function trimRefJobItems(
+  items: RefJobTrackItem[],
+  closers: MutableRefObject<Map<string, () => void>>,
+): RefJobTrackItem[] {
+  if (items.length <= MAX_REF_JOBS_TRACKED) return items
+  const sorted = [...items].sort((a, b) => a.enqueuedAt - b.enqueuedAt)
+  while (sorted.length > MAX_REF_JOBS_TRACKED) {
+    const ev = sorted.shift()!
+    closers.current.get(ev.jobId)?.()
+    closers.current.delete(ev.jobId)
   }
-  if (r.total != null) return `rows ${String(r.total)}`
-  if (r.rows_written != null) return `rows ${String(r.rows_written)}`
-  if (r.rows_upserted != null) return `rows upserted ${String(r.rows_upserted)}`
-  if (r.message != null) return String(r.message)
-  try {
-    return JSON.stringify(r)
-  } catch {
-    return '—'
-  }
+  return sorted
 }
 
-export interface MassiveStockReferenceDbSectionProps {
+export interface MassiveTickerReferenceDbSectionProps {
   /** e.g. feed tab panel id */
   panelId?: string
   /** e.g. feed tab id for aria-labelledby */
@@ -48,46 +49,78 @@ export interface MassiveStockReferenceDbSectionProps {
 }
 
 /**
- * PostgreSQL-backed stock reference: search, detail+related, instrument types.
+ * PostgreSQL-backed ticker reference: search, detail+related, instrument types.
  * Shared by Feed → Stock Data (Tickers → Reference DB) and Data Coverage → Stock Data.
  */
-export function MassiveStockReferenceDbSection({
+export function MassiveTickerReferenceDbSection({
   panelId = 'massive-stock-refdb-panel',
   ariaLabelledBy = 'massive-stock-refdb-heading',
   showInitControls = true,
-}: MassiveStockReferenceDbSectionProps) {
+}: MassiveTickerReferenceDbSectionProps) {
   const [q, setQ] = useState('A')
   const [sym, setSym] = useState('AAPL')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [searchRows, setSearchRows] = useState<StockReferenceSearchRow[]>([])
+  const [searchRows, setSearchRows] = useState<TickerReferenceSearchRow[]>([])
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null)
   const [related, setRelated] = useState<Record<string, unknown> | null>(null)
   const [typesRows, setTypesRows] = useState<Record<string, unknown>[] | null>(null)
 
   const [refJobSymbols, setRefJobSymbols] = useState(DEFAULT_REF_JOB_SYMBOLS)
-  const [jobBusy, setJobBusy] = useState<StockReferenceJobKind | null>(null)
+  const [jobBusy, setJobBusy] = useState<TickerReferenceJobKind | null>(null)
   const [jobMsg, setJobMsg] = useState<string | null>(null)
-  const [refJobWatch, setRefJobWatch] = useState<{
-    jobId: string
-    kind: StockReferenceJobKind
-    status: string
-    job?: MassiveJobApiRow
-    streamError?: string
-  } | null>(null)
-  const jobEventsCloseRef = useRef<(() => void) | null>(null)
+  const [refJobItems, setRefJobItems] = useState<RefJobTrackItem[]>([])
+  const [jobsSheetOpen, setJobsSheetOpen] = useState(false)
+
+  const sseClosersRef = useRef<Map<string, () => void>>(new Map())
 
   useEffect(
     () => () => {
-      jobEventsCloseRef.current?.()
-      jobEventsCloseRef.current = null
+      sseClosersRef.current.forEach(close => close())
+      sseClosersRef.current.clear()
     },
     [],
   )
 
+  const startJobStream = useCallback((jid: string) => {
+    if (sseClosersRef.current.has(jid)) return
+    const sub = subscribeMassiveJobEvents(
+      jid,
+      data => {
+        setRefJobItems(prev =>
+          prev.map(row => {
+            if (row.jobId !== jid) return row
+            if (!data.ok) {
+              sseClosersRef.current.delete(jid)
+              return {
+                ...row,
+                streamError: data.error ?? 'Job stream error',
+                status: 'failed',
+              }
+            }
+            const j = data.job
+            const st = (j?.status ?? '').trim() || 'running'
+            const stLower = st.toLowerCase()
+            if (stLower === 'done' || stLower === 'failed') {
+              sseClosersRef.current.delete(jid)
+            }
+            return {
+              ...row,
+              status: st,
+              job: j,
+              streamError: row.streamError,
+            }
+          }),
+        )
+      },
+      { timeoutSec: 600 },
+    )
+    sseClosersRef.current.set(jid, sub.close)
+  }, [])
+
   const enqueueOne = useCallback(
     async (
-      kind: StockReferenceJobKind,
+      kind: TickerReferenceJobKind,
       payload: Record<string, unknown>,
       priority?: string,
     ) => {
@@ -95,7 +128,7 @@ export function MassiveStockReferenceDbSection({
       setJobMsg(null)
       setErr(null)
       try {
-        const res = await postStockReferenceJob({
+        const res = await postTickerReferenceJob({
           kind,
           payload,
           ...(priority ? { priority } : {}),
@@ -105,47 +138,40 @@ export function MassiveStockReferenceDbSection({
           return
         }
         const tag = res.deduplicated ? `${res.job_id ?? '?'} (deduplicated)` : (res.job_id ?? '?')
-        setJobMsg(`Enqueued ${kind}: job ${tag}`)
+        setJobMsg(`Enqueued ${kind}: job ${tag}. Open Jobs for details.`)
         const jid = res.job_id
         if (jid) {
-          jobEventsCloseRef.current?.()
-          setRefJobWatch({
-            jobId: jid,
-            kind,
-            status: res.deduplicated ? 'deduplicated (waiting)' : 'enqueued',
-          })
-          const sub = subscribeMassiveJobEvents(
-            jid,
-            data => {
-              if (!data.ok) {
-                setRefJobWatch(prev =>
-                  prev && prev.jobId === jid
-                    ? {
-                        ...prev,
-                        streamError: data.error ?? 'Job stream error',
-                        status: 'failed',
-                      }
-                    : prev,
-                )
-                return
+          const now = Date.now()
+          setRefJobItems(prev => {
+            const idx = prev.findIndex(x => x.jobId === jid)
+            let next: RefJobTrackItem[]
+            if (idx >= 0) {
+              next = [...prev]
+              next[idx] = {
+                ...next[idx],
+                kind,
+                deduplicated: Boolean(res.deduplicated),
+                status: res.deduplicated ? 'deduplicated (waiting)' : 'enqueued',
+                streamError: undefined,
+                job: undefined,
+                enqueuedAt: next[idx].enqueuedAt,
               }
-              const j = data.job
-              const st = (j?.status ?? '').trim() || 'running'
-              setRefJobWatch(prev =>
-                prev && prev.jobId === jid
-                  ? {
-                      jobId: jid,
-                      kind,
-                      status: st,
-                      job: j,
-                      streamError: prev.streamError,
-                    }
-                  : prev,
-              )
-            },
-            { timeoutSec: 600 },
-          )
-          jobEventsCloseRef.current = sub.close
+            } else {
+              next = [
+                ...prev,
+                {
+                  jobId: jid,
+                  kind,
+                  deduplicated: Boolean(res.deduplicated),
+                  status: res.deduplicated ? 'deduplicated (waiting)' : 'enqueued',
+                  enqueuedAt: now,
+                },
+              ]
+            }
+            return trimRefJobItems(next, sseClosersRef)
+          })
+          setJobsSheetOpen(true)
+          startJobStream(jid)
         }
       } catch (e: unknown) {
         setErr(e instanceof Error ? e.message : String(e))
@@ -153,19 +179,29 @@ export function MassiveStockReferenceDbSection({
         setJobBusy(null)
       }
     },
-    [],
+    [startJobStream],
   )
+
+  const handleClearCompletedJobs = useCallback(() => {
+    setRefJobItems(prev => prev.filter(i => !isRefJobTerminal(i)))
+  }, [])
+
+  const handleClearAllJobs = useCallback(() => {
+    sseClosersRef.current.forEach(close => close())
+    sseClosersRef.current.clear()
+    setRefJobItems([])
+  }, [])
 
   const runEnqueueUniverse = useCallback(() => {
     void enqueueOne(
-      'stock_reference_universe',
+      'ticker_reference_universe',
       { max_pages: 3, limit: 1000, sort: 'ticker', order: 'asc' },
       'high',
     )
   }, [enqueueOne])
 
   const runEnqueueInstrumentTypes = useCallback(() => {
-    void enqueueOne('stock_reference_instrument_types', {}, 'high')
+    void enqueueOne('ticker_reference_instrument_types', {}, 'high')
   }, [enqueueOne])
 
   const runEnqueueOverview = useCallback(() => {
@@ -174,7 +210,7 @@ export function MassiveStockReferenceDbSection({
       setErr('Enter at least one symbol for the overview job')
       return
     }
-    void enqueueOne('stock_reference_overview', { mode: 'symbols', symbols })
+    void enqueueOne('ticker_reference_overview', { mode: 'symbols', symbols })
   }, [enqueueOne, refJobSymbols])
 
   const runEnqueueRelated = useCallback(() => {
@@ -183,7 +219,7 @@ export function MassiveStockReferenceDbSection({
       setErr('Enter at least one symbol for the related job')
       return
     }
-    void enqueueOne('stock_reference_related', { mode: 'symbols', symbols })
+    void enqueueOne('ticker_reference_related', { mode: 'symbols', symbols })
   }, [enqueueOne, refJobSymbols])
 
   const runSearch = useCallback(async () => {
@@ -196,7 +232,7 @@ export function MassiveStockReferenceDbSection({
     setErr(null)
     setSearchRows([])
     try {
-      const res = await fetchStockReferenceSearch({ q: qq, limit: 30 })
+      const res = await fetchTickerReferenceSearch({ q: qq, limit: 30 })
       if (!res.ok) {
         setErr(res.error ?? 'Request failed')
         return
@@ -221,8 +257,8 @@ export function MassiveStockReferenceDbSection({
     setRelated(null)
     try {
       const [d, rel] = await Promise.all([
-        fetchStockReferenceDetail(s),
-        fetchStockReferenceRelated(s),
+        fetchTickerReferenceDetail(s),
+        fetchTickerReferenceRelated(s),
       ])
       if (!d.ok) {
         setErr(d.error ?? 'Detail request failed')
@@ -232,7 +268,7 @@ export function MassiveStockReferenceDbSection({
         setErr(rel.error ?? 'Related request failed')
         return
       }
-      setDetail(d.stock ?? null)
+      setDetail((d.ticker as Record<string, unknown> | undefined) ?? null)
       setRelated(rel.data ?? null)
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -246,7 +282,7 @@ export function MassiveStockReferenceDbSection({
     setErr(null)
     setTypesRows(null)
     try {
-      const res = await fetchStockReferenceInstrumentTypes({ asset_class: 'stocks', locale: 'us' })
+      const res = await fetchTickerReferenceInstrumentTypes({ asset_class: 'stocks', locale: 'us' })
       if (!res.ok) {
         setErr(res.error ?? 'Request failed')
         return
@@ -261,6 +297,7 @@ export function MassiveStockReferenceDbSection({
 
   const anyJobBusy = jobBusy != null
   const disabledForJobs = busy || anyJobBusy
+  const activeJobCount = countActiveRefJobs(refJobItems)
 
   return (
     <div
@@ -271,16 +308,17 @@ export function MassiveStockReferenceDbSection({
     >
       <div className="feed-massive-agg-sub-doc">
         <p>
-          <strong>Use case:</strong> Query synced rows in PostgreSQL (<code>stocks</code>,{' '}
-          <code>stock_related_tickers</code>, <code>ticker_instrument_types</code>) with optional Redis cache.
-          Populate data via Celery jobs (<code>POST /research/massive/jobs/stock-reference</code>). Workers
-          must listen on <code>massive_stocks</code> / <code>massive_stocks_high</code> (priority), not the
-          options queues <code>massive</code> / <code>massive_high</code>.
+          <strong>Use case:</strong> Query synced rows in PostgreSQL (<code>tickers</code>,{' '}
+          <code>ticker_reference_details</code>, <code>ticker_related_tickers</code>,{' '}
+          <code>ticker_instrument_types</code>) with optional Redis cache. Populate data via Celery jobs (
+          <code>POST /research/massive/jobs/ticker-reference</code>). Workers must listen on{' '}
+          <code>massive_stocks</code> / <code>massive_stocks_high</code> (priority), not the options queues{' '}
+          <code>massive</code> / <code>massive_high</code>.
         </p>
         <p className="feed-massive-agg-sub-endpoint">
-          <code>GET /research/massive/stocks/search</code>
+          <code>GET /research/massive/reference/tickers/search</code>
           {' · '}
-          <code>GET /research/massive/stocks/&#123;symbol&#125;</code>
+          <code>GET /research/massive/reference/tickers/&#123;ticker&#125;</code>
           {' · '}
           <code>GET /research/massive/instrument-types</code>
         </p>
@@ -291,10 +329,22 @@ export function MassiveStockReferenceDbSection({
           className="feed-massive-refdb-jobs"
           style={{ marginTop: 'var(--space-3)' }}
           role="group"
-          aria-label="Enqueue stock reference Celery jobs"
+          aria-label="Enqueue ticker reference Celery jobs"
         >
-          <div className="form-label" style={{ marginBottom: 'var(--space-2)' }}>
-            Enqueue reference jobs
+          <div className="feed-massive-refdb-jobs-toolbar">
+            <div className="form-label" style={{ marginBottom: 0 }}>
+              Enqueue reference jobs
+            </div>
+            <div className="feed-massive-refdb-jobs-toolbar-actions">
+              {activeJobCount > 0 ? (
+                <span className="ref-jobs-active-pill" aria-live="polite">
+                  {activeJobCount} active
+                </span>
+              ) : null}
+              <button type="button" className="btn btn-secondary" onClick={() => setJobsSheetOpen(true)}>
+                Jobs
+              </button>
+            </div>
           </div>
           <div
             style={{
@@ -311,11 +361,11 @@ export function MassiveStockReferenceDbSection({
                   disabled={disabledForJobs}
                   onClick={runEnqueueUniverse}
                 >
-                  {jobBusy === 'stock_reference_universe' ? 'Enqueueing…' : 'Enqueue universe sync'}
+                  {jobBusy === 'ticker_reference_universe' ? 'Enqueueing…' : 'Enqueue universe sync'}
                 </button>
               </div>
               <p className="form-hint" style={{ marginTop: 'var(--space-1)', marginBottom: 0 }}>
-                <code>stock_reference_universe</code>: up to 3 pages (1000 rows/page, sort ticker asc). High priority
+                <code>ticker_reference_universe</code>: up to 3 pages (1000 rows/page, sort ticker asc). High priority
                 queue.
               </p>
             </div>
@@ -328,11 +378,11 @@ export function MassiveStockReferenceDbSection({
                   disabled={disabledForJobs}
                   onClick={runEnqueueInstrumentTypes}
                 >
-                  {jobBusy === 'stock_reference_instrument_types' ? 'Enqueueing…' : 'Enqueue instrument types'}
+                  {jobBusy === 'ticker_reference_instrument_types' ? 'Enqueueing…' : 'Enqueue instrument types'}
                 </button>
               </div>
               <p className="form-hint" style={{ marginTop: 'var(--space-1)', marginBottom: 0 }}>
-                <code>stock_reference_instrument_types</code>: fills <code>ticker_instrument_types</code>. High priority
+                <code>ticker_reference_instrument_types</code>: fills <code>ticker_instrument_types</code>. High priority
                 queue.
               </p>
             </div>
@@ -363,7 +413,7 @@ export function MassiveStockReferenceDbSection({
                   disabled={disabledForJobs}
                   onClick={runEnqueueOverview}
                 >
-                  {jobBusy === 'stock_reference_overview' ? 'Enqueueing…' : 'Enqueue ticker overview'}
+                  {jobBusy === 'ticker_reference_overview' ? 'Enqueueing…' : 'Enqueue ticker overview'}
                 </button>
                 <button
                   type="button"
@@ -371,12 +421,12 @@ export function MassiveStockReferenceDbSection({
                   disabled={disabledForJobs}
                   onClick={runEnqueueRelated}
                 >
-                  {jobBusy === 'stock_reference_related' ? 'Enqueueing…' : 'Enqueue related tickers'}
+                  {jobBusy === 'ticker_reference_related' ? 'Enqueueing…' : 'Enqueue related tickers'}
                 </button>
               </div>
               <p className="form-hint" style={{ marginTop: 'var(--space-1)', marginBottom: 0 }}>
-                <code>stock_reference_overview</code> and <code>stock_reference_related</code> use{' '}
-                <code>mode: symbols</code>. Related needs rows in <code>stocks</code> (from universe or overview).
+                <code>ticker_reference_overview</code> and <code>ticker_reference_related</code> use{' '}
+                <code>mode: symbols</code>. Related needs rows in <code>tickers</code> (from universe or overview).
               </p>
             </div>
           </div>
@@ -387,68 +437,6 @@ export function MassiveStockReferenceDbSection({
         <p className="status-page-msg ok" role="status" style={{ marginTop: 'var(--space-2)' }}>
           {jobMsg}
         </p>
-      ) : null}
-
-      {refJobWatch ? (
-        <div
-          className="feed-massive-refdb-job-watch"
-          style={{ marginTop: 'var(--space-3)' }}
-          role="region"
-          aria-label="Stock reference Celery job status"
-        >
-          <div className="form-label" style={{ marginBottom: 'var(--space-2)' }}>
-            Celery job result
-          </div>
-          <div
-            style={{
-              display: 'grid',
-              gap: 'var(--space-2)',
-              fontSize: 'var(--font-size-sm)',
-            }}
-          >
-            <div>
-              <span style={{ color: 'var(--color-text-muted)' }}>Job ID</span>{' '}
-              <code>{refJobWatch.jobId}</code>
-            </div>
-            <div>
-              <span style={{ color: 'var(--color-text-muted)' }}>Kind</span> <code>{refJobWatch.kind}</code>
-            </div>
-            <div>
-              <span style={{ color: 'var(--color-text-muted)' }}>Status</span>{' '}
-              <strong
-                style={{
-                  color:
-                    (refJobWatch.status || '').toLowerCase() === 'failed'
-                      ? 'var(--color-danger, #c00)'
-                      : (refJobWatch.status || '').toLowerCase() === 'done'
-                        ? 'var(--color-success, green)'
-                        : undefined,
-                }}
-              >
-                {refJobWatch.status}
-              </strong>
-            </div>
-            {refJobWatch.streamError ? (
-              <p className="status-page-msg err" role="alert" style={{ margin: 0 }}>
-                {refJobWatch.streamError}
-              </p>
-            ) : null}
-            <div>
-              <span style={{ color: 'var(--color-text-muted)' }}>Summary</span>{' '}
-              {summarizeRefJobResult(refJobWatch.job)}
-            </div>
-            {refJobWatch.job?.result != null ? (
-              <details className="feed-massive-details-debug" open>
-                <summary>Full result JSON</summary>
-                <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '14rem' }}>
-                  {typeof refJobWatch.job.result === 'string'
-                    ? refJobWatch.job.result
-                    : JSON.stringify(refJobWatch.job.result, null, 2)}
-                </pre>
-              </details>
-            ) : null}
-          </div>
-        </div>
       ) : null}
 
       <div className="feed-massive-form-grid">
@@ -505,7 +493,7 @@ export function MassiveStockReferenceDbSection({
 
       {detail ? (
         <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
-          <summary>Stock row</summary>
+          <summary>Ticker row</summary>
           <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '24rem' }}>
             {JSON.stringify(detail, null, 2)}
           </pre>
@@ -529,6 +517,14 @@ export function MassiveStockReferenceDbSection({
           </pre>
         </details>
       ) : null}
+
+      <TickerReferenceJobsSheet
+        open={jobsSheetOpen}
+        onClose={() => setJobsSheetOpen(false)}
+        items={refJobItems}
+        onClearCompleted={handleClearCompletedJobs}
+        onClearAll={handleClearAllJobs}
+      />
     </div>
   )
 }

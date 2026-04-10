@@ -1202,38 +1202,48 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
 
                 raise ValueError(f"unknown trades_quotes mode: {mode}")
 
-            if kind in (
-                "stock_reference_universe",
-                "stock_reference_overview",
-                "stock_reference_related",
-                "stock_reference_instrument_types",
-            ):
-                from src.persistence.postgres.stock_reference import (
+            _ticker_ref_kinds = frozenset(
+                {
+                    "ticker_reference_universe",
+                    "ticker_reference_overview",
+                    "ticker_reference_related",
+                    "ticker_reference_instrument_types",
+                    "stock_reference_universe",
+                    "stock_reference_overview",
+                    "stock_reference_related",
+                    "stock_reference_instrument_types",
+                }
+            )
+            if kind in _ticker_ref_kinds:
+                from src.persistence.postgres.ticker_reference import (
                     SYNC_KIND_UNIVERSE,
-                    all_stock_symbols,
+                    all_ticker_symbols,
                     get_reference_state,
-                    get_stocks_id_for_symbol,
+                    get_tickers_id_for_ticker,
                     next_cursor_from_api_response,
+                    normalize_ticker_ref_kind,
                     replace_instrument_types,
-                    replace_related_for_stocks_id,
+                    replace_related_for_tickers_id,
                     row_from_ticker_detail,
                     row_from_ticker_list_item,
                     symbols_needing_overview,
                     upsert_reference_state,
-                    upsert_stock_row,
+                    upsert_ticker_details_row,
+                    upsert_ticker_row,
                 )
                 from src.vendor.massive.reference_cache_keys import (
                     invalidate_search_caches,
-                    invalidate_stock_cache,
+                    invalidate_ticker_cache,
                     key_instrument_types,
                     key_peers,
                     redis_client_from_status_config,
                 )
 
+                kind = normalize_ticker_ref_kind(kind)
                 rds = redis_client_from_status_config(status_cfg)
                 cur = conn.cursor()
 
-                if kind == "stock_reference_universe":
+                if kind == "ticker_reference_universe":
                     max_pages = max(1, int(payload.get("max_pages") or 50))
                     reset = bool(payload.get("reset_cursor"))
                     cursor_in = (payload.get("cursor") or "").strip() or None
@@ -1270,7 +1280,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                             m = row_from_ticker_list_item(row if isinstance(row, dict) else {})
                             if not m:
                                 continue
-                            upsert_stock_row(cur, m)
+                            upsert_ticker_row(cur, m)
                             total += 1
                         conn.commit()
                         last_next = next_cursor_from_api_response(data)
@@ -1299,11 +1309,11 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                     return result
 
-                if kind == "stock_reference_overview":
+                if kind == "ticker_reference_overview":
                     mode = (payload.get("mode") or "stale").strip().lower()
                     stale_h = int(payload.get("stale_hours") or 720)
                     if mode == "all":
-                        syms = all_stock_symbols(cur)
+                        syms = all_ticker_symbols(cur)
                     elif mode == "symbols":
                         syms_raw = payload.get("symbols") or []
                         if isinstance(syms_raw, str):
@@ -1326,14 +1336,15 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                         if det.get("error"):
                             errors.append(f"{sym}: {det.get('error')}")
                             continue
-                        cols = row_from_ticker_detail(det)
-                        if not cols.get("symbol"):
-                            errors.append(f"{sym}: no symbol in response")
+                        tcols, dcols = row_from_ticker_detail(det)
+                        if not tcols.get("ticker"):
+                            errors.append(f"{sym}: no ticker in response")
                             continue
-                        upsert_stock_row(cur, cols)
+                        tid = upsert_ticker_row(cur, tcols)
+                        upsert_ticker_details_row(cur, tid, dcols)
                         conn.commit()
                         if rds:
-                            invalidate_stock_cache(rds, sym)
+                            invalidate_ticker_cache(rds, sym)
                         n_ok += 1
                     result = {
                         "ok": True,
@@ -1347,10 +1358,10 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                     return result
 
-                if kind == "stock_reference_related":
+                if kind == "ticker_reference_related":
                     mode = (payload.get("mode") or "symbols").strip().lower()
                     if mode == "all":
-                        syms = all_stock_symbols(cur)
+                        syms = all_ticker_symbols(cur)
                     else:
                         syms_raw = payload.get("symbols") or []
                         if isinstance(syms_raw, str):
@@ -1367,8 +1378,8 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     fetched_at = datetime.now(timezone.utc)
                     for sym in syms:
                         _rest_throttle()
-                        sid = get_stocks_id_for_symbol(cur, sym)
-                        if not sid:
+                        tid = get_tickers_id_for_ticker(cur, sym)
+                        if not tid:
                             continue
                         rel = client.fetch_related_companies(sym)
                         if rel.get("error"):
@@ -1376,10 +1387,10 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                         raw = rel.get("results") or []
                         if not isinstance(raw, list):
                             raw = []
-                        replace_related_for_stocks_id(cur, sid, raw, fetched_at)
+                        replace_related_for_tickers_id(cur, tid, raw, fetched_at)
                         conn.commit()
                         if rds:
-                            invalidate_stock_cache(rds, sym)
+                            invalidate_ticker_cache(rds, sym)
                             try:
                                 rds.delete(key_peers(sym))
                             except Exception:
@@ -1393,7 +1404,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                     return result
 
-                if kind == "stock_reference_instrument_types":
+                if kind == "ticker_reference_instrument_types":
                     ac = (payload.get("asset_class") or "").strip() or None
                     loc = (payload.get("locale") or "").strip() or None
                     data = client.fetch_ticker_types(asset_class=ac, locale=loc)

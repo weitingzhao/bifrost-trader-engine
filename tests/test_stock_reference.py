@@ -1,8 +1,8 @@
-"""Unit tests for stock reference mappers (Massive/Polygon-shaped dicts)."""
+"""Unit tests for ticker reference mappers (Massive/Polygon-shaped dicts)."""
 
 from __future__ import annotations
 
-from src.persistence.postgres.stock_reference import (
+from src.persistence.postgres.ticker_reference import (
     next_cursor_from_api_response,
     row_from_ticker_detail,
     row_from_ticker_list_item,
@@ -22,17 +22,24 @@ def test_row_from_ticker_list_item_maps_type_and_exchange():
             "cik": "0000320193",
         }
     )
-    assert row["symbol"] == "AAPL"
+    assert row["ticker"] == "AAPL"
     assert row["instrument_type"] == "CS"
     assert row["active"] is True
     assert row["primary_exchange"] == "XNAS"
-    assert row["exchange"] == "XNAS"
-    assert row["sector"] == ""
+    assert row["market"] == "stocks"
 
 
-def test_row_from_ticker_list_item_sector_from_api():
-    row = row_from_ticker_list_item({"ticker": "X", "name": "X Corp", "sector": "Technology"})
-    assert row["sector"] == "Technology"
+def test_row_from_ticker_list_item_currency_fields():
+    row = row_from_ticker_list_item(
+        {
+            "ticker": "X",
+            "name": "X",
+            "currency_symbol": "USD",
+            "base_currency_name": "US Dollar",
+        }
+    )
+    assert row["currency_symbol"] == "USD"
+    assert row["base_currency_name"] == "US Dollar"
 
 
 def test_row_from_ticker_detail_branding_and_address():
@@ -56,11 +63,11 @@ def test_row_from_ticker_detail_branding_and_address():
             "phone_number": "+1-555-0100",
         }
     }
-    out = row_from_ticker_detail(body)
-    assert out["symbol"] == "AAPL"
-    assert out["address_city"] == "Cupertino"
-    assert out["icon_url"] == "https://example.com/icon.png"
-    assert out["market_cap"] == 3e12
+    tcols, dcols = row_from_ticker_detail(body)
+    assert tcols["ticker"] == "AAPL"
+    assert dcols["address_city"] == "Cupertino"
+    assert dcols["icon_url"] == "https://example.com/icon.png"
+    assert dcols["market_cap"] == 3e12
 
 
 def test_next_cursor_from_next_url():

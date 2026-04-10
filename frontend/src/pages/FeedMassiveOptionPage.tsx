@@ -48,6 +48,8 @@ import { parseFeedMassiveSvcFromHash, parseFeedMassiveTabFromHash } from './mass
 
 const WS_VERIFY_CMD = 'python scripts/verify_massive_options_ws.py --config config/config.dev.yaml'
 
+const MASSIVE_OPTION_COVERAGE_PLAN_URL = `${import.meta.env.BASE_URL}plans/massive_api_coverage.html`
+
 function checklistRowById(id: string): ChecklistRow {
   const r = checklistRows.find(x => x.id === id)
   if (!r) throw new Error(`checklist row ${id}`)
@@ -1321,7 +1323,7 @@ export function FeedMassiveOptionPage({
           </div>
           <div className="feed-massive-api-coverage-actions">
             <a
-              href="/plans/massive_api_coverage.html"
+              href={MASSIVE_OPTION_COVERAGE_PLAN_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="btn-secondary"
@@ -1368,7 +1370,7 @@ export function FeedMassiveOptionPage({
           <div className="feed-massive-api-coverage-frame-wrap">
             <iframe
               title="Massive API coverage sheet"
-              src="/plans/massive_api_coverage.html?embed=1"
+              src={`${MASSIVE_OPTION_COVERAGE_PLAN_URL}?embed=1`}
               className="feed-massive-api-coverage-iframe"
             />
           </div>

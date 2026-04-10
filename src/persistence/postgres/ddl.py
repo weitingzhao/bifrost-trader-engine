@@ -428,112 +428,88 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS stock_min_symbol_period_time ON stock_min (symbol, period, bar_time DESC)"
         )
-        _log("stocks table (symbol reference)")
-        _log_table("stocks", "Stock symbol reference")
+        _log("tickers table (Massive reference universe)")
+        _log_table("tickers", "Ticker symbol reference (All Tickers)")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS stocks (
-                stocks_id bigserial PRIMARY KEY,
-                symbol text NOT NULL UNIQUE,
+            CREATE TABLE IF NOT EXISTS tickers (
+                tickers_id bigserial PRIMARY KEY,
+                ticker text NOT NULL UNIQUE,
                 name text,
-                exchange text,
-                created_at timestamptz DEFAULT now()
+                market text,
+                locale text,
+                primary_exchange text,
+                instrument_type text,
+                active boolean,
+                currency_name text,
+                currency_symbol text,
+                base_currency_name text,
+                base_currency_symbol text,
+                cik text,
+                composite_figi text,
+                share_class_figi text,
+                last_updated_utc timestamptz,
+                delisted_utc timestamptz,
+                created_at timestamptz DEFAULT now(),
+                updated_at timestamptz DEFAULT now()
             )
             """
         )
-        cur.execute("CREATE INDEX IF NOT EXISTS stocks_symbol ON stocks (symbol)")
-        # Legacy DBs may have an older ``stocks`` row shape (e.g. PK column ``id``, or symbol-only)
-        # without ``stocks_id``. FK from ``stock_related_tickers`` requires ``stocks(stocks_id)``.
+        cur.execute("CREATE INDEX IF NOT EXISTS tickers_ticker ON tickers (ticker)")
+        # Rename legacy Massive reference tables (idempotent; fresh DBs use CREATE below).
         cur.execute(
             """
             DO $$
-            DECLARE
-              pkc text;
             BEGIN
-              IF to_regclass('public.stocks') IS NULL THEN
-                RETURN;
+              IF to_regclass('public.ticker_reference_details') IS NOT NULL
+                 AND to_regclass('public.ticker_overview') IS NULL THEN
+                ALTER TABLE ticker_reference_details RENAME TO ticker_overview;
               END IF;
-              IF EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = 'stocks' AND column_name = 'stocks_id'
-              ) THEN
-                RETURN;
+              IF to_regclass('public.ticker_instrument_types') IS NOT NULL
+                 AND to_regclass('public.ticker_types') IS NULL THEN
+                ALTER TABLE ticker_instrument_types RENAME TO ticker_types;
+                IF EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'ticker_types'
+                    AND column_name = 'ticker_instrument_types_id'
+                ) THEN
+                  ALTER TABLE ticker_types RENAME COLUMN ticker_instrument_types_id TO ticker_types_id;
+                END IF;
+                IF EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'ticker_instrument_types_code') THEN
+                  ALTER INDEX ticker_instrument_types_code RENAME TO ticker_types_code;
+                END IF;
               END IF;
-
-              IF EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = 'stocks' AND column_name = 'id'
-              ) THEN
-                ALTER TABLE stocks RENAME COLUMN id TO stocks_id;
-                RETURN;
-              END IF;
-
-              ALTER TABLE stocks ADD COLUMN stocks_id bigserial;
-
-              SELECT c.conname INTO pkc
-              FROM pg_constraint c
-              JOIN pg_class t ON c.conrelid = t.oid
-              JOIN pg_namespace n ON t.relnamespace = n.oid
-              WHERE n.nspname = 'public' AND t.relname = 'stocks' AND c.contype = 'p'
-              LIMIT 1;
-
-              IF pkc IS NOT NULL THEN
-                EXECUTE format('ALTER TABLE stocks DROP CONSTRAINT %I', pkc);
-              END IF;
-
-              ALTER TABLE stocks ADD PRIMARY KEY (stocks_id);
-              CREATE UNIQUE INDEX IF NOT EXISTS stocks_symbol_uidx ON stocks (symbol);
             END $$;
             """
         )
-        # Base columns from canonical ``stocks`` DDL — legacy heaps may only have gotten
-        # ``stocks_id`` + ``symbol`` from the migration above, so add these if missing.
-        _stock_ref_cols = [
-            ("name", "text"),
-            ("exchange", "text"),
-            ("created_at", "timestamptz DEFAULT now()"),
-            ("instrument_type", "text"),
-            ("active", "boolean"),
-            ("list_date", "date"),
-            ("locale", "text"),
-            ("primary_exchange", "text"),
-            ("market", "text"),
-            ("currency_name", "text"),
-            ("cik", "text"),
-            ("composite_figi", "text"),
-            ("share_class_figi", "text"),
-            ("ticker_root", "text"),
-            ("sic_description", "text"),
-            ("market_cap", "double precision"),
-            ("total_employees", "integer"),
-            ("address_line1", "text"),
-            ("address_city", "text"),
-            ("address_state", "text"),
-            ("postal_code", "text"),
-            ("phone", "text"),
-            ("description", "text"),
-            ("icon_url", "text"),
-            ("logo_url", "text"),
-            ("reference_updated_at", "timestamptz"),
-        ]
-        for col, typ in _stock_ref_cols:
-            cur.execute(
-                f"""
-                DO $$
-                BEGIN
-                  IF NOT EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = 'public' AND table_name = 'stocks' AND column_name = '{col}'
-                  ) THEN
-                    ALTER TABLE stocks ADD COLUMN {col} {typ};
-                  END IF;
-                END $$;
-                """
-            )
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS ticker_instrument_types (
-                ticker_instrument_types_id bigserial PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS ticker_overview (
+                tickers_id bigint PRIMARY KEY REFERENCES tickers(tickers_id) ON DELETE CASCADE,
+                sector text NOT NULL DEFAULT '',
+                industry text NOT NULL DEFAULT '',
+                exchange text,
+                list_date date,
+                ticker_root text,
+                sic_description text,
+                market_cap double precision,
+                total_employees integer,
+                address_line1 text,
+                address_city text,
+                address_state text,
+                postal_code text,
+                phone text,
+                description text,
+                icon_url text,
+                logo_url text,
+                overview_updated_at timestamptz
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ticker_types (
+                ticker_types_id bigserial PRIMARY KEY,
                 code text NOT NULL,
                 description text,
                 asset_class text NOT NULL DEFAULT '',
@@ -544,29 +520,29 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             """
         )
         cur.execute(
-            "CREATE INDEX IF NOT EXISTS ticker_instrument_types_code ON ticker_instrument_types (code)"
+            "CREATE INDEX IF NOT EXISTS ticker_types_code ON ticker_types (code)"
         )
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS stock_related_tickers (
-                stock_related_tickers_id bigserial PRIMARY KEY,
-                from_stocks_id bigint NOT NULL REFERENCES stocks(stocks_id) ON DELETE CASCADE,
+            CREATE TABLE IF NOT EXISTS ticker_related_tickers (
+                ticker_related_tickers_id bigserial PRIMARY KEY,
+                from_tickers_id bigint NOT NULL REFERENCES tickers(tickers_id) ON DELETE CASCADE,
                 to_symbol text NOT NULL,
                 rank integer NOT NULL DEFAULT 0,
                 fetched_at timestamptz NOT NULL DEFAULT now(),
-                UNIQUE (from_stocks_id, to_symbol)
+                UNIQUE (from_tickers_id, to_symbol)
             )
             """
         )
         cur.execute(
-            "CREATE INDEX IF NOT EXISTS stock_related_from ON stock_related_tickers (from_stocks_id)"
+            "CREATE INDEX IF NOT EXISTS ticker_related_from ON ticker_related_tickers (from_tickers_id)"
         )
         cur.execute(
-            "CREATE INDEX IF NOT EXISTS stock_related_to_symbol ON stock_related_tickers (to_symbol)"
+            "CREATE INDEX IF NOT EXISTS ticker_related_to_symbol ON ticker_related_tickers (to_symbol)"
         )
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS job_stock_reference_state (
+            CREATE TABLE IF NOT EXISTS job_ticker_reference_state (
                 sync_kind text PRIMARY KEY,
                 last_cursor text,
                 status text,
@@ -575,12 +551,106 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             """
         )
         cur.execute(
-            "CREATE INDEX IF NOT EXISTS stocks_active ON stocks (active) WHERE active IS NOT NULL"
+            "CREATE INDEX IF NOT EXISTS tickers_active ON tickers (active) WHERE active IS NOT NULL"
         )
         cur.execute(
-            "CREATE INDEX IF NOT EXISTS stocks_primary_exchange ON stocks (primary_exchange)"
+            "CREATE INDEX IF NOT EXISTS tickers_primary_exchange ON tickers (primary_exchange)"
         )
-        cur.execute("CREATE INDEX IF NOT EXISTS stocks_instrument_type ON stocks (instrument_type)")
+        cur.execute("CREATE INDEX IF NOT EXISTS tickers_instrument_type ON tickers (instrument_type)")
+        # One-time: migrate legacy ``stocks`` / ``stock_related_tickers`` / ``job_stock_reference_state`` → new tables.
+        cur.execute(
+            """
+            DO $$
+            BEGIN
+              IF to_regclass('public.stocks') IS NULL THEN
+                RETURN;
+              END IF;
+              IF EXISTS (SELECT 1 FROM tickers LIMIT 1) THEN
+                DROP TABLE IF EXISTS stock_related_tickers CASCADE;
+                DROP TABLE IF EXISTS stocks CASCADE;
+                DROP TABLE IF EXISTS job_stock_reference_state CASCADE;
+                RETURN;
+              END IF;
+
+              INSERT INTO tickers (
+                ticker, name, market, locale, primary_exchange, instrument_type, active,
+                currency_name, currency_symbol, base_currency_name, base_currency_symbol,
+                cik, composite_figi, share_class_figi, last_updated_utc, delisted_utc,
+                created_at, updated_at
+              )
+              SELECT
+                upper(trim(symbol)),
+                name,
+                market,
+                locale,
+                primary_exchange,
+                instrument_type,
+                active,
+                currency_name,
+                NULL,
+                NULL,
+                NULL,
+                cik,
+                composite_figi,
+                share_class_figi,
+                NULL,
+                NULL,
+                COALESCE(created_at, now()),
+                COALESCE(reference_updated_at, created_at, now())
+              FROM stocks;
+
+              INSERT INTO ticker_overview (
+                tickers_id, sector, industry, exchange, list_date, ticker_root, sic_description,
+                market_cap, total_employees, address_line1, address_city, address_state, postal_code,
+                phone, description, icon_url, logo_url, overview_updated_at
+              )
+              SELECT
+                t.tickers_id,
+                '',
+                '',
+                s.exchange,
+                s.list_date,
+                s.ticker_root,
+                s.sic_description,
+                s.market_cap,
+                s.total_employees,
+                s.address_line1,
+                s.address_city,
+                s.address_state,
+                s.postal_code,
+                s.phone,
+                s.description,
+                s.icon_url,
+                s.logo_url,
+                COALESCE(s.reference_updated_at, now())
+              FROM tickers t
+              INNER JOIN stocks s ON t.ticker = upper(trim(s.symbol));
+
+              IF to_regclass('public.stock_related_tickers') IS NOT NULL THEN
+                INSERT INTO ticker_related_tickers (from_tickers_id, to_symbol, rank, fetched_at)
+                SELECT t.tickers_id, r.to_symbol, r.rank, r.fetched_at
+                FROM stock_related_tickers r
+                INNER JOIN stocks s ON s.stocks_id = r.from_stocks_id
+                INNER JOIN tickers t ON t.ticker = upper(trim(s.symbol));
+              END IF;
+
+              IF to_regclass('public.job_stock_reference_state') IS NOT NULL THEN
+                INSERT INTO job_ticker_reference_state (sync_kind, last_cursor, status, updated_at)
+                SELECT
+                  CASE sync_kind WHEN 'universe_stocks' THEN 'universe_tickers' ELSE sync_kind END,
+                  last_cursor,
+                  status,
+                  updated_at
+                FROM job_stock_reference_state
+                ON CONFLICT (sync_kind) DO NOTHING;
+              END IF;
+
+              DROP TABLE IF EXISTS stock_related_tickers CASCADE;
+              DROP TABLE IF EXISTS stocks CASCADE;
+              DROP TABLE IF EXISTS job_stock_reference_state CASCADE;
+            END $$;
+            """
+        )
         _log("option_day, option_min tables + indexes")
         _log_table("option_day", "Option daily OHLC bars")
         cur.execute(
