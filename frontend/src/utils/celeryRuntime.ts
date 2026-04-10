@@ -1,11 +1,18 @@
 /**
  * Celery runtime lamp + queue totals — aligned with Dashboard Runtime Snapshot / Ops API.
  * Supported queue names mirror backend.ops.services.worker_state.SUPPORTED_CELERY_QUEUES.
+ * Options: massive / massive_high. Stock reference: massive_stocks / massive_stocks_high.
  */
 
 import type { QueueSummaryRow, WorkerSummary } from '../api/ops/ops'
 
-export const SUPPORTED_CELERY_QUEUE_NAMES = ['bars', 'massive_high', 'massive'] as const
+export const SUPPORTED_CELERY_QUEUE_NAMES = [
+  'bars',
+  'massive_stocks_high',
+  'massive_stocks',
+  'massive_high',
+  'massive',
+] as const
 
 export type CeleryRuntimeLamp = 'green' | 'yellow' | 'red' | 'none'
 
@@ -45,8 +52,15 @@ export function computeCeleryRuntimeLamp(
   return 'green'
 }
 
+const MASSIVE_LIKE_QUEUE_NAMES = [
+  'massive',
+  'massive_high',
+  'massive_stocks',
+  'massive_stocks_high',
+] as const
+
 /**
- * Bars + one Massive row only — massive_high shares the same DB totals as massive (see Ops note).
+ * Bars + all Massive-like broker stats; DB done/failed from one Massive row (shared job table — see Ops note).
  */
 export function dedupedQueueSummaryTotals(rows: QueueSummaryRow[]): {
   pending_broker: number | null
@@ -55,26 +69,42 @@ export function dedupedQueueSummaryTotals(rows: QueueSummaryRow[]): {
   failed_db: number | null
 } {
   const bars = rows.find(r => r.name === 'bars')
-  const massive = rows.find(r => r.name === 'massive')
-  const fields = ['pending_broker', 'running_celery', 'done_db', 'failed_db'] as const
+  const massivePrimary =
+    rows.find(r => r.name === 'massive') ??
+    rows.find(r => MASSIVE_LIKE_QUEUE_NAMES.includes(r.name as (typeof MASSIVE_LIKE_QUEUE_NAMES)[number]))
+  const massiveLikeRows = MASSIVE_LIKE_QUEUE_NAMES.map(n => rows.find(r => r.name === n)).filter(
+    (x): x is QueueSummaryRow => x != null,
+  )
   const out = {
     pending_broker: null as number | null,
     running_celery: null as number | null,
     done_db: null as number | null,
     failed_db: null as number | null,
   }
-  for (const f of fields) {
-    let sum = 0
-    let has = false
-    for (const row of [bars, massive]) {
-      if (!row) continue
-      const v = row[f]
-      if (v != null && Number.isFinite(v)) {
-        sum += v
-        has = true
-      }
+  let pb = 0
+  let pbHas = false
+  let rc = 0
+  let rcHas = false
+  for (const row of [bars, ...massiveLikeRows]) {
+    if (!row) continue
+    const p = row.pending_broker
+    if (p != null && Number.isFinite(p)) {
+      pb += p
+      pbHas = true
     }
-    out[f] = has ? sum : null
+    const r = row.running_celery
+    if (r != null && Number.isFinite(r)) {
+      rc += r
+      rcHas = true
+    }
+  }
+  out.pending_broker = pbHas ? pb : null
+  out.running_celery = rcHas ? rc : null
+  if (massivePrimary) {
+    const d = massivePrimary.done_db
+    const f = massivePrimary.failed_db
+    out.done_db = d != null && Number.isFinite(d) ? d : null
+    out.failed_db = f != null && Number.isFinite(f) ? f : null
   }
   return out
 }

@@ -47,6 +47,28 @@ export interface CeleryControlPageProps {
 
 type LampColor = 'green' | 'yellow' | 'red' | 'none'
 
+/** Per-queue consumer coverage (Celery inspect + broker). */
+function queueCoverageLamp(
+  queueName: string,
+  brokerConnected: boolean | undefined,
+  workerList: WorkerSummary[],
+): { lamp: LampColor; title: string } {
+  if (brokerConnected !== true) {
+    return { lamp: 'red', title: 'Broker not connected' }
+  }
+  const covered = workerList.some(w => (w.queues ?? []).includes(queueName))
+  if (covered) {
+    return {
+      lamp: 'green',
+      title: `At least one worker consumes queue “${queueName}”`,
+    }
+  }
+  return {
+    lamp: 'yellow',
+    title: `No worker in this snapshot consumes queue “${queueName}”`,
+  }
+}
+
 function workerLamp(status: string): LampColor {
   if (status === 'running_healthy') return 'green'
   if (status === 'running_degraded' || status === 'starting' || status === 'stopping') return 'yellow'
@@ -83,8 +105,10 @@ function fmtQueueCell(n: number | null | undefined): string {
 }
 
 function formatQueueLabel(name: string): string {
-  if (name === 'massive_high') return 'Massive (high)'
-  if (name === 'massive') return 'Massive'
+  if (name === 'massive_stocks_high') return 'Massive stocks (high priority)'
+  if (name === 'massive_stocks') return 'Massive stocks'
+  if (name === 'massive_high') return 'Massive options (high priority)'
+  if (name === 'massive') return 'Massive options'
   if (name === 'bars') return 'Bars (IB)'
   return name
 }
@@ -315,7 +339,6 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   const [tick, setTick] = useState(0)
 
   const [queueSummary, setQueueSummary] = useState<QueueSummaryRow[]>([])
-  const [queueSummaryNote, setQueueSummaryNote] = useState<string | null>(null)
   const [queueSummaryDb, setQueueSummaryDb] = useState<boolean | null>(null)
 
   // Worker scaling
@@ -436,11 +459,9 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
 
           if (qRes.ok) {
             setQueueSummary(qRes.queues)
-            setQueueSummaryNote(qRes.massive_db_note ?? null)
             setQueueSummaryDb(qRes.db_connected ?? null)
           } else {
             setQueueSummary([])
-            setQueueSummaryNote(null)
             setQueueSummaryDb(null)
           }
           if (iRes.ok) setInstances(iRes.instances)
@@ -573,6 +594,93 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
     } finally {
       setScaleBusy(false)
     }
+  }
+
+  /** One new instance per configured profile (same as choosing each type and clicking Add). */
+  const onScaleAddAll = async () => {
+    if (workerProfiles.length === 0) {
+      setScaleMsg({ text: 'No worker profiles configured', isErr: true })
+      return
+    }
+    setScaleBusy(true)
+    const okParts: string[] = []
+    const errParts: string[] = []
+    try {
+      for (const p of workerProfiles) {
+        const res = await scaleWorker({ action: 'add', worker_type: p.key })
+        if (res.ok) {
+          const iid = res.instance_id ?? res.unit ?? p.key
+          okParts.push(`${p.key} → ${iid}`)
+        } else {
+          errParts.push(`${p.key}: ${res.error ?? 'Failed'}`)
+        }
+      }
+      if (errParts.length === 0) {
+        setScaleMsg({
+          text: `Started ${okParts.length} instance(s). ${okParts.join('; ')}`,
+          isErr: false,
+        })
+      } else {
+        setScaleMsg({
+          text: `${errParts.length} failed, ${okParts.length} ok. Errors: ${errParts.join(' | ')}`,
+          isErr: true,
+        })
+      }
+      await loadAll()
+      if (errParts.length === 0) await refreshOpsWorkersSnapshot({ forceRefresh: true })
+    } catch (e) {
+      setScaleMsg({ text: e instanceof Error ? e.message : 'Error', isErr: true })
+    } finally {
+      setScaleBusy(false)
+    }
+  }
+
+  const onScaleRemoveAllClick = () => {
+    const ids = [
+      ...new Set(
+        instances
+          .map(inst => instanceIdFromWorkerUnit(inst.unit))
+          .filter((x): x is string => x != null),
+      ),
+    ]
+    if (ids.length === 0) {
+      setScaleMsg({ text: 'No worker instances to remove', isErr: true })
+      return
+    }
+    setConfirmVariant('default')
+    setScaleRemoveForce(false)
+    setConfirmState({
+      open: true,
+      title: 'Remove all worker instances?',
+      message: `This will stop ${ids.length} unit(s) on this Ops control host: ${ids.join(', ')}. Workers on other machines using the same broker are not affected.`,
+      confirming: false,
+      confirmLabel: 'Confirm delete',
+      action: async () => {
+        setConfirmState(prev => ({ ...prev, confirming: true }))
+        setScaleBusy(true)
+        const errors: string[] = []
+        try {
+          for (const instanceId of ids) {
+            const res = await scaleWorker({ action: 'remove', instance_id: instanceId })
+            if (!res.ok) errors.push(`${instanceId}: ${res.error ?? 'Failed'}`)
+          }
+          await loadAll()
+          await refreshOpsWorkersSnapshot({ forceRefresh: true })
+          setScaleMsg({
+            text:
+              errors.length === 0
+                ? `Stopped ${ids.length} instance(s).`
+                : `Stopped with ${errors.length} error(s): ${errors.join('; ')}`,
+            isErr: errors.length > 0,
+          })
+        } catch (e) {
+          setScaleMsg({ text: e instanceof Error ? e.message : 'Error', isErr: true })
+        } finally {
+          setScaleBusy(false)
+          resetConfirmDialog()
+        }
+      },
+    })
   }
 
   // ── Broker control handlers ───────────────────────────────────────────
@@ -766,10 +874,10 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               <SettingsSidebarLampGlyph id="celery" />
             </span>
             Celery
-            <InfoTooltip text="Worker runtime, consoles, queue summary, scaling, broker control, and job queues." />
+            <InfoTooltip text="Queue summary, worker scaling, runtime snapshot, consoles, broker control, and job queues." />
           </h2>
           <p className="settings-page-subtitle">
-            Consoles, runtime snapshot, queues, worker instances, and Redis / broker control.
+            Queue summary, worker instances, runtime snapshot, console, Redis / broker control, and job queues.
           </p>
         </div>
         <div className="dashboard-auth-bar dashboard-auth-bar--celery-header">
@@ -833,44 +941,272 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
       ) : null}
       <div className="dashboard-grid settings-page-groups">
           <div className="dashboard-celery-group">
-          {/* ── Console Monitor ────────────────────────────────── */}
-          <section
-            ref={consoleSectionRef}
-            id="dashboard-console-section"
-            className={`replay-section dashboard-section dashboard-console-section${consoleTarget !== 'none' && (consoleTarget === 'broker' ? !!consoleUrl : true) ? ' dashboard-console-section--active' : ''}`}
-            aria-labelledby="dashboard-console-head"
-          >
-            <h3 id="dashboard-console-head" className="page-title-with-tooltip">
-              Console
-              <InfoTooltip text="Broker: Ops SSE (journald or tail of BIFROST_BROKER_CONSOLE_LOG on macOS). Worker: per-worker Redis stream via Ops /ops/console/worker (tail/clear: /ops/celery/logs)." />
+          {/* ── Queue summary ──────────────────────────────────── */}
+          <section className="replay-section dashboard-section dashboard-queue-summary" aria-labelledby="dashboard-queue-summary-head">
+            <h3 id="dashboard-queue-summary-head" className="page-title-with-tooltip">
+              Queue summary
+              <InfoTooltip text="Per queue: broker pending, active/reserved counts, and PostgreSQL job table totals where configured. Status = whether any worker consumes this queue on the current broker snapshot; Host = Ops stack (GET /ops/health)." />
             </h3>
-            <div className="dashboard-console-selector">
-              <button
-                type="button"
-                className={`dashboard-filter-btn ${consoleTarget === 'broker' ? 'active' : ''}`}
-                onClick={() => openConsole('broker')}
-              >
-                Broker (Redis)
-              </button>
-              {workers.map(w => (
-                <button
-                  key={w.worker_id}
-                  type="button"
-                  className={`dashboard-filter-btn ${consoleTarget === w.worker_id ? 'active' : ''}`}
-                  onClick={() => openConsole(w.worker_id)}
-                >
-                  {w.worker_id}
-                </button>
-              ))}
-            </div>
-            {consoleTarget === 'broker' && consoleUrl ? (
-              <LogConsole url={consoleUrl} />
-            ) : consoleTarget !== 'none' && consoleTarget !== 'broker' ? (
-              <DashboardWorkerRedisConsole key={consoleTarget} workerId={consoleTarget} />
+            {queueSummaryDb === false && (
+              <p className="dashboard-queue-summary-hint">PostgreSQL job totals unavailable (check ops config or DB).</p>
+            )}
+            {queueSummary.length === 0 ? (
+              <div className="dashboard-empty">
+                {loading ? 'Loading queue summary…' : 'No queue summary from Ops API.'}
+              </div>
             ) : (
-              <div className="dashboard-empty">Select a target above to open a live console stream.</div>
+              <div className="dashboard-queue-summary-table-wrap">
+                <table className="table-operations dashboard-queue-summary-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 36 }}>Status</th>
+                      <th style={{ width: 88 }}>
+                        Host
+                        <InfoTooltip text="Ops API stack from GET /ops/health (config_profile): Dev or Prod for this session, same as Socket Services." />
+                      </th>
+                      <th>Queue</th>
+                      <th>
+                        Pending
+                        <InfoTooltip text="Messages waiting on the Redis broker (LLEN)." />
+                      </th>
+                      <th>
+                        Running
+                        <InfoTooltip text="Celery tasks currently active or reserved for this queue (delivery routing key)." />
+                      </th>
+                      <th>
+                        Done
+                        <InfoTooltip text="Rows with status done in the job table for this pipeline." />
+                      </th>
+                      <th>
+                        Failed
+                        <InfoTooltip text="Rows with status failed in the job table for this pipeline." />
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {queueSummary.map(row => {
+                      const qCov = queueCoverageLamp(row.name, broker?.connected, workers)
+                      return (
+                        <tr key={row.name}>
+                          <td>
+                            <span
+                              className={`title-inline-lamp lamp-icon ${qCov.lamp}`}
+                              title={qCov.title}
+                              aria-label={qCov.title}
+                              role="img"
+                            >
+                              <span aria-hidden>●</span>
+                            </span>
+                          </td>
+                          <td title={opsHostEnvPillTitle}>
+                            <OpsHostEnvPillBadge pill={opsHostEnvPill} className="dashboard-celery-env-pill" />
+                          </td>
+                          <td>
+                            <code className="dashboard-queue-name">{formatQueueLabel(row.name)}</code>
+                            {row.db_totals_shared ? (
+                              <span
+                                className="dashboard-queue-shared-mark"
+                                title="Same job_massive_backfill row counts as other Massive-like queue rows"
+                              >
+                                {' '}
+                                *
+                              </span>
+                            ) : null}
+                          </td>
+                          <td>{fmtQueueCell(row.pending_broker)}</td>
+                          <td>{fmtQueueCell(row.running_celery)}</td>
+                          <td>{fmtQueueCell(row.done_db)}</td>
+                          <td>{fmtQueueCell(row.failed_db)}</td>
+                        </tr>
+                      )
+                    })}
+                    {queueSummaryDeduped ? (
+                      <tr className="dashboard-queue-summary-totals-row">
+                        <td>
+                          <span
+                            className={`title-inline-lamp lamp-icon ${runtimeCeleryLamp}`}
+                            title={runtimeCeleryStatusText}
+                            aria-label={runtimeCeleryStatusText}
+                            role="img"
+                          >
+                            <span aria-hidden>●</span>
+                          </span>
+                        </td>
+                        <td title={opsHostEnvPillTitle}>
+                          <OpsHostEnvPillBadge pill={opsHostEnvPill} className="dashboard-celery-env-pill" />
+                        </td>
+                        <td>
+                          <strong>Total</strong>
+                          <InfoTooltip text="Bars plus all Massive-like broker columns summed; DB done/failed once from shared job_massive_backfill." />
+                        </td>
+                        <td>{fmtQueueCell(queueSummaryDeduped.pending_broker)}</td>
+                        <td>{fmtQueueCell(queueSummaryDeduped.running_celery)}</td>
+                        <td>{fmtQueueCell(queueSummaryDeduped.done_db)}</td>
+                        <td>{fmtQueueCell(queueSummaryDeduped.failed_db)}</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
             )}
           </section>
+
+          <div className="dashboard-celery-instances-broker-row">
+            {/* ── Worker Scaling ─────────────────────────────────── */}
+            <section className="replay-section dashboard-section dashboard-scaling" aria-labelledby="dashboard-scale-head">
+              <h3 id="dashboard-scale-head" className="page-title-with-tooltip">
+                Worker Instances
+                <InfoTooltip text="Add Instance adds one worker for the selected profile (each Massive-related profile binds to a single Celery queue — no multi-queue sharing). Add all profiles starts one instance per profile in config. Remove all instances stops every unit listed below on this Ops host (confirmation required). Row chip = Ops host profile (GET /ops/health). If Runtime Snapshot still shows a worker after remove, check hostname on the worker card — another machine may share the same broker." />
+              </h3>
+              {scaleMsg.text && (
+                <span className={`settings-page-msg ${scaleMsg.isErr ? 'msg-error' : 'msg-ok'}`}>{scaleMsg.text}</span>
+              )}
+              {instances.length > 0 && (
+                <div className="dashboard-instances-list">
+                  {instances.map(inst => (
+                    <div key={inst.unit} className="dashboard-instance-row">
+                      <span className={`dashboard-instance-lamp ${inst.active === 'active' ? 'green' : 'red'}`}>●</span>
+                      <OpsHostEnvPillBadge
+                        pill={opsHostEnvPill}
+                        className="dashboard-celery-env-pill"
+                        title={opsHostEnvPillTitle}
+                      />
+                      <span className="dashboard-instance-unit">{inst.unit}</span>
+                      <span className="dashboard-instance-sub">{inst.sub}</span>
+                      <button
+                        type="button"
+                        className="dashboard-svc-stop-btn"
+                        onClick={() => {
+                          const iid = instanceIdFromWorkerUnit(inst.unit)
+                          if (iid) {
+                            onScaleRemove(iid)
+                          } else {
+                            setScaleMsg({
+                              text: `Cannot parse instance id from unit name: ${inst.unit}`,
+                              isErr: true,
+                            })
+                          }
+                        }}
+                        disabled={scaleBusy || !canOperate}
+                        title={canOperate ? `Stop and remove ${inst.unit}` : 'Requires operator role'}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="dashboard-scale-add-row">
+                <select
+                  className="dashboard-ctrl-input"
+                  value={scaleWorkerType}
+                  onChange={e => setScaleWorkerType(e.target.value)}
+                  disabled={scaleBusy || workerProfiles.length === 0}
+                >
+                  {workerProfiles.length === 0 && <option value="">No profiles</option>}
+                  {workerProfiles.map(p => (
+                    <option key={p.key} value={p.key}>
+                      {p.label} ({p.queues.join(', ')})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="btn-resume dashboard-btn dashboard-btn--start"
+                  onClick={onScaleAdd}
+                  disabled={scaleBusy || !scaleWorkerType || !canOperate}
+                >
+                  {scaleBusy ? 'Working…' : 'Add Instance'}
+                </button>
+              </div>
+              <div className="dashboard-scale-bulk-row">
+                <button
+                  type="button"
+                  className="btn btn-secondary dashboard-btn"
+                  onClick={() => void onScaleAddAll()}
+                  disabled={scaleBusy || workerProfiles.length === 0 || !canOperate}
+                  title="Start one worker instance for each profile in config (ops.worker_profiles)"
+                >
+                  {scaleBusy ? 'Working…' : 'Add all profiles'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger dashboard-btn"
+                  onClick={onScaleRemoveAllClick}
+                  disabled={scaleBusy || instances.length === 0 || !canOperate}
+                  title="Stop every listed worker unit on this host"
+                >
+                  Remove all instances
+                </button>
+              </div>
+            </section>
+
+            {/* ── Broker Control ─────────────────────────────────── */}
+            <section
+              className="replay-section dashboard-section dashboard-broker-ctrl dashboard-broker-ctrl--celery-column"
+              aria-labelledby="dashboard-broker-ctrl-head"
+            >
+              <h3 id="dashboard-broker-ctrl-head" className="page-title-with-tooltip">
+                Redis / Broker
+                <InfoTooltip text="Live metrics (reachability, memory, clients, Celery-related keys) come from the configured Redis. Start, stop, and restart only apply when Redis is managed by systemd on the same host as Ops." />
+              </h3>
+              {brokerMsg.text && (
+                <span className={`settings-page-msg ${brokerMsg.isErr ? 'msg-error' : 'msg-ok'}`}>{brokerMsg.text}</span>
+              )}
+              {extBroker ? (
+                <div className="dashboard-broker-ctrl-body">
+                  <div className="dashboard-broker-ctrl-info dashboard-broker-ctrl-info--compact">
+                    <span>Connected: <strong>{extBroker.connected ? 'Yes' : 'No'}</strong></span>
+                    <span>Systemd: <strong>{extBroker.locally_managed ? 'Yes' : 'No'}</strong></span>
+                    {extBroker.used_memory_human && <span>Mem: {extBroker.used_memory_human}</span>}
+                    {extBroker.connected_clients != null && <span>Clients: {extBroker.connected_clients}</span>}
+                    {extBroker.queues && Object.keys(extBroker.queues).length > 0 && (
+                      <span className="dashboard-broker-ctrl-keys-line">
+                        Keys:{' '}
+                        {Object.entries(extBroker.queues)
+                          .map(([q, n]) => `${q}(${n})`)
+                          .join(', ')}
+                      </span>
+                    )}
+                  </div>
+                  {extBroker.locally_managed ? (
+                    <div className="dashboard-broker-ctrl-actions">
+                      <button
+                        type="button"
+                        className="btn-resume dashboard-btn dashboard-btn--start"
+                        onClick={() => onBrokerAction('start')}
+                        disabled={brokerBusy || !canAdmin}
+                      >
+                        Start
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-resume dashboard-btn dashboard-btn--restart"
+                        onClick={() => onBrokerAction('restart')}
+                        disabled={brokerBusy || !canAdmin}
+                      >
+                        Restart
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-shutdown-all dashboard-btn dashboard-btn--stop"
+                        onClick={() => onBrokerAction('stop')}
+                        disabled={brokerBusy || !canAdmin}
+                      >
+                        Stop
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="dashboard-broker-ctrl-readonly">
+                      Read-only: Redis not under local systemd.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="dashboard-empty">Loading broker status…</div>
+              )}
+            </section>
+          </div>
 
           {/* ── Runtime Snapshot ──────────────────────────────── */}
           <section className="replay-section dashboard-section dashboard-snapshot" aria-labelledby="dashboard-snapshot-head">
@@ -884,7 +1220,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               <span className={`dashboard-snapshot-celery-lamp-status dashboard-svc-status--${runtimeCeleryLamp}`}>
                 {runtimeCeleryStatusText}
               </span>
-              <InfoTooltip text="Red: broker unreachable. Yellow: broker OK but no workers, or workers’ queue list does not include every supported queue (bars, massive_high, massive). Green: at least one worker and their combined queues cover all supported queues." />
+              <InfoTooltip text="Red: broker unreachable. Yellow: broker OK but no workers, or workers’ queue list does not include every supported queue (bars, massive_stocks_high, massive_stocks, massive_high, massive). Green: at least one worker and their combined queues cover all supported queues." />
             </div>
 
             {/* Broker */}
@@ -1040,215 +1376,46 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             )}
           </section>
 
-          {/* ── Queue summary ──────────────────────────────────── */}
-          <section className="replay-section dashboard-section dashboard-queue-summary" aria-labelledby="dashboard-queue-summary-head">
-            <h3 id="dashboard-queue-summary-head" className="page-title-with-tooltip">
-              Queue summary
-              <InfoTooltip text="Supported Celery queues: pending messages on the Redis broker, tasks currently executing on workers (routing key), and Done/Failed counts from PostgreSQL job tables (job_bars_backfill, job_massive_backfill)." />
+          {/* ── Console Monitor ────────────────────────────────── */}
+          <section
+            ref={consoleSectionRef}
+            id="dashboard-console-section"
+            className={`replay-section dashboard-section dashboard-console-section${consoleTarget !== 'none' && (consoleTarget === 'broker' ? !!consoleUrl : true) ? ' dashboard-console-section--active' : ''}`}
+            aria-labelledby="dashboard-console-head"
+          >
+            <h3 id="dashboard-console-head" className="page-title-with-tooltip">
+              Console
+              <InfoTooltip text="Broker: Ops SSE (journald or tail of BIFROST_BROKER_CONSOLE_LOG on macOS). Worker: per-worker Redis stream via Ops /ops/console/worker (tail/clear: /ops/celery/logs)." />
             </h3>
-            {queueSummaryDb === false && (
-              <p className="dashboard-queue-summary-hint">PostgreSQL job totals unavailable (check ops config or DB).</p>
-            )}
-            {queueSummaryNote && (
-              <p className="dashboard-queue-summary-note">{queueSummaryNote}</p>
-            )}
-            {queueSummary.length === 0 ? (
-              <div className="dashboard-empty">
-                {loading ? 'Loading queue summary…' : 'No queue summary from Ops API.'}
-              </div>
+            <div className="dashboard-console-selector">
+              <button
+                type="button"
+                className={`dashboard-filter-btn ${consoleTarget === 'broker' ? 'active' : ''}`}
+                onClick={() => openConsole('broker')}
+              >
+                Broker (Redis)
+              </button>
+              {workers.map(w => (
+                <button
+                  key={w.worker_id}
+                  type="button"
+                  className={`dashboard-filter-btn ${consoleTarget === w.worker_id ? 'active' : ''}`}
+                  onClick={() => openConsole(w.worker_id)}
+                >
+                  {w.worker_id}
+                </button>
+              ))}
+            </div>
+            {consoleTarget === 'broker' && consoleUrl ? (
+              <LogConsole url={consoleUrl} />
+            ) : consoleTarget !== 'none' && consoleTarget !== 'broker' ? (
+              <DashboardWorkerRedisConsole key={consoleTarget} workerId={consoleTarget} />
             ) : (
-              <div className="dashboard-queue-summary-table-wrap">
-                <table className="table-operations dashboard-queue-summary-table">
-                  <thead>
-                    <tr>
-                      <th>Queue</th>
-                      <th>
-                        Pending
-                        <InfoTooltip text="Messages waiting on the Redis broker (LLEN)." />
-                      </th>
-                      <th>
-                        Running
-                        <InfoTooltip text="Celery tasks currently active or reserved for this queue (delivery routing key)." />
-                      </th>
-                      <th>
-                        Done
-                        <InfoTooltip text="Rows with status done in the job table for this pipeline." />
-                      </th>
-                      <th>
-                        Failed
-                        <InfoTooltip text="Rows with status failed in the job table for this pipeline." />
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {queueSummary.map(row => (
-                      <tr key={row.name}>
-                        <td>
-                          <code className="dashboard-queue-name">{formatQueueLabel(row.name)}</code>
-                          {row.db_totals_shared ? (
-                            <span className="dashboard-queue-shared-mark" title="DB totals shared (see note above)"> *</span>
-                          ) : null}
-                        </td>
-                        <td>{fmtQueueCell(row.pending_broker)}</td>
-                        <td>{fmtQueueCell(row.running_celery)}</td>
-                        <td>{fmtQueueCell(row.done_db)}</td>
-                        <td>{fmtQueueCell(row.failed_db)}</td>
-                      </tr>
-                    ))}
-                    {queueSummaryDeduped ? (
-                      <tr className="dashboard-queue-summary-totals-row">
-                        <td>
-                          <strong>Total</strong>
-                          <InfoTooltip text="Bars plus Massive once — massive_high shares the same DB totals as massive (see note above)." />
-                        </td>
-                        <td>{fmtQueueCell(queueSummaryDeduped.pending_broker)}</td>
-                        <td>{fmtQueueCell(queueSummaryDeduped.running_celery)}</td>
-                        <td>{fmtQueueCell(queueSummaryDeduped.done_db)}</td>
-                        <td>{fmtQueueCell(queueSummaryDeduped.failed_db)}</td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
+              <div className="dashboard-empty">Select a target above to open a live console stream.</div>
             )}
           </section>
 
-          <div className="dashboard-celery-instances-broker-row">
-            {/* ── Worker Scaling ─────────────────────────────────── */}
-            <section className="replay-section dashboard-section dashboard-scaling" aria-labelledby="dashboard-scale-head">
-              <h3 id="dashboard-scale-head" className="page-title-with-tooltip">
-                Worker Instances
-                <InfoTooltip text="Select a worker type and click Add — the system assigns a unique instance ID. Row chip = Ops host profile (GET /ops/health). Remove stops the unit on this control host; if Runtime Snapshot still shows a worker with the same id, check hostname on the worker card — it may be another machine on the same Redis broker." />
-              </h3>
-              {scaleMsg.text && (
-                <span className={`settings-page-msg ${scaleMsg.isErr ? 'msg-error' : 'msg-ok'}`}>{scaleMsg.text}</span>
-              )}
-              {instances.length > 0 && (
-                <div className="dashboard-instances-list">
-                  {instances.map(inst => (
-                    <div key={inst.unit} className="dashboard-instance-row">
-                      <span className={`dashboard-instance-lamp ${inst.active === 'active' ? 'green' : 'red'}`}>●</span>
-                      <OpsHostEnvPillBadge
-                        pill={opsHostEnvPill}
-                        className="dashboard-celery-env-pill"
-                        title={opsHostEnvPillTitle}
-                      />
-                      <span className="dashboard-instance-unit">{inst.unit}</span>
-                      <span className="dashboard-instance-sub">{inst.sub}</span>
-                      <button
-                        type="button"
-                        className="dashboard-svc-stop-btn"
-                        onClick={() => {
-                          const iid = instanceIdFromWorkerUnit(inst.unit)
-                          if (iid) {
-                            onScaleRemove(iid)
-                          } else {
-                            setScaleMsg({
-                              text: `Cannot parse instance id from unit name: ${inst.unit}`,
-                              isErr: true,
-                            })
-                          }
-                        }}
-                        disabled={scaleBusy || !canOperate}
-                        title={canOperate ? `Stop and remove ${inst.unit}` : 'Requires operator role'}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="dashboard-scale-add-row">
-                <select
-                  className="dashboard-ctrl-input"
-                  value={scaleWorkerType}
-                  onChange={e => setScaleWorkerType(e.target.value)}
-                  disabled={scaleBusy || workerProfiles.length === 0}
-                >
-                  {workerProfiles.length === 0 && <option value="">No profiles</option>}
-                  {workerProfiles.map(p => (
-                    <option key={p.key} value={p.key}>
-                      {p.label} ({p.queues.join(', ')})
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  className="btn-resume dashboard-btn dashboard-btn--start"
-                  onClick={onScaleAdd}
-                  disabled={scaleBusy || !scaleWorkerType || !canOperate}
-                >
-                  {scaleBusy ? 'Working…' : 'Add Instance'}
-                </button>
-              </div>
-            </section>
 
-            {/* ── Broker Control ─────────────────────────────────── */}
-            <section
-              className="replay-section dashboard-section dashboard-broker-ctrl dashboard-broker-ctrl--celery-column"
-              aria-labelledby="dashboard-broker-ctrl-head"
-            >
-              <h3 id="dashboard-broker-ctrl-head" className="page-title-with-tooltip">
-                Redis / Broker
-                <InfoTooltip text="Live metrics (reachability, memory, clients, Celery-related keys) come from the configured Redis. Start, stop, and restart only apply when Redis is managed by systemd on the same host as Ops." />
-              </h3>
-              {brokerMsg.text && (
-                <span className={`settings-page-msg ${brokerMsg.isErr ? 'msg-error' : 'msg-ok'}`}>{brokerMsg.text}</span>
-              )}
-              {extBroker ? (
-                <div className="dashboard-broker-ctrl-body">
-                  <div className="dashboard-broker-ctrl-info dashboard-broker-ctrl-info--compact">
-                    <span>Connected: <strong>{extBroker.connected ? 'Yes' : 'No'}</strong></span>
-                    <span>Systemd: <strong>{extBroker.locally_managed ? 'Yes' : 'No'}</strong></span>
-                    {extBroker.used_memory_human && <span>Mem: {extBroker.used_memory_human}</span>}
-                    {extBroker.connected_clients != null && <span>Clients: {extBroker.connected_clients}</span>}
-                    {extBroker.queues && Object.keys(extBroker.queues).length > 0 && (
-                      <span className="dashboard-broker-ctrl-keys-line">
-                        Keys:{' '}
-                        {Object.entries(extBroker.queues)
-                          .map(([q, n]) => `${q}(${n})`)
-                          .join(', ')}
-                      </span>
-                    )}
-                  </div>
-                  {extBroker.locally_managed ? (
-                    <div className="dashboard-broker-ctrl-actions">
-                      <button
-                        type="button"
-                        className="btn-resume dashboard-btn dashboard-btn--start"
-                        onClick={() => onBrokerAction('start')}
-                        disabled={brokerBusy || !canAdmin}
-                      >
-                        Start
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-resume dashboard-btn dashboard-btn--restart"
-                        onClick={() => onBrokerAction('restart')}
-                        disabled={brokerBusy || !canAdmin}
-                      >
-                        Restart
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-shutdown-all dashboard-btn dashboard-btn--stop"
-                        onClick={() => onBrokerAction('stop')}
-                        disabled={brokerBusy || !canAdmin}
-                      >
-                        Stop
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="dashboard-broker-ctrl-readonly">
-                      Read-only: Redis not under local systemd.
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div className="dashboard-empty">Loading broker status…</div>
-              )}
-            </section>
-          </div>
 
           <CeleryJobQueuesSection />
 

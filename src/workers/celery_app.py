@@ -2,7 +2,8 @@
 
 Usage:
   celery -A src.workers.celery_app worker -l info -Q bars --pool=solo
-  celery -A src.workers.celery_app worker -l info -Q massive --pool=solo   # Massive/Polygon option sync (no IB)
+  celery -A src.workers.celery_app worker -l info -Q massive --pool=solo   # Massive/Polygon options (no IB)
+  # Stock reference jobs use queues massive_stocks / massive_stocks_high (see src.massive.celery_queues).
 
 Or: python scripts/run_celery.py [config_path]
 
@@ -72,6 +73,7 @@ app.conf.update(
     task_default_queue="bars",
     task_routes={
         "src.bars.tasks.backfill_bars": {"queue": "bars"},
+        # Default route; API enqueues with explicit queue= (options: massive/massive_high, stocks: massive_stocks*).
         "servers.massive_tasks.run_massive_job": {"queue": "massive"},
         "servers.massive_tasks.beat_eod_pipeline": {"queue": "massive"},
         "servers.massive_tasks.beat_corporate_watchlist": {"queue": "massive"},

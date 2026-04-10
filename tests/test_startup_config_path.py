@@ -79,3 +79,7 @@ def test_read_config_dev_includes_ops_worker_profiles_from_config_yaml(project_r
     profiles = (cfg.get("ops") or {}).get("worker_profiles") or {}
     assert "massive" in profiles
     assert profiles["massive"].get("queues") == ["massive"]
+    assert "massive_stocks" in profiles
+    assert profiles["massive_stocks"].get("queues") == ["massive_stocks"]
+    assert "massive_stocks_high" in profiles
+    assert profiles["massive_stocks_high"].get("queues") == ["massive_stocks_high"]

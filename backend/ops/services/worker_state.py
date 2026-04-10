@@ -17,8 +17,14 @@ from src.workers.celery_app import (
 
 logger = logging.getLogger(__name__)
 
-# Canonical Celery queues (see scripts/run_celery.py _DEFAULT_QUEUES, src/workers/celery_app.py).
-SUPPORTED_CELERY_QUEUES: Tuple[str, ...] = ("bars", "massive_high", "massive")
+# Canonical Celery queues (see scripts/run_celery.py _DEFAULT_QUEUES, src/massive/celery_queues.py).
+SUPPORTED_CELERY_QUEUES: Tuple[str, ...] = (
+    "bars",
+    "massive_stocks_high",
+    "massive_stocks",
+    "massive_high",
+    "massive",
+)
 
 
 class WorkerStateService:
@@ -501,16 +507,10 @@ class WorkerStateService:
             if q != "bars":
                 row["db_totals_shared"] = True
             rows.append(row)
-        out: Dict[str, Any] = {
+        return {
             "queues": rows,
             "db_connected": bars_db is not None,
         }
-        if massive_db is not None:
-            out["massive_db_note"] = (
-                "Pending/Running/Done/Failed for Massive queues are DB totals from "
-                "job_massive_backfill (not split between massive and massive_high)."
-            )
-        return out
 
     def broker_status(self) -> Dict[str, Any]:
         connected = self._broker_connected()

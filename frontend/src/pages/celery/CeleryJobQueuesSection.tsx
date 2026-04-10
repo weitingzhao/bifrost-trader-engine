@@ -193,7 +193,7 @@ export function CeleryJobQueuesSection() {
         ? 'all jobs in this queue'
         : `all jobs with status “${statusFilter}”`
     setConfirm({
-      title: tab === 'massive' ? 'Delete Massive queue jobs' : 'Delete bars backfill jobs',
+      title: tab === 'massive' ? 'Delete Massive options queue jobs' : 'Delete bars backfill jobs',
       message: `This will permanently delete ${scope}. This cannot be undone.`,
       confirming: false,
       action: async () => {
@@ -219,7 +219,7 @@ export function CeleryJobQueuesSection() {
       return
     }
     setConfirm({
-      title: tab === 'massive' ? 'Trim Massive job table' : 'Trim bars backfill job table',
+      title: tab === 'massive' ? 'Trim Massive options job table' : 'Trim bars backfill job table',
       message: `Keep only the newest ${n} job(s) by ID. Older rows will be deleted. This cannot be undone.`,
       confirming: false,
       action: async () => {
@@ -259,7 +259,7 @@ export function CeleryJobQueuesSection() {
       <div className="celery-queues-header">
         <h3 id="celery-queues-head" className="page-title-with-tooltip" style={{ margin: 0 }}>
           Queues
-          <InfoTooltip text="Massive sync jobs (queue: massive) and bars backfill jobs. Filter by status, delete in bulk, or trim to keep only the newest N rows." />
+          <InfoTooltip text="Massive options jobs (massive, massive_high), stock-reference jobs (massive_stocks, massive_stocks_high), and bars backfill. Filter by status, delete in bulk, or trim to keep only the newest N rows." />
         </h3>
       </div>
 
@@ -274,7 +274,7 @@ export function CeleryJobQueuesSection() {
             setActionMsg(null)
           }}
         >
-          Massive queue
+          Massive options
         </button>
         <button
           type="button"

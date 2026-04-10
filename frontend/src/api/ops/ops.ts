@@ -222,7 +222,6 @@ export async function fetchQueueSummary(): Promise<{
   ok: boolean
   queues: QueueSummaryRow[]
   db_connected?: boolean
-  massive_db_note?: string
   error?: string
 }> {
   const r = await fetch(`${opsBase()}/ops/queues/summary`, { headers: authHeaders() })

@@ -1,4 +1,4 @@
-"""Celery tasks for Massive / Polygon options sync (queue: massive)."""
+"""Celery tasks for Massive / Polygon sync (queues: see src.massive.celery_queues)."""
 
 from __future__ import annotations
 

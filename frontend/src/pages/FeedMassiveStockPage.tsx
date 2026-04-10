@@ -985,7 +985,9 @@ export function FeedMassiveStockPage({
                   <p>
                     <strong>Use case:</strong> Query synced rows in PostgreSQL (<code>stocks</code>,{' '}
                     <code>stock_related_tickers</code>, <code>ticker_instrument_types</code>) with optional Redis cache.
-                    Populate data via Celery jobs (<code>POST /research/massive/jobs/stock-reference</code>).
+                    Populate data via Celery jobs (<code>POST /research/massive/jobs/stock-reference</code>). Workers
+                    must listen on <code>massive_stocks</code> / <code>massive_stocks_high</code> (priority), not the
+                    options queues <code>massive</code> / <code>massive_high</code>.
                   </p>
                   <p className="feed-massive-agg-sub-endpoint">
                     <code>GET /research/massive/stocks/search</code>

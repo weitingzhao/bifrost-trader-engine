@@ -486,7 +486,12 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             END $$;
             """
         )
+        # Base columns from canonical ``stocks`` DDL — legacy heaps may only have gotten
+        # ``stocks_id`` + ``symbol`` from the migration above, so add these if missing.
         _stock_ref_cols = [
+            ("name", "text"),
+            ("exchange", "text"),
+            ("created_at", "timestamptz DEFAULT now()"),
             ("instrument_type", "text"),
             ("active", "boolean"),
             ("list_date", "date"),

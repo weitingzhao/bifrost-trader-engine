@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from src.massive.celery_queues import celery_queue_for_massive_job
 from src.vendor.massive.client import _as_error_str
 
 logger = logging.getLogger(__name__)
@@ -777,9 +778,8 @@ def post_jobs_stock_reference(request: Request, body: Dict[str, Any] = Body(...)
         return {"ok": True, "job_id": str(jid), "deduplicated": True}
 
     try:
-        queue_name = (
-            "massive_high" if str(body.get("priority") or "").strip().lower() == "high" else "massive"
-        )
+        priority_high = str(body.get("priority") or "").strip().lower() == "high"
+        queue_name = celery_queue_for_massive_job(kind, priority_high=priority_high)
         async_result = run_massive_job.apply_async(
             args=[jid], task_id=str(jid), queue=queue_name
         )
@@ -991,7 +991,7 @@ def get_massive_hist_trades(
 
 @router.post("/research/massive/sync")
 def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """Enqueue Celery job on queue `massive`. Body: kind + payload."""
+    """Enqueue Celery job (queue depends on kind: options → massive/massive_high, stock ref → massive_stocks*)."""
     from src.vendor.massive.config import get_massive_settings
     from src.massive.tasks import run_massive_job
     from src.vendor.massive.reader import insert_job_massive_backfill, update_job_massive_backfill_celery_task_id
@@ -1056,9 +1056,8 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
         return {"ok": True, "job_id": str(jid), "deduplicated": True}
 
     try:
-        queue_name = (
-            "massive_high" if str(body.get("priority") or "").strip().lower() == "high" else "massive"
-        )
+        priority_high = str(body.get("priority") or "").strip().lower() == "high"
+        queue_name = celery_queue_for_massive_job(kind, priority_high=priority_high)
         async_result = run_massive_job.apply_async(
             args=[jid], task_id=str(jid), queue=queue_name
         )
