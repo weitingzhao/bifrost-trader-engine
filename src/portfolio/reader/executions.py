@@ -112,6 +112,9 @@ _COMM_NORM_E = (
     "WHEN c.commission IS NOT NULL THEN -c.commission ELSE NULL END AS commission"
 )
 
+# CommissionReport.realizedPNL first; else Flex fifoPnlRealized on the execution row (executions_raw_*).
+_REALIZED_PNL_COALESCE_E = "COALESCE(c.realized_pnl, e.fifo_pnl_realized) AS realized_pnl"
+
 
 def attach_instance_allocations(conn: Any, executions: List[Dict[str, Any]]) -> None:
     """Populate instance_allocations on each execution dict (mutates in place)."""
@@ -380,7 +383,7 @@ def get_executions(
                            e.symbol, e.sec_type, e.side, {_qty_e}, e.price,
                            {_COMM_NORM_E}, e.source,
                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
-                           c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
+                           {_REALIZED_PNL_COALESCE_E}, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
                            e.trade_date, e.report_date, e.settle_date_target, e.transaction_type, e.taxes, e.net_cash,
                            e.raw_extra, {_CREATED_AT_E},
                            e.strategy_opportunity_id, e.strategy_instance_id,
@@ -404,7 +407,7 @@ def get_executions(
                                    e.symbol, e.sec_type, e.side, {_qty_e}, e.price,
                                    {_COMM_NORM_E}, e.source,
                                    e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
-                                   c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
+                                   {_REALIZED_PNL_COALESCE_E}, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
                                    e.trade_date, e.raw_extra, {_CREATED_AT_E}
                             FROM {from_table} e
                             LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id
@@ -420,7 +423,7 @@ def get_executions(
                                            e.symbol, e.sec_type, e.side, {_qty_e}, e.price,
                                            NULL::double precision AS commission, e.source,
                                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
-                                           NULL::double precision AS realized_pnl, e.contract_key,
+                                           e.fifo_pnl_realized AS realized_pnl, e.contract_key,
                                            NULL::text AS currency, NULL::double precision AS yield_, NULL::integer AS yield_redemption_date,
                                            e.trade_date, e.raw_extra, {_CREATED_AT_E}
                                     FROM {from_table} e
@@ -506,7 +509,7 @@ def get_executions_by_contract_keys(
                            e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
                            {_COMM_NORM_E}, e.source,
                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
-                           c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
+                           {_REALIZED_PNL_COALESCE_E}, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
                            e.trade_date, e.report_date, e.settle_date_target, e.transaction_type, e.taxes, e.net_cash,
                            e.raw_extra, {_CREATED_AT_E}
                     FROM {_EXEC_READ_TABLE} e
@@ -528,7 +531,7 @@ def get_executions_by_contract_keys(
                                    e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
                                    {_COMM_NORM_E}, e.source,
                                    e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
-                                   c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
+                                   {_REALIZED_PNL_COALESCE_E}, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
                                    e.trade_date, e.raw_extra, {_CREATED_AT_E}
                             FROM {_EXEC_READ_TABLE} e
                             LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id
@@ -546,7 +549,7 @@ def get_executions_by_contract_keys(
                                    symbol, sec_type, side, {_QTY_NORM}, price,
                                    NULL::double precision AS commission, source,
                                    expiry, strike, option_right, exchange, order_id, cum_qty,
-                                   NULL::double precision AS realized_pnl, contract_key,
+                                   fifo_pnl_realized AS realized_pnl, contract_key,
                                    NULL::text AS currency, NULL::double precision AS yield_, NULL::integer AS yield_redemption_date,
                                    trade_date, raw_extra, {_CREATED_AT}
                             FROM {_EXEC_READ_TABLE}
@@ -680,7 +683,7 @@ def get_executions_for_strategy_link(
                            e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
                            {_COMM_NORM_E}, e.source,
                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
-                           c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
+                           {_REALIZED_PNL_COALESCE_E}, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
                            e.trade_date, e.report_date, e.settle_date_target, e.transaction_type, e.taxes, e.net_cash,
                            e.raw_extra, {_CREATED_AT_E},
                            e.strategy_opportunity_id, e.strategy_instance_id,
@@ -707,7 +710,7 @@ def get_executions_for_strategy_link(
                                    e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
                                    {_COMM_NORM_E}, e.source,
                                    e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
-                                   c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
+                                   {_REALIZED_PNL_COALESCE_E}, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
                                    e.trade_date, e.raw_extra, {_CREATED_AT_E},
                                    e.strategy_opportunity_id, e.strategy_instance_id,
                                    so.name AS strategy_opportunity_name, si.label AS strategy_instance_label,
@@ -931,7 +934,7 @@ all_legs AS (
          e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
          {_COMM_NORM_E}, e.source,
          e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
-         c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date, e.raw_extra,
+         {_REALIZED_PNL_COALESCE_E}, e.contract_key, c.currency, c.yield_, c.yield_redemption_date, e.raw_extra,
          {_CREATED_AT_E},
          (e.trade_date >= %s AND e.trade_date <= %s) AS in_selected_day,
          upper(trim(COALESCE(e.side,''))) AS side_norm
@@ -994,7 +997,7 @@ all_legs AS (
          e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
          NULL::double precision AS commission, e.source,
          e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
-         NULL::double precision AS realized_pnl, e.contract_key, NULL::text AS currency,
+         {_REALIZED_PNL_COALESCE_E}, e.contract_key, NULL::text AS currency,
          NULL::double precision AS yield_, NULL::integer AS yield_redemption_date, e.raw_extra,
          {_CREATED_AT_E},
          (e.trade_date >= %s AND e.trade_date <= %s) AS in_selected_day,

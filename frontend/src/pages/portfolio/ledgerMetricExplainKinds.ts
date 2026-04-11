@@ -5,3 +5,4 @@ export type LedgerMetricExplainKind =
   | 'stocks_period_notional'
   | 'stocks_total_realized'
   | 'stocks_total_notional'
+  | 'stocks_total_unrealized'

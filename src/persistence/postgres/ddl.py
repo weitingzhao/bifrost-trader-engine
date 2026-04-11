@@ -2013,10 +2013,23 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         )
         _log("account_executions_final(view: flex + journal only)")
 
-        # TWS-only "on the fly" rows: drop any TWS execution whose (account_id, contract_key)
-        # already appears in account_executions_final (Flex/Journal book covers that contract).
+        # TWS-only "on the fly" rows: drop any TWS execution already covered by account_executions_final.
+        # Match (1) exact contract_key trim equality; (2) STK rows where keys differ only in trailing
+        # pipes — IB builds "SYM|STK||||" while Flex uses "SYM|STK|||"; (3) same account + symbol when
+        # TWS sec_type is STK and final row is equity-like (e.g. Flex assetCategory FUND vs IB STK).
         _exec_canonical_cols_t = ", ".join(
             f"t.{c.strip()}" for c in _EXEC_CANONICAL_COLS.split(",") if c.strip()
+        )
+        # Equity-like final rows (excludes OPT — same ticker can name a stock and an option).
+        _fly_final_equity_sec_types = (
+            "'STK', 'EQUITY', 'FUND', 'ETF', 'ETN', 'ADR', 'CORP', 'STOCK', 'REIT', 'WAR'"
+        )
+        # Prefer f.sec_type; if null/blank (some Flex rows), infer from contract_key segment 2.
+        _fly_f_sec_norm = (
+            "upper(trim(COALESCE("
+            "NULLIF(trim(COALESCE(f.sec_type, '')), ''), "
+            "NULLIF(trim(split_part(COALESCE(f.contract_key, ''), '|', 2)), '')"
+            ")))"
         )
         cur.execute(
             f"""
@@ -2029,9 +2042,26 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 SELECT 1
                 FROM account_executions_final f
                 WHERE f.account_id IS NOT DISTINCT FROM t.account_id
-                  AND NULLIF(trim(COALESCE(t.contract_key, '')), '') IS NOT NULL
-                  AND NULLIF(trim(COALESCE(f.contract_key, '')), '') IS NOT NULL
-                  AND trim(COALESCE(f.contract_key, '')) = trim(COALESCE(t.contract_key, ''))
+                  AND (
+                    (
+                      NULLIF(trim(COALESCE(t.contract_key, '')), '') IS NOT NULL
+                      AND NULLIF(trim(COALESCE(f.contract_key, '')), '') IS NOT NULL
+                      AND trim(COALESCE(f.contract_key, '')) = trim(COALESCE(t.contract_key, ''))
+                    )
+                    OR (
+                      upper(trim(COALESCE(t.sec_type, ''))) = 'STK'
+                      AND upper(trim(COALESCE(f.sec_type, ''))) = 'STK'
+                      AND NULLIF(trim(COALESCE(t.contract_key, '')), '') IS NOT NULL
+                      AND NULLIF(trim(COALESCE(f.contract_key, '')), '') IS NOT NULL
+                      AND rtrim(trim(COALESCE(t.contract_key, '')), '|') = rtrim(trim(COALESCE(f.contract_key, '')), '|')
+                    )
+                    OR (
+                      upper(trim(COALESCE(t.sec_type, ''))) = 'STK'
+                      AND {_fly_f_sec_norm} IN ({_fly_final_equity_sec_types})
+                      AND NULLIF(trim(COALESCE(t.symbol, '')), '') IS NOT NULL
+                      AND upper(trim(COALESCE(t.symbol, ''))) = upper(trim(COALESCE(f.symbol, '')))
+                    )
+                  )
             )
         """
         )

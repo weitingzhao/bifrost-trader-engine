@@ -13987,6 +13987,129 @@ th {
   color: var(--color-text-muted);
 }
 
+/* STK group header: Pos / Avg / Mkt from GET /status (same snapshot as U) */
+.replay-stock-group-position-snapshot {
+  font-size: 0.88em;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  max-width: 100%;
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.replay-stock-group-position-snapshot-label {
+  font-weight: 600;
+  font-size: 0.85em;
+  opacity: 0.88;
+}
+
+.replay-stock-group-position-snapshot-sep {
+  color: var(--color-border-strong, var(--color-border));
+  opacity: 0.85;
+}
+
+/* STK group header: cost basis + R%/U% vs basis */
+.replay-stock-group-basis-pct {
+  font-size: 0.88em;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  max-width: 100%;
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.replay-stock-group-total-pnl {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.replay-stock-group-total-pnl-label {
+  font-weight: 600;
+  font-size: 0.92em;
+  color: var(--color-text-muted);
+}
+
+.replay-stock-group-total-pnl.ledger-stk-ur-pnl-group-inline {
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.ledger-stk-ur-pnl-group-inline-metrics {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  flex-wrap: nowrap;
+  font-size: 0.92em;
+}
+
+.ledger-stk-ur-pnl-inline-seg {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ledger-stk-ur-pnl-group-metric-sep {
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.ledger-stk-ur-pnl-unrealized {
+  color: var(--color-warning);
+}
+
+.ledger-stk-ur-pnl-unrealized .ledger-stk-ur-pnl-prefix {
+  color: var(--color-warning);
+  opacity: 0.95;
+}
+
+.ledger-stk-notional-td {
+  font-variant-numeric: tabular-nums;
+}
+
+/* STK table: per-row realized only (unrealized on group + Total U) */
+.ledger-stk-row-realized-td {
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-stk-row-realized-value {
+  white-space: nowrap;
+}
+
+.ledger-stk-ur-pnl-td {
+  vertical-align: top;
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+}
+
+.ledger-stk-ur-pnl-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  line-height: 1.2;
+  font-size: 0.92em;
+}
+
+.ledger-stk-ur-pnl-line {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ledger-stk-ur-pnl-prefix {
+  font-weight: 600;
+  opacity: 0.88;
+  margin-right: 0.12rem;
+}
+
+.replay-ledger-summary-stocks-total-u {
+  font-variant-numeric: tabular-nums;
+}
+
 .replay-stock-group-symbol.ledger-stk-pill--symbol {
   display: inline-block;
   padding: 0.12rem 0.5rem;
@@ -14028,6 +14151,7 @@ th {
 
 .ledger-stock-quick-journal-btn {
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 .replay-opt-expand-icon.expanded {

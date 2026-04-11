@@ -10,6 +10,7 @@ import {
 import type {
   Execution,
   IbClient,
+  IbPositionRow,
   OptExecutionGroup,
   OptionStockLinkRow,
   OptionStockLinkSummary,
@@ -23,6 +24,7 @@ import { LedgerSymbolCombobox } from '../../components/LedgerSymbolCombobox'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import {
   fmtExpiry,
+  fmtPctCompact,
   fmtTradeDate,
   fmtTs,
   fmtUsd,
@@ -79,7 +81,65 @@ import {
   isLedgerFixedIncomeCategory,
 } from './ledgerStockCategoryBuckets'
 
+/**
+ * Signed cash-flow notional for one STK fill (green if positive, red if negative).
+ * Uses quantity sign when negative; when quantity is positive, Buy → -(qty×price), Sell → +(qty×price).
+ */
+/** Dollar cost basis for STK snapshot: |shares| × avg cost per share. */
+function stkCostBasisFromSnapshot(
+  snap: { position: number | null; avgCost: number | null } | null | undefined,
+): number | null {
+  if (!snap) return null
+  const { position, avgCost } = snap
+  if (position == null || avgCost == null) return null
+  if (!Number.isFinite(position) || !Number.isFinite(avgCost)) return null
+  if (Math.abs(position) < 1e-12) return null
+  return Math.abs(position) * avgCost
+}
+
+/** Percent = 100 × numer / denom; null if denominator unusable. */
+function stkPctOf(numer: number, denom: number | null): number | null {
+  if (denom == null || !Number.isFinite(denom) || Math.abs(denom) < 1e-6) return null
+  if (!Number.isFinite(numer)) return null
+  return (100 * numer) / denom
+}
+
+/** Trade size in dollars: |quantity| × price (same as summary notional sum). */
+function stkNotionalAbsUsd(ex: Execution): number | null {
+  const p = Number(ex.price)
+  const q = Math.abs(Number(ex.quantity) || 0)
+  if (!Number.isFinite(p) || q <= 0) return null
+  return q * p
+}
+
+/** Notional cell color: Buy = green, Sell = red, unknown = neutral. */
+function stkNotionalSideColorClass(ex: Execution): string {
+  const s = (ex.side ?? '').toString().trim().toUpperCase()
+  if (s === 'BUY' || s === 'BOT' || s === 'B') return 'replay-pnl-realized'
+  if (s === 'SELL' || s === 'SLD' || s === 'S') return 'replay-pnl-detail-negative'
+  return 'replay-ledger-summary-realized-zero'
+}
+
 type LedgerOptSectionGroupBy = 'opportunity' | 'structure' | 'watchlist_symbol'
+
+/** Latest activity in a stock ledger group: max execution `time`, else max parsed `trade_date`. */
+function stockGroupLatestSortKey(execs: Execution[]): number {
+  let maxTs = 0
+  for (const ex of execs) {
+    const t = Number(ex.time)
+    if (Number.isFinite(t) && t > maxTs) maxTs = t
+  }
+  if (maxTs > 0) return maxTs
+  let maxMs = 0
+  for (const ex of execs) {
+    const d = (ex.trade_date ?? '').trim()
+    if (d.length >= 8) {
+      const ms = Date.parse(`${d}T12:00:00.000Z`)
+      if (Number.isFinite(ms) && ms > maxMs) maxMs = ms
+    }
+  }
+  return maxMs / 1000
+}
 
 function getLedgerOpportunityDimensionMeta(
   opportunityId: number | 'none',
@@ -162,6 +222,67 @@ function executionMatchesExpiryYearMonth(
   const target6 = `${ys}${mm}`
   const cmp = ex.length >= 6 ? ex.slice(0, 6) : ex
   return cmp === target6
+}
+
+function ledgerUrPnlLineClass(v: number): string {
+  if (v > 0) return 'replay-pnl-realized'
+  if (v < 0) return 'replay-pnl-detail-negative'
+  return 'replay-ledger-summary-realized-zero'
+}
+
+function LedgerStkNotionalCell({ ex }: { ex: Execution }) {
+  const n = stkNotionalAbsUsd(ex)
+  if (n == null) return <td>—</td>
+  return (
+    <td className={`ledger-stk-notional-td ${stkNotionalSideColorClass(ex)}`}>{fmtUsd(n)}</td>
+  )
+}
+
+/** Per-fill realized only; unrealized is position-level (group header + Total U, not per row). */
+function LedgerStkRowRealizedPnlCell({ realized }: { realized: number }) {
+  const isZero = !Number.isFinite(realized) || Math.abs(realized) < 0.005
+  return (
+    <td className="ledger-stk-row-realized-td">
+      {isZero ? (
+        <span className="ledger-stk-row-realized-value replay-ledger-summary-realized-zero">-</span>
+      ) : (
+        <span className={`ledger-stk-row-realized-value ${ledgerUrPnlLineClass(realized)}`}>
+          {fmtUsd0(realized)}
+        </span>
+      )}
+    </td>
+  )
+}
+
+/** Single-line group header: label + R (green/red) + U (yellow). */
+function LedgerStkUrPnlGroupInline({
+  realized,
+  unrealized,
+}: {
+  realized: number
+  unrealized: number | null | undefined
+}) {
+  const uFinite = unrealized != null && Number.isFinite(unrealized)
+  return (
+    <span className="replay-stock-group-total-pnl ledger-stk-ur-pnl-group-inline">
+      <span className="replay-stock-group-total-pnl-label">Group U/R PnL</span>
+      <span className="ledger-stk-ur-pnl-group-inline-metrics">
+        <span className={`ledger-stk-ur-pnl-inline-seg ${ledgerUrPnlLineClass(realized)}`}>
+          <span className="ledger-stk-ur-pnl-prefix">R</span> {fmtUsd0(realized)}
+        </span>
+        <span className="ledger-stk-ur-pnl-group-metric-sep" aria-hidden>
+          ·
+        </span>
+        <span
+          className={`ledger-stk-ur-pnl-inline-seg ${
+            uFinite ? 'ledger-stk-ur-pnl-unrealized' : 'replay-ledger-summary-realized-zero'
+          }`}
+        >
+          <span className="ledger-stk-ur-pnl-prefix">U</span> {uFinite ? fmtUsd0(unrealized as number) : '—'}
+        </span>
+      </span>
+    </span>
+  )
 }
 
 /** YYYY-MM-DD → M/D for compact trade-window hints */
@@ -275,8 +396,9 @@ export function LedgerView({
     column: 'expiry' | 'trade_date'
     dir: 'asc' | 'desc'
   }>({ column: 'expiry', dir: 'desc' })
+  /** Default: Trade date descending; group-by-position order uses each group's latest fill (see stockGroupLatestSortKey). */
   const [ledgerStockSort, setLedgerStockSort] = useState<{
-    column: 'trade_date'
+    column: 'trade_date' | 'realized_pnl'
     dir: 'asc' | 'desc'
   }>({ column: 'trade_date', dir: 'desc' })
   const [ledgerSummaryPeriod, setLedgerSummaryPeriod] = useState<LedgerSummaryPeriod>('month')
@@ -517,6 +639,64 @@ export function LedgerView({
     return map
   }, [status?.portfolio?.accounts])
 
+  /** (account_id, contract_key) -> unrealized_pnl for STK rows from GET /status positions (Ib). */
+  const stkUnrealizedPnlByAccountContract = useMemo(() => {
+    const map = new Map<string, number | null>()
+    const accounts = status?.portfolio?.accounts ?? []
+    for (const acc of accounts) {
+      const accountId = (acc.account_id ?? '').trim()
+      const positions = (acc as { positions?: IbPositionRow[] }).positions ?? []
+      for (const p of positions) {
+        const stRaw = (p.secType ?? (p as { sec_type?: string }).sec_type ?? '').toString().trim().toUpperCase()
+        if (stRaw !== 'STK') continue
+        const ck = (p.contract_key ?? '').trim()
+        if (!accountId || !ck) continue
+        const key = `${accountId}|${ck}`
+        const u = p.unrealized_pnl
+        if (u != null && typeof u === 'number' && Number.isFinite(u)) {
+          map.set(key, u)
+        } else {
+          map.set(key, null)
+        }
+      }
+    }
+    return map
+  }, [status?.portfolio?.accounts])
+
+  /** (account_id, contract_key) -> position snapshot for STK rows from GET /status (same keys as unrealized map). */
+  const stkPositionSnapshotByAccountContract = useMemo(() => {
+    const map = new Map<
+      string,
+      { position: number | null; avgCost: number | null; price: number | null }
+    >()
+    const accounts = status?.portfolio?.accounts ?? []
+    for (const acc of accounts) {
+      const accountId = (acc.account_id ?? '').trim()
+      const positions = (acc as { positions?: IbPositionRow[] }).positions ?? []
+      for (const p of positions) {
+        const stRaw = (p.secType ?? (p as { sec_type?: string }).sec_type ?? '').toString().trim().toUpperCase()
+        if (stRaw !== 'STK') continue
+        const ck = (p.contract_key ?? '').trim()
+        if (!accountId || !ck) continue
+        const key = `${accountId}|${ck}`
+        const posRaw = p.position
+        let position: number | null = null
+        if (posRaw != null) {
+          const pq = typeof posRaw === 'number' ? posRaw : Number(posRaw)
+          if (Number.isFinite(pq)) position = pq
+        }
+        const rawAvg = p.avgCost
+        const avgFin =
+          rawAvg != null && Number.isFinite(Number(rawAvg)) ? Number(rawAvg) : null
+        const rawPx = p.price
+        const priceFin =
+          rawPx != null && Number.isFinite(Number(rawPx)) ? Number(rawPx) : null
+        map.set(key, { position, avgCost: avgFin, price: priceFin })
+      }
+    }
+    return map
+  }, [status?.portfolio?.accounts])
+
   /** STK contract_key for lookup: symbol|STK||| */
   const stkContractKey = useCallback(
     (sym: string, accId: string) =>
@@ -530,6 +710,16 @@ export function LedgerView({
         stkContractKey(ex.symbol ?? '', ex.account_id ?? ''),
       ) ?? '—',
     [positionCategoryByAccountContract, stkContractKey],
+  )
+
+  const getStkUnrealizedForExecution = useCallback(
+    (ex: Execution) => stkUnrealizedPnlByAccountContract.get(stkContractKey(ex.symbol ?? '', ex.account_id ?? '')),
+    [stkUnrealizedPnlByAccountContract, stkContractKey],
+  )
+
+  const getStkPositionSnapshotForGroup = useCallback(
+    (accId: string, sym: string) => stkPositionSnapshotByAccountContract.get(stkContractKey(sym, accId)),
+    [stkPositionSnapshotByAccountContract, stkContractKey],
   )
 
   const ledgerBaseFilteredExecutions = useMemo(() => {
@@ -1272,8 +1462,27 @@ export function LedgerView({
       notional += d.notional
       realizedPnl += d.realizedPnl
     }
-    return { trades, notional, realizedPnl }
-  }, [ledgerStocksSummaryByMonth])
+    const seen = new Set<string>()
+    for (const ex of ledgerStockFilteredExecutions) {
+      seen.add(stkContractKey(ex.symbol ?? '', ex.account_id ?? ''))
+    }
+    let totalUnrealized: number | null = null
+    let sumU = 0
+    let anyPositionRow = false
+    for (const key of seen) {
+      if (!stkUnrealizedPnlByAccountContract.has(key)) continue
+      anyPositionRow = true
+      const u = stkUnrealizedPnlByAccountContract.get(key)
+      if (u != null && Number.isFinite(u)) sumU += u
+    }
+    if (anyPositionRow) totalUnrealized = sumU
+    return { trades, notional, realizedPnl, totalUnrealized }
+  }, [
+    ledgerStocksSummaryByMonth,
+    ledgerStockFilteredExecutions,
+    stkUnrealizedPnlByAccountContract,
+    stkContractKey,
+  ])
 
   const handleMetricExplainEnter = useCallback(
     (kind: LedgerMetricExplainKind, id: string, e: MouseEvent) => {
@@ -1287,6 +1496,7 @@ export function LedgerView({
         closedOptionGroups,
         stockFilteredExecutions: ledgerStockFilteredExecutions,
         closedOptGroupsPnlSum,
+        stkUnrealizedByAccountContract: stkUnrealizedPnlByAccountContract,
       })
       setLedgerMetricExplain(prev => {
         const anchor = prev === null ? { x: e.clientX, y: e.clientY } : prev.anchor
@@ -1300,6 +1510,7 @@ export function LedgerView({
       closedOptionGroups,
       ledgerStockFilteredExecutions,
       closedOptGroupsPnlSum,
+      stkUnrealizedPnlByAccountContract,
     ],
   )
 
@@ -1393,12 +1604,24 @@ export function LedgerView({
 
   const sortedStockExecutions = useMemo(() => {
     const list = [...ledgerStockFilteredExecutions]
-    const { dir } = ledgerStockSort
+    const { column, dir } = ledgerStockSort
     const mult = dir === 'asc' ? 1 : -1
     list.sort((a, b) => {
-      const va = (a.trade_date ?? '').trim()
-      const vb = (b.trade_date ?? '').trim()
-      return mult * va.localeCompare(vb)
+      if (column === 'realized_pnl') {
+        const va = Number(a.realized_pnl) || 0
+        const vb = Number(b.realized_pnl) || 0
+        if (Math.abs(va - vb) > 1e-9) return mult * (va - vb)
+      } else {
+        const da = (a.trade_date ?? '').trim()
+        const db = (b.trade_date ?? '').trim()
+        const c = da.localeCompare(db)
+        if (c !== 0) return mult * c
+      }
+      const da = (a.trade_date ?? '').trim()
+      const db = (b.trade_date ?? '').trim()
+      const tie = da.localeCompare(db)
+      if (tie !== 0) return tie
+      return (Number(a.time) || 0) - (Number(b.time) || 0)
     })
     return list
   }, [ledgerStockFilteredExecutions, ledgerStockSort])
@@ -2425,6 +2648,32 @@ export function LedgerView({
                         <span
                           role="button"
                           tabIndex={0}
+                          className={`replay-ledger-metric-explain-trigger replay-ledger-summary-stocks-total-u ${
+                            ledgerStocksSummaryTotals.totalUnrealized != null
+                              ? 'ledger-stk-ur-pnl-unrealized'
+                              : 'replay-ledger-summary-realized-zero'
+                          }`}
+                          aria-label="Open calculation details for total stock unrealized PnL"
+                          onMouseEnter={e =>
+                            handleMetricHoverEnter('stocks_total_unrealized', 'stk-total-u', e)
+                          }
+                          onMouseLeave={handleMetricHoverLeave}
+                          onClick={e => {
+                            e.stopPropagation()
+                            handleMetricExplainEnter('stocks_total_unrealized', 'stk-total-u', e)
+                          }}
+                        >
+                          U{' '}
+                          {ledgerStocksSummaryTotals.totalUnrealized != null
+                            ? fmtUsd0(ledgerStocksSummaryTotals.totalUnrealized)
+                            : '—'}
+                        </span>
+                        <span className="replay-ledger-summary-stocks-metric-sep" aria-hidden>
+                          ·
+                        </span>
+                        <span
+                          role="button"
+                          tabIndex={0}
                           className="replay-ledger-summary-stocks-notional replay-ledger-metric-explain-trigger"
                           aria-label="Open calculation details for total stock notional"
                           onMouseEnter={e =>
@@ -3131,18 +3380,28 @@ export function LedgerView({
                               className="replay-th-sortable"
                               onClick={e => {
                                 e.stopPropagation()
-                                setLedgerStockSort(prev => ({
-                                  column: 'trade_date',
-                                  dir: prev.dir === 'desc' ? 'asc' : 'desc',
-                                }))
+                                setLedgerStockSort(prev => {
+                                  if (prev.column === 'trade_date') {
+                                    return {
+                                      column: 'trade_date',
+                                      dir: prev.dir === 'desc' ? 'asc' : 'desc',
+                                    }
+                                  }
+                                  return { column: 'trade_date', dir: 'desc' }
+                                })
                               }}
                               onKeyDown={e => {
                                 if (e.key === 'Enter' || e.key === ' ') {
                                   e.preventDefault()
-                                  setLedgerStockSort(prev => ({
-                                    column: 'trade_date',
-                                    dir: prev.dir === 'desc' ? 'asc' : 'desc',
-                                  }))
+                                  setLedgerStockSort(prev => {
+                                    if (prev.column === 'trade_date') {
+                                      return {
+                                        column: 'trade_date',
+                                        dir: prev.dir === 'desc' ? 'asc' : 'desc',
+                                      }
+                                    }
+                                    return { column: 'trade_date', dir: 'desc' }
+                                  })
                                 }
                               }}
                               role="button"
@@ -3150,7 +3409,11 @@ export function LedgerView({
                               title="Sort by Trade date"
                             >
                               Trade date{' '}
-                              {ledgerStockSort.dir === 'asc' ? ' ▲' : ' ▼'}
+                              {ledgerStockSort.column === 'trade_date'
+                                ? ledgerStockSort.dir === 'asc'
+                                  ? ' ▲'
+                                  : ' ▼'
+                                : ''}
                             </th>
                             {!ledgerStockGroupByPosition ? <th>Symbol</th> : null}
                             <th>Account</th>
@@ -3158,6 +3421,47 @@ export function LedgerView({
                             <th>Side</th>
                             <th>Qty</th>
                             <th>Price</th>
+                            <th>Notional</th>
+                            <th
+                              className="replay-th-sortable"
+                              onClick={e => {
+                                e.stopPropagation()
+                                setLedgerStockSort(prev => {
+                                  if (prev.column === 'realized_pnl') {
+                                    return {
+                                      column: 'realized_pnl',
+                                      dir: prev.dir === 'desc' ? 'asc' : 'desc',
+                                    }
+                                  }
+                                  return { column: 'realized_pnl', dir: 'desc' }
+                                })
+                              }}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault()
+                                  setLedgerStockSort(prev => {
+                                    if (prev.column === 'realized_pnl') {
+                                      return {
+                                        column: 'realized_pnl',
+                                        dir: prev.dir === 'desc' ? 'asc' : 'desc',
+                                      }
+                                    }
+                                    return { column: 'realized_pnl', dir: 'desc' }
+                                  })
+                                }
+                              }}
+                              role="button"
+                              tabIndex={0}
+                              title="Sort by realized per fill"
+                            >
+                              Realized{' '}
+                              <InfoTooltip text="Realized on this fill (IB commission report). Zero shows as dash. Unrealized is position-level: see Group U/R PnL when grouped, or Total U in the summary." />{' '}
+                              {ledgerStockSort.column === 'realized_pnl'
+                                ? ledgerStockSort.dir === 'asc'
+                                  ? ' ▲'
+                                  : ' ▼'
+                                : ''}
+                            </th>
                             <th>Comm.</th>
                             <th>Source</th>
                             <th>Actions</th>
@@ -3211,6 +3515,8 @@ export function LedgerView({
                                         : '—'}
                                     </td>
                                     <td>{fmtUsd(ex.price)}</td>
+                                    <LedgerStkNotionalCell ex={ex} />
+                                    <LedgerStkRowRealizedPnlCell realized={Number(ex.realized_pnl) || 0} />
                                     <td>{fmtUsd(ex.commission ?? 0)}</td>
                                     <td><ExecSourceBadge source={ex.source} /></td>
                                     <td>
@@ -3275,9 +3581,21 @@ export function LedgerView({
                               if (!groups.has(key)) groups.set(key, [])
                               groups.get(key)!.push(ex)
                             }
+                            const groupByLatestNewestFirst =
+                              ledgerStockSort.column !== 'trade_date' ||
+                              ledgerStockSort.dir === 'desc'
                             const allGroupEntries = Array.from(
                               groups.entries(),
-                            ).sort(([a], [b]) => {
+                            ).sort((entryA, entryB) => {
+                              const [, execsA] = entryA
+                              const [, execsB] = entryB
+                              const ka = stockGroupLatestSortKey(execsA)
+                              const kb = stockGroupLatestSortKey(execsB)
+                              if (Math.abs(ka - kb) > 1e-6) {
+                                return groupByLatestNewestFirst ? kb - ka : ka - kb
+                              }
+                              const [a] = entryA
+                              const [b] = entryB
                               const [accA, symA] = a.split('|')
                               const [accB, symB] = b.split('|')
                               if (symA !== symB)
@@ -3296,12 +3614,43 @@ export function LedgerView({
                                 positionCategoryByAccountContract.get(
                                   stkContractKey(sym, accId),
                                 ) ?? '—'
+                              const groupTotalRealizedPnl = execs.reduce(
+                                (sum, ex) => sum + (Number(ex.realized_pnl) || 0),
+                                0,
+                              )
+                              const groupUnrealized = execs[0]
+                                ? getStkUnrealizedForExecution(execs[0])
+                                : undefined
+                              const snap = getStkPositionSnapshotForGroup(accId, sym ?? '')
+                              const posSnapStr =
+                                snap?.position != null && Number.isFinite(snap.position)
+                                  ? snap.position.toLocaleString('en-US', { maximumFractionDigits: 6 })
+                                  : '—'
+                              const avgSnapStr =
+                                snap?.avgCost != null && Number.isFinite(snap.avgCost)
+                                  ? fmtUsd(snap.avgCost)
+                                  : '—'
+                              const mktSnapStr =
+                                snap?.price != null && Number.isFinite(snap.price)
+                                  ? fmtUsd(snap.price)
+                                  : '—'
+                              const costBaseUsd = stkCostBasisFromSnapshot(snap)
+                              const costBaseStr =
+                                costBaseUsd != null ? fmtUsd0(costBaseUsd) : '—'
+                              const uDollar =
+                                groupUnrealized != null && Number.isFinite(groupUnrealized)
+                                  ? groupUnrealized
+                                  : null
+                              const rPct = stkPctOf(groupTotalRealizedPnl, costBaseUsd)
+                              const uPct = uDollar != null ? stkPctOf(uDollar, costBaseUsd) : null
+                              const rPctStr = rPct != null ? fmtPctCompact(rPct) : '—'
+                              const uPctStr = uPct != null ? fmtPctCompact(uPct) : '—'
                               rows.push(
                                 <tr
                                   key={`h-${groupKey}`}
                                   className="replay-stock-group-header"
                                 >
-                                  <td colSpan={10}>
+                                  <td colSpan={12}>
                                     <div className="replay-stock-group-header-inner">
                                       <span
                                         className={`replay-stock-group-symbol${ledgerTab === 'stocks' ? ' ledger-stk-pill ledger-stk-pill--symbol' : ''}`}
@@ -3316,13 +3665,85 @@ export function LedgerView({
                                       >
                                         {category}
                                       </span>
+                                      <span
+                                        className="replay-stock-group-position-snapshot"
+                                        title="Current position snapshot from GET /status (portfolio positions); same source as U."
+                                      >
+                                        <span className="replay-stock-group-position-snapshot-label">Pos</span>{' '}
+                                        {posSnapStr}
+                                        <span className="replay-stock-group-position-snapshot-sep" aria-hidden>
+                                          {' '}
+                                          ·{' '}
+                                        </span>
+                                        <span className="replay-stock-group-position-snapshot-label">Avg</span>{' '}
+                                        {avgSnapStr}
+                                        <span className="replay-stock-group-position-snapshot-sep" aria-hidden>
+                                          {' '}
+                                          ·{' '}
+                                        </span>
+                                        <span className="replay-stock-group-position-snapshot-label">Mkt</span>{' '}
+                                        {mktSnapStr}
+                                      </span>
+                                      <span
+                                        className="replay-stock-group-basis-pct"
+                                        title="Cost basis = |position| × avg cost (from GET /status). R% and U% are realized and unrealized PnL as a percentage of that basis (not annualized)."
+                                      >
+                                        <span className="replay-stock-group-position-snapshot-label">Basis</span>{' '}
+                                        {costBaseStr}
+                                        <span className="replay-stock-group-position-snapshot-sep" aria-hidden>
+                                          {' '}
+                                          ·{' '}
+                                        </span>
+                                        <span className="replay-stock-group-position-snapshot-label">R%</span>{' '}
+                                        <span
+                                          className={
+                                            rPct != null ? ledgerUrPnlLineClass(rPct) : 'replay-ledger-summary-realized-zero'
+                                          }
+                                        >
+                                          {rPctStr}
+                                        </span>
+                                        <span className="replay-stock-group-position-snapshot-sep" aria-hidden>
+                                          {' '}
+                                          ·{' '}
+                                        </span>
+                                        <span className="replay-stock-group-position-snapshot-label">U%</span>{' '}
+                                        <span
+                                          className={
+                                            uPct != null ? ledgerUrPnlLineClass(uPct) : 'replay-ledger-summary-realized-zero'
+                                          }
+                                        >
+                                          {uPctStr}
+                                        </span>
+                                      </span>
+                                      <LedgerStkUrPnlGroupInline
+                                        realized={groupTotalRealizedPnl}
+                                        unrealized={groupUnrealized}
+                                      />
                                       {ledgerTab === 'stocks' && ledgerStockGroupByPosition && (
                                         <button
                                           type="button"
-                                          className="btn btn-secondary btn-sm ledger-stock-quick-journal-btn"
+                                          className="btn btn-icon-small ledger-stock-quick-journal-btn"
                                           onClick={() => openQuickStockJournal(accId, sym)}
+                                          title="Add journal"
+                                          aria-label="Add journal"
                                         >
-                                          Add journal
+                                          <svg
+                                            viewBox="0 0 24 24"
+                                            width={16}
+                                            height={16}
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            aria-hidden
+                                          >
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                            <polyline points="14 2 14 8 20 8" />
+                                            <line x1="16" y1="13" x2="8" y2="13" />
+                                            <line x1="16" y1="17" x2="8" y2="17" />
+                                            <line x1="10" y1="9" x2="8" y2="9" />
+                                          </svg>
                                         </button>
                                       )}
                                     </div>
@@ -3362,6 +3783,8 @@ export function LedgerView({
                                         : '—'}
                                     </td>
                                     <td>{fmtUsd(ex.price)}</td>
+                                    <LedgerStkNotionalCell ex={ex} />
+                                    <LedgerStkRowRealizedPnlCell realized={Number(ex.realized_pnl) || 0} />
                                     <td>{fmtUsd(ex.commission ?? 0)}</td>
                                     <td><ExecSourceBadge source={ex.source} /></td>
                                     <td>

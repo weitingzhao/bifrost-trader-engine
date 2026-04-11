@@ -121,6 +121,11 @@ function buildGroupPnLFormula(groups: OptExecutionGroup[]): string[] {
   return [`${head} + … (${terms.length} terms) + ${tail}`, `= ${fmtUsd0(sum)}`]
 }
 
+/** Same key as LedgerView `stkContractKey`: account|SYMBOL|STK||| */
+function stockStkPositionKey(ex: Execution): string {
+  return `${(ex.account_id ?? '').trim()}|${(ex.symbol ?? '').toString().trim().toUpperCase()}|STK|||`
+}
+
 export interface BuildLedgerMetricExplainPayloadInput {
   kind: LedgerMetricExplainKind
   id: string
@@ -130,6 +135,8 @@ export interface BuildLedgerMetricExplainPayloadInput {
   closedOptionGroups: OptExecutionGroup[]
   stockFilteredExecutions: Execution[]
   closedOptGroupsPnlSum: number
+  /** STK position unrealized from GET /status; optional for kinds that need it. */
+  stkUnrealizedByAccountContract?: Map<string, number | null>
 }
 
 export function buildLedgerMetricExplainPayload(
@@ -144,6 +151,7 @@ export function buildLedgerMetricExplainPayload(
     closedOptionGroups,
     stockFilteredExecutions,
     closedOptGroupsPnlSum,
+    stkUnrealizedByAccountContract = new Map<string, number | null>(),
   } = input
 
   const period = ledgerSummaryPeriod
@@ -357,6 +365,66 @@ export function buildLedgerMetricExplainPayload(
       displayedRaw: sum,
       formulaLines: buildNotionalFormula(execRows),
       detailColumnHeaders: ['#', 'symbol', 'account', 'time', 'qty', 'price', 'line_notional'],
+      detailRows,
+      truncatedCount: truncated,
+      emptyMessage: execRows.length === 0 ? 'No stock executions under current filters.' : undefined,
+    }
+  }
+
+  if (kind === 'stocks_total_unrealized') {
+    const execRows = stockFilteredExecutions
+    const seen = new Set<string>()
+    const distinctKeys: string[] = []
+    for (const ex of execRows) {
+      const k = stockStkPositionKey(ex)
+      if (seen.has(k)) continue
+      seen.add(k)
+      distinctKeys.push(k)
+    }
+    let sum = 0
+    let anyPosition = false
+    for (const key of distinctKeys) {
+      if (!stkUnrealizedByAccountContract.has(key)) continue
+      anyPosition = true
+      const u = stkUnrealizedByAccountContract.get(key)
+      if (u != null && Number.isFinite(u)) sum += u
+    }
+    const allRows = distinctKeys.map((key, i) => {
+      const parts = key.split('|')
+      const account = parts[0] ?? '—'
+      const sym = parts[1] ?? '—'
+      const has = stkUnrealizedByAccountContract.has(key)
+      const u = stkUnrealizedByAccountContract.get(key)
+      const uStr =
+        !has ? '—' : u != null && Number.isFinite(u) ? fmtUsd0(u) : '—'
+      return {
+        '#': i + 1,
+        symbol: sym,
+        account,
+        contract_key: key.slice(0, 48),
+        unrealized_pnl: uStr,
+      }
+    })
+    const truncated =
+      allRows.length > LEDGER_METRIC_EXPLAIN_MAX_ROWS
+        ? allRows.length - LEDGER_METRIC_EXPLAIN_MAX_ROWS
+        : 0
+    const detailRows = allRows.slice(0, LEDGER_METRIC_EXPLAIN_MAX_ROWS)
+    const formulaLines = anyPosition
+      ? [
+          'For each distinct (account, STK contract_key) in filtered executions, take unrealized_pnl from GET /status portfolio positions (if present).',
+          `Σ unrealized_pnl = ${fmtUsd0(sum)}`,
+        ]
+      : ['No matching STK position rows in the current status snapshot for in-scope execution keys.']
+    return {
+      ledgerTabLabel,
+      summaryPeriodModeLabel,
+      bucketLabel: 'Total (distinct STK positions for in-scope fills)',
+      metricLabel: 'Unrealized PnL (total)',
+      displayedFormatted: anyPosition ? fmtUsd0(sum) : '—',
+      displayedRaw: anyPosition ? sum : NaN,
+      formulaLines,
+      detailColumnHeaders: ['#', 'symbol', 'account', 'contract_key', 'unrealized_pnl'],
       detailRows,
       truncatedCount: truncated,
       emptyMessage: execRows.length === 0 ? 'No stock executions under current filters.' : undefined,

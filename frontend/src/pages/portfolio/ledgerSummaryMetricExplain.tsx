@@ -23,6 +23,8 @@ export function ledgerMetricExplainTitle(kind: LedgerMetricExplainKind): string 
       return 'Stock summary — realized PnL (total)'
     case 'stocks_total_notional':
       return 'Stock summary — notional (total)'
+    case 'stocks_total_unrealized':
+      return 'Stock summary — unrealized PnL (total)'
     default:
       return 'Summary metric'
   }
@@ -217,6 +219,11 @@ export function LedgerSummaryMetricExplainContent({
             <li>
               <strong>Time field for bucketing:</strong> <code>execution.time</code> (Unix seconds).
             </li>
+            <li>
+              <strong>Unrealized:</strong> period cells are <strong>realized only</strong>. Unrealized PnL is a
+              position snapshot (see Total unrealized explain); it is not allocated into historical month/quarter
+              buckets.
+            </li>
           </ul>
           <SectionTitle n={2}>Formula and calculation</SectionTitle>
           <ol className="ledger-metric-explain-steps">
@@ -306,10 +313,59 @@ export function LedgerSummaryMetricExplainContent({
           <SectionTitle n={3}>Result on screen</SectionTitle>
           <ul className="ledger-metric-explain-list">
             <li>
-              In the <strong>Total</strong> box: middle number after the trade count,{' '}
-              <code>fmtUsd0(totalRealizedPnL)</code>, colored by sign.
+              In the <strong>Total</strong> box: realized total after the trade count,{' '}
+              <code>fmtUsd0(totalRealizedPnL)</code>, colored by sign; then <strong>U</strong> (unrealized from
+              positions) and <strong>nv</strong> (notional).
             </li>
             <li>Independent of the period grid — it is the full filtered ledger total.</li>
+          </ul>
+        </>
+      )}
+      {kind === 'stocks_total_unrealized' && (
+        <>
+          <SectionTitle n={1}>Raw data sources</SectionTitle>
+          <ul className="ledger-metric-explain-list">
+            <li>
+              <strong>API:</strong> <code>GET /status</code> → <code>portfolio.accounts[].positions[]</code> (IB
+              snapshot). Unrealized is <strong>not</strong> on execution rows.
+            </li>
+            <li>
+              For each STK position, the server computes <code>unrealized_pnl</code> from mark vs average cost
+              (same as Accounts).
+            </li>
+            <li>
+              Keys match ledger rows: <code>account_id</code> + STK <code>contract_key</code>{' '}
+              (<code>symbol|STK|||</code>).
+            </li>
+            <li>
+              The table <strong>Notional</strong> column per fill is <code>|quantity| × price</code> (trade size in
+              dollars). Cell color is by side: <strong>Buy</strong> green, <strong>Sell</strong> red. Unrelated to{' '}
+              <strong>U</strong> (position-level unrealized). The <strong>Realized</strong> column is per fill;
+              unrealized appears only on <strong>Group U/R PnL</strong> (when grouped) and <strong>Total U</strong>.
+            </li>
+          </ul>
+          <SectionTitle n={2}>Formula and calculation</SectionTitle>
+          <ol className="ledger-metric-explain-steps">
+            <li>
+              Let <code>K</code> be distinct <code>(account, STK contract_key)</code> pairs from in-scope stock
+              executions.
+            </li>
+            <li>
+              For each <code>k ∈ K</code>, read <code>U(k)</code> from the position map if present.
+            </li>
+            <li>
+              <pre className="ledger-metric-explain-formula">
+                {`totalUnrealized = Σ  U(k)   over k where a position row exists
+  (missing position → omitted; if none exist, show em dash)`}
+              </pre>
+            </li>
+          </ol>
+          <SectionTitle n={3}>Result on screen</SectionTitle>
+          <ul className="ledger-metric-explain-list">
+            <li>
+              In the <strong>Total</strong> box: label <code>U</code> plus <code>fmtUsd0(totalUnrealized)</code>{' '}
+              when any matching position exists.
+            </li>
           </ul>
         </>
       )}
