@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, Fragment } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react'
 import type {
   Execution,
   OptionStockLinkRow,
@@ -19,11 +19,16 @@ import {
   scaledLedgerOptDetailRowPnl,
 } from './portfolio/ledgerOptHelpers'
 import { fmtChicagoTime, fmtPnl, fmtPnlCalendar, fmtUsd } from '../utils/format'
+import {
+  filterExecutionsByUnixRange,
+  loadPerformanceDayPnLBulk,
+  slicePerformanceForCalendarMonth,
+} from './performance/performanceBulk'
 import { fetchOptionStockLinkMapForExecutions } from './performance/fetchOptionStockLinkMap'
 import {
+  computeBackendOptPairsFromExecutions,
   computeDayRealizedUnrealized,
   computeDayRealizedUnrealizedStock,
-  computeStockDayPnLForPerformanceDate,
   computeOptionDayPnLForPerformanceDate,
   computeOptPairsFromExecutions,
   dateStrMinusDays,
@@ -37,7 +42,6 @@ import {
   stockOnTheFlyUnrealizedPnlLeg,
   listDateStrings,
   listMonthKeysInRange,
-  mapWithConcurrency,
   matchPnl,
   normalizeStrike,
   optionRightToFull,
@@ -87,8 +91,14 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
   )
   const [calendarDayPnL, setCalendarDayPnL] = useState<Record<string, { realized: number; unrealized: number }> | null>(null)
   const [calendarDayPnLLoading, setCalendarDayPnLLoading] = useState(false)
-  const [calendarMonthPerformance, setCalendarMonthPerformance] = useState<PerformanceResponse | null>(null)
-  const [calendarMonthPerformanceLoading, setCalendarMonthPerformanceLoading] = useState(false)
+  /** Batched executions + link map for drill-down; key matches getTimeRangeDates + filters */
+  const perfBulkRef = useRef<{
+    key: string
+    rawExecsWindow: Execution[]
+    linkByOptionId: Record<number, OptionStockLinkSummary>
+  } | null>(null)
+  /** Incremented when bulk day PnL load completes so selected-day effect can switch from fallback fetch to cache */
+  const [perfBulkVersion, setPerfBulkVersion] = useState(0)
   const [byDayExpandedMonths, setByDayExpandedMonths] = useState<Set<string>>(new Set())
   const [byDayRangeData, setByDayRangeData] = useState<{
     opt: Record<string, { realized: number; unrealized: number }>
@@ -107,6 +117,11 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
   const [onTheFlySecTab, setOnTheFlySecTab] = useState<'all' | 'OPT' | 'STK'>('all')
   const [onTheFlyLoading, setOnTheFlyLoading] = useState(false)
   const [onTheFlyError, setOnTheFlyError] = useState<string | null>(null)
+
+  const calendarMonthPerformance = useMemo((): PerformanceResponse | null => {
+    if (!data) return null
+    return slicePerformanceForCalendarMonth(data, calendarMonth)
+  }, [data, calendarMonth])
 
   const onTheFlyComputed = useMemo(() => {
     if (onTheFlyExecs.length === 0) return null
@@ -210,94 +225,46 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
     void loadOnTheFly()
   }, [onTheFlyOpen, loadOnTheFly])
 
-  // By day: default all months collapsed (do not auto-expand current month)
-  // useEffect that auto-expanded calendarMonth removed so newest month is not expanded by default
-
-  // By day: fetch executions per month (same as Calendar logic) and merge for full range
+  // By day + calendar daily OPT R/U: one merged executions fetch + one bulk link query, then in-memory per-day PnL
   useEffect(() => {
     const { sinceStr, untilStr } = getTimeRangeDates(timeRange, calendarMonth)
     const monthKeys = listMonthKeysInRange(sinceStr, untilStr)
     if (monthKeys.length === 0) {
       setByDayRangeData(null)
       setByDayRangeLoading(false)
+      setCalendarDayPnL(null)
+      setCalendarDayPnLLoading(false)
+      perfBulkRef.current = null
       return
     }
     setByDayRangeLoading(true)
     setByDayRangeData(null)
-
-    const fetchOneMonth = (monthKey: string): Promise<{ opt: Record<string, { realized: number; unrealized: number }>; stock: Record<string, { realized: number; unrealized: number }> }> => {
-      const [y, m] = monthKey.split('-').map(Number)
-      const firstDateStr = `${monthKey}-01`
-      const lastDay = new Date(y, m, 0).getDate()
-      const lastDateStr = `${monthKey}-${String(lastDay).padStart(2, '0')}`
-      const lookBackStart = dateStrMinusDays(firstDateStr, OPT_PAIR_LOOK_BACK_DAYS)
-      const { since_ts } = getChicagoDayRange(lookBackStart)
-      const { until_ts } = getChicagoDayRange(lastDateStr)
-      const dateStrsForMonth: string[] = []
-      for (let day = 1; day <= lastDay; day++) {
-        dateStrsForMonth.push(`${monthKey}-${String(day).padStart(2, '0')}`)
-      }
-      const optPromise = mapWithConcurrency(dateStrsForMonth, 8, async (dateStr) => {
-        const lb = dateStrMinusDays(dateStr, OPT_PAIR_LOOK_BACK_DAYS)
-        const { since_ts: s } = getChicagoDayRange(lb)
-        const { until_ts: u } = getChicagoDayRange(dateStr)
-        const res = await fetchExecutions(
-          s,
-          u,
-          5000,
-          true,
-          strategyOpportunityId ?? undefined,
-          strategyInstanceId ?? undefined,
-          PERFORMANCE_EXEC_SOURCE_SCOPE,
-        )
-        const execs = res.executions ?? []
-        const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
-        const linkMap = await fetchOptionStockLinkMapForExecutions(execs)
-        const { realized, unrealized } = computeOptionDayPnLForPerformanceDate(dateStr, execs, optPairs, linkMap)
-        return { dateStr, realized, unrealized }
-      })
-      const stockPromise = fetchExecutions(
-        since_ts,
-        until_ts,
-        5000,
-        false,
-        strategyOpportunityId ?? undefined,
-        strategyInstanceId ?? undefined,
-        PERFORMANCE_EXEC_SOURCE_SCOPE,
-      ).then((res) => {
-        const execs = res.executions ?? []
-        const stockMap: Record<string, { realized: number; unrealized: number }> = {}
-        for (let day = 1; day <= lastDay; day++) {
-          const dateStr = `${monthKey}-${String(day).padStart(2, '0')}`
-          const { realized: stkR, unrealized: stkU } = computeStockDayPnLForPerformanceDate(
-            dateStr,
-            execs,
-            sortExecByExecutionDateThenTime,
-          )
-          stockMap[dateStr] = { realized: stkR, unrealized: stkU }
+    setCalendarDayPnLLoading(true)
+    setCalendarDayPnL(null)
+    let cancelled = false
+    const bulkKey = `${sinceStr}|${untilStr}|${strategyOpportunityId ?? ''}|${strategyInstanceId ?? ''}`
+    void loadPerformanceDayPnLBulk({
+      sinceStr,
+      untilStr,
+      calendarMonth,
+      strategyOpportunityId,
+      strategyInstanceId,
+      lookBackDays: OPT_PAIR_LOOK_BACK_DAYS,
+    })
+      .then((r) => {
+        if (cancelled) return
+        perfBulkRef.current = {
+          key: bulkKey,
+          rawExecsWindow: r.rawExecsWindow,
+          linkByOptionId: r.linkByOptionId,
         }
-        return stockMap
-      })
-      return Promise.all([optPromise, stockPromise]).then(([optRows, stockMap]) => {
-        const optMap: Record<string, { realized: number; unrealized: number }> = {}
-        for (const r of optRows) {
-          optMap[r.dateStr] = { realized: r.realized, unrealized: r.unrealized }
-        }
-        return { opt: optMap, stock: stockMap }
-      })
-    }
-
-    Promise.all(monthKeys.map(fetchOneMonth))
-      .then((results) => {
-        const optMap: Record<string, { realized: number; unrealized: number }> = {}
-        const stockMap: Record<string, { realized: number; unrealized: number }> = {}
-        for (const r of results) {
-          Object.assign(optMap, r.opt)
-          Object.assign(stockMap, r.stock)
-        }
-        setByDayRangeData({ opt: optMap, stock: stockMap })
+        setPerfBulkVersion((v) => v + 1)
+        setByDayRangeData(r.byDayRangeData)
+        setCalendarDayPnL(r.calendarDayPnL)
       })
       .catch(() => {
+        if (cancelled) return
+        perfBulkRef.current = null
         const dateStrsList = listDateStrings(sinceStr, untilStr)
         const fallbackOpt: Record<string, { realized: number; unrealized: number }> = {}
         const fallbackStock: Record<string, { realized: number; unrealized: number }> = {}
@@ -306,8 +273,17 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
           fallbackStock[dateStr] = { realized: 0, unrealized: 0 }
         }
         setByDayRangeData({ opt: fallbackOpt, stock: fallbackStock })
+        setCalendarDayPnL({})
       })
-      .finally(() => setByDayRangeLoading(false))
+      .finally(() => {
+        if (!cancelled) {
+          setByDayRangeLoading(false)
+          setCalendarDayPnLLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
   }, [timeRange, calendarMonth, strategyOpportunityId, strategyInstanceId])
 
   useEffect(() => {
@@ -324,89 +300,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
     }
   }, [selectedDay])
 
-  // Per calendar day: same fetch window as day-detail — since (day − OPT_PAIR_LOOK_BACK_DAYS) through end of that day
-  // (not month-end), so backend FIFO pairs match click-drill-down and R/U split is consistent.
-  useEffect(() => {
-    if (!calendarMonth) {
-      setCalendarDayPnL(null)
-      return
-    }
-    const [y, m] = calendarMonth.split('-').map(Number)
-    const lastDay = new Date(y, m, 0).getDate()
-    const dateStrs: string[] = []
-    for (let day = 1; day <= lastDay; day++) {
-      dateStrs.push(`${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`)
-    }
-    setCalendarDayPnLLoading(true)
-    setCalendarDayPnL(null)
-    let cancelled = false
-    mapWithConcurrency(dateStrs, 8, async (dateStr) => {
-      const lookBackStart = dateStrMinusDays(dateStr, OPT_PAIR_LOOK_BACK_DAYS)
-      const { since_ts } = getChicagoDayRange(lookBackStart)
-      const { until_ts } = getChicagoDayRange(dateStr)
-      const res = await fetchExecutions(
-        since_ts,
-        until_ts,
-        5000,
-        true,
-        strategyOpportunityId ?? undefined,
-        strategyInstanceId ?? undefined,
-        PERFORMANCE_EXEC_SOURCE_SCOPE,
-      )
-      const execs = res.executions ?? []
-      const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
-      const linkMap = await fetchOptionStockLinkMapForExecutions(execs)
-      const { realized, unrealized } = computeOptionDayPnLForPerformanceDate(dateStr, execs, optPairs, linkMap)
-      return { dateStr, realized, unrealized }
-    })
-      .then((rows) => {
-        if (cancelled) return
-        const map: Record<string, { realized: number; unrealized: number }> = {}
-        for (const r of rows) {
-          map[r.dateStr] = { realized: r.realized, unrealized: r.unrealized }
-        }
-        setCalendarDayPnL(map)
-      })
-      .catch(() => {
-        if (!cancelled) setCalendarDayPnL({})
-      })
-      .finally(() => {
-        if (!cancelled) setCalendarDayPnLLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [calendarMonth, strategyOpportunityId, strategyInstanceId])
-
-  // Calendar PnL owns its own performance query for the displayed month (so Time Range does not trigger refetch)
-  useEffect(() => {
-    if (!calendarMonth) {
-      setCalendarMonthPerformance(null)
-      return
-    }
-    const [y, m] = calendarMonth.split('-').map(Number)
-    const firstDateStr = `${y}-${String(m).padStart(2, '0')}-01`
-    const lastDay = new Date(y, m, 0).getDate()
-    const lastDateStr = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
-    const { since_ts } = getChicagoDayRange(firstDateStr)
-    const { until_ts } = getChicagoDayRange(lastDateStr)
-    setCalendarMonthPerformanceLoading(true)
-    setCalendarMonthPerformance(null)
-    fetchPerformance({
-      since_ts,
-      until_ts,
-      account_id: undefined,
-      granularity: 'day',
-      strategy_opportunity_id: strategyOpportunityId ?? undefined,
-      strategy_instance_id: strategyInstanceId ?? undefined,
-      source_scope: PERFORMANCE_EXEC_SOURCE_SCOPE,
-    })
-      .then(setCalendarMonthPerformance)
-      .catch(() => setCalendarMonthPerformance(null))
-      .finally(() => setCalendarMonthPerformanceLoading(false))
-  }, [calendarMonth, strategyOpportunityId, strategyInstanceId])
-
-  // When a day is selected, fetch executions from (selectedDay − OPT_PAIR_LOOK_BACK_DAYS) through end of selected day (same as each calendar cell)
+  // When a day is selected: reuse batched executions + links when possible (same window as calendar / By day)
   useEffect(() => {
     if (!selectedDay) {
       setSelectedDayExecutions(null)
@@ -414,19 +308,47 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       setSelectedDayComputedPnL(null)
       return
     }
+    const { sinceStr, untilStr } = getTimeRangeDates(timeRange, calendarMonth)
+    const bulkKey = `${sinceStr}|${untilStr}|${strategyOpportunityId ?? ''}|${strategyInstanceId ?? ''}`
+    const b = perfBulkRef.current
     const lookBackStart = dateStrMinusDays(selectedDay, OPT_PAIR_LOOK_BACK_DAYS)
     const { since_ts: monthStartTs } = getChicagoDayRange(lookBackStart)
     const { until_ts: dayEndTs } = getChicagoDayRange(selectedDay)
+
+    if (
+      b?.key === bulkKey &&
+      selectedDay >= sinceStr &&
+      selectedDay <= untilStr
+    ) {
+      setSelectedDayExecutionsLoading(true)
+      const slice = filterExecutionsByUnixRange(b.rawExecsWindow, monthStartTs, dayEndTs)
+      const optPairs = computeBackendOptPairsFromExecutions(slice, sortExecByExecutionDateThenTime)
+      setSelectedDayExecutions(slice)
+      setSelectedDayOptPairs(optPairs)
+      const { realized, unrealized, symbolsRealized, symbolsUnrealized } = computeOptionDayPnLForPerformanceDate(
+        selectedDay,
+        slice,
+        optPairs,
+        b.linkByOptionId,
+      )
+      setSelectedDayComputedPnL({ realized, unrealized })
+      if (symbolsRealized.length === 0 && symbolsUnrealized.length > 0) {
+        setSelectedDayPnLType('unrealized')
+      }
+      setSelectedDayExecutionsLoading(false)
+      return
+    }
+
     setSelectedDayExecutionsLoading(true)
     fetchExecutions(
-        monthStartTs,
-        dayEndTs,
-        5000,
-        true,
-        strategyOpportunityId ?? undefined,
-        strategyInstanceId ?? undefined,
-        PERFORMANCE_EXEC_SOURCE_SCOPE,
-      )
+      monthStartTs,
+      dayEndTs,
+      5000,
+      true,
+      strategyOpportunityId ?? undefined,
+      strategyInstanceId ?? undefined,
+      PERFORMANCE_EXEC_SOURCE_SCOPE,
+    )
       .then(async (res) => {
         setSelectedDayExecutions(res.executions ?? [])
         setSelectedDayOptPairs('opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null)
@@ -450,16 +372,29 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         setSelectedDayComputedPnL(null)
       })
       .finally(() => setSelectedDayExecutionsLoading(false))
-  }, [selectedDay, strategyOpportunityId, strategyInstanceId])
+  }, [selectedDay, timeRange, calendarMonth, strategyOpportunityId, strategyInstanceId, perfBulkVersion])
 
-  /** Bulk option–stock links for Performance day-detail (same API as Trade Ledger). */
+  /** Option–stock links for day-detail: reuse bulk link map when the batch matches. */
   useEffect(() => {
     if (!selectedDayExecutions || selectedDayExecutions.length === 0) {
       setSelectedDayOptionStockLinkByOptionId({})
       return
     }
-    let cancelled = false
+    const { sinceStr, untilStr } = getTimeRangeDates(timeRange, calendarMonth)
+    const bulkKey = `${sinceStr}|${untilStr}|${strategyOpportunityId ?? ''}|${strategyInstanceId ?? ''}`
+    const b = perfBulkRef.current
     const opt = selectedDayExecutions.filter((e) => (e.sec_type ?? '').toUpperCase() === 'OPT')
+    if (b?.key === bulkKey) {
+      const next: Record<number, OptionStockLinkSummary> = {}
+      for (const e of opt) {
+        const id = e.account_executions_id
+        if (id == null) continue
+        next[id] = b.linkByOptionId[id] ?? { links: [], slippage_total: null }
+      }
+      setSelectedDayOptionStockLinkByOptionId(next)
+      return
+    }
+    let cancelled = false
     const byAccount = new Map<string, number[]>()
     for (const e of opt) {
       const id = e.account_executions_id
@@ -498,7 +433,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
     return () => {
       cancelled = true
     }
-  }, [selectedDayExecutions])
+  }, [selectedDayExecutions, timeRange, calendarMonth, strategyOpportunityId, strategyInstanceId])
 
   const summary = data?.summary
 
@@ -730,9 +665,6 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         </h3>
         {data && summary ? (
           <>
-              {calendarMonthPerformanceLoading && (
-                <p className="section-hint performance-calendar-loading">Loading calendar…</p>
-              )}
               {(() => {
                 const bySec = calendarMonthPerformance?.calendar_by_sec_type ?? []
                 const optDays: Record<string, { net_pnl: number; pnl: number; commission: number; trade_count: number; pairs?: import('../types').OptRealizedPair[] }> = {}

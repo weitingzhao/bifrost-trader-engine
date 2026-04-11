@@ -332,6 +332,133 @@ export function computeOptPairsFromExecutions(
   return pairs
 }
 
+/**
+ * Same FIFO as {@link computeOptPairsFromExecutions}, but emits `leg_c_execution_id` / `leg_p_execution_id`
+ * so {@link filterRelevantOptPairsForDay} and day PnL match backend `include_opt_pairs` behavior on the same leg set.
+ */
+export function computeBackendOptPairsFromExecutions(
+  executions: Execution[],
+  sortExec: (a: Execution, b: Execution) => number = sortExecByExecutionDateThenTime,
+): BackendOptPair[] {
+  const QTY_EPS = 1e-9
+  const opt = executions.filter((e) => (e.sec_type ?? '').toUpperCase() === 'OPT')
+  const byKey: Record<string, Execution[]> = {}
+  for (const e of opt) {
+    const side = (e.side ?? 'BUY').toString().trim().toUpperCase() || 'BUY'
+    if (side !== 'BUY' && side !== 'SELL') continue
+    const key = [e.symbol ?? '', e.expiry ?? '', String(e.strike ?? ''), e.account_id ?? ''].join('\t')
+    if (!byKey[key]) byKey[key] = []
+    byKey[key].push(e)
+  }
+  const pairs: BackendOptPair[] = []
+  for (const list of Object.values(byKey)) {
+    const sorted = [...list].sort(sortExec)
+    const sym = sorted[0]?.symbol ?? ''
+    const exp = sorted[0]?.expiry ?? ''
+    const str = String(sorted[0]?.strike ?? '')
+    const acc = sorted[0]?.account_id ?? ''
+
+    type WorkItem = { eid: number; side: string; price: number; remQty: number; remComm: number }
+    const work: WorkItem[] = []
+    for (const x of sorted) {
+      const q = Number(x.quantity) || 0
+      const p = Number(x.price) || 0
+      const comm = Number(x.commission) || 0
+      const eid = x.account_executions_id
+      if (eid == null || !Number.isFinite(Number(eid))) continue
+      if (!Number.isFinite(q) || q <= 0 || !Number.isFinite(p)) continue
+      const side = (x.side ?? 'BUY').toString().trim().toUpperCase() || 'BUY'
+      work.push({ eid: Number(eid), side, price: p, remQty: q, remComm: comm })
+    }
+
+    for (;;) {
+      let pairFound = false
+      const buyQ: WorkItem[] = []
+      const sellQ: WorkItem[] = []
+
+      for (const w of work) {
+        if (w.remQty <= QTY_EPS) continue
+
+        if (w.side === 'BUY') {
+          if (sellQ.length > 0) {
+            const s = sellQ[0]
+            const qMatch = Math.min(w.remQty, s.remQty)
+            if (qMatch <= QTY_EPS) {
+              buyQ.push(w)
+              continue
+            }
+            const bAlloc = (qMatch / w.remQty) * w.remComm
+            const sAlloc = (qMatch / s.remQty) * s.remComm
+            const legB = -1 * qMatch * w.price * 100 - bAlloc
+            const legS = 1 * qMatch * s.price * 100 - sAlloc
+            pairs.push({
+              leg_c_execution_id: s.eid,
+              leg_p_execution_id: w.eid,
+              account_id: acc,
+              symbol: sym,
+              expiry: exp,
+              strike: str,
+              quantity: Math.round(qMatch * 1e4) / 1e4,
+              c_side: s.side,
+              c_price: Math.round(s.price * 1e4) / 1e4,
+              p_side: w.side,
+              p_price: Math.round(w.price * 1e4) / 1e4,
+              commission: Math.round((bAlloc + sAlloc) * 100) / 100,
+              net_pnl: Math.round((legB + legS) * 100) / 100,
+            })
+            w.remComm -= bAlloc
+            w.remQty -= qMatch
+            s.remComm -= sAlloc
+            s.remQty -= qMatch
+            pairFound = true
+            break
+          } else {
+            buyQ.push(w)
+          }
+        } else {
+          if (buyQ.length > 0) {
+            const b = buyQ[0]
+            const qMatch = Math.min(w.remQty, b.remQty)
+            if (qMatch <= QTY_EPS) {
+              sellQ.push(w)
+              continue
+            }
+            const bAlloc = (qMatch / b.remQty) * b.remComm
+            const sAlloc = (qMatch / w.remQty) * w.remComm
+            const legB = -1 * qMatch * b.price * 100 - bAlloc
+            const legS = 1 * qMatch * w.price * 100 - sAlloc
+            pairs.push({
+              leg_c_execution_id: b.eid,
+              leg_p_execution_id: w.eid,
+              account_id: acc,
+              symbol: sym,
+              expiry: exp,
+              strike: str,
+              quantity: Math.round(qMatch * 1e4) / 1e4,
+              c_side: b.side,
+              c_price: Math.round(b.price * 1e4) / 1e4,
+              p_side: w.side,
+              p_price: Math.round(w.price * 1e4) / 1e4,
+              commission: Math.round((bAlloc + sAlloc) * 100) / 100,
+              net_pnl: Math.round((legB + legS) * 100) / 100,
+            })
+            b.remComm -= bAlloc
+            b.remQty -= qMatch
+            w.remComm -= sAlloc
+            w.remQty -= qMatch
+            pairFound = true
+            break
+          } else {
+            sellQ.push(w)
+          }
+        }
+      }
+      if (!pairFound) break
+    }
+  }
+  return pairs
+}
+
 export function computeDayRealizedUnrealized(
   executions: Execution[],
   optPairs: BackendOptPair[] | null,
