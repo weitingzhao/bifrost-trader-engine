@@ -23,7 +23,18 @@ import {
   filterExecutionsByUnixRange,
   loadPerformanceDayPnLBulk,
   slicePerformanceForCalendarMonth,
+  stkFillNotional,
+  stkSignedTradeNotionalUsd,
+  sumStkBrokerRealizedPnlForTradeDate,
+  type PerformanceCalendarAssetTab,
+  type PerformanceDayPnLCell,
 } from './performance/performanceBulk'
+import {
+  buildPositionCategoryByAccountContract,
+  getStkLedgerBucketForExecution,
+  serializePositionCategoryKey,
+  type StkLedgerBucket,
+} from './portfolio/stkLedgerBucket'
 import { fetchOptionStockLinkMapForExecutions } from './performance/fetchOptionStockLinkMap'
 import {
   computeBackendOptPairsFromExecutions,
@@ -54,12 +65,18 @@ const PERFORMANCE_EXEC_SOURCE_SCOPE = 'performance_book' as const
 /** Days to look back from each calendar day / selected day so OPT pairing matches the execution fetch window. */
 const OPT_PAIR_LOOK_BACK_DAYS = 180
 
+const CALENDAR_STK_TAB_LABEL: Record<'stocks' | 'fixed_income' | 'cash_like', string> = {
+  stocks: 'Stocks',
+  fixed_income: 'Fixed income',
+  cash_like: 'Cash-like',
+}
+
 interface PerformancePageProps {
   status: StatusResponse | null
   onViewChange?: (view: 'accounts') => void
 }
 
-export function PerformancePage({ status: _status, onViewChange }: PerformancePageProps) {
+export function PerformancePage({ status, onViewChange }: PerformancePageProps) {
   const [data, setData] = useState<PerformanceResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -89,8 +106,16 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
     },
     [],
   )
-  const [calendarDayPnL, setCalendarDayPnL] = useState<Record<string, { realized: number; unrealized: number }> | null>(null)
+  const [calendarDayPnLByAsset, setCalendarDayPnLByAsset] = useState<Record<
+    PerformanceCalendarAssetTab,
+    Record<string, PerformanceDayPnLCell>
+  > | null>(null)
+  const [calendarStkNotionalByBucket, setCalendarStkNotionalByBucket] = useState<Record<
+    'stocks' | 'fixed_income' | 'cash_like',
+    Record<string, number>
+  > | null>(null)
   const [calendarDayPnLLoading, setCalendarDayPnLLoading] = useState(false)
+  const [calendarAssetTab, setCalendarAssetTab] = useState<PerformanceCalendarAssetTab>('options')
   /** Batched executions + link map for drill-down; key matches getTimeRangeDates + filters */
   const perfBulkRef = useRef<{
     key: string
@@ -101,8 +126,16 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
   const [perfBulkVersion, setPerfBulkVersion] = useState(0)
   const [byDayExpandedMonths, setByDayExpandedMonths] = useState<Set<string>>(new Set())
   const [byDayRangeData, setByDayRangeData] = useState<{
-    opt: Record<string, { realized: number; unrealized: number }>
-    stock: Record<string, { realized: number; unrealized: number }>
+    opt: Record<string, PerformanceDayPnLCell>
+    stock: Record<string, PerformanceDayPnLCell>
+    stocks: Record<string, PerformanceDayPnLCell>
+    fixed_income: Record<string, PerformanceDayPnLCell>
+    cash_like: Record<string, PerformanceDayPnLCell>
+    stkBucketNotional: {
+      stocks: Record<string, number>
+      fixed_income: Record<string, number>
+      cash_like: Record<string, number>
+    }
   } | null>(null)
   const [byDayRangeLoading, setByDayRangeLoading] = useState(false)
   const [selectedDayComputedPnL, setSelectedDayComputedPnL] = useState<{ realized: number; unrealized: number } | null>(null)
@@ -118,10 +151,29 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
   const [onTheFlyLoading, setOnTheFlyLoading] = useState(false)
   const [onTheFlyError, setOnTheFlyError] = useState<string | null>(null)
 
+  const positionCategoryKey = useMemo(
+    () => serializePositionCategoryKey(status),
+    [status],
+  )
+  const positionCategoryByAccountContract = useMemo(
+    () => buildPositionCategoryByAccountContract(status),
+    [positionCategoryKey],
+  )
+
   const calendarMonthPerformance = useMemo((): PerformanceResponse | null => {
     if (!data) return null
     return slicePerformanceForCalendarMonth(data, calendarMonth)
   }, [data, calendarMonth])
+
+  const calendarDayPnL = useMemo((): Record<string, PerformanceDayPnLCell> | null => {
+    if (!calendarDayPnLByAsset) return null
+    return calendarDayPnLByAsset[calendarAssetTab] ?? null
+  }, [calendarDayPnLByAsset, calendarAssetTab])
+
+  const calendarDayNotional = useMemo((): Record<string, number> | null => {
+    if (!calendarStkNotionalByBucket || calendarAssetTab === 'options') return null
+    return calendarStkNotionalByBucket[calendarAssetTab] ?? null
+  }, [calendarStkNotionalByBucket, calendarAssetTab])
 
   const onTheFlyComputed = useMemo(() => {
     if (onTheFlyExecs.length === 0) return null
@@ -232,15 +284,14 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
     if (monthKeys.length === 0) {
       setByDayRangeData(null)
       setByDayRangeLoading(false)
-      setCalendarDayPnL(null)
+      setCalendarDayPnLByAsset(null)
+      setCalendarStkNotionalByBucket(null)
       setCalendarDayPnLLoading(false)
       perfBulkRef.current = null
       return
     }
     setByDayRangeLoading(true)
-    setByDayRangeData(null)
     setCalendarDayPnLLoading(true)
-    setCalendarDayPnL(null)
     let cancelled = false
     const bulkKey = `${sinceStr}|${untilStr}|${strategyOpportunityId ?? ''}|${strategyInstanceId ?? ''}`
     void loadPerformanceDayPnLBulk({
@@ -250,6 +301,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       strategyOpportunityId,
       strategyInstanceId,
       lookBackDays: OPT_PAIR_LOOK_BACK_DAYS,
+      positionCategoryByAccountContract,
     })
       .then((r) => {
         if (cancelled) return
@@ -260,20 +312,50 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         }
         setPerfBulkVersion((v) => v + 1)
         setByDayRangeData(r.byDayRangeData)
-        setCalendarDayPnL(r.calendarDayPnL)
+        setCalendarDayPnLByAsset(r.calendarDayPnLByAsset)
+        setCalendarStkNotionalByBucket(r.calendarStkNotionalByBucket)
       })
       .catch(() => {
         if (cancelled) return
         perfBulkRef.current = null
         const dateStrsList = listDateStrings(sinceStr, untilStr)
-        const fallbackOpt: Record<string, { realized: number; unrealized: number }> = {}
-        const fallbackStock: Record<string, { realized: number; unrealized: number }> = {}
-        for (const dateStr of dateStrsList) {
-          fallbackOpt[dateStr] = { realized: 0, unrealized: 0 }
-          fallbackStock[dateStr] = { realized: 0, unrealized: 0 }
+        const z = (): PerformanceDayPnLCell => ({ realized: 0, unrealized: 0 })
+        const buildFallbackByDay = () => {
+          const fallbackOpt: Record<string, PerformanceDayPnLCell> = {}
+          const fallbackStock: Record<string, PerformanceDayPnLCell> = {}
+          const fallbackStocks: Record<string, PerformanceDayPnLCell> = {}
+          const fallbackFi: Record<string, PerformanceDayPnLCell> = {}
+          const fallbackCash: Record<string, PerformanceDayPnLCell> = {}
+          const zN = (): number => 0
+          const fallbackNS: Record<string, number> = {}
+          const fallbackNFi: Record<string, number> = {}
+          const fallbackNCash: Record<string, number> = {}
+          for (const dateStr of dateStrsList) {
+            fallbackOpt[dateStr] = z()
+            fallbackStock[dateStr] = z()
+            fallbackStocks[dateStr] = z()
+            fallbackFi[dateStr] = z()
+            fallbackCash[dateStr] = z()
+            fallbackNS[dateStr] = zN()
+            fallbackNFi[dateStr] = zN()
+            fallbackNCash[dateStr] = zN()
+          }
+          return {
+            opt: fallbackOpt,
+            stock: fallbackStock,
+            stocks: fallbackStocks,
+            fixed_income: fallbackFi,
+            cash_like: fallbackCash,
+            stkBucketNotional: {
+              stocks: fallbackNS,
+              fixed_income: fallbackNFi,
+              cash_like: fallbackNCash,
+            },
+          }
         }
-        setByDayRangeData({ opt: fallbackOpt, stock: fallbackStock })
-        setCalendarDayPnL({})
+        setByDayRangeData((prev) => (prev != null ? prev : buildFallbackByDay()))
+        setCalendarDayPnLByAsset((prev) => (prev != null ? prev : null))
+        setCalendarStkNotionalByBucket((prev) => (prev != null ? prev : null))
       })
       .finally(() => {
         if (!cancelled) {
@@ -284,7 +366,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
     return () => {
       cancelled = true
     }
-  }, [timeRange, calendarMonth, strategyOpportunityId, strategyInstanceId])
+  }, [timeRange, calendarMonth, strategyOpportunityId, strategyInstanceId, positionCategoryKey])
 
   useEffect(() => {
     setSelectedDay(null)
@@ -322,18 +404,25 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
     ) {
       setSelectedDayExecutionsLoading(true)
       const slice = filterExecutionsByUnixRange(b.rawExecsWindow, monthStartTs, dayEndTs)
-      const optPairs = computeBackendOptPairsFromExecutions(slice, sortExecByExecutionDateThenTime)
       setSelectedDayExecutions(slice)
-      setSelectedDayOptPairs(optPairs)
-      const { realized, unrealized, symbolsRealized, symbolsUnrealized } = computeOptionDayPnLForPerformanceDate(
-        selectedDay,
-        slice,
-        optPairs,
-        b.linkByOptionId,
-      )
-      setSelectedDayComputedPnL({ realized, unrealized })
-      if (symbolsRealized.length === 0 && symbolsUnrealized.length > 0) {
-        setSelectedDayPnLType('unrealized')
+      if (calendarAssetTab === 'options') {
+        const optPairs = computeBackendOptPairsFromExecutions(slice, sortExecByExecutionDateThenTime)
+        setSelectedDayOptPairs(optPairs)
+        const { realized, unrealized, symbolsRealized, symbolsUnrealized } = computeOptionDayPnLForPerformanceDate(
+          selectedDay,
+          slice,
+          optPairs,
+          b.linkByOptionId,
+        )
+        setSelectedDayComputedPnL({ realized, unrealized })
+        if (symbolsRealized.length === 0 && symbolsUnrealized.length > 0) {
+          setSelectedDayPnLType('unrealized')
+        }
+      } else {
+        setSelectedDayOptPairs(null)
+        const stkTab = calendarAssetTab as StkLedgerBucket
+        const rSum = sumStkBrokerRealizedPnlForTradeDate(slice, selectedDay, stkTab, positionCategoryByAccountContract)
+        setSelectedDayComputedPnL({ realized: rSum, unrealized: 0 })
       }
       setSelectedDayExecutionsLoading(false)
       return
@@ -350,20 +439,27 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       PERFORMANCE_EXEC_SOURCE_SCOPE,
     )
       .then(async (res) => {
-        setSelectedDayExecutions(res.executions ?? [])
-        setSelectedDayOptPairs('opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null)
         const execs = res.executions ?? []
-        const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
-        const linkMap = await fetchOptionStockLinkMapForExecutions(execs)
-        const { realized, unrealized, symbolsRealized, symbolsUnrealized } = computeOptionDayPnLForPerformanceDate(
-          selectedDay,
-          execs,
-          optPairs,
-          linkMap,
-        )
-        setSelectedDayComputedPnL({ realized, unrealized })
-        if (symbolsRealized.length === 0 && symbolsUnrealized.length > 0) {
-          setSelectedDayPnLType('unrealized')
+        setSelectedDayExecutions(execs)
+        if (calendarAssetTab === 'options') {
+          setSelectedDayOptPairs('opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null)
+          const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
+          const linkMap = await fetchOptionStockLinkMapForExecutions(execs)
+          const { realized, unrealized, symbolsRealized, symbolsUnrealized } = computeOptionDayPnLForPerformanceDate(
+            selectedDay,
+            execs,
+            optPairs,
+            linkMap,
+          )
+          setSelectedDayComputedPnL({ realized, unrealized })
+          if (symbolsRealized.length === 0 && symbolsUnrealized.length > 0) {
+            setSelectedDayPnLType('unrealized')
+          }
+        } else {
+          setSelectedDayOptPairs(null)
+          const stkTab = calendarAssetTab as StkLedgerBucket
+          const rSum = sumStkBrokerRealizedPnlForTradeDate(execs, selectedDay, stkTab, positionCategoryByAccountContract)
+          setSelectedDayComputedPnL({ realized: rSum, unrealized: 0 })
         }
       })
       .catch(() => {
@@ -372,7 +468,16 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         setSelectedDayComputedPnL(null)
       })
       .finally(() => setSelectedDayExecutionsLoading(false))
-  }, [selectedDay, timeRange, calendarMonth, strategyOpportunityId, strategyInstanceId, perfBulkVersion])
+  }, [
+    selectedDay,
+    timeRange,
+    calendarMonth,
+    strategyOpportunityId,
+    strategyInstanceId,
+    perfBulkVersion,
+    calendarAssetTab,
+    positionCategoryKey,
+  ])
 
   /** Option–stock links for day-detail: reuse bulk link map when the batch matches. */
   useEffect(() => {
@@ -551,25 +656,61 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
             })()}
             {byDayRangeData && (() => {
               const optMap = byDayRangeData.opt
-              const stockMap = byDayRangeData.stock
+              const stocksMap = byDayRangeData.stocks
+              const fiMap = byDayRangeData.fixed_income
+              const cashMap = byDayRangeData.cash_like
+              const nMap = byDayRangeData.stkBucketNotional
               const dateStrs = Object.keys(optMap).sort()
               const totalSum = dateStrs.reduce(
                 (a, dateStr) => {
                   const opt = optMap[dateStr] ?? { realized: 0, unrealized: 0 }
-                  const stk = stockMap[dateStr] ?? { realized: 0, unrealized: 0 }
+                  const s = stocksMap[dateStr] ?? { realized: 0, unrealized: 0 }
+                  const f = fiMap[dateStr] ?? { realized: 0, unrealized: 0 }
+                  const c = cashMap[dateStr] ?? { realized: 0, unrealized: 0 }
                   return {
                     optRealized: a.optRealized + opt.realized,
                     optUnrealized: a.optUnrealized + opt.unrealized,
-                    stkRealized: a.stkRealized + stk.realized,
-                    stkUnrealized: a.stkUnrealized + stk.unrealized,
+                    stocksNotional: a.stocksNotional + (nMap.stocks[dateStr] ?? 0),
+                    stocksRealized: a.stocksRealized + s.realized,
+                    fiNotional: a.fiNotional + (nMap.fixed_income[dateStr] ?? 0),
+                    fiRealized: a.fiRealized + f.realized,
+                    cashNotional: a.cashNotional + (nMap.cash_like[dateStr] ?? 0),
+                    cashRealized: a.cashRealized + c.realized,
                   }
                 },
-                { optRealized: 0, optUnrealized: 0, stkRealized: 0, stkUnrealized: 0 },
+                {
+                  optRealized: 0,
+                  optUnrealized: 0,
+                  stocksNotional: 0,
+                  stocksRealized: 0,
+                  fiNotional: 0,
+                  fiRealized: 0,
+                  cashNotional: 0,
+                  cashRealized: 0,
+                },
               )
               return (
                 <span className="by-day-total-summary-inline" aria-label="Total sum of all days">
-                  <span className="by-day-total-summary-kv">Option <span className={totalSum.optRealized >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtPnl(totalSum.optRealized)}</span> / <span className="by-day-sum-number">{fmtPnl(totalSum.optUnrealized)}</span></span>
-                  <span className="by-day-total-summary-kv">Stock <span className={totalSum.stkRealized >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtPnl(totalSum.stkRealized)}</span> / <span className="by-day-sum-number">{fmtPnl(totalSum.stkUnrealized)}</span></span>
+                  <span className="by-day-total-summary-kv">
+                    Option{' '}
+                    <span className={totalSum.optRealized >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtPnl(totalSum.optRealized)}</span> /{' '}
+                    <span className="by-day-sum-number">{fmtPnl(totalSum.optUnrealized)}</span>
+                  </span>
+                  <span className="by-day-total-summary-kv">
+                    Stocks{' '}
+                    <span className="by-day-sum-number">{fmtUsd(totalSum.stocksNotional)}</span> /{' '}
+                    <span className={totalSum.stocksRealized >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtPnl(totalSum.stocksRealized)}</span>
+                  </span>
+                  <span className="by-day-total-summary-kv">
+                    FI{' '}
+                    <span className="by-day-sum-number">{fmtUsd(totalSum.fiNotional)}</span> /{' '}
+                    <span className={totalSum.fiRealized >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtPnl(totalSum.fiRealized)}</span>
+                  </span>
+                  <span className="by-day-total-summary-kv">
+                    Cash-like{' '}
+                    <span className="by-day-sum-number">{fmtUsd(totalSum.cashNotional)}</span> /{' '}
+                    <span className={totalSum.cashRealized >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtPnl(totalSum.cashRealized)}</span>
+                  </span>
                 </span>
               )
             })()}
@@ -581,27 +722,70 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
           <p className="section-hint">Select time range above to load daily PnL.</p>
         ) : (() => {
           const optMap = byDayRangeData.opt
-          const stockMap = byDayRangeData.stock
+          const stocksMap = byDayRangeData.stocks
+          const fiMap = byDayRangeData.fixed_income
+          const cashMap = byDayRangeData.cash_like
+          const nMap = byDayRangeData.stkBucketNotional
           const dateStrs = Object.keys(optMap).sort()
-          const rows: { dateStr: string; optRealized: number; optUnrealized: number; stkRealized: number; stkUnrealized: number }[] = dateStrs.map((dateStr) => {
+          type ByCol =
+            | 'optRealized'
+            | 'optUnrealized'
+            | 'stocksNotional'
+            | 'stocksRealized'
+            | 'fiNotional'
+            | 'fiRealized'
+            | 'cashNotional'
+            | 'cashRealized'
+          const rows: {
+            dateStr: string
+            optRealized: number
+            optUnrealized: number
+            stocksNotional: number
+            stocksRealized: number
+            fiNotional: number
+            fiRealized: number
+            cashNotional: number
+            cashRealized: number
+          }[] = dateStrs.map((dateStr) => {
             const opt = optMap[dateStr] ?? { realized: 0, unrealized: 0 }
-            const stk = stockMap[dateStr] ?? { realized: 0, unrealized: 0 }
-            return { dateStr, optRealized: opt.realized, optUnrealized: opt.unrealized, stkRealized: stk.realized, stkUnrealized: stk.unrealized }
+            const st = stocksMap[dateStr] ?? { realized: 0, unrealized: 0 }
+            const fi = fiMap[dateStr] ?? { realized: 0, unrealized: 0 }
+            const cash = cashMap[dateStr] ?? { realized: 0, unrealized: 0 }
+            return {
+              dateStr,
+              optRealized: opt.realized,
+              optUnrealized: opt.unrealized,
+              stocksNotional: nMap.stocks[dateStr] ?? 0,
+              stocksRealized: st.realized,
+              fiNotional: nMap.fixed_income[dateStr] ?? 0,
+              fiRealized: fi.realized,
+              cashNotional: nMap.cash_like[dateStr] ?? 0,
+              cashRealized: cash.realized,
+            }
           })
           if (dateStrs.length === 0) return <p className="section-hint">No Option or Stock PnL in the selected range.</p>
           const ZERO_THRESH = 0.005
-          const pnlTd = (val: number, col: 'optRealized' | 'optUnrealized' | 'stkRealized' | 'stkUnrealized') => {
+          const pnlTd = (val: number, col: ByCol) => {
             if (Math.abs(val) < ZERO_THRESH) return <td>—</td>
-            const isUnrealized = col === 'optUnrealized' || col === 'stkUnrealized'
-            const cls = isUnrealized ? 'tone-unrealized' : (val >= 0 ? 'tone-positive' : 'tone-negative')
+            if (col === 'stocksNotional' || col === 'fiNotional') {
+              const tone =
+                val > 0
+                  ? ' performance-by-day-notional-stk-pos'
+                  : val < 0
+                    ? ' performance-by-day-notional-stk-neg'
+                    : ''
+              return <td className={`performance-by-day-notional${tone}`}>{fmtUsd(val)}</td>
+            }
+            if (col === 'cashNotional') {
+              return (
+                <td className="performance-by-day-notional performance-by-day-notional-cash-like">{fmtUsd(val)}</td>
+              )
+            }
+            const isUnrealized = col === 'optUnrealized'
+            const cls = isUnrealized ? 'tone-unrealized' : val >= 0 ? 'tone-positive' : 'tone-negative'
             return <td className={cls}>{fmtPnl(val)}</td>
           }
-          const pnlTdSum = (val: number, col: 'optRealized' | 'optUnrealized' | 'stkRealized' | 'stkUnrealized') => {
-            if (Math.abs(val) < ZERO_THRESH) return <td>—</td>
-            const isUnrealized = col === 'optUnrealized' || col === 'stkUnrealized'
-            const cls = isUnrealized ? 'tone-unrealized' : (val >= 0 ? 'tone-positive' : 'tone-negative')
-            return <td className={cls}>{fmtPnl(val)}</td>
-          }
+          const pnlTdSum = (val: number, col: ByCol) => pnlTd(val, col)
           const groups = new Map<string, { monthLabel: string; rows: typeof rows }>()
           for (const r of rows) {
             const monthKey = r.dateStr.slice(0, 7)
@@ -619,15 +803,43 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
             <>
             <div className="table-wrap performance-by-day-table-wrap">
               <table className="data-table by-day-table" role="grid">
-                <thead><tr><th>Date</th><th>Opt Realized</th><th>Opt Unrealized</th><th>Stk Realized</th><th>Stk Unrealized</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Opt R</th>
+                    <th>Opt U</th>
+                    <th>Stocks N</th>
+                    <th>Stocks R</th>
+                    <th>FI N</th>
+                    <th>FI R</th>
+                    <th>Cash N</th>
+                    <th>Cash R</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {groupEntriesNewestFirst.map(([monthKey, { monthLabel, rows: groupRows }]) => {
-                    const sum = groupRows.reduce((a, r) => ({
-                      optRealized: a.optRealized + r.optRealized,
-                      optUnrealized: a.optUnrealized + r.optUnrealized,
-                      stkRealized: a.stkRealized + r.stkRealized,
-                      stkUnrealized: a.stkUnrealized + r.stkUnrealized,
-                    }), { optRealized: 0, optUnrealized: 0, stkRealized: 0, stkUnrealized: 0 })
+                    const sum = groupRows.reduce(
+                      (a, r) => ({
+                        optRealized: a.optRealized + r.optRealized,
+                        optUnrealized: a.optUnrealized + r.optUnrealized,
+                        stocksNotional: a.stocksNotional + r.stocksNotional,
+                        stocksRealized: a.stocksRealized + r.stocksRealized,
+                        fiNotional: a.fiNotional + r.fiNotional,
+                        fiRealized: a.fiRealized + r.fiRealized,
+                        cashNotional: a.cashNotional + r.cashNotional,
+                        cashRealized: a.cashRealized + r.cashRealized,
+                      }),
+                      {
+                        optRealized: 0,
+                        optUnrealized: 0,
+                        stocksNotional: 0,
+                        stocksRealized: 0,
+                        fiNotional: 0,
+                        fiRealized: 0,
+                        cashNotional: 0,
+                        cashRealized: 0,
+                      },
+                    )
                     const expanded = byDayExpandedMonths.has(monthKey)
                     return (
                       <Fragment key={monthKey}>
@@ -639,12 +851,26 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                             <strong>{monthLabel}</strong>
                             <span className="by-day-group-sum-label"> Sum</span>
                           </td>
-                          {pnlTdSum(sum.optRealized, 'optRealized')}{pnlTdSum(sum.optUnrealized, 'optUnrealized')}{pnlTdSum(sum.stkRealized, 'stkRealized')}{pnlTdSum(sum.stkUnrealized, 'stkUnrealized')}
+                          {pnlTdSum(sum.optRealized, 'optRealized')}
+                          {pnlTdSum(sum.optUnrealized, 'optUnrealized')}
+                          {pnlTdSum(sum.stocksNotional, 'stocksNotional')}
+                          {pnlTdSum(sum.stocksRealized, 'stocksRealized')}
+                          {pnlTdSum(sum.fiNotional, 'fiNotional')}
+                          {pnlTdSum(sum.fiRealized, 'fiRealized')}
+                          {pnlTdSum(sum.cashNotional, 'cashNotional')}
+                          {pnlTdSum(sum.cashRealized, 'cashRealized')}
                         </tr>
                         {expanded && [...groupRows].reverse().map((r) => (
                           <tr key={r.dateStr} className="by-day-day-row">
                             <td>{r.dateStr}</td>
-                            {pnlTd(r.optRealized, 'optRealized')}{pnlTd(r.optUnrealized, 'optUnrealized')}{pnlTd(r.stkRealized, 'stkRealized')}{pnlTd(r.stkUnrealized, 'stkUnrealized')}
+                            {pnlTd(r.optRealized, 'optRealized')}
+                            {pnlTd(r.optUnrealized, 'optUnrealized')}
+                            {pnlTd(r.stocksNotional, 'stocksNotional')}
+                            {pnlTd(r.stocksRealized, 'stocksRealized')}
+                            {pnlTd(r.fiNotional, 'fiNotional')}
+                            {pnlTd(r.fiRealized, 'fiRealized')}
+                            {pnlTd(r.cashNotional, 'cashNotional')}
+                            {pnlTd(r.cashRealized, 'cashRealized')}
                           </tr>
                         ))}
                       </Fragment>
@@ -661,7 +887,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       <section className="performance-calendar-section performance-pane" aria-label="Calendar">
         <h3 className="card-subtitle page-title-with-tooltip">
           Calendar
-          <InfoTooltip text="Daily Option Realized and Unrealized (R/U). Realized matches day drill-down: FIFO match option PnL plus prorated linked-stock slippage when option–stock links exist." />
+          <InfoTooltip text="Options: daily Realized and Unrealized (R/U)—FIFO option PnL plus prorated option–stock link slippage. Stocks / Fixed income: daily Realized is Σ realized_pnl; daily Notional is signed net trade size (qty×price) for coloring. Cash-like: Realized same; Notional is Σ |qty|×price. Unrealized is not shown for STK tabs. Category labels use GET /status (approximate on history)." />
         </h3>
         {data && summary ? (
           <>
@@ -689,9 +915,20 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                     cells.push({ day: null, dateStr: null })
                   }
                 }
-                const hasAnyOptInMonth = calendarDayPnL != null
-                  ? Object.keys(calendarDayPnL).length > 0
-                  : cells.some((c) => c.dateStr && optDays[c.dateStr] != null)
+                const hasAnyCalendarActivity =
+                  calendarAssetTab === 'options'
+                    ? calendarDayPnL != null
+                      ? Object.values(calendarDayPnL).some(
+                          (d) => Math.abs(d.realized) >= 0.005 || Math.abs(d.unrealized) >= 0.005,
+                        )
+                      : cells.some((c) => c.dateStr && optDays[c.dateStr] != null)
+                    : calendarDayPnL != null && calendarDayNotional != null
+                      ? Object.keys(calendarDayPnL).some((ds) => {
+                          const d = calendarDayPnL![ds]!
+                          const n = calendarDayNotional![ds] ?? 0
+                          return Math.abs(d.realized) >= 0.005 || Math.abs(n) >= 0.005
+                        })
+                      : false
                 const goPrev = () => {
                   const d = new Date(y, m - 2, 1)
                   setCalendarMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
@@ -705,18 +942,42 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                   <>
                     <div className="performance-calendar-with-summary">
                       <div className="performance-calendar-left">
-                    {optUnrealized != null && (
+                    <div className="performance-calendar-asset-tabs system-tabs" role="tablist" aria-label="Calendar asset class">
+                      {(
+                        [
+                          ['options', 'Options'],
+                          ['stocks', 'Stocks'],
+                          ['fixed_income', 'Fixed income'],
+                          ['cash_like', 'Cash-like'],
+                        ] as const
+                      ).map(([tab, label]) => (
+                        <button
+                          key={tab}
+                          type="button"
+                          role="tab"
+                          aria-selected={calendarAssetTab === tab}
+                          className={`system-tab performance-calendar-asset-tab ${calendarAssetTab === tab ? 'active' : ''}`}
+                          onClick={() => setCalendarAssetTab(tab)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {calendarAssetTab === 'options' && optUnrealized != null && (
                       <p className="performance-calendar-total-unrealized">
-                        Option Unrealized (as of now): <strong className={(optUnrealized ?? 0) >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtUsd(optUnrealized)}</strong>
+                        Option Unrealized (as of now):{' '}
+                        <strong className={(optUnrealized ?? 0) >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtUsd(optUnrealized)}</strong>
                       </p>
                     )}
-                    {!hasAnyOptInMonth && (
+                    {!hasAnyCalendarActivity && (
                       <p className="section-hint performance-calendar-no-data">
-                        No Option realized in this month (only paired same-day BUY+SELL count). Try a larger range or another month.
+                        {calendarAssetTab === 'options'
+                          ? 'No option PnL in this month for the selected filters. Try another month or a larger range.'
+                          : `No ${CALENDAR_STK_TAB_LABEL[calendarAssetTab].toLowerCase()} PnL in this month. Try another month or a larger range.`}
                       </p>
                     )}
                     {calendarDayPnLLoading && (
-                      <p className="section-hint performance-calendar-loading">Loading daily Realized/Unrealized…</p>
+                      <p className="section-hint performance-calendar-loading">Loading daily metrics…</p>
                     )}
                     <div className="performance-calendar-nav">
                       <button type="button" className="btn btn-secondary" onClick={goPrev} aria-label="Previous month">&larr; Prev</button>
@@ -725,7 +986,13 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                     </div>
                     <div className="performance-calendar-legend" aria-label="PnL legend">
                       <span className="performance-calendar-legend-item performance-calendar-legend-item-realized">R = Realized</span>
-                      <span className="performance-calendar-legend-item performance-calendar-legend-item-unrealized">U = Unrealized</span>
+                      {calendarAssetTab === 'options' ? (
+                        <span className="performance-calendar-legend-item performance-calendar-legend-item-unrealized">U = Unrealized</span>
+                      ) : (
+                        <span className="performance-calendar-legend-item performance-calendar-legend-item-notional">
+                          N = Notional (signed net Stocks/FI; Cash-like |qty|×price)
+                        </span>
+                      )}
                     </div>
                     <div className="performance-calendar-grid" role="grid">
                       <div className="performance-calendar-row performance-calendar-header">
@@ -736,22 +1003,66 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                       {Array.from({ length: totalCells / 7 }, (_, rowIdx) => (
                         <div key={rowIdx} className="performance-calendar-row">
                           {cells.slice(rowIdx * 7, rowIdx * 7 + 7).map((c, colIdx) => {
-                            const dayPnL = c.dateStr && calendarDayPnL != null ? calendarDayPnL[c.dateStr] : null
+                            /** Missing date key → zeros so STK Realized is never dropped (was null → no R line). */
+                            const dayPnL =
+                              c.dateStr && calendarDayPnL != null
+                                ? (calendarDayPnL[c.dateStr] ?? { realized: 0, unrealized: 0 })
+                                : null
+                            const dayNotional =
+                              c.dateStr && calendarDayNotional != null ? calendarDayNotional[c.dateStr] : null
                             const legacyInfo = c.dateStr ? optDays[c.dateStr] : null
                             const useDetailPnL = c.dateStr === selectedDay && selectedDayComputedPnL != null
-                            const realizedVal = useDetailPnL ? selectedDayComputedPnL.realized : (dayPnL != null ? dayPnL.realized : (legacyInfo?.net_pnl ?? null))
-                            const unrealizedVal = useDetailPnL ? selectedDayComputedPnL.unrealized : (dayPnL != null ? dayPnL.unrealized : null)
+                            const realizedVal = useDetailPnL
+                              ? selectedDayComputedPnL.realized
+                              : dayPnL != null
+                                ? dayPnL.realized
+                                : calendarAssetTab === 'options'
+                                  ? (legacyInfo?.net_pnl ?? null)
+                                  : null
+                            const unrealizedVal =
+                              calendarAssetTab === 'options'
+                                ? useDetailPnL
+                                  ? selectedDayComputedPnL.unrealized
+                                  : dayPnL != null
+                                    ? dayPnL.unrealized
+                                    : null
+                                : null
+                            const notionalVal = calendarAssetTab !== 'options' ? dayNotional : null
                             const showPnL = c.day != null
-                            const showR = showPnL && realizedVal != null && Math.abs(Number(realizedVal)) >= 0.005
-                            const showU = showPnL && unrealizedVal != null && Math.abs(Number(unrealizedVal)) >= 0.005
+                            const showU =
+                              calendarAssetTab === 'options' &&
+                              showPnL &&
+                              unrealizedVal != null &&
+                              Math.abs(Number(unrealizedVal)) >= 0.005
+                            const showN =
+                              calendarAssetTab !== 'options' &&
+                              showPnL &&
+                              notionalVal != null &&
+                              Math.abs(Number(notionalVal)) >= 0.005
+                            /** STK tabs: no Unrealized row; show Realized whenever |R| matters or same day has Notional (activity). */
+                            const showR =
+                              showPnL &&
+                              realizedVal != null &&
+                              (calendarAssetTab === 'options'
+                                ? Math.abs(Number(realizedVal)) >= 0.005
+                                : Math.abs(Number(realizedVal)) >= 0.005 || showN)
                             const toneR = showR && (realizedVal ?? 0) !== 0 ? ((realizedVal!) >= 0 ? 'tone-positive' : 'tone-negative') : ''
                             const toneU = showU && (unrealizedVal ?? 0) !== 0 ? 'tone-unrealized' : ''
                             const titleParts: string[] = []
-                            if (useDetailPnL || dayPnL != null || legacyInfo != null) {
+                            if (calendarAssetTab === 'options') {
+                              if (useDetailPnL || dayPnL != null || legacyInfo != null) {
+                                titleParts.push(`Realized: ${fmtUsd(realizedVal ?? 0)}`)
+                                titleParts.push(unrealizedVal != null ? `Unrealized: ${fmtUsd(unrealizedVal)}` : 'Unrealized: —')
+                              } else if (c.dateStr) {
+                                titleParts.push('No option PnL that day')
+                              }
+                            } else if (useDetailPnL || dayPnL != null || (dayNotional != null && c.dateStr)) {
                               titleParts.push(`Realized: ${fmtUsd(realizedVal ?? 0)}`)
-                              titleParts.push(unrealizedVal != null ? `Unrealized: ${fmtUsd(unrealizedVal)}` : 'Unrealized: —')
+                              titleParts.push(notionalVal != null ? `Notional: ${fmtUsd(notionalVal)}` : 'Notional: —')
                             } else if (c.dateStr) {
-                              titleParts.push('No Option trades that day')
+                              titleParts.push(
+                                `No ${CALENDAR_STK_TAB_LABEL[calendarAssetTab].toLowerCase()} activity that day`,
+                              )
                             }
                             return (
                               <div
@@ -764,16 +1075,36 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                 title={titleParts.length ? titleParts.join('\n') : (c.dateStr ? 'Click to see contributing records' : undefined)}
                               >
                                 {c.day != null && <span className="performance-calendar-day">{c.day}</span>}
-                                {(showR || showU) && (
+                                {(showR || showU || showN) && (
                                   <div className="performance-calendar-pnl-lines">
                                     {showR && (
                                       <span className={`performance-calendar-pnl performance-calendar-realized ${toneR}`}>
-                                        R: {fmtPnlCalendar(realizedVal)}
+                                        R:{' '}
+                                        {calendarAssetTab === 'options'
+                                          ? fmtPnlCalendar(realizedVal)
+                                          : fmtUsd(realizedVal)}
                                       </span>
                                     )}
                                     {showU && (
                                       <span className={`performance-calendar-pnl performance-calendar-unrealized ${toneU}`}>
                                         U: {fmtPnlCalendar(unrealizedVal)}
+                                      </span>
+                                    )}
+                                    {showN && (
+                                      <span
+                                        className={`performance-calendar-pnl performance-calendar-notional${
+                                          calendarAssetTab === 'cash_like'
+                                            ? ' performance-calendar-notional-cash-like'
+                                            : calendarAssetTab === 'stocks' || calendarAssetTab === 'fixed_income'
+                                              ? notionalVal! > 0
+                                                ? ' performance-calendar-notional-stk-pos'
+                                                : notionalVal! < 0
+                                                  ? ' performance-calendar-notional-stk-neg'
+                                                  : ' performance-calendar-notional-stk-zero'
+                                              : ''
+                                        }`}
+                                      >
+                                        N: {fmtUsd(notionalVal)}
                                       </span>
                                     )}
                                   </div>
@@ -839,19 +1170,57 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                       {(() => {
                         const realized = data.realized_by_sec_type ?? []
                         const unrealized = data.unrealized_by_sec_type ?? []
-                        const hasCalendar = calendarDayPnL != null && Object.keys(calendarDayPnL).length > 0
-                        const optRealizedFromCalendar = Object.values(calendarDayPnL ?? {}).reduce((s, d) => s + (d.realized ?? 0), 0)
-                        const optUnrealizedFromCalendar = Object.values(calendarDayPnL ?? {}).reduce((s, d) => s + (d.unrealized ?? 0), 0)
+                        const hasCalendar = calendarDayPnLByAsset != null && Object.keys(calendarDayPnLByAsset).length > 0
+                        const sumBucketMonth = (tab: 'options' | 'stocks' | 'fixed_income' | 'cash_like') => {
+                          const rec = calendarDayPnLByAsset?.[tab]
+                          if (!rec) return { r: 0, u: 0 }
+                          return Object.values(rec).reduce(
+                            (a, d) => ({ r: a.r + (d.realized ?? 0), u: a.u + (d.unrealized ?? 0) }),
+                            { r: 0, u: 0 },
+                          )
+                        }
+                        const sumNotionalMonth = (tab: 'stocks' | 'fixed_income' | 'cash_like') => {
+                          const rec = calendarStkNotionalByBucket?.[tab]
+                          if (!rec) return 0
+                          return Object.values(rec).reduce((a, n) => a + n, 0)
+                        }
+                        const optM = sumBucketMonth('options')
+                        const stocksM = sumBucketMonth('stocks')
+                        const fiM = sumBucketMonth('fixed_income')
+                        const cashM = sumBucketMonth('cash_like')
+                        const stocksNMonth = sumNotionalMonth('stocks')
+                        const fiNMonth = sumNotionalMonth('fixed_income')
+                        const cashNMonth = sumNotionalMonth('cash_like')
                         const rOpt = realized.find((x) => x.sec_type === 'OPT')
                         const uOpt = unrealized.find((x) => x.sec_type === 'OPT')
                         const rStk = realized.find((x) => x.sec_type === 'STK')
                         const uStk = unrealized.find((x) => x.sec_type === 'STK')
-                        const optRealizedPnl = hasCalendar ? optRealizedFromCalendar : (rOpt?.total_pnl ?? 0)
-                        const optUnrealizedPnl = hasCalendar ? optUnrealizedFromCalendar : (uOpt?.total_pnl ?? 0)
-                        const optNetPnl = hasCalendar ? optRealizedFromCalendar - (rOpt?.commission ?? 0) : (rOpt?.net_pnl ?? 0)
+                        const optRealizedPnl = hasCalendar ? optM.r : (rOpt?.total_pnl ?? 0)
+                        const optUnrealizedPnl = hasCalendar ? optM.u : (uOpt?.total_pnl ?? 0)
+                        const optNetPnl = hasCalendar ? optM.r - (rOpt?.commission ?? 0) : (rOpt?.net_pnl ?? 0)
                         const hasOpt = hasCalendar || rOpt != null || uOpt != null
-                        const hasStk = rStk != null || uStk != null
-                        const InlineRow = ({ type, realized: rVal, commission, net, trades, unrealized: uVal, toneR, toneN, toneU }: { type: string; realized: string; commission: string; net: string; trades: string; unrealized: string; toneR: 'positive' | 'negative'; toneN: 'positive' | 'negative'; toneU: 'positive' | 'negative' }) => (
+                        const hasStkBackend = rStk != null || uStk != null
+                        const InlineRow = ({
+                          type,
+                          realized: rVal,
+                          commission,
+                          net,
+                          trades,
+                          unrealized: uVal,
+                          toneR,
+                          toneN,
+                          toneU,
+                        }: {
+                          type: string
+                          realized: string
+                          commission: string
+                          net: string
+                          trades: string
+                          unrealized: string
+                          toneR: 'positive' | 'negative'
+                          toneN: 'positive' | 'negative'
+                          toneU: 'positive' | 'negative'
+                        }) => (
                           <div className="performance-summary-row">
                             <span className="performance-summary-type">{type}</span>
                             <div className="performance-summary-metrics">
@@ -878,10 +1247,131 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                             </div>
                           </div>
                         )
+                        const StkBucketInlineRow = ({
+                          type: rowType,
+                          realized: rStr,
+                          notional: nStr,
+                          commission,
+                          net,
+                          trades,
+                          toneR,
+                          notionalCashLike,
+                          notionalSignedTone,
+                        }: {
+                          type: string
+                          realized: string
+                          notional: string
+                          commission: string
+                          net: string
+                          trades: string
+                          toneR: 'positive' | 'negative'
+                          notionalCashLike?: boolean
+                          notionalSignedTone?: 'pos' | 'neg' | 'zero'
+                        }) => (
+                          <div className="performance-summary-row">
+                            <span className="performance-summary-type">{rowType}</span>
+                            <div className="performance-summary-metrics">
+                              <div className="performance-summary-metric">
+                                <span className="performance-summary-metric-label">Realized</span>
+                                <span className={`performance-summary-metric-value ${toneR === 'positive' ? 'tone-positive' : 'tone-negative'}`}>{rStr}</span>
+                              </div>
+                              <div className="performance-summary-metric">
+                                <span className="performance-summary-metric-label">Notional</span>
+                                <span
+                                  className={`performance-summary-metric-value performance-summary-metric-notional${
+                                    notionalCashLike
+                                      ? ' performance-summary-metric-notional-cash-like'
+                                      : notionalSignedTone === 'pos'
+                                        ? ' performance-summary-metric-notional-stk-pos'
+                                        : notionalSignedTone === 'neg'
+                                          ? ' performance-summary-metric-notional-stk-neg'
+                                          : notionalSignedTone === 'zero'
+                                            ? ' performance-summary-metric-notional-stk-zero'
+                                            : ''
+                                  }`}
+                                >
+                                  {nStr}
+                                </span>
+                              </div>
+                              <div className="performance-summary-metric">
+                                <span className="performance-summary-metric-label">Comm</span>
+                                <span className="performance-summary-metric-value">{commission}</span>
+                              </div>
+                              <div className="performance-summary-metric">
+                                <span className="performance-summary-metric-label">Net</span>
+                                <span className={`performance-summary-metric-value ${toneR === 'positive' ? 'tone-positive' : 'tone-negative'}`}>{net}</span>
+                              </div>
+                              <div className="performance-summary-metric">
+                                <span className="performance-summary-metric-label">Trades</span>
+                                <span className="performance-summary-metric-value">{trades}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                        const stkBucketRow = (
+                          label: string,
+                          mr: number,
+                          mnMonth: number,
+                          fallbackR: number,
+                          showFallback: boolean,
+                        ) => {
+                          const useBulk = hasCalendar && calendarStkNotionalByBucket != null
+                          const rVal = useBulk ? mr : fallbackR
+                          const nVal = useBulk ? mnMonth : 0
+                          const hasRow =
+                            useBulk
+                              ? Math.abs(mr) >= 0.005 || Math.abs(mnMonth) >= 0.005
+                              : showFallback && Math.abs(fallbackR) >= 0.005
+                          if (!hasRow) {
+                            return (
+                              <div className="performance-summary-row">
+                                <span className="performance-summary-type">{label}</span>
+                                <span className="section-hint performance-summary-empty">No data in the selected range.</span>
+                              </div>
+                            )
+                          }
+                          const toneR = rVal >= 0 ? 'positive' : 'negative'
+                          let notionalSignedTone: 'pos' | 'neg' | 'zero' | undefined
+                          if (useBulk && (label === 'Stocks' || label === 'Fixed income')) {
+                            notionalSignedTone = nVal > 0 ? 'pos' : nVal < 0 ? 'neg' : 'zero'
+                          }
+                          return (
+                            <StkBucketInlineRow
+                              type={label}
+                              realized={fmtUsd(rVal)}
+                              notional={useBulk ? fmtUsd(nVal) : '—'}
+                              commission={useBulk ? '—' : fmtUsd(rStk?.commission ?? 0)}
+                              net={fmtUsd(useBulk ? rVal : (rStk?.net_pnl ?? 0))}
+                              trades={useBulk ? '—' : String(rStk?.trade_count ?? 0)}
+                              toneR={toneR}
+                              notionalCashLike={label === 'Cash-like'}
+                              notionalSignedTone={notionalSignedTone}
+                            />
+                          )
+                        }
                         return (
                           <>
-                            {hasOpt ? <InlineRow type="Option" realized={fmtUsd(optRealizedPnl)} commission={fmtUsd(rOpt?.commission ?? 0)} net={fmtUsd(optNetPnl)} trades={String(rOpt?.trade_count ?? 0)} unrealized={fmtUsd(optUnrealizedPnl)} toneR={(optRealizedPnl ?? 0) >= 0 ? 'positive' : 'negative'} toneN={(optNetPnl ?? 0) >= 0 ? 'positive' : 'negative'} toneU={(optUnrealizedPnl ?? 0) >= 0 ? 'positive' : 'negative'} /> : <div className="performance-summary-row"><span className="performance-summary-type">Option</span><span className="section-hint performance-summary-empty">No data in the selected range.</span></div>}
-                            {hasStk ? <InlineRow type="Stock" realized={fmtUsd(rStk?.total_pnl ?? 0)} commission={fmtUsd(rStk?.commission ?? 0)} net={fmtUsd(rStk?.net_pnl ?? 0)} trades={String(rStk?.trade_count ?? 0)} unrealized={fmtUsd(uStk?.total_pnl ?? 0)} toneR={((rStk?.total_pnl ?? 0) >= 0) ? 'positive' : 'negative'} toneN={((rStk?.net_pnl ?? 0) >= 0) ? 'positive' : 'negative'} toneU={((uStk?.total_pnl ?? 0) >= 0) ? 'positive' : 'negative'} /> : <div className="performance-summary-row"><span className="performance-summary-type">Stock</span><span className="section-hint performance-summary-empty">No data in the selected range.</span></div>}
+                            {hasOpt ? (
+                              <InlineRow
+                                type="Option"
+                                realized={fmtUsd(optRealizedPnl)}
+                                commission={fmtUsd(rOpt?.commission ?? 0)}
+                                net={fmtUsd(optNetPnl)}
+                                trades={String(rOpt?.trade_count ?? 0)}
+                                unrealized={fmtUsd(optUnrealizedPnl)}
+                                toneR={(optRealizedPnl ?? 0) >= 0 ? 'positive' : 'negative'}
+                                toneN={(optNetPnl ?? 0) >= 0 ? 'positive' : 'negative'}
+                                toneU={(optUnrealizedPnl ?? 0) >= 0 ? 'positive' : 'negative'}
+                              />
+                            ) : (
+                              <div className="performance-summary-row">
+                                <span className="performance-summary-type">Option</span>
+                                <span className="section-hint performance-summary-empty">No data in the selected range.</span>
+                              </div>
+                            )}
+                            {stkBucketRow('Stocks', stocksM.r, stocksNMonth, rStk?.total_pnl ?? 0, hasStkBackend)}
+                            {stkBucketRow('Fixed income', fiM.r, fiNMonth, 0, false)}
+                            {stkBucketRow('Cash-like', cashM.r, cashNMonth, 0, false)}
                           </>
                         )
                       })()}
@@ -898,10 +1388,86 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                           <p className="section-hint">Loading executions…</p>
                         ) : (
                           <>
-                            {(() => {
-                              const allExecs = selectedDayExecutions ?? []
-                              const dayExecs = allExecs.filter((e) => executionDateStr(e) === selectedDay)
-                              const optExecs = dayExecs.filter((e) => (e.sec_type ?? '').toUpperCase() === 'OPT')
+                            {calendarAssetTab !== 'options' &&
+                              (() => {
+                                const allExecs = selectedDayExecutions ?? []
+                                const dayExecs = allExecs.filter((e) => executionDateStr(e) === selectedDay)
+                                const bucketExecs = dayExecs.filter(
+                                  (e) =>
+                                    getStkLedgerBucketForExecution(e, positionCategoryByAccountContract) ===
+                                    calendarAssetTab,
+                                )
+                                const lbl = CALENDAR_STK_TAB_LABEL[calendarAssetTab]
+                                if (bucketExecs.length === 0) {
+                                  return (
+                                    <p className="section-hint">
+                                      No {lbl} executions on this trade date in the loaded window.
+                                    </p>
+                                  )
+                                }
+                                return (
+                                  <div className="performance-calendar-stk-day-detail">
+                                    <h5 className="performance-calendar-day-detail-subtitle">STK executions ({lbl})</h5>
+                                    <p className="section-hint">
+                                      Calendar daily realized is the sum of broker <code className="performance-inline-code">realized_pnl</code> on fills for this trade date in this bucket (same as column totals below). Stocks / Fixed income Notional is signed trade size (qty×price, net buy vs sell); Cash-like uses |qty|×price. Category is from GET /status (same as Trade Ledger).
+                                    </p>
+                                    <div className="table-wrap performance-calendar-stk-day-table-wrap">
+                                      <table className="data-table performance-calendar-stk-day-table">
+                                        <thead>
+                                          <tr>
+                                            <th>Account</th>
+                                            <th>Symbol</th>
+                                            <th>Side</th>
+                                            <th>Qty</th>
+                                            <th>Price</th>
+                                            <th>Notional</th>
+                                            <th>Realized PnL</th>
+                                            <th>Commission</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {bucketExecs.map((ex) => {
+                                            const signedNv = stkSignedTradeNotionalUsd(ex)
+                                            const notionalCellClass =
+                                              calendarAssetTab === 'cash_like'
+                                                ? ' performance-calendar-stk-notional-cell-cash-like'
+                                                : calendarAssetTab === 'stocks' || calendarAssetTab === 'fixed_income'
+                                                  ? signedNv > 0
+                                                    ? ' performance-stk-notional-pos'
+                                                    : signedNv < 0
+                                                      ? ' performance-stk-notional-neg'
+                                                      : ' performance-stk-notional-zero'
+                                                  : ''
+                                            const notionalDisplay =
+                                              calendarAssetTab === 'cash_like' ? stkFillNotional(ex) : signedNv
+                                            return (
+                                            <tr key={ex.account_executions_id ?? `${ex.time}-${ex.symbol}`}>
+                                              <td>{ex.account_id ?? '—'}</td>
+                                              <td>{ex.symbol ?? '—'}</td>
+                                              <td>{ex.side ?? '—'}</td>
+                                              <td>{ex.quantity != null ? Number(ex.quantity) : '—'}</td>
+                                              <td>{fmtUsd(ex.price)}</td>
+                                              <td
+                                                className={`performance-calendar-stk-notional-cell${notionalCellClass}`}
+                                              >
+                                                {fmtUsd(notionalDisplay)}
+                                              </td>
+                                              <td>{fmtUsd(Number(ex.realized_pnl) || 0)}</td>
+                                              <td>{fmtUsd(ex.commission ?? 0)}</td>
+                                            </tr>
+                                            )
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                )
+                              })()}
+                            {calendarAssetTab === 'options' &&
+                              (() => {
+                                const allExecs = selectedDayExecutions ?? []
+                                const dayExecs = allExecs.filter((e) => executionDateStr(e) === selectedDay)
+                                const optExecs = dayExecs.filter((e) => (e.sec_type ?? '').toUpperCase() === 'OPT')
                               const backendPairs = selectedDayOptPairs ?? []
                               const execById = new Map<number, Execution>()
                               for (const e of allExecs) {

@@ -11757,20 +11757,19 @@ th {
 /* Summary inside Calendar section: right column next to calendar */
 .performance-calendar-with-summary {
   display: flex;
-  gap: var(--space-4);
+  gap: var(--space-3);
   align-items: flex-start;
   flex-wrap: wrap;
 }
 
 .performance-calendar-left {
-  flex: 0 1 50%;
-  min-width: 280px;
+  flex: 3 1 0;
+  min-width: min(100%, 280px);
 }
 
 .performance-calendar-summary {
-  flex: 1 1 320px;
+  flex: 2 1 0;
   min-width: 0;
-  max-width: 100%;
 }
 
 /* Calendar summary: three columns (Summary | Option | Stock) */
@@ -11779,8 +11778,8 @@ th {
   padding-top: 0;
   border-top: none;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0 var(--space-4);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 var(--space-3);
   align-items: start;
 }
 
@@ -11788,11 +11787,11 @@ th {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-2) var(--space-2) 0;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2) var(--space-1) 0;
   border-bottom: none;
   border-right: 1px solid var(--color-border);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   min-width: 0;
 }
 
@@ -11901,6 +11900,116 @@ th {
   margin: 0;
 }
 
+.performance-calendar-asset-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.performance-calendar-asset-tab.system-tab {
+  font-size: var(--text-caption);
+}
+
+.performance-calendar-legend-item-notional {
+  color: var(--color-text-dim);
+}
+
+.performance-calendar-pnl.performance-calendar-notional {
+  color: var(--color-text-dim);
+  font-size: 0.65rem;
+}
+
+.performance-by-day-notional {
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.performance-summary-metric-notional {
+  color: var(--color-text-muted);
+}
+
+/* Cash-like bucket: notional is trade size, not directional PnL — use success green */
+.performance-summary-metric-value.performance-summary-metric-notional-cash-like {
+  color: var(--color-success);
+}
+
+.performance-calendar-pnl.performance-calendar-notional-cash-like {
+  color: var(--color-success);
+}
+
+.performance-page .performance-calendar-cell.tone-negative .performance-calendar-pnl.performance-calendar-notional-cash-like,
+.performance-page .performance-calendar-cell.tone-positive .performance-calendar-pnl.performance-calendar-notional-cash-like {
+  color: var(--color-success);
+}
+
+.performance-by-day-notional.performance-by-day-notional-cash-like {
+  color: var(--color-success);
+}
+
+.performance-calendar-stk-notional-cell.performance-calendar-stk-notional-cell-cash-like {
+  color: var(--color-success);
+}
+
+/* Stocks / Fixed income: signed notional — green if positive, red if negative */
+.performance-calendar-notional-stk-pos,
+.performance-summary-metric-notional-stk-pos,
+.performance-by-day-notional-stk-pos {
+  color: var(--color-success);
+}
+
+.performance-calendar-notional-stk-neg,
+.performance-summary-metric-notional-stk-neg,
+.performance-by-day-notional-stk-neg {
+  color: var(--color-danger);
+}
+
+.performance-calendar-notional-stk-zero,
+.performance-summary-metric-notional-stk-zero {
+  color: var(--color-text-muted);
+}
+
+.performance-stk-notional-pos {
+  color: var(--color-success);
+}
+
+.performance-stk-notional-neg {
+  color: var(--color-danger);
+}
+
+.performance-stk-notional-zero {
+  color: var(--color-text-muted);
+}
+
+.performance-page .performance-calendar-cell.tone-negative .performance-calendar-pnl.performance-calendar-notional-stk-pos,
+.performance-page .performance-calendar-cell.tone-positive .performance-calendar-pnl.performance-calendar-notional-stk-pos {
+  color: var(--color-success);
+}
+
+.performance-page .performance-calendar-cell.tone-negative .performance-calendar-pnl.performance-calendar-notional-stk-neg,
+.performance-page .performance-calendar-cell.tone-positive .performance-calendar-pnl.performance-calendar-notional-stk-neg {
+  color: var(--color-danger);
+}
+
+.performance-page .performance-calendar-cell.tone-negative .performance-calendar-pnl.performance-calendar-notional-stk-zero,
+.performance-page .performance-calendar-cell.tone-positive .performance-calendar-pnl.performance-calendar-notional-stk-zero {
+  color: var(--color-text-muted);
+}
+
+.performance-calendar-stk-day-detail {
+  margin-top: var(--space-2);
+}
+
+.performance-calendar-stk-day-table-wrap {
+  margin-top: var(--space-2);
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.performance-calendar-stk-day-table {
+  font-size: var(--text-caption);
+}
+
 /* Option PnL Calendar grid */
 .performance-calendar-nav {
   display: flex;
@@ -11939,10 +12048,10 @@ th {
   gap: 2px;
 }
 
-/* Uniform: every data row same height, every cell same width (1fr) and height (100%). Tall enough for 3 lines (day + R + U). */
+/* Uniform: every data row same height (taller for STK R+N + long USD strings). */
 .performance-calendar-row:not(.performance-calendar-header) {
-  height: 4.25rem;
-  min-height: 4.25rem;
+  height: 5.125rem;
+  min-height: 5.125rem;
 }
 
 .performance-calendar-header {
@@ -11989,7 +12098,7 @@ th {
 
 .performance-calendar-pnl {
   font-family: var(--font-mono);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
@@ -12431,6 +12540,7 @@ th {
 
 .performance-page .performance-by-day-table-wrap .by-day-table {
   margin: 0;
+  min-width: 52rem;
 }
 
 .performance-page .by-day-table thead th {
@@ -12492,12 +12602,48 @@ th {
 }
 
 /* ---- Calendar section ---- */
+.performance-page .performance-calendar-with-summary {
+  align-items: stretch;
+}
+
+@media (min-width: 1101px) {
+  .performance-page .performance-calendar-with-summary {
+    flex-wrap: nowrap;
+  }
+
+  /* Calendar 3/5, Summary 2/5 of the row (after gap) */
+  .performance-page .performance-calendar-left {
+    flex: 3 1 0;
+    min-width: 0;
+    width: auto;
+    max-width: none;
+  }
+
+  .performance-page .performance-calendar-summary {
+    flex: 2 1 0;
+    min-width: 0;
+    max-width: none;
+  }
+}
+
 .performance-page .performance-calendar-left {
   border: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
   border-radius: 14px;
   padding: var(--space-4);
   background: color-mix(in srgb, var(--color-surface-elevated) 75%, transparent);
   backdrop-filter: blur(6px);
+}
+
+.performance-page .performance-calendar-asset-tabs {
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.performance-page .performance-calendar-asset-tab.system-tab {
+  padding: 0.3rem 0.55rem;
+  font-size: 0.6875rem;
+  margin-bottom: 0;
+  border-bottom-width: 2px;
 }
 
 .performance-page .performance-calendar-nav {
@@ -12555,6 +12701,11 @@ th {
 
 .performance-page .performance-calendar-row {
   gap: 3px;
+}
+
+.performance-page .performance-calendar-row:not(.performance-calendar-header) {
+  min-height: 5.375rem;
+  height: 5.375rem;
 }
 
 .performance-page .performance-calendar-header .performance-calendar-cell {
@@ -12620,30 +12771,40 @@ th {
 }
 
 .performance-page .performance-calendar-pnl {
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   font-weight: 600;
+}
+
+.performance-page .performance-calendar-pnl-lines {
+  width: 100%;
+  align-items: stretch;
+}
+
+.performance-page .performance-calendar-cell .performance-calendar-pnl {
+  max-width: 100%;
+  text-align: center;
 }
 
 /* ---- Summary card (next to calendar) ---- */
 .performance-page .performance-calendar-summary-card {
   border: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
-  border-radius: 14px;
-  padding: var(--space-4);
+  border-radius: 12px;
+  padding: var(--space-3);
   background: color-mix(in srgb, var(--color-surface-elevated) 75%, transparent);
   backdrop-filter: blur(6px);
 }
 
 .performance-page .performance-summary-inside-calendar.performance-summary-rows {
-  grid-template-columns: minmax(220px, 1.2fr) repeat(2, minmax(170px, 1fr));
-  gap: var(--space-3);
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.95fr) minmax(0, 0.95fr);
+  gap: var(--space-2);
 }
 
 /* Individual summary column cards */
 .performance-page .performance-summary-inside-calendar .performance-summary-row {
   border-right: none;
   border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
-  border-radius: 12px;
-  padding: var(--space-3);
+  border-radius: 10px;
+  padding: var(--space-2);
   background: color-mix(in srgb, var(--color-surface) 70%, transparent);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
@@ -12659,9 +12820,9 @@ th {
 
 /* Summary type label */
 .performance-page .performance-summary-inside-calendar .performance-summary-type {
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-1);
   color: var(--color-text-main);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   letter-spacing: 0.02em;
   font-weight: 700;
 }
@@ -12673,33 +12834,33 @@ th {
 /* Highlight key metrics in summary column: Total PnL and Net larger */
 .performance-page .performance-summary-row-summary .performance-summary-metric:first-child .performance-summary-metric-value,
 .performance-page .performance-summary-row-summary .performance-summary-metric:nth-child(3) .performance-summary-metric-value {
-  font-size: 0.9375rem;
+  font-size: 0.8125rem;
 }
 
 .performance-page .performance-summary-inside-calendar .performance-summary-metrics {
-  gap: var(--space-2);
+  gap: var(--space-1);
 }
 
 /* Individual metric pill */
 .performance-page .performance-summary-inside-calendar .performance-summary-metric {
-  padding: 5px var(--space-2);
-  border-radius: 8px;
+  padding: 3px var(--space-1);
+  border-radius: 6px;
   background: color-mix(in srgb, var(--color-bg) 75%, transparent);
   display: flex;
   flex-direction: row;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--space-2);
+  gap: var(--space-1);
 }
 
 .performance-page .performance-summary-inside-calendar .performance-summary-metric-label {
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   font-weight: 500;
 }
 
 .performance-page .performance-summary-inside-calendar .performance-summary-metric-value {
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 700;
 }
 
@@ -12842,6 +13003,7 @@ th {
   .performance-page .performance-calendar-summary {
     flex: 1 1 auto;
     width: 100%;
+    max-width: none;
   }
 }
 

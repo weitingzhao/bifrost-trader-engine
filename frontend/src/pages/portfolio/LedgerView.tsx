@@ -80,6 +80,7 @@ import {
   isLedgerCashLikeCategory,
   isLedgerFixedIncomeCategory,
 } from './ledgerStockCategoryBuckets'
+import { buildPositionCategoryByAccountContract, stkContractKey } from './stkLedgerBucket'
 
 /**
  * Signed cash-flow notional for one STK fill (green if positive, red if negative).
@@ -619,25 +620,10 @@ export function LedgerView({
   )
 
   /** (account_id, contract_key) -> category name for STK positions */
-  const positionCategoryByAccountContract = useMemo(() => {
-    const map = new Map<string, string>()
-    const accounts = status?.portfolio?.accounts ?? []
-    for (const acc of accounts) {
-      const accountId = (acc.account_id ?? '').trim()
-      const positions =
-        (acc as { positions?: { account_id?: string; contract_key?: string; category?: string }[] })
-          .positions ?? []
-      for (const p of positions) {
-        const ck = (p.contract_key ?? '').trim()
-        if (accountId && ck) {
-          const key = `${accountId}|${ck}`
-          const name = (p as { category?: string }).category
-          if (typeof name === 'string' && name.trim()) map.set(key, name.trim())
-        }
-      }
-    }
-    return map
-  }, [status?.portfolio?.accounts])
+  const positionCategoryByAccountContract = useMemo(
+    () => buildPositionCategoryByAccountContract(status),
+    [status?.portfolio?.accounts],
+  )
 
   /** (account_id, contract_key) -> unrealized_pnl for STK rows from GET /status positions (Ib). */
   const stkUnrealizedPnlByAccountContract = useMemo(() => {
@@ -697,29 +683,22 @@ export function LedgerView({
     return map
   }, [status?.portfolio?.accounts])
 
-  /** STK contract_key for lookup: symbol|STK||| */
-  const stkContractKey = useCallback(
-    (sym: string, accId: string) =>
-      `${(accId ?? '').trim()}|${(sym ?? '').toString().trim().toUpperCase()}|STK|||`,
-    [],
-  )
-
   const getStockExecCategory = useCallback(
     (ex: Execution) =>
       positionCategoryByAccountContract.get(
         stkContractKey(ex.symbol ?? '', ex.account_id ?? ''),
       ) ?? '—',
-    [positionCategoryByAccountContract, stkContractKey],
+    [positionCategoryByAccountContract],
   )
 
   const getStkUnrealizedForExecution = useCallback(
     (ex: Execution) => stkUnrealizedPnlByAccountContract.get(stkContractKey(ex.symbol ?? '', ex.account_id ?? '')),
-    [stkUnrealizedPnlByAccountContract, stkContractKey],
+    [stkUnrealizedPnlByAccountContract],
   )
 
   const getStkPositionSnapshotForGroup = useCallback(
     (accId: string, sym: string) => stkPositionSnapshotByAccountContract.get(stkContractKey(sym, accId)),
-    [stkPositionSnapshotByAccountContract, stkContractKey],
+    [stkPositionSnapshotByAccountContract],
   )
 
   const ledgerBaseFilteredExecutions = useMemo(() => {
@@ -1477,12 +1456,7 @@ export function LedgerView({
     }
     if (anyPositionRow) totalUnrealized = sumU
     return { trades, notional, realizedPnl, totalUnrealized }
-  }, [
-    ledgerStocksSummaryByMonth,
-    ledgerStockFilteredExecutions,
-    stkUnrealizedPnlByAccountContract,
-    stkContractKey,
-  ])
+  }, [ledgerStocksSummaryByMonth, ledgerStockFilteredExecutions, stkUnrealizedPnlByAccountContract])
 
   const handleMetricExplainEnter = useCallback(
     (kind: LedgerMetricExplainKind, id: string, e: MouseEvent) => {
