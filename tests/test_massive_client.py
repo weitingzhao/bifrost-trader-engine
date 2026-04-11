@@ -69,3 +69,35 @@ class TestFetchOptionPreviousDay:
         with patch.object(MassiveClient, "_get", return_value=(500, {"error": "Internal"})):
             result = _client().fetch_option_previous_day("O:SPY251219C00600000")
         assert "error" in result
+
+
+class TestFetchStockGroupedDaily:
+    def test_requests_grouped_path(self):
+        paths: list[str] = []
+
+        def capture_get(self, path, params=None):
+            paths.append(path)
+            return (200, {"status": "OK", "queryCount": 0, "results": []})
+
+        with patch.object(MassiveClient, "_get", capture_get):
+            out = _client().fetch_stock_grouped_daily("2024-06-03")
+        assert not out.get("error")
+        assert paths and "/v2/aggs/grouped/locale/us/market/stocks/2024-06-03" in paths[0]
+
+    def test_missing_date(self):
+        out = _client().fetch_stock_grouped_daily("")
+        assert out.get("error")
+
+
+class TestFetchStockAggs:
+    def test_delegates_to_same_range_path_as_options(self):
+        paths: list[str] = []
+
+        def capture_get(self, path, params=None):
+            paths.append(path)
+            return (200, {"status": "OK", "results": []})
+
+        with patch.object(MassiveClient, "_get", capture_get):
+            out = _client().fetch_stock_aggs("AAPL", 1, "minute", 1_000, 2_000)
+        assert not out.get("error")
+        assert paths[0].startswith("/v2/aggs/ticker/AAPL/range/1/minute/1000/2000")

@@ -311,6 +311,33 @@ def upsert_ticker_overview_row(cur: Any, tickers_id: int, cols: Dict[str, Any]) 
     cur.execute(sql, vals)
 
 
+def overview_stub_cols_api_not_found() -> Dict[str, Any]:
+    """Columns for ``ticker_overview`` when GET /v3/reference/tickers/{ticker} returns NOT_FOUND.
+
+    Records that we attempted sync so the symbol leaves the SQL \"missing overview\" set; fields stay empty.
+    """
+    now = datetime.now(timezone.utc)
+    return {
+        "sector": "",
+        "industry": "",
+        "exchange": None,
+        "list_date": None,
+        "ticker_root": None,
+        "sic_description": None,
+        "market_cap": None,
+        "total_employees": None,
+        "address_line1": None,
+        "address_city": None,
+        "address_state": None,
+        "postal_code": None,
+        "phone": None,
+        "description": None,
+        "icon_url": None,
+        "logo_url": None,
+        "overview_updated_at": now,
+    }
+
+
 def get_reference_state(cur: Any, sync_kind: str) -> Optional[Dict[str, Any]]:
     cur.execute(
         """
@@ -626,6 +653,41 @@ def count_ticker_related_coverage(cur: Any) -> Dict[str, int]:
         "filled": int(row[1] or 0),
         "missing": int(row[2] or 0),
     }
+
+
+def symbols_missing_related_only(cur: Any) -> List[str]:
+    """Tickers in ``tickers`` with no ``ticker_related_tickers`` rows as ``from_tickers_id``."""
+    cur.execute(
+        """
+        SELECT t.ticker FROM tickers t
+        WHERE NOT EXISTS (
+            SELECT 1 FROM ticker_related_tickers r WHERE r.from_tickers_id = t.tickers_id
+        )
+        ORDER BY t.ticker
+        """
+    )
+    return [str(r[0]) for r in cur.fetchall() if r and r[0]]
+
+
+def symbols_needing_related_stale(cur: Any, stale_hours: int = 720) -> List[str]:
+    """Tickers missing related rows, or whose latest ``fetched_at`` is older than ``stale_hours``."""
+    h = max(1, int(stale_hours))
+    cur.execute(
+        """
+        SELECT t.ticker FROM tickers t
+        LEFT JOIN (
+            SELECT from_tickers_id, MAX(fetched_at) AS last_fetch
+            FROM ticker_related_tickers
+            GROUP BY from_tickers_id
+        ) r ON r.from_tickers_id = t.tickers_id
+        WHERE r.from_tickers_id IS NULL
+           OR r.last_fetch IS NULL
+           OR r.last_fetch < (now() - (%s * interval '1 hour'))
+        ORDER BY t.ticker
+        """,
+        (h,),
+    )
+    return [str(r[0]) for r in cur.fetchall() if r and r[0]]
 
 
 def list_tickers_missing_related_page(cur: Any, limit: int, offset: int) -> List[str]:

@@ -43,14 +43,19 @@ const rows: ChecklistRow[] = [
       'Four REST aggregate endpoints for stocks: Custom Bars (OHLCV over custom range), Grouped Daily (all tickers for a date), '
       + 'Daily Open/Close, and Previous Close.',
     tierMin: 'starter',
-    projectStatus: 'not-implemented',
-    verification: 'N/A — not yet implemented.',
+    projectStatus: 'implemented',
+    verification:
+      'Settings → Feed → Massive Stock → Aggregate Bars (OHLC): each sub-tab has Execute → JSON. '
+      + 'Proxies: GET /research/massive/stocks/bars/range, GET /research/massive/stocks/bars/grouped-daily/{date}, '
+      + 'GET /research/massive/stocks/bars/open-close/{ticker}/{date}, GET /research/massive/stocks/bars/prev/{ticker}.',
     purpose:
       'Backfill stock OHLCV bars from Massive as a complement to IB historical data. Grouped Daily enables universe-wide screening.',
     helpVerification:
-      'Not yet implemented. Target endpoints: GET /v2/aggs/ticker/{ticker}/range/…, '
-      + 'GET /v2/aggs/grouped/locale/us/market/stocks/{date}, GET /v1/open-close/{ticker}/{date}, '
-      + 'GET /v2/aggs/ticker/{ticker}/prev.',
+      'Custom Bars: GET /v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from}/{to} — proxy query: ticker, multiplier, timespan, start_ms, end_ms. '
+      + 'Grouped Daily: GET /v2/aggs/grouped/locale/us/market/stocks/{date}. '
+      + 'Open/Close: GET /v1/open-close/{ticker}/{date}. '
+      + 'Previous day: GET /v2/aggs/ticker/{ticker}/prev. '
+      + 'MassiveClient: fetch_stock_aggs, fetch_stock_grouped_daily, fetch_stock_open_close, fetch_stock_previous_day.',
   },
   {
     id: 'stock-snapshots',

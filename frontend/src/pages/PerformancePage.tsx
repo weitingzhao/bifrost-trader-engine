@@ -1,12 +1,25 @@
 import { useCallback, useEffect, useMemo, useState, Fragment } from 'react'
-import type { Execution, PerformanceResponse, StatusResponse } from '../types'
+import type {
+  Execution,
+  OptionStockLinkRow,
+  OptionStockLinkSummary,
+  PerformanceResponse,
+  StatusResponse,
+} from '../types'
 import type { BackendOptPair } from '../types'
 import type { StrategyOpportunity } from '../api'
 import type { StrategyInstance } from '../types'
-import { fetchExecutions, fetchPerformance, fetchOpportunities, fetchStrategyInstances } from '../api'
+import { fetchExecutions, fetchPerformance, fetchOpportunities, fetchStrategyInstances, postOptionStockLinksQuery } from '../api'
 import ExecSourceBadge from '../components/ExecSourceBadge'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { ViewOptionStockLinksModal } from './portfolio/ViewOptionStockLinksModal'
+import {
+  getOptionStockLinkDetailForExecution,
+  realizedPnlFifoMatchPlusStock,
+  scaledLedgerOptDetailRowPnl,
+} from './portfolio/ledgerOptHelpers'
 import { fmtChicagoTime, fmtPnl, fmtPnlCalendar, fmtUsd } from '../utils/format'
+import { fetchOptionStockLinkMapForExecutions } from './performance/fetchOptionStockLinkMap'
 import {
   computeDayRealizedUnrealized,
   computeDayRealizedUnrealizedStock,
@@ -57,6 +70,21 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
   const [selectedDayExecutions, setSelectedDayExecutions] = useState<Execution[] | null>(null)
   const [selectedDayOptPairs, setSelectedDayOptPairs] = useState<BackendOptPair[] | null>(null)
   const [selectedDayExecutionsLoading, setSelectedDayExecutionsLoading] = useState(false)
+  const [selectedDayOptionStockLinkByOptionId, setSelectedDayOptionStockLinkByOptionId] = useState<
+    Record<number, OptionStockLinkSummary>
+  >({})
+  const [viewStockLinksModal, setViewStockLinksModal] = useState<{
+    open: boolean
+    title: string
+    rows: OptionStockLinkRow[]
+    slippageTotal: number | null
+  }>({ open: false, title: '', rows: [], slippageTotal: null })
+  const handleViewOptionStockLinks = useCallback(
+    (rows: OptionStockLinkRow[], title: string, slippageTotal: number | null) => {
+      setViewStockLinksModal({ open: true, title, rows, slippageTotal })
+    },
+    [],
+  )
   const [calendarDayPnL, setCalendarDayPnL] = useState<Record<string, { realized: number; unrealized: number }> | null>(null)
   const [calendarDayPnLLoading, setCalendarDayPnLLoading] = useState(false)
   const [calendarMonthPerformance, setCalendarMonthPerformance] = useState<PerformanceResponse | null>(null)
@@ -224,7 +252,8 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         )
         const execs = res.executions ?? []
         const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
-        const { realized, unrealized } = computeOptionDayPnLForPerformanceDate(dateStr, execs, optPairs)
+        const linkMap = await fetchOptionStockLinkMapForExecutions(execs)
+        const { realized, unrealized } = computeOptionDayPnLForPerformanceDate(dateStr, execs, optPairs, linkMap)
         return { dateStr, realized, unrealized }
       })
       const stockPromise = fetchExecutions(
@@ -326,7 +355,8 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       )
       const execs = res.executions ?? []
       const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
-      const { realized, unrealized } = computeOptionDayPnLForPerformanceDate(dateStr, execs, optPairs)
+      const linkMap = await fetchOptionStockLinkMapForExecutions(execs)
+      const { realized, unrealized } = computeOptionDayPnLForPerformanceDate(dateStr, execs, optPairs, linkMap)
       return { dateStr, realized, unrealized }
     })
       .then((rows) => {
@@ -397,15 +427,17 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         strategyInstanceId ?? undefined,
         PERFORMANCE_EXEC_SOURCE_SCOPE,
       )
-      .then((res) => {
+      .then(async (res) => {
         setSelectedDayExecutions(res.executions ?? [])
         setSelectedDayOptPairs('opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null)
         const execs = res.executions ?? []
         const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
+        const linkMap = await fetchOptionStockLinkMapForExecutions(execs)
         const { realized, unrealized, symbolsRealized, symbolsUnrealized } = computeOptionDayPnLForPerformanceDate(
           selectedDay,
           execs,
           optPairs,
+          linkMap,
         )
         setSelectedDayComputedPnL({ realized, unrealized })
         if (symbolsRealized.length === 0 && symbolsUnrealized.length > 0) {
@@ -419,6 +451,54 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       })
       .finally(() => setSelectedDayExecutionsLoading(false))
   }, [selectedDay, strategyOpportunityId, strategyInstanceId])
+
+  /** Bulk option–stock links for Performance day-detail (same API as Trade Ledger). */
+  useEffect(() => {
+    if (!selectedDayExecutions || selectedDayExecutions.length === 0) {
+      setSelectedDayOptionStockLinkByOptionId({})
+      return
+    }
+    let cancelled = false
+    const opt = selectedDayExecutions.filter((e) => (e.sec_type ?? '').toUpperCase() === 'OPT')
+    const byAccount = new Map<string, number[]>()
+    for (const e of opt) {
+      const id = e.account_executions_id
+      const acc = (e.account_id ?? '').trim()
+      if (id == null || !acc) continue
+      if (!byAccount.has(acc)) byAccount.set(acc, [])
+      byAccount.get(acc)!.push(id)
+    }
+    const batches = Array.from(byAccount.entries()).map(([account_id, option_account_executions_ids]) => ({
+      account_id,
+      option_account_executions_ids,
+    }))
+    if (batches.length === 0) {
+      setSelectedDayOptionStockLinkByOptionId({})
+      return
+    }
+    void postOptionStockLinksQuery({ batches })
+      .then((res) => {
+        if (cancelled) return
+        const raw = res.by_option_id ?? {}
+        const next: Record<number, OptionStockLinkSummary> = {}
+        for (const [k, v] of Object.entries(raw)) {
+          const num = Number(k)
+          if (!Number.isFinite(num)) continue
+          const summary = v as OptionStockLinkSummary
+          next[num] = {
+            links: summary.links ?? [],
+            slippage_total: summary.slippage_total ?? null,
+          }
+        }
+        setSelectedDayOptionStockLinkByOptionId(next)
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedDayOptionStockLinkByOptionId({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedDayExecutions])
 
   const summary = data?.summary
 
@@ -646,7 +726,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       <section className="performance-calendar-section performance-pane" aria-label="Calendar">
         <h3 className="card-subtitle page-title-with-tooltip">
           Calendar
-          <InfoTooltip text="Daily Option Realized and Unrealized in calendar form." />
+          <InfoTooltip text="Daily Option Realized and Unrealized (R/U). Realized matches day drill-down: FIFO match option PnL plus prorated linked-stock slippage when option–stock links exist." />
         </h3>
         {data && summary ? (
           <>
@@ -1033,7 +1113,13 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                   if (p.leg_c_execution_id != null) matchedQtyById.set(p.leg_c_execution_id, (matchedQtyById.get(p.leg_c_execution_id) ?? 0) + pq)
                                   if (p.leg_p_execution_id != null) matchedQtyById.set(p.leg_p_execution_id, (matchedQtyById.get(p.leg_p_execution_id) ?? 0) + pq)
                                 }
-                                const realizedPnl = pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
+                                const pairNetSum = pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
+                                const realizedPnl = realizedPnlFifoMatchPlusStock(
+                                  pairNetSum,
+                                  sortedExecs,
+                                  matchedQtyById,
+                                  selectedDayOptionStockLinkByOptionId,
+                                )
                                 const realizedComm = pairs.reduce((s, p) => s + (Number(p.commission) || 0), 0)
                                 let unrealizedPnl = 0
                                 let unrealizedComm = 0
@@ -1083,7 +1169,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                   </h5>
                                   {selectedDayPnLType === 'realized' && (
                                     <p className="section-hint performance-calendar-records-realized-hint">
-                                      Realized lists execution legs that participate in a FIFO match (scaled to matched qty when partial), then match rows. Open quantity appears under Unrealized.
+                                      Realized lists execution legs that participate in a FIFO match (scaled to matched qty when partial), then match rows. Match row PnL is option (FIFO) only. Execution rows show per-leg premium plus prorated linked stock (Trade Ledger detail). Realized tab and symbol totals = sum of Match option PnL (FIFO) for the contract plus prorated linked-stock slippage on matched fills. Open quantity appears under Unrealized.
                                     </p>
                                   )}
                                   {contractKeys.length === 0 ? (
@@ -1236,8 +1322,14 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                             ...pairs.map((p) => ({ type: 'Match' as const, p })),
                                           ]
                                         : unmatchedRows.map(({ e, unmatchedRatio }) => ({ type: 'Execution' as const, e, unmatchedRatio }))
+                                      const pairNetSumTab = pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
                                       const tabPnl = isRealizedTab
-                                        ? pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
+                                        ? realizedPnlFifoMatchPlusStock(
+                                            pairNetSumTab,
+                                            sortedExecs,
+                                            matchedQtyById2,
+                                            selectedDayOptionStockLinkByOptionId,
+                                          )
                                         : tabUnrealizedPnl
                                       const tabComm = isRealizedTab
                                         ? pairs.reduce((s, p) => s + (Number(p.commission) || 0), 0)
@@ -1281,6 +1373,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                                   const tdP = (legP?.trade_date ?? '').trim()
                                                   const tradeDateStr =
                                                     tdC !== '' ? tdC : tdP !== '' ? tdP : '—'
+                                                  const mp = row.p.net_pnl ?? matchPnl(row.p)
                                                   return (
                                                     <tr key={`match-${idx}`} className="performance-calendar-row-match">
                                                       <td>Match</td>
@@ -1295,7 +1388,13 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                                       <td>{String(row.p.quantity)}</td>
                                                       <td>{`${fmtUsd(row.p.c_price)} / ${fmtUsd(row.p.p_price)}`}</td>
                                                       <td>{fmtUsd(row.p.commission)}</td>
-                                                      <td className={(() => { const mp = row.p.net_pnl ?? matchPnl(row.p); return Math.abs(mp) < 0.005 ? '' : (mp >= 0 ? 'tone-positive' : 'tone-negative'); })()}>{fmtPnl(row.p.net_pnl ?? matchPnl(row.p))}</td>
+                                                      <td
+                                                        className={
+                                                          Math.abs(mp) < 0.005 ? '' : mp >= 0 ? 'tone-positive' : 'tone-negative'
+                                                        }
+                                                      >
+                                                        {fmtPnl(mp)}
+                                                      </td>
                                                     </tr>
                                                   )
                                                 })() : (
@@ -1306,21 +1405,76 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                                         : row.matchedRatio != null
                                                           ? row.matchedRatio
                                                           : 1
-                                                    const ep = ledgerOptionExecutionCashFlowSigned(row.e) * r
                                                     const ec = (Number(row.e.commission) || 0) * r
                                                     const eq = Math.abs(Number(row.e.quantity) || 0)
                                                     const displayQty = r < 1 - 1e-9 ? Math.round((eq * r) * 1e4) / 1e4 : (row.e.quantity ?? '—')
+                                                    const ex = row.e
+                                                    const sym0 = (ex.symbol ?? '').trim().split(/\s+/)[0]?.trim() ?? ''
+                                                    const detailTitle = [sym0, optionRightToFull(ex.option_right), ex.strike != null ? String(ex.strike) : '']
+                                                      .filter((x) => String(x).trim() !== '')
+                                                      .join(' ')
+                                                    const { displayPnl: execDisplayPnl, hasCombinedStock } = isRealizedTab
+                                                      ? scaledLedgerOptDetailRowPnl(ex, r, selectedDayOptionStockLinkByOptionId)
+                                                      : {
+                                                          displayPnl: ledgerOptionExecutionCashFlowSigned(ex) * r,
+                                                          hasCombinedStock: false,
+                                                        }
+                                                    const pnlClass = isRealizedTab
+                                                      ? Math.abs(execDisplayPnl) < 0.005
+                                                        ? ''
+                                                        : execDisplayPnl >= 0
+                                                          ? 'tone-positive'
+                                                          : 'tone-negative'
+                                                      : executionLegPnlToneClass(ex, execDisplayPnl)
+                                                    const { linkIds, links, slippageTotal: linkSlip } = getOptionStockLinkDetailForExecution(
+                                                      ex,
+                                                      selectedDayOptionStockLinkByOptionId,
+                                                    )
                                                     return (
                                                   <tr key={row.e.account_executions_id ?? idx} className="performance-calendar-row-execution">
                                                     <td>Execution</td>
-                                                    <td>{row.e.account_executions_id ?? '—'}</td>
+                                                    <td>
+                                                      <span className="performance-calendar-exec-id-wrap">
+                                                        {ex.account_executions_id ?? '—'}
+                                                        {isRealizedTab && linkIds.length > 0 ? (
+                                                          <span className="ledger-opt-link-stock-badges">
+                                                            {linkIds.map((lid) => (
+                                                              <button
+                                                                key={lid}
+                                                                type="button"
+                                                                className="ledger-opt-link-stock-badge"
+                                                                onClick={(e) => {
+                                                                  e.stopPropagation()
+                                                                  handleViewOptionStockLinks(
+                                                                    links,
+                                                                    `Link #${lid} · Exec #${ex.account_executions_id ?? '?'} · ${detailTitle || 'Option'}`,
+                                                                    linkSlip,
+                                                                  )
+                                                                }}
+                                                              >
+                                                                #{lid}
+                                                              </button>
+                                                            ))}
+                                                          </span>
+                                                        ) : null}
+                                                      </span>
+                                                    </td>
                                                     <td>{row.e.account_id ?? '—'}</td>
                                                     <td>{(row.e.trade_date ?? '').trim() || '—'}</td>
                                                     <td>{row.e.side ?? '—'}</td>
                                                     <td>{displayQty}</td>
                                                     <td>{fmtUsd(row.e.price)}</td>
                                                     <td>{fmtUsd(ec)}</td>
-                                                    <td className={executionLegPnlToneClass(row.e, ep)}>{fmtPnl(ep)}</td>
+                                                    <td
+                                                      className={pnlClass}
+                                                      title={
+                                                        isRealizedTab && hasCombinedStock
+                                                          ? 'Option premium cash flow for matched quantity plus linked stock slippage (vs Flex close)'
+                                                          : undefined
+                                                      }
+                                                    >
+                                                      {fmtPnl(execDisplayPnl)}
+                                                    </td>
                                                   </tr>
                                                     );
                                                   })()
@@ -1577,6 +1731,16 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
           <p>{error}</p>
         </div>
       )}
+
+      <ViewOptionStockLinksModal
+        open={viewStockLinksModal.open}
+        title={viewStockLinksModal.title}
+        rows={viewStockLinksModal.rows}
+        slippageTotal={viewStockLinksModal.slippageTotal}
+        onClose={() =>
+          setViewStockLinksModal({ open: false, title: '', rows: [], slippageTotal: null })
+        }
+      />
     </div>
   )
 }

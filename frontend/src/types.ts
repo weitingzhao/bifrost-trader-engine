@@ -494,6 +494,8 @@ export interface Execution {
   taxes?: number | null
   /** Net cash. */
   net_cash?: number | null
+  /** Flex reference close price when present (e.g. stock-link candidates). */
+  close_price?: number | null
   /** Row created_at (Unix seconds); use for Time column when exec_time is updated over time. */
   created_at?: number | null
   /** Strategy opportunity ID (trade attribution, SI.2). */
@@ -508,6 +510,30 @@ export interface Execution {
   strategy_instance_opened_at_epoch?: number | null
   /** When set, quantity is split across multiple strategy instances (see DATABASE §2.24.11d). */
   instance_allocations?: ExecutionInstanceAllocation[] | null
+}
+
+/** Aggregated link rows + total slippage vs close for one option execution id. */
+export interface OptionStockLinkSummary {
+  links: OptionStockLinkRow[]
+  slippage_total: number | null
+}
+
+/** One row from GET /executions/option-stock-links (joined stock leg + slippage vs close). */
+export interface OptionStockLinkRow {
+  link_id: number
+  option_account_executions_id: number
+  stock_account_executions_id: number
+  role?: string | null
+  note?: string | null
+  created_at_epoch?: number | null
+  stock_symbol?: string | null
+  stock_side?: string | null
+  stock_quantity?: number | null
+  stock_price?: number | null
+  stock_close_price?: number | null
+  stock_trade_date?: string | null
+  stock_exec_id?: string | null
+  slippage_vs_close?: number | null
 }
 
 /** One row from GET /executions/position-attribution: one (position, instance); open_qty_est = sum of signed exec qty for that instance (final-only or TWS-only per position, see reader). */

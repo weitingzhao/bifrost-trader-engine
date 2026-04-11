@@ -53,6 +53,7 @@ EXPECTED_TABLES_BY_CATEGORY: Dict[str, List[str]] = {
     "execution": [
         "account_execution_commissions",
         "account_execution_instance_allocation",
+        "account_execution_option_stock_link",
         "account_executions",
         "account_executions_final",
         "account_executions_fly",

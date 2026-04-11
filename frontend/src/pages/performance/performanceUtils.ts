@@ -1,5 +1,5 @@
-import type { Execution } from '../../types'
-import type { BackendOptPair } from '../../types'
+import type { BackendOptPair, Execution, OptionStockLinkSummary } from '../../types'
+import { realizedPnlFifoMatchPlusStock } from '../portfolio/ledgerOptHelpers'
 
 export function optionRightToFull(r: string | null | undefined): string {
   if (r == null || String(r).trim() === '') return '—'
@@ -336,6 +336,7 @@ export function computeDayRealizedUnrealized(
   executions: Execution[],
   optPairs: BackendOptPair[] | null,
   sortExec: (a: Execution, b: Execution) => number = sortExecByExecutionDateThenTime,
+  linkByOptionId?: Record<number, OptionStockLinkSummary>,
 ): { realized: number; unrealized: number; symbolsRealized: string[]; symbolsUnrealized: string[] } {
   type DayPair = {
     account_id: string
@@ -444,7 +445,8 @@ export function computeDayRealizedUnrealized(
       if (p.leg_c_execution_id != null) matchedQtyById.set(p.leg_c_execution_id, (matchedQtyById.get(p.leg_c_execution_id) ?? 0) + pq)
       if (p.leg_p_execution_id != null) matchedQtyById.set(p.leg_p_execution_id, (matchedQtyById.get(p.leg_p_execution_id) ?? 0) + pq)
     }
-    const realizedPnl = pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
+    const pairNetSum = pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
+    const realizedPnl = realizedPnlFifoMatchPlusStock(pairNetSum, sortedExecs, matchedQtyById, linkByOptionId)
     let unrealizedPnl = 0
     let hasUnmatched = false
     for (const e of sortedExecs) {
@@ -483,6 +485,7 @@ export function computeOptionDayPnLForPerformanceDate(
   dateStr: string,
   execs: Execution[],
   optPairs: BackendOptPair[] | null,
+  linkByOptionId?: Record<number, OptionStockLinkSummary>,
 ): { realized: number; unrealized: number; symbolsRealized: string[]; symbolsUnrealized: string[] } {
   const execByIdForDate = new Map<number, Execution>(
     execs.filter((e) => e.account_executions_id != null).map((e) => [e.account_executions_id!, e]),
@@ -495,6 +498,8 @@ export function computeOptionDayPnLForPerformanceDate(
   return computeDayRealizedUnrealized(
     dayExecs,
     relevantPairs != null && relevantPairs.length > 0 ? relevantPairs : null,
+    sortExecByExecutionDateThenTime,
+    linkByOptionId,
   )
 }
 

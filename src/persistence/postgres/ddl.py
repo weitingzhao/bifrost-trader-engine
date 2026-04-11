@@ -2065,4 +2065,35 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             "ON account_execution_instance_allocation (strategy_instance_id)"
         )
 
+        # OPT exercise / assignment: link option execution row(s) to underlying STK fills (performance book).
+        _log_table(
+            "account_execution_option_stock_link",
+            "Option leg to underlying stock execution(s); slippage vs close_price computed in API reader",
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS account_execution_option_stock_link (
+                account_execution_option_stock_link_id bigserial PRIMARY KEY,
+                account_id text NOT NULL,
+                option_account_executions_id bigint NOT NULL,
+                stock_account_executions_id bigint NOT NULL,
+                role text,
+                note text,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                UNIQUE (option_account_executions_id, stock_account_executions_id),
+                CONSTRAINT account_execution_option_stock_link_role_chk CHECK (
+                    role IS NULL OR lower(trim(role)) IN ('exercise', 'assignment')
+                )
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS account_exec_opt_stock_link_option "
+            "ON account_execution_option_stock_link (account_id, option_account_executions_id)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS account_exec_opt_stock_link_stock "
+            "ON account_execution_option_stock_link (account_id, stock_account_executions_id)"
+        )
+
         conn.commit()

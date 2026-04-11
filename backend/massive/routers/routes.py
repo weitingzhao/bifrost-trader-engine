@@ -1006,6 +1006,101 @@ def get_ticker_reference_detail(request: Request, ticker: str) -> Dict[str, Any]
     return _ticker_ref_detail_impl(request, ticker)
 
 
+# ── Stock aggregate bars (read-only Polygon proxy; registered before ``/stocks/{symbol}``) ──
+
+
+@router.get("/research/massive/stocks/bars/range")
+def get_massive_stock_bars_range(
+    request: Request,
+    ticker: str = Query(..., description="Stock symbol, e.g. AAPL"),
+    multiplier: int = Query(1, ge=1),
+    timespan: str = Query("minute"),
+    start_ms: int = Query(..., description="Range start (Unix ms)"),
+    end_ms: int = Query(..., description="Range end (Unix ms)"),
+) -> Dict[str, Any]:
+    """GET /v2/aggs/ticker/.../range/... — custom OHLCV for a stock (proxy)."""
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured"}
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    data = client.fetch_stock_aggs(ticker, multiplier, timespan, start_ms, end_ms)
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/stocks/bars/grouped-daily/{date}")
+def get_massive_stock_bars_grouped_daily(
+    request: Request,
+    date: str,
+    adjusted: bool = Query(True),
+) -> Dict[str, Any]:
+    """GET /v2/aggs/grouped/locale/us/market/stocks/{date} — all US stocks for one date (proxy)."""
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured"}
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    data = client.fetch_stock_grouped_daily(date, adjusted=adjusted)
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/stocks/bars/open-close/{ticker:path}/{date}")
+def get_massive_stock_bars_open_close(
+    request: Request,
+    ticker: str,
+    date: str,
+    adjusted: bool = Query(True),
+) -> Dict[str, Any]:
+    """GET /v1/open-close/{ticker}/{date} — daily OHLC for a stock (proxy)."""
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured"}
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    data = client.fetch_stock_open_close(ticker, date, adjusted=adjusted)
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/stocks/bars/prev/{ticker:path}")
+def get_massive_stock_bars_prev(
+    request: Request,
+    ticker: str,
+    adjusted: bool = Query(True),
+) -> Dict[str, Any]:
+    """GET /v2/aggs/ticker/.../prev — previous trading day OHLC for a stock (proxy)."""
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured"}
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    data = client.fetch_stock_previous_day(ticker, adjusted=adjusted)
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
 @router.get("/research/massive/stocks/{symbol}")
 def get_stock_reference_detail_legacy(request: Request, symbol: str) -> Dict[str, Any]:
     """Deprecated: use ``GET /research/massive/reference/tickers/{ticker}``."""

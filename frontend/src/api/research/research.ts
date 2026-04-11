@@ -1298,6 +1298,95 @@ export async function fetchMassiveRelatedCompanies(ticker: string): Promise<Mass
   }
 }
 
+/** Stock OHLC aggregates (GET proxies under ``/research/massive/stocks/bars/``). */
+export async function fetchMassiveStockBarsRange(opts: {
+  ticker: string
+  multiplier?: number
+  timespan?: string
+  start_ms: number
+  end_ms: number
+}): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  q.set('ticker', opts.ticker.trim())
+  q.set('multiplier', String(opts.multiplier ?? 1))
+  q.set('timespan', (opts.timespan ?? 'minute').trim() || 'minute')
+  q.set('start_ms', String(opts.start_ms))
+  q.set('end_ms', String(opts.end_ms))
+  const r = await fetch(massiveUrl(`/research/massive/stocks/bars/range?${q.toString()}`))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  const parsed = parseMassiveTickerProxyResponse(j, r)
+  if (!parsed.ok) {
+    return { ok: false, error: parsed.error }
+  }
+  return {
+    ok: true,
+    data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined,
+  }
+}
+
+export async function fetchMassiveStockGroupedDaily(
+  date: string,
+  opts?: { adjusted?: boolean },
+): Promise<MassiveTickerProxyResponse> {
+  const d = date.trim()
+  const q = new URLSearchParams()
+  if (opts?.adjusted === false) q.set('adjusted', 'false')
+  const qs = q.toString()
+  const r = await fetch(
+    massiveUrl(`/research/massive/stocks/bars/grouped-daily/${encodeURIComponent(d)}${qs ? `?${qs}` : ''}`),
+  )
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  const parsed = parseMassiveTickerProxyResponse(j, r)
+  if (!parsed.ok) {
+    return { ok: false, error: parsed.error }
+  }
+  return {
+    ok: true,
+    data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined,
+  }
+}
+
+export async function fetchMassiveStockOpenClose(
+  ticker: string,
+  date: string,
+  opts?: { adjusted?: boolean },
+): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  if (opts?.adjusted === false) q.set('adjusted', 'false')
+  const qs = q.toString()
+  const path = `/research/massive/stocks/bars/open-close/${encodeURIComponent(ticker.trim())}/${encodeURIComponent(date.trim())}${qs ? `?${qs}` : ''}`
+  const r = await fetch(massiveUrl(path))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  const parsed = parseMassiveTickerProxyResponse(j, r)
+  if (!parsed.ok) {
+    return { ok: false, error: parsed.error }
+  }
+  return {
+    ok: true,
+    data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined,
+  }
+}
+
+export async function fetchMassiveStockPrev(
+  ticker: string,
+  opts?: { adjusted?: boolean },
+): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  if (opts?.adjusted === false) q.set('adjusted', 'false')
+  const qs = q.toString()
+  const path = `/research/massive/stocks/bars/prev/${encodeURIComponent(ticker.trim())}${qs ? `?${qs}` : ''}`
+  const r = await fetch(massiveUrl(path))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  const parsed = parseMassiveTickerProxyResponse(j, r)
+  if (!parsed.ok) {
+    return { ok: false, error: parsed.error }
+  }
+  return {
+    ok: true,
+    data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined,
+  }
+}
+
 /** PostgreSQL-backed ticker reference: search autocomplete. */
 export interface TickerReferenceSearchRow {
   tickers_id: number

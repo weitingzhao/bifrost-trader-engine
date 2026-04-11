@@ -11028,6 +11028,115 @@ th {
   margin-bottom: var(--space-2);
 }
 
+.replay-filters--bar-two-rows {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+.replay-filters--bar-two-rows .replay-filters--bar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.replay-filters--bar-two-rows .replay-filters--bar-row-strategy {
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--color-border);
+}
+
+.replay-section-trade-records .ledger-since-bubble-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.replay-section-trade-records .ledger-filter-field--expiry-split {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.replay-section-trade-records .ledger-expiry-split-label {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.replay-section-trade-records .ledger-expiry-year-select {
+  min-width: 5.5rem;
+}
+
+.replay-section-trade-records .ledger-expiry-month-select {
+  min-width: 4.5rem;
+}
+
+.replay-section-trade-records .ledger-strategy-filter-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.replay-section-trade-records .ledger-strategy-filter-label--symbol {
+  min-width: 0;
+  flex: 1 1 11rem;
+  max-width: 20rem;
+  align-items: center;
+}
+
+.replay-section-trade-records .ledger-strategy-filter-label--symbol .ledger-symbol-combobox {
+  flex: 1;
+  min-width: 0;
+}
+
+.replay-section-trade-records .ledger-strategy-filter-label--symbol .ledger-symbol-combobox__input--toolbar {
+  width: 100%;
+  min-width: 7.5rem;
+}
+
+.replay-section-trade-records .ledger-top-quick-filters.replay-filters--bar {
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.06));
+}
+
+.replay-section-trade-records .ledger-top-quick-filters-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.replay-section-trade-records .ledger-top-quick-filters-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.replay-section-trade-records .ledger-since-preset-label {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.replay-section-trade-records .ledger-since-preset-highlight {
+  font-weight: 700;
+  color: var(--color-accent, #58a6ff);
+  font-variant-numeric: tabular-nums;
+}
+
+.replay-section-trade-records .ledger-active-filters-summary {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
 .replay-filter-account-wrap {
   display: inline-flex;
   align-items: center;
@@ -11151,6 +11260,34 @@ th {
 .replay-filters--bar .ledger-filter-field {
   display: inline-flex;
   align-items: center;
+}
+
+.ledger-trade-period-label {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.replay-section-trade-records .ledger-since-cutoff-inline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  align-self: center;
+  margin-left: var(--space-2);
+  max-width: 100%;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  line-height: 1.35;
+}
+
+.replay-section-trade-records .ledger-since-cutoff-label {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.replay-section-trade-records .ledger-since-range-muted {
+  font-weight: 400;
+  opacity: 0.9;
 }
 
 .replay-filter-clear {
@@ -13300,6 +13437,257 @@ th {
   color: var(--color-text-muted);
 }
 
+/* Trade ledger: Strategy/Instance (attribution) vs Options/Stocks (instruments) */
+.replay-ledger-tab-matrix {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.replay-ledger-tab-matrix--aligned {
+  width: 100%;
+}
+
+.replay-ledger-tab-matrix-labels {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, auto));
+  gap: 0 var(--space-3);
+  padding: 0 var(--space-1);
+}
+
+/* Same 6-column track as tab buttons so Attribution | Instruments aligns with Strategy/Instance | Options… */
+.replay-ledger-tab-matrix--aligned .replay-ledger-tab-matrix-labels {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.replay-ledger-tab-group-caption {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 1.35;
+  padding: 0.2rem 0.5rem 0.35rem;
+  border-radius: 6px;
+  background: linear-gradient(
+    180deg,
+    rgba(88, 166, 255, 0.14) 0%,
+    rgba(88, 166, 255, 0.05) 100%
+  );
+  border: 1px solid rgba(88, 166, 255, 0.22);
+  color: var(--color-text-main, #e4e9ef);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12);
+}
+
+.replay-ledger-tab-matrix-labels .replay-ledger-tab-group-caption--attr {
+  grid-column: 1 / 3;
+}
+
+.replay-ledger-tab-matrix-labels .replay-ledger-tab-group-caption--inst {
+  grid-column: 3 / 7;
+}
+
+.replay-ledger-tab-matrix--aligned .replay-ledger-tab-button-row.replay-portfolio-tabs.system-tabs {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  column-gap: var(--space-3);
+  row-gap: 0;
+  padding: 0 var(--space-1);
+  width: 100%;
+  box-sizing: border-box;
+  align-items: stretch;
+}
+
+.replay-ledger-tab-matrix--aligned .replay-ledger-tab-button-row .system-tab {
+  min-width: 0;
+  justify-content: center;
+  text-align: center;
+}
+
+.replay-ledger-tab-at-instruments {
+  border-left: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.08));
+  padding-left: var(--space-2);
+  margin-left: 0;
+}
+
+.replay-ledger-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-1);
+  margin-bottom: var(--space-2);
+  min-width: 0;
+}
+
+.replay-ledger-toolbar .replay-portfolio-tabs-wrap {
+  flex: 1 1 18rem;
+}
+
+.replay-ledger-detail-view-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  flex: 0 1 auto;
+  padding-bottom: 2px;
+}
+
+.replay-ledger-detail-view-radios.replay-fetch-range-group {
+  margin-bottom: 0;
+}
+
+/* Trade ledger: tab-specific filters — inline under toolbar (no collapsible card) */
+.ledger-tab-filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  min-width: 0;
+}
+
+.ledger-tab-filters-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ledger-opt-section-group-bubbles.replay-bubble-switch {
+  flex-wrap: wrap;
+}
+
+/* Trade ledger — Strategy / Instance: outer group by structure or watchlist symbol */
+.replay-ledger-dimension-bundle {
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--color-border, var(--border-subtle, #2a313c));
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-surface, var(--bg-card, #1a1a1a));
+}
+
+.replay-ledger-dimension-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.45rem 0.75rem;
+  background: linear-gradient(
+    180deg,
+    rgba(88, 166, 255, 0.08) 0%,
+    rgba(88, 166, 255, 0.02) 100%
+  );
+  border: none;
+  border-bottom: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.06));
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.85rem;
+  color: var(--color-text-main, var(--text-primary, #e4e9ef));
+}
+
+.replay-ledger-dimension-header:hover {
+  background: var(--color-surface-hover, rgba(255, 255, 255, 0.04));
+}
+
+.replay-ledger-dimension-body {
+  padding: 0.5rem 0.65rem 0.75rem 0.85rem;
+  border-top: none;
+  background: var(--color-surface, var(--bg-card, #1a1a1a));
+}
+
+.ledger-instance-controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  width: 100%;
+  min-width: 0;
+}
+
+.ledger-instance-toolbar-row {
+  align-items: flex-start;
+  row-gap: var(--space-2);
+}
+
+.ledger-instance-toolbar-segment {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.55rem;
+  min-width: 0;
+}
+
+.ledger-instance-toolbar-segment .ledger-strategy-filter-label {
+  min-width: auto;
+}
+
+.ledger-instance-toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 1.65rem;
+  background: var(--color-border-subtle, rgba(255, 255, 255, 0.08));
+  flex-shrink: 0;
+}
+
+.ledger-instance-type-bubbles.replay-bubble-switch {
+  flex-wrap: wrap;
+}
+
+.ledger-instance-filter-meta-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--color-text-muted, #8b949e);
+}
+
+.ledger-instance-controls-row .replay-instance-contain-filter {
+  margin-bottom: 0;
+}
+
+.ledger-instance-scope-bubbles {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ledger-instance-scope-bubbles .replay-bubble-switch-btn {
+  white-space: nowrap;
+}
+
+.ledger-stock-bucket-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  width: 100%;
+  min-width: 0;
+}
+
+.ledger-stock-bucket-filter-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 1.65rem;
+  background: var(--color-border-subtle, rgba(255, 255, 255, 0.08));
+  flex-shrink: 0;
+}
+
+.ledger-stock-view-bubbles {
+  flex: 0 0 auto;
+}
+
+.ledger-stock-category-bubbles {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ledger-stock-category-bubbles.replay-bubble-switch {
+  flex-wrap: wrap;
+}
+
 .replay-stock-group-tabs {
   margin-bottom: 0;
   border-bottom: none;
@@ -13478,6 +13866,10 @@ th {
   margin-bottom: 0.5rem;
 }
 
+.ledger-options-subtab-row--in-sheet {
+  margin-bottom: 0;
+}
+
 /* ── Options instance filter ── */
 .ledger-opt-instance-filter {
   display: inline-flex;
@@ -13574,18 +13966,68 @@ th {
   color: var(--color-text-muted);
 }
 
+.replay-stock-group-header-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
 .replay-stock-group-symbol {
-  margin-right: var(--space-3);
+  margin-right: 0;
 }
 
 .replay-stock-group-account {
-  margin-right: var(--space-3);
+  margin-right: 0;
   color: var(--color-text-main);
 }
 
 .replay-stock-group-category {
   font-weight: 500;
-  color: var(--color-accent, #2563eb);
+  color: var(--color-text-muted);
+}
+
+.replay-stock-group-symbol.ledger-stk-pill--symbol {
+  display: inline-block;
+  padding: 0.12rem 0.5rem;
+  border-radius: 6px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--color-text-main);
+  background: color-mix(in srgb, var(--color-accent, #3b82f6) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent, #3b82f6) 35%, transparent);
+}
+
+.replay-stock-group-category.ledger-stk-pill--category {
+  display: inline-block;
+  padding: 0.12rem 0.5rem;
+  border-radius: 6px;
+  font-weight: 600;
+  color: var(--color-text-main);
+  background: color-mix(in srgb, #a855f7 16%, transparent);
+  border: 1px solid color-mix(in srgb, #a855f7 32%, transparent);
+}
+
+.ledger-stk-cell-symbol {
+  display: inline-block;
+  padding: 0.08rem 0.4rem;
+  border-radius: 4px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--color-accent, #3b82f6) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent, #3b82f6) 28%, transparent);
+}
+
+.ledger-stk-cell-category {
+  display: inline-block;
+  padding: 0.08rem 0.4rem;
+  border-radius: 4px;
+  font-weight: 500;
+  background: color-mix(in srgb, #a855f7 12%, transparent);
+  border: 1px solid color-mix(in srgb, #a855f7 26%, transparent);
+}
+
+.ledger-stock-quick-journal-btn {
+  margin-left: auto;
 }
 
 .replay-opt-expand-icon.expanded {
@@ -16444,6 +16886,57 @@ th:has(> .coverage-pool-th-held-amt) {
   vertical-align: -0.15em;
 }
 
+.ledger-opt-link-stock-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+}
+
+button.ledger-opt-link-stock-badge {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs, 0.7rem);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  border: 1px solid var(--color-accent, #2563eb);
+  background: rgba(37, 99, 235, 0.14);
+  color: var(--color-accent, #2563eb);
+  cursor: pointer;
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+button.ledger-opt-link-stock-badge:hover {
+  background: rgba(37, 99, 235, 0.26);
+}
+
+.performance-calendar-exec-id-wrap {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+button.ledger-opt-link-stock-aggregate-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: -0.15em;
+  margin-left: 0.3rem;
+  padding: 0.12rem 0.2rem;
+  border: none;
+  border-radius: 4px;
+  background: rgba(37, 99, 235, 0.14);
+  color: var(--color-accent, #2563eb);
+  cursor: pointer;
+  line-height: 0;
+}
+
+button.ledger-opt-link-stock-aggregate-icon:hover {
+  background: rgba(37, 99, 235, 0.26);
+}
+
 .positions-missing-instance-dot {
   display: inline-block;
   width: 7px;
@@ -18666,6 +19159,51 @@ th:has(> .coverage-pool-th-held-amt) {
   color: var(--color-text-main);
 }
 
+.replay-exec-seg-bubbles {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.replay-exec-seg-bubbles .replay-bubble-switch-btn.replay-exec-bubble-locked {
+  cursor: default;
+  pointer-events: none;
+}
+
+.replay-exec-form-row-metrics {
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.replay-exec-form-row-metrics--pnl .replay-exec-metric-field:last-child {
+  flex: 0 1 8rem;
+  max-width: 10rem;
+}
+
+.replay-exec-metric-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.replay-exec-metric-field label {
+  min-width: 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.replay-exec-form-row-metrics .replay-exec-metric-field input {
+  flex: none;
+  width: 100%;
+  min-width: 0;
+}
+
 .replay-exec-form-actions {
   display: flex;
   justify-content: flex-end;
@@ -18811,6 +19349,61 @@ th:has(> .coverage-pool-th-held-amt) {
 
 .link-exec-no-match-hint {
   margin-top: var(--space-1);
+  font-size: var(--text-caption);
+}
+
+.link-exec-peer-quick {
+  margin-bottom: 0.85rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.link-exec-inline-bubbles-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  align-items: stretch;
+}
+
+.link-exec-inline-bubbles-head {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #8b949e);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.link-exec-inline-bubble-group {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-start;
+  row-gap: 6px;
+  column-gap: 4px;
+  max-width: 100%;
+}
+
+.link-exec-inline-bubble-group .replay-bubble-switch-btn {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+  line-height: 1.3;
+}
+
+.link-exec-opp-field-row.link-exec-bubbles-field-col {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+
+.link-exec-opp-field-row.link-exec-bubbles-field-col > label {
+  min-width: 0;
+}
+
+.link-exec-peer-quick-hint {
+  margin-top: 0.35rem;
+  margin-bottom: 0;
   font-size: var(--text-caption);
 }
 

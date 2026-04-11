@@ -172,7 +172,8 @@ export function LedgerSummaryMetricExplainContent({
               <code>buildOptExecutionGroups</code> → closed groups with <code>realized_pnl</code>.
             </li>
             <li>
-              Trade ledger filters (symbol, expiry, account, strategy, instance) apply before the sum.
+              Trade ledger filters (symbol, expiry year/month or Since rolling window, account, structure, wishlist
+              symbol) apply before the sum.
             </li>
           </ul>
           <SectionTitle n={2}>Formula and calculation</SectionTitle>
@@ -205,8 +206,8 @@ export function LedgerSummaryMetricExplainContent({
               an <code>Execution</code>.
             </li>
             <li>
-              <strong>Stock filter:</strong> rows where <code>sec_type</code> is not <code>OPT</code>, after
-              Trade ledger filters and the Stocks category tab when applicable.
+              <strong>Stock filter:</strong> rows where <code>sec_type</code> is <code>STK</code>, after Trade
+              ledger filters and the Stocks category tab when applicable.
             </li>
             <li>
               <strong>Per-fill PnL field:</strong> <code>execution.realized_pnl</code> — populated from IB

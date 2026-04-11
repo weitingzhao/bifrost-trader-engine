@@ -13,6 +13,7 @@ from src.app.config import get_effective_ib_config
 
 from src.portfolio.reader import accounts as accounts_module
 from src.portfolio.reader import executions as executions_module
+from src.portfolio.reader import option_stock_link as option_stock_link_module
 from src.monitor.reader import gate_safety as gate_safety_module
 from src.monitor.reader import market as market_module
 from src.monitor.reader import strategy as strategy_module
@@ -676,6 +677,50 @@ class StatusReader:
             option_right=option_right,
             limit=limit,
         )
+        self._end_read_txn()
+        return result
+
+    def get_option_stock_links(
+        self,
+        account_id: str,
+        option_account_executions_id: int,
+    ) -> Dict[str, Any]:
+        if not self._connect():
+            return {"links": [], "slippage_total": None, "error": "database_unavailable"}
+        result = option_stock_link_module.get_option_stock_links(
+            self._conn, account_id, option_account_executions_id
+        )
+        self._end_read_txn()
+        return result
+
+    def get_stock_link_candidates(
+        self,
+        account_id: str,
+        option_account_executions_id: int,
+        trade_date_from: Optional[str] = None,
+        trade_date_to: Optional[str] = None,
+        limit: int = 200,
+    ) -> Dict[str, Any]:
+        if not self._connect():
+            return {"executions": [], "error": "database_unavailable"}
+        result = option_stock_link_module.get_stock_link_candidates(
+            self._conn,
+            account_id,
+            option_account_executions_id,
+            trade_date_from=trade_date_from,
+            trade_date_to=trade_date_to,
+            limit=limit,
+        )
+        self._end_read_txn()
+        return result
+
+    def get_option_stock_links_bulk(
+        self,
+        batches: List[Tuple[str, List[int]]],
+    ) -> Dict[str, Any]:
+        if not self._connect():
+            return {"by_option_id": {}, "error": "database_unavailable"}
+        result = option_stock_link_module.get_option_stock_links_bulk(self._conn, batches)
         self._end_read_txn()
         return result
 

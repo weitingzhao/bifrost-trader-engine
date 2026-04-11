@@ -100,3 +100,75 @@ export function rollupStocksFromMonthly(
   keys.sort((a, b) => comparePeriodKeysDesc(a, b, period))
   return keys.map(k => [k, m.get(k)!])
 }
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+function localYmd(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+/**
+ * Trade ledger "Since" filter presets (rolling lookback from today, plus YTD).
+ * Distinct from {@link LedgerSummaryPeriod} used for the summary grid roll-up.
+ */
+export type LedgerSincePreset = 'month' | 'quarter' | 'half_year' | 'year' | 'ytd'
+
+export const LEDGER_SINCE_PRESET_TABS: { id: LedgerSincePreset; label: string }[] = [
+  { id: 'month', label: '1 month' },
+  { id: 'quarter', label: '1 quarter' },
+  { id: 'half_year', label: 'Half-year' },
+  { id: 'year', label: '1 year' },
+  { id: 'ytd', label: 'YTD' },
+]
+
+/**
+ * Inclusive YYYY-MM-DD range: trades from `start` through **today** (`end`), local calendar.
+ * Rolling: subtract 1 / 3 / 6 / 12 months from today's date for month/quarter/half-year/year.
+ * YTD: Jan 1 of the current year through today.
+ */
+export function getSinceTradeDateRange(
+  preset: LedgerSincePreset,
+  ref: Date = new Date(),
+): { start: string; end: string } {
+  const end = localYmd(ref)
+  if (preset === 'ytd') {
+    return { start: `${ref.getFullYear()}-01-01`, end }
+  }
+  const startD = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate())
+  if (preset === 'month') {
+    startD.setMonth(startD.getMonth() - 1)
+  } else if (preset === 'quarter') {
+    startD.setMonth(startD.getMonth() - 3)
+  } else if (preset === 'half_year') {
+    startD.setMonth(startD.getMonth() - 6)
+  } else {
+    startD.setMonth(startD.getMonth() - 12)
+  }
+  return { start: localYmd(startD), end }
+}
+
+/** YYYY-MM-DD from Flex trade_date, else local calendar date from execution time. */
+export function ledgerExecutionDateKey(
+  tradeDate: string | null | undefined,
+  timeSec: number | undefined | null,
+): string | null {
+  const td = tradeDate?.trim()
+  if (td && /^\d{4}-\d{2}-\d{2}/.test(td)) return td.slice(0, 10)
+  if (timeSec != null && Number.isFinite(timeSec) && timeSec > 0) {
+    const d = new Date(timeSec * 1000)
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+  }
+  return null
+}
+
+export function executionMatchesLedgerTradePeriod(
+  tradeDate: string | null | undefined,
+  timeSec: number | undefined | null,
+  range: { start: string; end: string },
+): boolean {
+  const d = ledgerExecutionDateKey(tradeDate, timeSec)
+  if (!d) return false
+  return d >= range.start && d <= range.end
+}

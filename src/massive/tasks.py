@@ -1275,12 +1275,15 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     get_tickers_id_for_ticker,
                     next_cursor_from_api_response,
                     normalize_ticker_ref_kind,
+                    overview_stub_cols_api_not_found,
                     replace_related_for_tickers_id,
                     replace_ticker_types,
                     row_from_ticker_detail,
                     row_from_ticker_list_item,
                     symbols_missing_overview_only,
+                    symbols_missing_related_only,
                     symbols_needing_overview,
+                    symbols_needing_related_stale,
                     upsert_reference_state,
                     upsert_ticker_overview_row,
                     upsert_ticker_row,
@@ -1397,6 +1400,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                         syms = symbols_needing_overview(cur, stale_h)
                     total_sym = len(syms)
                     n_ok = 0
+                    n_stub_not_found = 0
                     errors = []
                     if _should_emit_ticker_ref_progress(0, total_sym):
                         _emit_massive_job_running_progress(
@@ -1415,7 +1419,24 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                         _rest_throttle()
                         det = client.fetch_ticker_detail(sym)
                         if det.get("error"):
-                            errors.append(f"{sym}: {det.get('error')}")
+                            err_raw = det.get("error")
+                            err_s = err_raw if isinstance(err_raw, str) else json.dumps(
+                                err_raw, default=str
+                            )
+                            if "NOT_FOUND" in err_s.upper() or "Ticker not found" in err_s:
+                                tid_nf = get_tickers_id_for_ticker(cur, sym)
+                                if tid_nf:
+                                    upsert_ticker_overview_row(
+                                        cur, tid_nf, overview_stub_cols_api_not_found()
+                                    )
+                                    conn.commit()
+                                    if rds:
+                                        invalidate_ticker_cache(rds, sym)
+                                    n_stub_not_found += 1
+                                else:
+                                    errors.append(f"{sym}: NOT_FOUND (no tickers row)")
+                            else:
+                                errors.append(f"{sym}: {det.get('error')}")
                         else:
                             tcols, dcols = row_from_ticker_detail(det)
                             if not tcols.get("ticker"):
@@ -1437,7 +1458,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                                 total=total_sym,
                                 processed=processed,
                                 current_symbol=sym,
-                                symbols_ok=n_ok,
+                                symbols_ok=n_ok + n_stub_not_found,
                                 symbols_failed=len(errors),
                                 errors_sample=errors,
                             )
@@ -1449,6 +1470,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                             "overview_mode": mode,
                             "symbols_requested": total_sym,
                             "symbols_upserted": n_ok,
+                            "symbols_overview_stub_not_found": n_stub_not_found,
                             "symbols_failed": len(errors),
                             "errors_sample": errors[:20],
                         },
@@ -1458,8 +1480,25 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
 
                 if kind == "ticker_reference_related":
                     mode = (payload.get("mode") or "symbols").strip().lower()
+                    stale_h = int(payload.get("stale_hours") or 720)
                     if mode == "all":
                         syms = all_ticker_symbols(cur)
+                    elif mode == "symbols":
+                        syms_raw = payload.get("symbols") or []
+                        if isinstance(syms_raw, str):
+                            syms = [
+                                x.strip().upper()
+                                for x in syms_raw.replace(",", " ").split()
+                                if x.strip()
+                            ]
+                        elif isinstance(syms_raw, list):
+                            syms = [str(x).strip().upper() for x in syms_raw if str(x).strip()]
+                        else:
+                            syms = []
+                    elif mode == "missing":
+                        syms = symbols_missing_related_only(cur)
+                    elif mode == "stale":
+                        syms = symbols_needing_related_stale(cur, stale_h)
                     else:
                         syms_raw = payload.get("symbols") or []
                         if isinstance(syms_raw, str):

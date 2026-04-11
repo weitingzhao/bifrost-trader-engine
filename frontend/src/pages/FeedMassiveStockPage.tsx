@@ -4,6 +4,10 @@ import {
   fetchMassiveReferenceTickers,
   fetchMassiveRelatedCompanies,
   fetchMassiveStatus,
+  fetchMassiveStockBarsRange,
+  fetchMassiveStockGroupedDaily,
+  fetchMassiveStockOpenClose,
+  fetchMassiveStockPrev,
   fetchMassiveTickerDetail,
   fetchMassiveTickerTypes,
   postMassiveStocksApiCoverageSync,
@@ -204,6 +208,33 @@ export function FeedMassiveStockPage({
   // Related Tickers form fields
   const [tkRelTicker, setTkRelTicker] = useState('AAPL')
 
+  // Aggregate Bars (OHLC) sub-tabs
+  const [aggSubTab, setAggSubTab] = useState<'custom_bars' | 'grouped_daily' | 'open_close' | 'prev'>('custom_bars')
+  const [aggStTicker, setAggStTicker] = useState('AAPL')
+  const [aggStMult, setAggStMult] = useState('1')
+  const [aggStTs, setAggStTs] = useState('minute')
+  const [aggStStartMs, setAggStStartMs] = useState('')
+  const [aggStEndMs, setAggStEndMs] = useState('')
+  const [aggStBusy, setAggStBusy] = useState(false)
+  const [aggStErr, setAggStErr] = useState<string | null>(null)
+  const [aggStResult, setAggStResult] = useState<Record<string, unknown> | null>(null)
+
+  const [gdDate, setGdDate] = useState('2024-06-03')
+  const [gdBusy, setGdBusy] = useState(false)
+  const [gdErr, setGdErr] = useState<string | null>(null)
+  const [gdResult, setGdResult] = useState<Record<string, unknown> | null>(null)
+
+  const [ocStTicker, setOcStTicker] = useState('AAPL')
+  const [ocDate, setOcDate] = useState('2024-06-03')
+  const [ocBusy, setOcBusy] = useState(false)
+  const [ocErr, setOcErr] = useState<string | null>(null)
+  const [ocResult, setOcResult] = useState<Record<string, unknown> | null>(null)
+
+  const [prevStTicker, setPrevStTicker] = useState('AAPL')
+  const [prevBusy, setPrevBusy] = useState(false)
+  const [prevErr, setPrevErr] = useState<string | null>(null)
+  const [prevResult, setPrevResult] = useState<Record<string, unknown> | null>(null)
+
   const loadStatus = useCallback(async () => {
     try { setMassiveStatus(await fetchMassiveStatus()) } catch { /* ignore */ }
   }, [])
@@ -312,6 +343,112 @@ export function FeedMassiveStockPage({
     }
   }, [tkRelTicker])
 
+  const runAggCustom = useCallback(async () => {
+    const t = aggStTicker.trim()
+    if (!t) {
+      setAggStErr('Ticker is required')
+      return
+    }
+    const startMs = parseInt(aggStStartMs.trim(), 10)
+    const endMs = parseInt(aggStEndMs.trim(), 10)
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+      setAggStErr('Start and end must be Unix timestamps in milliseconds')
+      return
+    }
+    const mult = parseInt(aggStMult.trim(), 10) || 1
+    setAggStBusy(true)
+    setAggStErr(null)
+    setAggStResult(null)
+    try {
+      const res = await fetchMassiveStockBarsRange({
+        ticker: t,
+        multiplier: mult,
+        timespan: aggStTs.trim() || 'minute',
+        start_ms: startMs,
+        end_ms: endMs,
+      })
+      if (!res.ok) {
+        setAggStErr(res.error ?? 'Request failed')
+        return
+      }
+      setAggStResult(res.data ?? null)
+    } catch (e: unknown) {
+      setAggStErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAggStBusy(false)
+    }
+  }, [aggStTicker, aggStMult, aggStTs, aggStStartMs, aggStEndMs])
+
+  const runAggGrouped = useCallback(async () => {
+    const d = gdDate.trim()
+    if (!d) {
+      setGdErr('Date is required (YYYY-MM-DD)')
+      return
+    }
+    setGdBusy(true)
+    setGdErr(null)
+    setGdResult(null)
+    try {
+      const res = await fetchMassiveStockGroupedDaily(d)
+      if (!res.ok) {
+        setGdErr(res.error ?? 'Request failed')
+        return
+      }
+      setGdResult(res.data ?? null)
+    } catch (e: unknown) {
+      setGdErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setGdBusy(false)
+    }
+  }, [gdDate])
+
+  const runAggOpenClose = useCallback(async () => {
+    const t = ocStTicker.trim()
+    const d = ocDate.trim()
+    if (!t || !d) {
+      setOcErr('Ticker and date are required')
+      return
+    }
+    setOcBusy(true)
+    setOcErr(null)
+    setOcResult(null)
+    try {
+      const res = await fetchMassiveStockOpenClose(t, d)
+      if (!res.ok) {
+        setOcErr(res.error ?? 'Request failed')
+        return
+      }
+      setOcResult(res.data ?? null)
+    } catch (e: unknown) {
+      setOcErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setOcBusy(false)
+    }
+  }, [ocStTicker, ocDate])
+
+  const runAggPrev = useCallback(async () => {
+    const t = prevStTicker.trim()
+    if (!t) {
+      setPrevErr('Ticker is required')
+      return
+    }
+    setPrevBusy(true)
+    setPrevErr(null)
+    setPrevResult(null)
+    try {
+      const res = await fetchMassiveStockPrev(t)
+      if (!res.ok) {
+        setPrevErr(res.error ?? 'Request failed')
+        return
+      }
+      setPrevResult(res.data ?? null)
+    } catch (e: unknown) {
+      setPrevErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPrevBusy(false)
+    }
+  }, [prevStTicker])
+
   const toggleCap = useCallback((id: string) => {
     setCapExpanded(prev => ({ ...prev, [id]: !prev[id] }))
   }, [])
@@ -380,6 +517,13 @@ export function FeedMassiveStockPage({
       return (
         <span className="feed-massive-svc-evidence-ok">
           REST proxy on the Massive server: use Execute on each Tickers sub-tab to call Polygon and inspect the JSON response.
+        </span>
+      )
+    }
+    if (row.id === 'stock-aggregates' && row.projectStatus === 'implemented') {
+      return (
+        <span className="feed-massive-svc-evidence-ok">
+          REST proxy on the Massive server: use Execute on each Aggregate Bars sub-tab to call Polygon OHLC endpoints and inspect the JSON response.
         </span>
       )
     }
@@ -908,6 +1052,361 @@ export function FeedMassiveStockPage({
     )
   }
 
+  // ── Aggregate Bars (OHLC) — four REST sub-tabs ───────────────────────────
+  function renderStockAggregatesCap() {
+    const id = 'stock-aggregates'
+    const row = rowById(id)
+    const eff = rowEff(row)
+    return (
+      <StockCapabilityPanel
+        key={id}
+        capId={id}
+        checklistRow={row}
+        effectiveStatus={eff}
+        expanded={capExpanded[id] === true}
+        onToggle={() => toggleCap(id)}
+        highlight={highlightedCapabilityId === id}
+        ariaLabel={row.service}
+      >
+        <FeedMassiveServiceBlock effectiveStatus={eff} checklistRow={row} evidence={evidenceFor(row)}>
+          <div className="feed-massive-card-head">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <span className="feed-massive-card-icon" aria-hidden>
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M3 16V4M7 16V9M11 16V6M15 16V11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </span>
+              <h3>{row.service}</h3>
+            </div>
+          </div>
+          <p className="feed-massive-card-lead">{row.description}</p>
+        </FeedMassiveServiceBlock>
+
+        <div className="feed-massive-agg-tabs-wrap">
+          <div className="feed-massive-agg-tabs" role="tablist" aria-label="Stock aggregate REST endpoints">
+            <button
+              type="button"
+              role="tab"
+              id="feed-massive-stk-agg-tab-custom"
+              className={`feed-massive-agg-tab${aggSubTab === 'custom_bars' ? ' feed-massive-agg-tab--active' : ''}`}
+              aria-selected={aggSubTab === 'custom_bars'}
+              tabIndex={aggSubTab === 'custom_bars' ? 0 : -1}
+              onClick={() => setAggSubTab('custom_bars')}
+            >
+              Custom Bars
+              <span className="feed-massive-agg-tab-badge">REST</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="feed-massive-stk-agg-tab-grouped"
+              className={`feed-massive-agg-tab${aggSubTab === 'grouped_daily' ? ' feed-massive-agg-tab--active' : ''}`}
+              aria-selected={aggSubTab === 'grouped_daily'}
+              tabIndex={aggSubTab === 'grouped_daily' ? 0 : -1}
+              onClick={() => setAggSubTab('grouped_daily')}
+            >
+              Grouped Daily
+              <span className="feed-massive-agg-tab-badge">REST</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="feed-massive-stk-agg-tab-oc"
+              className={`feed-massive-agg-tab${aggSubTab === 'open_close' ? ' feed-massive-agg-tab--active' : ''}`}
+              aria-selected={aggSubTab === 'open_close'}
+              tabIndex={aggSubTab === 'open_close' ? 0 : -1}
+              onClick={() => setAggSubTab('open_close')}
+            >
+              Open / Close
+              <span className="feed-massive-agg-tab-badge">REST</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="feed-massive-stk-agg-tab-prev"
+              className={`feed-massive-agg-tab${aggSubTab === 'prev' ? ' feed-massive-agg-tab--active' : ''}`}
+              aria-selected={aggSubTab === 'prev'}
+              tabIndex={aggSubTab === 'prev' ? 0 : -1}
+              onClick={() => setAggSubTab('prev')}
+            >
+              Previous day
+              <span className="feed-massive-agg-tab-badge">REST</span>
+            </button>
+          </div>
+
+          <div className="feed-massive-agg-tab-panels">
+            {aggSubTab === 'custom_bars' ? (
+              <div
+                className="feed-massive-agg-tab-panel"
+                role="tabpanel"
+                id="feed-massive-stk-agg-panel-custom"
+                aria-labelledby="feed-massive-stk-agg-tab-custom"
+              >
+                <div className="feed-massive-agg-sub-doc">
+                  <p>
+                    <strong>Use case:</strong> Retrieve aggregated OHLCV bars for a stock over a custom time range and
+                    interval (minute, hour, day, etc.). Bars are built from qualifying trades.
+                  </p>
+                  <p>
+                    <strong>When to use:</strong> Charting, backtesting, and research where you need more than a single
+                    trading day or a fixed calendar window.
+                  </p>
+                  <p className="feed-massive-agg-sub-endpoint">
+                    <code>GET /v2/aggs/ticker/&#123;stocksTicker&#125;/range/&#123;multiplier&#125;/&#123;timespan&#125;/&#123;from&#125;/&#123;to&#125;</code>
+                  </p>
+                </div>
+                <label className="feed-massive-field" style={{ marginBottom: 'var(--space-3)' }}>
+                  <span className="form-label">Stock ticker</span>
+                  <input
+                    className="form-input"
+                    value={aggStTicker}
+                    onChange={e => setAggStTicker(e.target.value)}
+                    disabled={!configured || aggStBusy}
+                    placeholder="AAPL"
+                    autoComplete="off"
+                  />
+                </label>
+                <div className="feed-massive-form-grid feed-massive-form-grid--wide">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Start (Unix ms)</span>
+                    <input
+                      className="form-input"
+                      value={aggStStartMs}
+                      onChange={e => setAggStStartMs(e.target.value)}
+                      disabled={!configured || aggStBusy}
+                      placeholder="e.g. 1717200000000"
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">End (Unix ms)</span>
+                    <input
+                      className="form-input"
+                      value={aggStEndMs}
+                      onChange={e => setAggStEndMs(e.target.value)}
+                      disabled={!configured || aggStBusy}
+                      placeholder="e.g. 1717286400000"
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Timespan</span>
+                    <input
+                      className="form-input"
+                      value={aggStTs}
+                      onChange={e => setAggStTs(e.target.value)}
+                      disabled={!configured || aggStBusy}
+                      placeholder="minute"
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Multiplier</span>
+                    <input
+                      className="form-input"
+                      value={aggStMult}
+                      onChange={e => setAggStMult(e.target.value)}
+                      disabled={!configured || aggStBusy}
+                      placeholder="1"
+                      autoComplete="off"
+                    />
+                  </label>
+                </div>
+                <p className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <strong>Proxy:</strong> <code>GET /research/massive/stocks/bars/range</code>
+                </p>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || aggStBusy} onClick={runAggCustom}>
+                    {aggStBusy ? 'Loading\u2026' : 'Execute'}
+                  </button>
+                </div>
+                {aggStErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{aggStErr}</p> : null}
+                {aggStResult ? (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Result</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>
+                      {JSON.stringify(aggStResult, null, 2)}
+                    </pre>
+                  </details>
+                ) : null}
+              </div>
+            ) : null}
+
+            {aggSubTab === 'grouped_daily' ? (
+              <div
+                className="feed-massive-agg-tab-panel"
+                role="tabpanel"
+                id="feed-massive-stk-agg-panel-grouped"
+                aria-labelledby="feed-massive-stk-agg-tab-grouped"
+              >
+                <div className="feed-massive-agg-sub-doc">
+                  <p>
+                    <strong>Use case:</strong> Retrieve daily OHLCV bars for <em>all</em> US stocks on a single calendar
+                    date in one response. Response can be very large.
+                  </p>
+                  <p>
+                    <strong>When to use:</strong> Universe-wide daily screening, gap analysis, or bulk EOD snapshots
+                    for a specific session date.
+                  </p>
+                  <p className="feed-massive-agg-sub-endpoint">
+                    <code>GET /v2/aggs/grouped/locale/us/market/stocks/&#123;date&#125;</code>
+                  </p>
+                </div>
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Date (YYYY-MM-DD)</span>
+                    <input
+                      className="form-input"
+                      value={gdDate}
+                      onChange={e => setGdDate(e.target.value)}
+                      disabled={!configured || gdBusy}
+                      placeholder="2024-06-03"
+                      autoComplete="off"
+                    />
+                  </label>
+                </div>
+                <p className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <strong>Proxy:</strong> <code>GET /research/massive/stocks/bars/grouped-daily/&#123;date&#125;</code>
+                </p>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || gdBusy} onClick={runAggGrouped}>
+                    {gdBusy ? 'Loading\u2026' : 'Execute'}
+                  </button>
+                </div>
+                {gdErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{gdErr}</p> : null}
+                {gdResult ? (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Result</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>
+                      {JSON.stringify(gdResult, null, 2)}
+                    </pre>
+                  </details>
+                ) : null}
+              </div>
+            ) : null}
+
+            {aggSubTab === 'open_close' ? (
+              <div
+                className="feed-massive-agg-tab-panel"
+                role="tabpanel"
+                id="feed-massive-stk-agg-panel-oc"
+                aria-labelledby="feed-massive-stk-agg-tab-oc"
+              >
+                <div className="feed-massive-agg-sub-doc">
+                  <p>
+                    <strong>Use case:</strong> Official open, high, low, close, and volume for one stock on one date,
+                    including pre-market and after-hours where available.
+                  </p>
+                  <p>
+                    <strong>When to use:</strong> Single-day summaries, EOD reporting, or extended-hours review without
+                    pulling full intraday aggregates.
+                  </p>
+                  <p className="feed-massive-agg-sub-endpoint">
+                    <code>GET /v1/open-close/&#123;stocksTicker&#125;/&#123;date&#125;</code>
+                  </p>
+                </div>
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Stock ticker</span>
+                    <input
+                      className="form-input"
+                      value={ocStTicker}
+                      onChange={e => setOcStTicker(e.target.value)}
+                      disabled={!configured || ocBusy}
+                      placeholder="AAPL"
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Date (YYYY-MM-DD)</span>
+                    <input
+                      className="form-input"
+                      value={ocDate}
+                      onChange={e => setOcDate(e.target.value)}
+                      disabled={!configured || ocBusy}
+                      placeholder="2024-06-03"
+                      autoComplete="off"
+                    />
+                  </label>
+                </div>
+                <p className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <strong>Proxy:</strong> <code>GET /research/massive/stocks/bars/open-close/&#123;ticker&#125;/&#123;date&#125;</code>
+                </p>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || ocBusy} onClick={runAggOpenClose}>
+                    {ocBusy ? 'Loading\u2026' : 'Execute'}
+                  </button>
+                </div>
+                {ocErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ocErr}</p> : null}
+                {ocResult ? (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Result</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>
+                      {JSON.stringify(ocResult, null, 2)}
+                    </pre>
+                  </details>
+                ) : null}
+              </div>
+            ) : null}
+
+            {aggSubTab === 'prev' ? (
+              <div
+                className="feed-massive-agg-tab-panel"
+                role="tabpanel"
+                id="feed-massive-stk-agg-panel-prev"
+                aria-labelledby="feed-massive-stk-agg-tab-prev"
+              >
+                <div className="feed-massive-agg-sub-doc">
+                  <p>
+                    <strong>Use case:</strong> Previous <em>trading</em> day OHLCV for a stock in one call — no calendar
+                    math on the client.
+                  </p>
+                  <p>
+                    <strong>When to use:</strong> Overnight change metrics, daily baselines, or quick prior-session
+                    reference.
+                  </p>
+                  <p className="feed-massive-agg-sub-endpoint">
+                    <code>GET /v2/aggs/ticker/&#123;stocksTicker&#125;/prev</code>
+                  </p>
+                </div>
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Stock ticker</span>
+                    <input
+                      className="form-input"
+                      value={prevStTicker}
+                      onChange={e => setPrevStTicker(e.target.value)}
+                      disabled={!configured || prevBusy}
+                      placeholder="AAPL"
+                      autoComplete="off"
+                    />
+                  </label>
+                </div>
+                <p className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <strong>Proxy:</strong> <code>GET /research/massive/stocks/bars/prev/&#123;ticker&#125;</code>
+                </p>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || prevBusy} onClick={runAggPrev}>
+                    {prevBusy ? 'Loading\u2026' : 'Execute'}
+                  </button>
+                </div>
+                {prevErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{prevErr}</p> : null}
+                {prevResult ? (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Result</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>
+                      {JSON.stringify(prevResult, null, 2)}
+                    </pre>
+                  </details>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </StockCapabilityPanel>
+    )
+  }
+
   // ── Render a single capability section ───────────────────────────────────
   function renderCap(id: string) {
     const row = rowById(id)
@@ -1119,7 +1618,11 @@ export function FeedMassiveStockPage({
           return (
             <div key={id}>
               <h4 className="feed-massive-section-header">{REST_SECTION_LABELS[id]}</h4>
-              {id === 'stock-tickers' ? renderTickersCap() : renderCap(id)}
+              {id === 'stock-tickers'
+                ? renderTickersCap()
+                : id === 'stock-aggregates'
+                  ? renderStockAggregatesCap()
+                  : renderCap(id)}
             </div>
           )
         })}

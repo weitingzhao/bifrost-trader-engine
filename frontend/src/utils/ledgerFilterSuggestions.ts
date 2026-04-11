@@ -36,16 +36,33 @@ export function formatExpiryMonthKey(key: string): string {
   return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
 }
 
-/** Unique underlying symbols (uppercase) from `symbol` and `contract_key`. */
+/**
+ * Unique underlying symbols (uppercase) for the symbol filter dropdown.
+ * For OPT rows, uses the underlying from `contract_key` only — not full option contract / OSI strings.
+ */
 export function collectUnderlyingSymbols(execs: Execution[]): string[] {
   const set = new Set<string>()
   for (const e of execs) {
+    const st = (e.sec_type ?? '').toUpperCase()
+    const ck = (e.contract_key ?? '').trim()
+    if (st === 'OPT') {
+      if (ck) {
+        const s = getContractLabelParts(ck).symbol.trim().toUpperCase()
+        if (s) set.add(s)
+      } else {
+        const direct = (e.symbol || '').trim()
+        if (direct) {
+          const first = direct.split(/\s+/)[0]?.trim()
+          if (first) set.add(first.toUpperCase())
+        }
+      }
+      continue
+    }
     const direct = (e.symbol || '').trim()
     if (direct) {
       const first = direct.split(/\s+/)[0]?.trim()
       if (first) set.add(first.toUpperCase())
     }
-    const ck = (e.contract_key ?? '').trim()
     if (ck) {
       const s = getContractLabelParts(ck).symbol.trim().toUpperCase()
       if (s) set.add(s)

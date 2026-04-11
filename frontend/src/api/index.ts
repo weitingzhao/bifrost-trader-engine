@@ -30,6 +30,11 @@ export {
   updateExecution,
   deleteExecution,
   fetchExecutionLinkCandidates,
+  fetchOptionStockLinks,
+  fetchStockLinkCandidates,
+  createOptionStockLink,
+  deleteOptionStockLink,
+  postOptionStockLinksQuery,
 } from './trading/executions'
 export {
   postBarsFetch,
@@ -103,6 +108,10 @@ export {
   fetchMassiveTickerDetail,
   fetchMassiveTickerTypes,
   fetchMassiveRelatedCompanies,
+  fetchMassiveStockBarsRange,
+  fetchMassiveStockGroupedDaily,
+  fetchMassiveStockOpenClose,
+  fetchMassiveStockPrev,
   fetchTickerReferenceSearch,
   fetchTickerReferenceOverviewCoverage,
   fetchTickerReferenceUniverseCount,

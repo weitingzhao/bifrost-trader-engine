@@ -1260,6 +1260,25 @@ Type Config UI 通过 GET `/strategies/structure-types/param-kind-options`、`/s
 - **删除**：删除 raw 成交行时一并删除本分摊表中 `account_executions_id` 匹配行。
 - **Performance**：单笔 `realized_pnl`、`commission`（来自 `account_execution_commissions`）按各分摊行 `|allocated_quantity|` 占该笔总 `|allocated_quantity|` 的比例拆分至各实例；若占比为 0 则退回整笔记于单列（若存在）。
 
+##### 2.24.11e 表 `account_execution_option_stock_link`（期权成交 → 标的股票成交）
+
+- **用途**：将**行权/指派**产生的标的股票成交与对应期权成交（`account_executions_final` 中 `sec_type=OPT` 的一行）人工关联，用于 Trade Ledger 展示与 **相对 Flex `close_price` 的滑点**（API 计算 `signed_qty × (price − close_price)`，不写回 `realized_pnl`）。
+- **逻辑外键**：`account_executions` 为 VIEW，不建 FK。两端 `account_executions_id` 均须能在 `account_executions_final` 中解析；应用层校验 OPT/STK、`account_id` 与标的 `symbol` 一致。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| account_execution_option_stock_link_id | bigserial PRIMARY KEY | 主键 |
+| account_id | text NOT NULL | 账户 |
+| option_account_executions_id | bigint NOT NULL | 期权腿统一 id |
+| stock_account_executions_id | bigint NOT NULL | 股票腿统一 id |
+| role | text | 可选：`exercise` / `assignment`（CHECK） |
+| note | text | 备注 |
+| created_at | timestamptz | 创建时间 |
+
+- **唯一约束**：`UNIQUE (option_account_executions_id, stock_account_executions_id)`（同一股票腿对同一期权腿仅一条）。
+- **API**：`GET/POST/DELETE /executions/option-stock-links`、`GET /executions/stock-link-candidates`（见 trading router）。
+
 ---
 
 ## 3. 阶段 1 写入策略

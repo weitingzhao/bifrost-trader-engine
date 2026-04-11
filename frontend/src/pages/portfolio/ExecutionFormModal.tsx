@@ -52,6 +52,8 @@ interface ExecutionFormModalProps {
   accountOptions: string[]
   /** When opening Add (no editExec), merge into form after defaults. Cleared when modal closes. */
   initialDraft?: Partial<ExecutionFormState> | null
+  /** When true (e.g. quick Add journal from Stocks position group), Account / STK / Symbol cannot be changed. */
+  lockContractContext?: boolean
   /** Create payload source; journal_closed is stored in executions_raw_journal (Trade ledger manual journal). */
   createExecutionSource?: 'journal_closed' | 'manual'
   onClose: () => void
@@ -63,6 +65,7 @@ export function ExecutionFormModal({
   editExec,
   accountOptions,
   initialDraft = null,
+  lockContractContext = false,
   createExecutionSource = 'manual',
   onClose,
   onSuccess,
@@ -122,14 +125,15 @@ export function ExecutionFormModal({
           ...base,
           ...initialDraft,
           account_id: (initialDraft.account_id ?? '').trim() || base.account_id,
+          sec_type: lockContractContext ? 'STK' : (initialDraft.sec_type ?? base.sec_type),
         })
       } else {
-        setExecForm(base)
+        setExecForm(lockContractContext ? { ...base, sec_type: 'STK' } : base)
       }
       setUseInstanceSplits(false)
       setSplitRows([])
     }
-  }, [open, accountOptions, editExec, initialDraft])
+  }, [open, accountOptions, editExec, initialDraft, lockContractContext])
 
   useEffect(() => {
     if (editExec) {
@@ -336,17 +340,27 @@ export function ExecutionFormModal({
         >
           <div className="replay-exec-form-row">
             <label>Account</label>
-            <select
-              value={execForm.account_id}
-              onChange={e => setExecForm(f => ({ ...f, account_id: e.target.value }))}
-              required
-            >
-              {accountOptions.map(accId => (
-                <option key={accId} value={accId}>
-                  {accId}
-                </option>
-              ))}
-            </select>
+            {lockContractContext && !editExec ? (
+              <input
+                type="text"
+                className="replay-exec-readonly"
+                readOnly
+                value={execForm.account_id}
+                aria-readonly="true"
+              />
+            ) : (
+              <select
+                value={execForm.account_id}
+                onChange={e => setExecForm(f => ({ ...f, account_id: e.target.value }))}
+                required
+              >
+                {accountOptions.map(accId => (
+                  <option key={accId} value={accId}>
+                    {accId}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
           <div className="replay-exec-form-row">
             <label>Strategy (optional)</label>
@@ -480,41 +494,113 @@ export function ExecutionFormModal({
           </div>
           <div className="replay-exec-form-row">
             <label>Symbol</label>
-            <input type="text" value={execForm.symbol} onChange={e => setExecForm(f => ({ ...f, symbol: e.target.value.trim().toUpperCase() }))} placeholder="e.g. NVDA" required />
+            {lockContractContext && !editExec ? (
+              <input
+                type="text"
+                className="replay-exec-readonly"
+                readOnly
+                value={execForm.symbol}
+                aria-readonly="true"
+              />
+            ) : (
+              <input
+                type="text"
+                value={execForm.symbol}
+                onChange={e => setExecForm(f => ({ ...f, symbol: e.target.value.trim().toUpperCase() }))}
+                placeholder="e.g. NVDA"
+                required
+              />
+            )}
           </div>
           <div className="replay-exec-form-row">
             <label>Type</label>
-            <div className="replay-exec-type-radios">
-              <label>
-                <input type="radio" name="exec-sec-type" value="STK" checked={(execForm.sec_type || 'STK').toUpperCase() === 'STK'} onChange={e => setExecForm(f => ({ ...f, sec_type: e.target.value }))} />
-                STK
-              </label>
-              <label>
-                <input type="radio" name="exec-sec-type" value="OPT" checked={(execForm.sec_type || 'STK').toUpperCase() === 'OPT'} onChange={e => setExecForm(f => ({ ...f, sec_type: e.target.value }))} />
-                OPT
-              </label>
-            </div>
+            {lockContractContext && !editExec ? (
+              <div className="replay-exec-seg-bubbles" role="group" aria-label="Security type">
+                <span className="replay-bubble-switch-btn active replay-exec-bubble-locked" aria-current="true">
+                  STK
+                </span>
+              </div>
+            ) : (
+              <div className="replay-exec-seg-bubbles" role="radiogroup" aria-label="Security type">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={(execForm.sec_type || 'STK').toUpperCase() === 'STK'}
+                  className={`replay-bubble-switch-btn ${(execForm.sec_type || 'STK').toUpperCase() === 'STK' ? 'active' : ''}`}
+                  onClick={() => setExecForm(f => ({ ...f, sec_type: 'STK' }))}
+                >
+                  STK
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={(execForm.sec_type || 'STK').toUpperCase() === 'OPT'}
+                  className={`replay-bubble-switch-btn ${(execForm.sec_type || 'STK').toUpperCase() === 'OPT' ? 'active' : ''}`}
+                  onClick={() => setExecForm(f => ({ ...f, sec_type: 'OPT' }))}
+                >
+                  OPT
+                </button>
+              </div>
+            )}
           </div>
           <div className="replay-exec-form-row">
             <label>Side</label>
-            <div className="replay-exec-type-radios">
-              <label>
-                <input type="radio" name="exec-side" value="BUY" checked={(execForm.side || 'BUY').toUpperCase() === 'BUY'} onChange={e => setExecForm(f => ({ ...f, side: e.target.value }))} />
+            <div className="replay-exec-seg-bubbles" role="radiogroup" aria-label="Side">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={(execForm.side || 'BUY').toUpperCase() === 'BUY'}
+                className={`replay-bubble-switch-btn ${(execForm.side || 'BUY').toUpperCase() === 'BUY' ? 'active' : ''}`}
+                onClick={() => setExecForm(f => ({ ...f, side: 'BUY' }))}
+              >
                 Buy
-              </label>
-              <label>
-                <input type="radio" name="exec-side" value="SELL" checked={(execForm.side || 'BUY').toUpperCase() === 'SELL'} onChange={e => setExecForm(f => ({ ...f, side: e.target.value }))} />
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={(execForm.side || 'BUY').toUpperCase() === 'SELL'}
+                className={`replay-bubble-switch-btn ${(execForm.side || 'BUY').toUpperCase() === 'SELL' ? 'active' : ''}`}
+                onClick={() => setExecForm(f => ({ ...f, side: 'SELL' }))}
+              >
                 Sell
-              </label>
+              </button>
             </div>
           </div>
-          <div className="replay-exec-form-row">
-            <label>Quantity</label>
-            <input type="number" step="any" min="0" value={execForm.quantity} onChange={e => setExecForm(f => ({ ...f, quantity: e.target.value }))} required />
-          </div>
-          <div className="replay-exec-form-row">
-            <label>Price</label>
-            <input type="number" step="any" value={execForm.price} onChange={e => setExecForm(f => ({ ...f, price: e.target.value }))} required />
+          <div className="replay-exec-form-row replay-exec-form-row-metrics">
+            <div className="replay-exec-metric-field">
+              <label htmlFor="exec-qty">Quantity</label>
+              <input
+                id="exec-qty"
+                type="number"
+                step="any"
+                min="0"
+                value={execForm.quantity}
+                onChange={e => setExecForm(f => ({ ...f, quantity: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="replay-exec-metric-field">
+              <label htmlFor="exec-price">Price</label>
+              <input
+                id="exec-price"
+                type="number"
+                step="any"
+                value={execForm.price}
+                onChange={e => setExecForm(f => ({ ...f, price: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="replay-exec-metric-field">
+              <label htmlFor="exec-comm">Commission</label>
+              <input
+                id="exec-comm"
+                type="number"
+                step="any"
+                value={execForm.commission}
+                onChange={e => setExecForm(f => ({ ...f, commission: e.target.value }))}
+                placeholder="Optional"
+              />
+            </div>
           </div>
           {(execForm.sec_type || 'STK').toUpperCase() === 'OPT' && (
             <>
@@ -541,17 +627,28 @@ export function ExecutionFormModal({
               </div>
             </>
           )}
-          <div className="replay-exec-form-row">
-            <label>Commission</label>
-            <input type="number" step="any" value={execForm.commission} onChange={e => setExecForm(f => ({ ...f, commission: e.target.value }))} placeholder="Optional" />
-          </div>
-          <div className="replay-exec-form-row">
-            <label>Realized PnL</label>
-            <input type="number" step="any" value={execForm.realized_pnl} onChange={e => setExecForm(f => ({ ...f, realized_pnl: e.target.value }))} placeholder="Optional" />
-          </div>
-          <div className="replay-exec-form-row">
-            <label>Currency</label>
-            <input type="text" value={execForm.currency} onChange={e => setExecForm(f => ({ ...f, currency: e.target.value }))} placeholder="USD" />
+          <div className="replay-exec-form-row replay-exec-form-row-metrics replay-exec-form-row-metrics--pnl">
+            <div className="replay-exec-metric-field">
+              <label htmlFor="exec-realized">Realized PnL</label>
+              <input
+                id="exec-realized"
+                type="number"
+                step="any"
+                value={execForm.realized_pnl}
+                onChange={e => setExecForm(f => ({ ...f, realized_pnl: e.target.value }))}
+                placeholder="Optional"
+              />
+            </div>
+            <div className="replay-exec-metric-field">
+              <label htmlFor="exec-ccy">Currency</label>
+              <input
+                id="exec-ccy"
+                type="text"
+                value={execForm.currency}
+                onChange={e => setExecForm(f => ({ ...f, currency: e.target.value }))}
+                placeholder="USD"
+              />
+            </div>
           </div>
           <div className="replay-exec-form-actions">
             <button type="button" className="btn btn-secondary" onClick={() => { onClose(); setExecFormError(null) }}>

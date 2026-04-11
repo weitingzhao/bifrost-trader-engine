@@ -12,9 +12,11 @@ from src.persistence.postgres.ticker_reference import (
     list_tickers_missing_related_page,
     next_cursor_from_api_response,
     normalize_ticker_ref_kind,
+    overview_stub_cols_api_not_found,
     row_from_ticker_detail,
     row_from_ticker_list_item,
     symbols_missing_overview_only,
+    symbols_missing_related_only,
 )
 
 
@@ -92,6 +94,13 @@ def test_normalize_ticker_ref_kind_maps_legacy_instrument_types():
     assert normalize_ticker_ref_kind("ticker_reference_instrument_types") == "ticker_reference_ticker_types"
     assert normalize_ticker_ref_kind("stock_reference_instrument_types") == "ticker_reference_ticker_types"
     assert normalize_ticker_ref_kind("ticker_reference_ticker_types") == "ticker_reference_ticker_types"
+
+
+def test_overview_stub_cols_api_not_found_sets_timestamp():
+    stub = overview_stub_cols_api_not_found()
+    assert stub["sector"] == ""
+    assert stub["industry"] == ""
+    assert stub["overview_updated_at"] is not None
 
 
 def test_symbols_missing_overview_only_returns_tickers_without_overview_row():
@@ -172,6 +181,17 @@ def test_list_tickers_filled_related_page_params():
     cur = _Cur()
     assert list_tickers_filled_related_page(cur, 2, 0) == ["A", "B"]
     assert cur.params == (2, 0)
+
+
+def test_symbols_missing_related_only_returns_tickers_without_related_rows():
+    class _Cur:
+        def execute(self, *_a, **_k):
+            return None
+
+        def fetchall(self):
+            return [("AAA",), ("ZZZ",)]
+
+    assert symbols_missing_related_only(_Cur()) == ["AAA", "ZZZ"]
 
 
 def test_count_tickers_rows():

@@ -8,9 +8,37 @@ import {
   MAX_TICKER_REF_MISSING_LIMIT,
   REF_CATALOG_PG_LABELS,
   type OverviewEnqueueMode,
+  type RelatedEnqueueMode,
   refJobKindShortLabel,
   type RefTickerCatalogRow,
 } from './stockReferenceJobHelpers'
+
+const RELATED_SCOPE_BUBBLES: ReadonlyArray<{
+  value: RelatedEnqueueMode
+  label: string
+  title: string
+}> = [
+  {
+    value: 'missing',
+    label: 'Missing only',
+    title: 'Tickers with no ticker_related_tickers rows for from_tickers_id.',
+  },
+  {
+    value: 'stale',
+    label: 'Missing or stale',
+    title: 'No related rows, or latest fetched_at older than stale hours.',
+  },
+  {
+    value: 'symbols',
+    label: 'Listed symbols',
+    title: 'Only symbols in the enqueue field below.',
+  },
+  {
+    value: 'all',
+    label: 'All tickers',
+    title: 'Re-fetch related peers for every row in tickers.',
+  },
+]
 
 const OVERVIEW_SCOPE_BUBBLES: ReadonlyArray<{
   value: OverviewEnqueueMode
@@ -82,6 +110,10 @@ export interface RefJobDetailPanelProps {
   setOverviewEnqueueMode: (m: OverviewEnqueueMode) => void
   overviewStaleHours: number
   setOverviewStaleHours: (n: number) => void
+  relatedEnqueueMode: RelatedEnqueueMode
+  setRelatedEnqueueMode: (m: RelatedEnqueueMode) => void
+  relatedStaleHours: number
+  setRelatedStaleHours: (n: number) => void
   refJobSymbols: string
   setRefJobSymbols: (s: string) => void
   refJobSymbolsErr: string | null
@@ -138,6 +170,10 @@ export function RefJobDetailPanel({
   setOverviewEnqueueMode,
   overviewStaleHours,
   setOverviewStaleHours,
+  relatedEnqueueMode,
+  setRelatedEnqueueMode,
+  relatedStaleHours,
+  setRelatedStaleHours,
   refJobSymbols,
   setRefJobSymbols,
   refJobSymbolsErr,
@@ -351,10 +387,41 @@ export function RefJobDetailPanel({
           ) : null}
 
           {kind === 'ticker_reference_related' ? (
-            <div className="feed-massive-field" style={{ display: 'block', marginTop: 'var(--space-2)' }}>
-              <p className="feed-massive-agg-sub-doc" style={{ marginBottom: 'var(--space-1)' }}>
-                Compares <code>public.tickers</code> to rows in <code>public.ticker_related_tickers</code> (
-                <code>from_tickers_id</code>).
+            <div className="feed-massive-refdb-overview-scope" style={{ marginTop: 'var(--space-2)' }}>
+              <div className="feed-massive-field" style={{ display: 'block' }}>
+                <div className="form-label" id="ref-related-scope-label-panel">
+                  Related job scope
+                </div>
+                <div
+                  className="ref-overview-scope-bubbles"
+                  role="radiogroup"
+                  aria-labelledby="ref-related-scope-label-panel"
+                  aria-describedby="ref-related-scope-hint-panel"
+                >
+                  {RELATED_SCOPE_BUBBLES.map(opt => {
+                    const active = relatedEnqueueMode === opt.value
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        disabled={disabledEnqueue}
+                        title={opt.title}
+                        className={`ref-overview-scope-bubble${active ? ' ref-overview-scope-bubble--active' : ''}`}
+                        onClick={() => {
+                          setRelatedEnqueueMode(opt.value)
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+              <p id="ref-related-scope-hint-panel" className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-1)', marginBottom: 'var(--space-1)' }}>
+                Compares <code>public.tickers</code> to <code>public.ticker_related_tickers</code> (
+                <code>from_tickers_id</code>). Stale uses <code>MAX(fetched_at)</code> per ticker.
               </p>
               <div className="ref-overview-coverage-strip" aria-live="polite">
                 {relatedCoverageLoading ? (
@@ -381,11 +448,38 @@ export function RefJobDetailPanel({
                   <span className="ref-overview-coverage-muted">Coverage counts unavailable</span>
                 )}
               </div>
+              {relatedEnqueueMode === 'stale' ? (
+                <label className="feed-massive-field" style={{ display: 'block', marginTop: 'var(--space-2)' }}>
+                  <span className="form-label">Stale after (hours)</span>
+                  <input
+                    className="form-input"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={relatedStaleHours}
+                    disabled={disabledEnqueue}
+                    onChange={e => {
+                      const n = parseInt(e.target.value, 10)
+                      setRelatedStaleHours(Number.isFinite(n) && n >= 1 ? n : 720)
+                    }}
+                    aria-label="Hours before related data is considered stale"
+                    style={{ maxWidth: '8rem' }}
+                  />
+                </label>
+              ) : null}
             </div>
           ) : null}
 
-          {(kind === 'ticker_reference_overview' && overviewEnqueueMode === 'symbols') || kind === 'ticker_reference_related' ? (
-            <label className="feed-massive-field" style={{ display: 'block', marginTop: kind === 'ticker_reference_overview' ? 'var(--space-2)' : 0 }}>
+          {(kind === 'ticker_reference_overview' && overviewEnqueueMode === 'symbols') ||
+          (kind === 'ticker_reference_related' && relatedEnqueueMode === 'symbols') ? (
+            <label
+              className="feed-massive-field"
+              style={{
+                display: 'block',
+                marginTop:
+                  kind === 'ticker_reference_overview' || kind === 'ticker_reference_related' ? 'var(--space-2)' : 0,
+              }}
+            >
               <span className="form-label">Symbols (comma or space separated)</span>
               <input
                 className="form-input"
@@ -572,7 +666,7 @@ export function RefJobDetailPanel({
           </div>
 
           <label className="feed-massive-field" style={{ display: 'block', marginTop: 'var(--space-3)' }}>
-            <span className="form-label">Missing / filled lists — page size</span>
+            <span className="form-label">Page size</span>
             <input
               className="form-input"
               type="number"
@@ -589,11 +683,6 @@ export function RefJobDetailPanel({
               style={{ maxWidth: '8rem' }}
             />
           </label>
-          <p className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-1)', marginBottom: 0 }}>
-            <strong>Missing:</strong> tickers with no <code>ticker_related_tickers</code> rows.{' '}
-            <strong>Filled:</strong> tickers with at least one related row (distinct symbols). Default page size{' '}
-            {DEFAULT_TICKER_REF_MISSING_LIMIT}.
-          </p>
           <div className="ref-jobs-md-actions" style={{ marginTop: 'var(--space-2)' }}>
             <button
               type="button"

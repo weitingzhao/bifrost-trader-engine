@@ -33,6 +33,7 @@ import {
   validateSingleTickerSymbol,
   validateTickerRefSearchQuery,
   type OverviewEnqueueMode,
+  type RelatedEnqueueMode,
   type RefJobTrackItem,
 } from './stockReferenceJobHelpers'
 
@@ -87,6 +88,8 @@ export function MassiveTickerReferenceDbSection({
   const [refJobSymbolsErr, setRefJobSymbolsErr] = useState<string | null>(null)
   const [overviewEnqueueMode, setOverviewEnqueueMode] = useState<OverviewEnqueueMode>('missing')
   const [overviewStaleHours, setOverviewStaleHours] = useState(720)
+  const [relatedEnqueueMode, setRelatedEnqueueMode] = useState<RelatedEnqueueMode>('missing')
+  const [relatedStaleHours, setRelatedStaleHours] = useState(720)
 
   const [overviewCoverage, setOverviewCoverage] = useState<{
     total_tickers: number
@@ -413,14 +416,27 @@ export function MassiveTickerReferenceDbSection({
   }, [enqueueOne, overviewEnqueueMode, overviewStaleHours, refJobSymbols])
 
   const runEnqueueRelated = useCallback(() => {
-    const symbols = parseRefJobSymbols(refJobSymbols)
-    const v = validateRefJobSymbolsForEnqueue(symbols)
-    if (!v.ok) {
-      setRefJobSymbolsErr(v.message)
+    if (relatedEnqueueMode === 'symbols') {
+      const symbols = parseRefJobSymbols(refJobSymbols)
+      const v = validateRefJobSymbolsForEnqueue(symbols)
+      if (!v.ok) {
+        setRefJobSymbolsErr(v.message)
+        return
+      }
+      void enqueueOne('ticker_reference_related', { mode: 'symbols', symbols })
       return
     }
-    void enqueueOne('ticker_reference_related', { mode: 'symbols', symbols })
-  }, [enqueueOne, refJobSymbols])
+    if (relatedEnqueueMode === 'stale') {
+      const h = Math.max(1, Math.floor(Number(relatedStaleHours) || 720))
+      void enqueueOne('ticker_reference_related', { mode: 'stale', stale_hours: h })
+      return
+    }
+    if (relatedEnqueueMode === 'missing') {
+      void enqueueOne('ticker_reference_related', { mode: 'missing' })
+      return
+    }
+    void enqueueOne('ticker_reference_related', { mode: 'all' })
+  }, [enqueueOne, relatedEnqueueMode, relatedStaleHours, refJobSymbols])
 
   const onDetailEnqueue = useCallback(() => {
     if (selectedRefJobKind === 'ticker_reference_universe') runEnqueueUniverse()
@@ -679,6 +695,11 @@ export function MassiveTickerReferenceDbSection({
     setRefJobSymbolsErr(null)
   }, [])
 
+  const onRelatedModeChange = useCallback((m: RelatedEnqueueMode) => {
+    setRelatedEnqueueMode(m)
+    setRefJobSymbolsErr(null)
+  }, [])
+
   const focusRefJobTab = useCallback((kind: TickerReferenceJobKind) => {
     window.requestAnimationFrame(() => {
       document.getElementById(`ref-job-tab-${kind}`)?.focus()
@@ -773,6 +794,10 @@ export function MassiveTickerReferenceDbSection({
                 setOverviewEnqueueMode={onOverviewModeChange}
                 overviewStaleHours={overviewStaleHours}
                 setOverviewStaleHours={setOverviewStaleHours}
+                relatedEnqueueMode={relatedEnqueueMode}
+                setRelatedEnqueueMode={onRelatedModeChange}
+                relatedStaleHours={relatedStaleHours}
+                setRelatedStaleHours={setRelatedStaleHours}
                 refJobSymbols={refJobSymbols}
                 setRefJobSymbols={v => {
                   setRefJobSymbols(v)

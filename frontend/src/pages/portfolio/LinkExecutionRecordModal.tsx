@@ -5,11 +5,14 @@ import type { StrategyInstance } from '../../types'
 import { createStrategyInstance, fetchOpportunities, fetchStrategyInstances, updateExecution } from '../../api'
 import ExecSourceBadge from '../../components/ExecSourceBadge'
 import { fmtDate, fmtUsd, getContractLabelParts } from '../../utils/format'
+import type { PeerInstancePick } from './ledgerOptHelpers'
 
 export interface LinkExecutionContext {
   account_executions_id: number
   /** Current row values for prefill and summary line */
   execution?: Execution | null
+  /** Other fills on this option contract that already have instance(s); enables a one-click shortcut in the modal. */
+  peer_instance_picks?: PeerInstancePick[]
 }
 
 interface LinkExecutionRecordModalProps {
@@ -111,12 +114,14 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
   const [instances, setInstances] = useState<StrategyInstance[]>([])
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
-  const firstFieldRef = useRef<HTMLSelectElement>(null)
+  const [peerShortcut, setPeerShortcut] = useState('')
+  const firstFieldRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     if (!open || !context) return
     setFormError(null)
     const ex = context.execution
+    const picks = context.peer_instance_picks
     const oppId = ex?.strategy_opportunity_id != null ? String(ex.strategy_opportunity_id) : ''
     const instId = ex?.strategy_instance_id != null ? String(ex.strategy_instance_id) : ''
     setStrategyOpportunityId(oppId)
@@ -124,6 +129,14 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
     setInstanceMode('existing')
     setNewOpenedAt(defaultOpenedAtFromExecution(ex))
     setNewLabel('')
+    if (picks?.length && oppId && instId) {
+      const hit = picks.find(
+        p => String(p.strategy_opportunity_id) === oppId && String(p.strategy_instance_id) === instId,
+      )
+      setPeerShortcut(hit ? `${hit.strategy_opportunity_id}::${hit.strategy_instance_id}` : '')
+    } else {
+      setPeerShortcut('')
+    }
     fetchOpportunities(true)
       .then(r => setOpportunities(r.items ?? []))
       .catch(() => setOpportunities([]))
@@ -147,6 +160,7 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
 
   const execId = context.account_executions_id
   const ex = context.execution
+  const peerPicks = context.peer_instance_picks
   const executionAccountId = (ex?.account_id ?? '').trim()
   const execSymbol = getUnderlyingSymbolFromExecution(ex)
   const filteredOpportunities = filterOpportunitiesBySymbol(opportunities, execSymbol)
@@ -229,8 +243,50 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
         ) : null}
         {formError ? <p className="section-hint replay-form-error">{formError}</p> : null}
         <form onSubmit={onSubmit} className="replay-exec-form">
-          <div className="replay-exec-form-row">
-            <label htmlFor="link-strategy-opp">
+          {peerPicks && peerPicks.length > 0 ? (
+            <div className="link-exec-peer-quick">
+              <div className="link-exec-inline-bubbles-block">
+                <div className="link-exec-inline-bubbles-head" id="link-peer-shortcut-label">
+                  Reuse from this contract
+                </div>
+                <div
+                  className="replay-bubble-switch link-exec-inline-bubble-group"
+                  role="radiogroup"
+                  aria-labelledby="link-peer-shortcut-label"
+                >
+                  {peerPicks.map((p, idx) => {
+                    const key = `${p.strategy_opportunity_id}::${p.strategy_instance_id}`
+                    const isActive = peerShortcut === key
+                    const hasOppRow = filteredOpportunities.length > 0
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        role="radio"
+                        aria-checked={isActive}
+                        ref={!hasOppRow && idx === 0 ? firstFieldRef : undefined}
+                        className={`replay-bubble-switch-btn${isActive ? ' active' : ''}`}
+                        title={p.label}
+                        onClick={() => {
+                          setPeerShortcut(key)
+                          setStrategyOpportunityId(String(p.strategy_opportunity_id))
+                          setStrategyInstanceId(String(p.strategy_instance_id))
+                          setInstanceMode('existing')
+                        }}
+                      >
+                        {p.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+              <p className="section-hint replay-muted link-exec-peer-quick-hint">
+                Optional: apply strategy opportunity and instance already used on another fill for this contract. You can still set them manually below.
+              </p>
+            </div>
+          ) : null}
+          <div className="replay-exec-form-row link-exec-opp-field-row link-exec-bubbles-field-col">
+            <label id="link-strategy-opp-label">
               Strategy opportunity
               {symbolFiltered && (
                 <span className="link-exec-symbol-filter-badge" title={`Showing opportunities matching symbol ${execSymbol}`}>
@@ -238,26 +294,41 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
                 </span>
               )}
             </label>
-            <select
-              id="link-strategy-opp"
-              ref={firstFieldRef}
-              value={strategyOpportunityId}
-              onChange={e => {
-                setStrategyOpportunityId(e.target.value)
-                setStrategyInstanceId('')
-              }}
-              required
-            >
-              <option value="">— Select —</option>
-              {filteredOpportunities.map(o => (
-                <option key={o.strategy_opportunity_id} value={String(o.strategy_opportunity_id)}>
-                  {o.name ?? `#${o.strategy_opportunity_id}`}
-                </option>
-              ))}
-            </select>
-            {symbolFiltered && filteredOpportunities.length === 0 && (
+            {filteredOpportunities.length > 0 ? (
+              <div
+                className="replay-bubble-switch link-exec-inline-bubble-group link-exec-opp-inline-group"
+                role="radiogroup"
+                aria-labelledby="link-strategy-opp-label"
+              >
+                {filteredOpportunities.map((o, idx) => {
+                  const idStr = String(o.strategy_opportunity_id)
+                  const isActive = strategyOpportunityId === idStr
+                  const label = o.name?.trim() || `#${o.strategy_opportunity_id}`
+                  return (
+                    <button
+                      key={o.strategy_opportunity_id}
+                      type="button"
+                      role="radio"
+                      aria-checked={isActive}
+                      ref={idx === 0 ? firstFieldRef : undefined}
+                      className={`replay-bubble-switch-btn${isActive ? ' active' : ''}`}
+                      title={label}
+                      onClick={() => {
+                        setStrategyOpportunityId(idStr)
+                        setStrategyInstanceId('')
+                        setPeerShortcut('')
+                      }}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
               <p className="section-hint replay-muted link-exec-no-match-hint">
-                No opportunities match symbol {execSymbol}. Check scope settings in Strategy / Opportunity.
+                {symbolFiltered
+                  ? `No opportunities match symbol ${execSymbol}. Check scope settings in Strategy / Opportunity.`
+                  : 'No strategy opportunities loaded.'}
               </p>
             )}
           </div>
@@ -278,7 +349,10 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
                   className={`link-exec-toggle-btn${instanceMode === 'new' ? ' active' : ''}`}
                   disabled={!executionAccountId}
                   title={!executionAccountId ? 'This execution has no account ID.' : undefined}
-                  onClick={() => setInstanceMode('new')}
+                  onClick={() => {
+                    setInstanceMode('new')
+                    setPeerShortcut('')
+                  }}
                 >
                   + Create new
                 </button>
@@ -290,7 +364,10 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
                   <select
                     id="link-strategy-inst"
                     value={strategyInstanceId}
-                    onChange={e => setStrategyInstanceId(e.target.value)}
+                    onChange={e => {
+                      setStrategyInstanceId(e.target.value)
+                      setPeerShortcut('')
+                    }}
                   >
                     <option value="">— None —</option>
                     {instances.map(i => (

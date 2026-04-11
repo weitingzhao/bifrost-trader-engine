@@ -1,5 +1,5 @@
 import { useState, useEffect, type Dispatch, type SetStateAction } from 'react'
-import type { Execution, OptExecutionGroup } from '../../types'
+import type { Execution, OptExecutionGroup, OptionStockLinkRow, OptionStockLinkSummary } from '../../types'
 import ExecSourceBadge from '../../components/ExecSourceBadge'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import {
@@ -11,9 +11,14 @@ import {
   getContractLabelParts,
 } from '../../utils/format'
 import {
+  adjustedRealizedPnlForOptGroup,
+  collectLinkIdsForOptGroup,
   findOppositeLegAttributionSource,
+  flattenLinksForOptGroup,
   getInstanceConsistencyState,
+  getOptionStockLinkDetailForExecution,
   getOptGroupKey,
+  ledgerOptDetailRowPnl,
 } from './ledgerOptHelpers'
 import { LedgerStgInsCell } from './LedgerStgInsCell'
 
@@ -98,6 +103,26 @@ function LinkStrategyIconButton({ onClick, title }: { onClick: () => void; title
   )
 }
 
+function LinkStockLegIconButton({ onClick, title }: { onClick: () => void; title: string }) {
+  return (
+    <button
+      type="button"
+      className="btn btn-icon-small"
+      onClick={e => {
+        e.stopPropagation()
+        onClick()
+      }}
+      title={title}
+      aria-label={title}
+    >
+      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M3 18h6v-6H3v6zm9-12h6V3h-6v3zM3 8h6V3H3v5zm9 10h6v-6h-6v6z" />
+        <path d="M14 9h2M9 14v2" />
+      </svg>
+    </button>
+  )
+}
+
 function SyncOppositeLegAttributionButton({
   onClick,
   title,
@@ -140,7 +165,10 @@ export interface LedgerClosedOptionContractsSectionProps {
     SetStateAction<{ column: 'expiry' | 'trade_date'; dir: 'asc' | 'desc' }>
   >
   onEditExecution: (ex: Execution) => void
-  onLinkExecution: (ex: Execution) => void
+  /** Pass `sameContractTrades` (group `trades`) so Assign strategy can suggest instances from sibling fills. */
+  onLinkExecution: (ex: Execution, sameContractTrades?: Execution[]) => void
+  /** Link OPT row to underlying STK fills (exercise/assignment). */
+  onLinkStockExecution?: (ex: Execution) => void
   onDeleteExecution: (ex: Execution) => void
   /** Copy strategy opportunity + instance from opposite-side same-|qty| fill in the group (closed option details). */
   onSyncOppositeLegAttribution?: (target: Execution, peer: Execution) => void | Promise<void>
@@ -149,6 +177,10 @@ export interface LedgerClosedOptionContractsSectionProps {
   /** Shown when no row is expanded in the details table */
   detailPlaceholder?: string
   sectionAriaLabel?: string
+  /** Map option execution id → linked stock rows (from bulk query). */
+  optionStockLinkByOptionId?: Record<number, OptionStockLinkSummary>
+  /** Open readonly modal with link rows for this contract group. */
+  onViewOptionStockLinks?: (rows: OptionStockLinkRow[], title: string, slippageTotal: number | null) => void
 }
 
 export function LedgerClosedOptionContractsSection({
@@ -162,11 +194,14 @@ export function LedgerClosedOptionContractsSection({
   setLedgerOptSort,
   onEditExecution,
   onLinkExecution,
+  onLinkStockExecution,
   onDeleteExecution,
   onSyncOppositeLegAttribution,
   syncingAccountExecutionsId = null,
   detailPlaceholder = 'Click a closed trade row above to load details',
   sectionAriaLabel = 'Closed option positions and details',
+  optionStockLinkByOptionId,
+  onViewOptionStockLinks,
 }: LedgerClosedOptionContractsSectionProps) {
   const [closedPage, setClosedPage] = useState(1)
 
@@ -271,6 +306,34 @@ export function LedgerClosedOptionContractsSection({
           </thead>
           <tbody>
             {pagedClosedGroups.map(g => {
+              const linkIds =
+                optionStockLinkByOptionId && onViewOptionStockLinks
+                  ? collectLinkIdsForOptGroup(g, optionStockLinkByOptionId)
+                  : []
+              const linkRows =
+                optionStockLinkByOptionId && onViewOptionStockLinks
+                  ? flattenLinksForOptGroup(g, optionStockLinkByOptionId)
+                  : []
+              let linkSlippageSum: number | null = null
+              if (optionStockLinkByOptionId && linkIds.length > 0) {
+                let s = 0
+                let any = false
+                const seenOid = new Set<number>()
+                for (const ex of g.trades ?? []) {
+                  const oid = ex.account_executions_id
+                  if (oid == null || seenOid.has(oid)) continue
+                  seenOid.add(oid)
+                  const t = optionStockLinkByOptionId[oid]?.slippage_total
+                  if (t != null && Number.isFinite(t)) {
+                    s += t
+                    any = true
+                  }
+                }
+                linkSlippageSum = any ? s : null
+              }
+              const displayGroupPnl = optionStockLinkByOptionId
+                ? adjustedRealizedPnlForOptGroup(g, optionStockLinkByOptionId)
+                : Number(g.realized_pnl) || 0
               const uniqueAccounts = Array.from(
                 new Set((g.trades ?? []).map(t => (t.account_id ?? '').trim()).filter(Boolean)),
               )
@@ -372,6 +435,31 @@ export function LedgerClosedOptionContractsSection({
                             </span>
                           )
                         ) : null
+                      const contractTitle = p.symbol
+                        ? `${p.symbol} ${p.rightLabel}${strikeStr}`
+                        : (g.contract_key ?? 'Contract')
+                      const linkStockSummaryIcon =
+                        onViewOptionStockLinks && linkIds.length > 0 ? (
+                          <button
+                            type="button"
+                            className="ledger-opt-link-stock-aggregate-icon"
+                            title="Linked stock fills — open summary (details show per-fill link IDs)"
+                            aria-label="Linked stock fills"
+                            onClick={e => {
+                              e.stopPropagation()
+                              onViewOptionStockLinks(
+                                linkRows,
+                                `Linked stocks · ${contractTitle}`,
+                                linkSlippageSum,
+                              )
+                            }}
+                          >
+                            <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                              <path d="M3 18h6v-6H3v6zm9-12h6V3h-6v3zM3 8h6V3H3v5zm9 10h6v-6h-6v6z" />
+                              <path d="M14 9h2M9 14v2" />
+                            </svg>
+                          </button>
+                        ) : null
                       return (
                         <>
                           {instanceIcon}
@@ -383,6 +471,7 @@ export function LedgerClosedOptionContractsSection({
                           ) : (
                             g.contract_key
                           )}
+                          {linkStockSummaryIcon}
                         </>
                       )
                     })()}
@@ -404,10 +493,15 @@ export function LedgerClosedOptionContractsSection({
                   <td>
                     <span
                       className={
-                        g.realized_pnl >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'
+                        displayGroupPnl >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'
+                      }
+                      title={
+                        linkIds.length > 0
+                          ? 'Premium PnL plus sum of linked stock slippage vs Flex close (signed qty × (price − close))'
+                          : undefined
                       }
                     >
-                      {fmtUsd0(g.realized_pnl)}
+                      {fmtUsd0(displayGroupPnl)}
                     </span>
                   </td>
                   <td>{accountLabel}</td>
@@ -495,14 +589,10 @@ export function LedgerClosedOptionContractsSection({
                     : s === 'SELL' || s === 'SLD' || s === 'S'
                       ? 'Sell'
                       : (ex.side ?? '—')
-                const q = Number(ex.quantity) || 0
-                const p = Number(ex.price) || 0
-                const c = Number(ex.commission) || 0
-                const value = q * p * 100 - c
-                const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
-                const isSell = !isBuy
-                const pnl = isBuy ? -value : value
-                const displayPnl = isSell ? Math.abs(pnl) : pnl
+                const { displayPnl, hasCombinedStock } = ledgerOptDetailRowPnl(
+                  ex,
+                  optionStockLinkByOptionId,
+                )
                 const pnlClass =
                   displayPnl < 0
                     ? 'replay-pnl-detail-negative'
@@ -555,6 +645,42 @@ export function LedgerClosedOptionContractsSection({
                                 )}
                               </>
                             )}
+                            {optionStockLinkByOptionId && onViewOptionStockLinks
+                              ? (() => {
+                                  const {
+                                    linkIds: detailLinkIds,
+                                    links: detailLinkRows,
+                                    slippageTotal: detailSlip,
+                                  } = getOptionStockLinkDetailForExecution(ex, optionStockLinkByOptionId)
+                                  if (detailLinkIds.length === 0) return null
+                                  const pL = getContractLabelParts(g.contract_key)
+                                  const strikeStrL = g.strike != null ? ` ${g.strike}` : ''
+                                  const detailTitle = pL.symbol
+                                    ? `${pL.symbol} ${pL.rightLabel}${strikeStrL}`
+                                    : (g.contract_key ?? '')
+                                  return (
+                                    <span className="ledger-opt-link-stock-badges">
+                                      {detailLinkIds.map(lid => (
+                                        <button
+                                          key={lid}
+                                          type="button"
+                                          className="ledger-opt-link-stock-badge"
+                                          onClick={e => {
+                                            e.stopPropagation()
+                                            onViewOptionStockLinks(
+                                              detailLinkRows,
+                                              `Link #${lid} · Exec #${ex.account_executions_id ?? '?'} · ${detailTitle}`,
+                                              detailSlip,
+                                            )
+                                          }}
+                                        >
+                                          #{lid}
+                                        </button>
+                                      ))}
+                                    </span>
+                                  )
+                                })()
+                              : null}
                             {showSyncOppositeAttribution && peer && onSyncOppositeLegAttribution ? (
                               <SyncOppositeLegAttributionButton
                                 disabled={syncingAccountExecutionsId === ex.account_executions_id}
@@ -588,7 +714,13 @@ export function LedgerClosedOptionContractsSection({
                     <td>{ex.quantity != null ? Number(ex.quantity) : '—'}</td>
                     <td>{fmtUsd(ex.price)}</td>
                     <td>{fmtUsd(ex.commission ?? 0)}</td>
-                    <td>
+                    <td
+                      title={
+                        hasCombinedStock
+                          ? 'Option premium cash flow for this fill plus linked stock slippage (vs Flex close)'
+                          : undefined
+                      }
+                    >
                       <span className={pnlClass}>{fmtUsd(displayPnl)}</span>
                     </td>
                     <td>{ex.account_id ?? '—'}</td>
@@ -612,8 +744,14 @@ export function LedgerClosedOptionContractsSection({
                           </button>
                           <LinkStrategyIconButton
                             title="Assign strategy opportunity and instance"
-                            onClick={() => onLinkExecution(ex)}
+                            onClick={() => onLinkExecution(ex, groupTrades)}
                           />
+                          {onLinkStockExecution ? (
+                            <LinkStockLegIconButton
+                              title="Link underlying stock fills (exercise or assignment)"
+                              onClick={() => onLinkStockExecution(ex)}
+                            />
+                          ) : null}
                           <button
                             type="button"
                             className="btn btn-icon-small btn-icon-danger"

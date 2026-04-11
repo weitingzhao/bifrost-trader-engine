@@ -573,6 +573,63 @@ class MassiveClient:
             return {"results": [], "error": err}
         return data if isinstance(data, dict) else {"results": []}
 
+    # ── Stock aggregates (same Polygon paths as options; ticker e.g. AAPL) ──
+
+    def fetch_stock_aggs(
+        self,
+        ticker: str,
+        multiplier: int,
+        timespan: str,
+        start_ms: int,
+        end_ms: int,
+    ) -> Dict[str, Any]:
+        """GET /v2/aggs/ticker/{ticker}/range/... — custom-range OHLCV for a stock symbol."""
+        return self.fetch_option_aggs(ticker, multiplier, timespan, start_ms, end_ms)
+
+    def fetch_stock_open_close(
+        self,
+        ticker: str,
+        date: str,
+        *,
+        adjusted: bool = True,
+    ) -> Dict[str, Any]:
+        """GET /v1/open-close/{ticker}/{date} — daily OHLC + pre/after-hours for a stock."""
+        return self.fetch_option_open_close(ticker, date, adjusted=adjusted)
+
+    def fetch_stock_previous_day(
+        self,
+        ticker: str,
+        *,
+        adjusted: bool = True,
+    ) -> Dict[str, Any]:
+        """GET /v2/aggs/ticker/{ticker}/prev — previous trading day OHLC for a stock."""
+        return self.fetch_option_previous_day(ticker, adjusted=adjusted)
+
+    def fetch_stock_grouped_daily(
+        self,
+        date: str,
+        *,
+        adjusted: bool = True,
+    ) -> Dict[str, Any]:
+        """GET /v2/aggs/grouped/locale/us/market/stocks/{date} — all US stocks for one date."""
+        d = (date or "").strip()
+        if not d or not self._api_key:
+            return {"results": [], "error": "date or api key missing"}
+        enc = quote(d, safe="")
+        params: Dict[str, Any] = {"adjusted": "true" if adjusted else "false"}
+        status, data = self._get(
+            f"/v2/aggs/grouped/locale/us/market/stocks/{enc}",
+            params,
+        )
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
     # ── Corporate actions (Stocks REST) ──
 
     def fetch_dividends(

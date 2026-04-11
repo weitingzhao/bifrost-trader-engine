@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
+from src.portfolio.reader.option_stock_link import delete_option_stock_link, insert_option_stock_link
 from src.portfolio.services.executions_fetch_flex import (
     fetch_flex_trades_and_upsert_executions,
     upsert_executions_from_uploaded_flex_xml,
@@ -156,6 +157,92 @@ def get_executions_link_candidates(
         limit=limit,
     )
     return {"executions": items}
+
+
+@router.post("/executions/option-stock-links/query")
+def post_option_stock_links_query(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Bulk load link rows for many option_account_executions_id values (grouped by account_id).
+
+    Body: { "batches": [ { "account_id": "...", "option_account_executions_ids": [1, 2, ...] }, ... ] }
+    Returns: { "by_option_id": { "<id>": { "links": [...], "slippage_total": number | null } } }
+    """
+    reader = request.app.state.reader
+    raw_batches = body.get("batches")
+    if not isinstance(raw_batches, list):
+        return {"by_option_id": {}, "error": "batches must be a list"}
+    batches: List[Any] = []
+    for item in raw_batches:
+        if not isinstance(item, dict):
+            continue
+        acc = (item.get("account_id") or "").strip()
+        ids_raw = item.get("option_account_executions_ids")
+        if not acc or not isinstance(ids_raw, list):
+            continue
+        batches.append((acc, ids_raw))
+    return reader.get_option_stock_links_bulk(batches)
+
+
+@router.get("/executions/option-stock-links")
+def get_option_stock_links_route(
+    request: Request,
+    account_id: str = Query(..., description="IB account id"),
+    option_account_executions_id: int = Query(..., description="Unified account_executions_id of the OPT leg"),
+) -> Dict[str, Any]:
+    """List stock legs linked to an option execution; includes slippage_vs_close per row and slippage_total."""
+    reader = request.app.state.reader
+    return reader.get_option_stock_links(account_id.strip(), option_account_executions_id)
+
+
+@router.get("/executions/stock-link-candidates")
+def get_stock_link_candidates_route(
+    request: Request,
+    account_id: str = Query(..., description="IB account id"),
+    option_account_executions_id: int = Query(
+        ...,
+        description="OPT row id (performance book); underlying symbol and date window derived from this row",
+    ),
+    trade_date_from: Optional[str] = Query(None, description="YYYY-MM-DD override (default: option trade_date − 7d)"),
+    trade_date_to: Optional[str] = Query(None, description="YYYY-MM-DD override (default: option trade_date + 7d)"),
+    limit: int = Query(200, ge=1, le=500),
+) -> Dict[str, Any]:
+    """STK executions in performance book matching option underlying; excludes already-linked rows for this option."""
+    reader = request.app.state.reader
+    return reader.get_stock_link_candidates(
+        account_id.strip(),
+        option_account_executions_id,
+        trade_date_from=trade_date_from,
+        trade_date_to=trade_date_to,
+        limit=limit,
+    )
+
+
+@router.post("/executions/option-stock-links")
+def post_option_stock_links(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Link one OPT execution to one STK execution (both must exist on account_executions_final)."""
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return {"ok": False, "error": "PostgreSQL is required.", "link_id": None}
+    ok, link_id, err, warning = insert_option_stock_link(control_via_db, body)
+    return {"ok": ok, "link_id": link_id, "error": err, "warning": warning}
+
+
+@router.delete("/executions/option-stock-links/{link_id}")
+def delete_option_stock_links_route(
+    request: Request,
+    link_id: str,
+    account_id: str = Query(..., description="Must match link row account_id"),
+) -> Dict[str, Any]:
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return {"ok": False, "error": "PostgreSQL is required."}
+    try:
+        lid = int(str(link_id).strip())
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Invalid link id") from None
+    ok, err = delete_option_stock_link(control_via_db, lid, account_id.strip())
+    if ok:
+        return {"ok": True, "message": "Link removed."}
+    return {"ok": False, "error": err or "Delete failed."}
 
 
 @router.get("/executions/freshness")

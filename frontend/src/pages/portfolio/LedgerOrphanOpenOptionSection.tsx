@@ -1,8 +1,8 @@
-import type { Execution, OptExecutionGroup } from '../../types'
+import type { Execution, OptExecutionGroup, OptionStockLinkSummary } from '../../types'
 import ExecSourceBadge from '../../components/ExecSourceBadge'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import { fmtExpiry, fmtTradeDate, fmtTs, fmtUsd, getContractLabelParts } from '../../utils/format'
-import { getOptGroupKey } from './ledgerOptHelpers'
+import { getOptGroupKey, ledgerOptDetailRowPnl } from './ledgerOptHelpers'
 import { LedgerStgInsCell } from './LedgerStgInsCell'
 
 function LinkStrategyIconButton({ onClick, title }: { onClick: () => void; title: string }) {
@@ -25,6 +25,26 @@ function LinkStrategyIconButton({ onClick, title }: { onClick: () => void; title
   )
 }
 
+function LinkStockLegIconButton({ onClick, title }: { onClick: () => void; title: string }) {
+  return (
+    <button
+      type="button"
+      className="btn btn-icon-small"
+      onClick={e => {
+        e.stopPropagation()
+        onClick()
+      }}
+      title={title}
+      aria-label={title}
+    >
+      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M3 18h6v-6H3v6zm9-12h6V3h-6v3zM3 8h6V3H3v5zm9 10h6v-6h-6v6z" />
+        <path d="M14 9h2M9 14v2" />
+      </svg>
+    </button>
+  )
+}
+
 export interface LedgerOrphanOpenOptionSectionProps {
   sortedOpenUnrealized: OptExecutionGroup[]
   expiredUnrealized: OptExecutionGroup[]
@@ -33,8 +53,11 @@ export interface LedgerOrphanOpenOptionSectionProps {
   toggleDetailExpand: (key: string) => void
   onExpiredCloseClick: (groupKey: string) => void
   onEditExecution: (ex: Execution) => void
-  onLinkExecution: (ex: Execution) => void
+  onLinkExecution: (ex: Execution, sameContractTrades?: Execution[]) => void
+  onLinkStockExecution?: (ex: Execution) => void
   onDeleteExecution: (ex: Execution) => void
+  /** When set, detail PnL includes linked stock slippage for that option fill (same as closed section). */
+  optionStockLinkByOptionId?: Record<number, OptionStockLinkSummary>
   detailPlaceholder?: string
 }
 
@@ -47,7 +70,9 @@ export function LedgerOrphanOpenOptionSection({
   onExpiredCloseClick,
   onEditExecution,
   onLinkExecution,
+  onLinkStockExecution,
   onDeleteExecution,
+  optionStockLinkByOptionId,
   detailPlaceholder = 'Click an orphan option row above to load details',
 }: LedgerOrphanOpenOptionSectionProps) {
   return (
@@ -338,6 +363,7 @@ export function LedgerOrphanOpenOptionSection({
           ) : (
             orphanExpandedGroups.flatMap(g =>
               (g.trades ?? []).map((ex, ti) => {
+                const groupTrades = g.trades ?? []
                 const s = (ex.side ?? '').toUpperCase()
                 const sideLabel =
                   s === 'BUY' || s === 'BOT' || s === 'B'
@@ -345,14 +371,10 @@ export function LedgerOrphanOpenOptionSection({
                     : s === 'SELL' || s === 'SLD' || s === 'S'
                       ? 'Sell'
                       : (ex.side ?? '—')
-                const q = Number(ex.quantity) || 0
-                const p = Number(ex.price) || 0
-                const c = Number(ex.commission) || 0
-                const value = q * p * 100 - c
-                const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
-                const isSell = !isBuy
-                const pnl = isBuy ? -value : value
-                const displayPnl = isSell ? Math.abs(pnl) : pnl
+                const { displayPnl, hasCombinedStock } = ledgerOptDetailRowPnl(
+                  ex,
+                  optionStockLinkByOptionId,
+                )
                 const pnlClass =
                   displayPnl < 0
                     ? 'replay-pnl-detail-negative'
@@ -405,7 +427,13 @@ export function LedgerOrphanOpenOptionSection({
                     <td>{ex.quantity != null ? Number(ex.quantity) : '—'}</td>
                     <td>{fmtUsd(ex.price)}</td>
                     <td>{fmtUsd(ex.commission ?? 0)}</td>
-                    <td>
+                    <td
+                      title={
+                        hasCombinedStock
+                          ? 'Option premium cash flow for this fill plus linked stock slippage (vs Flex close)'
+                          : undefined
+                      }
+                    >
                       <span className={pnlClass}>{fmtUsd(displayPnl)}</span>
                     </td>
                     <td>{ex.account_id ?? '—'}</td>
@@ -429,8 +457,14 @@ export function LedgerOrphanOpenOptionSection({
                           </button>
                           <LinkStrategyIconButton
                             title="Assign strategy opportunity and instance"
-                            onClick={() => onLinkExecution(ex)}
+                            onClick={() => onLinkExecution(ex, groupTrades)}
                           />
+                          {onLinkStockExecution ? (
+                            <LinkStockLegIconButton
+                              title="Link underlying stock fills (exercise or assignment)"
+                              onClick={() => onLinkStockExecution(ex)}
+                            />
+                          ) : null}
                           <button
                             type="button"
                             className="btn btn-icon-small btn-icon-danger"

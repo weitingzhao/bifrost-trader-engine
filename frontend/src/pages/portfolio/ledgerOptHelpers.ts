@@ -1,4 +1,4 @@
-import type { Execution, OptExecutionGroup } from '../../types'
+import type { Execution, OptExecutionGroup, OptionStockLinkRow, OptionStockLinkSummary } from '../../types'
 
 /** Stable key for grouping ledger rows by strategy opportunity (null/invalid → unassigned). */
 export function executionStrategyOpportunityKey(ex: Execution): number | 'none' {
@@ -199,6 +199,48 @@ export function executionAbsQuantity(ex: Execution): number {
  * Same option contract group: find another fill on the opposite side with the same |quantity|
  * that already has strategy opportunity + instance (for one-click sync onto unlinked legs).
  */
+/** Sibling fills on the same option contract that already have instance attribution (for Assign strategy shortcut). */
+export interface PeerInstancePick {
+  strategy_opportunity_id: number
+  strategy_instance_id: number
+  label: string
+}
+
+/**
+ * Unique (opportunity, instance) pairs from other executions in the same contract group — excludes `currentAccountExecutionsId`.
+ */
+export function collectPeerInstancePicks(
+  sameContractTrades: Execution[],
+  currentAccountExecutionsId: number,
+): PeerInstancePick[] {
+  const seen = new Set<string>()
+  const out: PeerInstancePick[] = []
+  for (const peer of sameContractTrades) {
+    const pid = peer.account_executions_id
+    if (pid != null && pid === currentAccountExecutionsId) continue
+    const iids = executionStrategyInstanceIds(peer)
+    for (const iid of iids) {
+      const sliced = sliceExecutionForInstanceOptView(peer, iid)
+      const oppRaw = sliced?.strategy_opportunity_id ?? peer.strategy_opportunity_id
+      if (oppRaw == null || !Number.isFinite(Number(oppRaw))) continue
+      const oppId = Number(oppRaw)
+      const key = `${oppId}::${iid}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      const oppName =
+        (sliced?.strategy_opportunity_name?.trim() ||
+          peer.strategy_opportunity_name?.trim() ||
+          '') || `Opportunity #${oppId}`
+      const instLab =
+        (sliced?.strategy_instance_label?.trim() || peer.strategy_instance_label?.trim() || '') || ''
+      const label = instLab ? `${oppName} · ${instLab} (#${iid})` : `${oppName} · #${iid}`
+      out.push({ strategy_opportunity_id: oppId, strategy_instance_id: iid, label })
+    }
+  }
+  out.sort((a, b) => a.label.localeCompare(b.label))
+  return out
+}
+
 export function findOppositeLegAttributionSource(trades: Execution[], ex: Execution): Execution | null {
   const exId = ex.account_executions_id
   const exBuy = isExecutionBuySide(ex)
@@ -228,4 +270,186 @@ export function findOppositeLegAttributionSource(trades: Execution[], ex: Execut
     return t
   }
   return null
+}
+
+/** Sum of stock slippage vs close (signed qty × (price − close)) for one OPT execution id. */
+export function stockSlippageTotalForOptionExecution(
+  optionAccountExecutionsId: number | null | undefined,
+  linkByOptionId: Record<number, OptionStockLinkSummary> | undefined,
+): number {
+  if (optionAccountExecutionsId == null || !linkByOptionId) return 0
+  const t = linkByOptionId[optionAccountExecutionsId]?.slippage_total
+  return t != null && Number.isFinite(t) ? t : 0
+}
+
+/**
+ * Options detail table (per fill): premium cash flow for this row plus linked-stock slippage when
+ * this option execution has stock links (or non-zero slippage from the bulk query).
+ * When not combined, matches legacy display (non-buy uses abs on the option-only cash flow).
+ */
+export function ledgerOptDetailRowPnl(
+  ex: Execution,
+  linkByOptionId: Record<number, OptionStockLinkSummary> | undefined,
+): { displayPnl: number; hasCombinedStock: boolean; stockAdj: number } {
+  const s = (ex.side ?? '').toUpperCase()
+  const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
+  const isSell = !isBuy
+  const q = Number(ex.quantity) || 0
+  const p = Number(ex.price) || 0
+  const c = Number(ex.commission) || 0
+  const value = q * p * 100 - c
+  const optionEconomic = isBuy ? -value : value
+  const oid = ex.account_executions_id
+  const stockAdj = stockSlippageTotalForOptionExecution(oid, linkByOptionId)
+  const linkCount =
+    oid != null && linkByOptionId ? (linkByOptionId[oid]?.links?.length ?? 0) : 0
+  const hasCombinedStock =
+    oid != null && linkByOptionId != null && (linkCount > 0 || stockAdj !== 0)
+  let displayPnl: number
+  if (hasCombinedStock) {
+    displayPnl = optionEconomic + stockAdj
+  } else {
+    const pnl = optionEconomic
+    displayPnl = isSell ? Math.abs(pnl) : pnl
+  }
+  return { displayPnl, hasCombinedStock, stockAdj }
+}
+
+/**
+ * Same as {@link ledgerOptDetailRowPnl} but scales option cash flow and stock slippage by `ratio` (e.g. matched qty / full |qty| on Performance realized execution rows).
+ */
+export function scaledLedgerOptDetailRowPnl(
+  ex: Execution,
+  ratio: number,
+  linkByOptionId: Record<number, OptionStockLinkSummary> | undefined,
+): { displayPnl: number; hasCombinedStock: boolean } {
+  if (ratio <= 0 || !Number.isFinite(ratio)) return { displayPnl: 0, hasCombinedStock: false }
+  const s = (ex.side ?? '').toUpperCase()
+  const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
+  const isSell = !isBuy
+  const q = Number(ex.quantity) || 0
+  const p = Number(ex.price) || 0
+  const c = Number(ex.commission) || 0
+  const value = q * p * 100 - c
+  const optionEconomic = isBuy ? -value : value
+  const oid = ex.account_executions_id
+  const slipFull = stockSlippageTotalForOptionExecution(oid, linkByOptionId)
+  const linkCount = oid != null && linkByOptionId ? (linkByOptionId[oid]?.links?.length ?? 0) : 0
+  const hasCombinedStock =
+    oid != null && linkByOptionId != null && (linkCount > 0 || slipFull !== 0)
+  if (hasCombinedStock) {
+    return { displayPnl: optionEconomic * ratio + slipFull * ratio, hasCombinedStock: true }
+  }
+  const pnl = optionEconomic * ratio
+  const displayPnl = isSell ? Math.abs(pnl) : pnl
+  return { displayPnl, hasCombinedStock: false }
+}
+
+/**
+ * Performance calendar day-detail: final Realized PnL = FIFO **Match** option total (`pairNetSum`, same as Match rows)
+ * plus prorated linked-stock slippage on each fill’s matched quantity (Trade Ledger slippage layer).
+ * Keeps option economics anchored to FIFO pairs; stock is additive. If no fill has matched qty (e.g. synthetic pairs
+ * without leg ids), returns `pairNetSum` and stock add is zero.
+ */
+export function realizedPnlFifoMatchPlusStock(
+  pairNetSum: number,
+  sortedExecs: Execution[],
+  matchedQtyById: Map<number, number>,
+  linkByOptionId: Record<number, OptionStockLinkSummary> | undefined,
+): number {
+  let stockAdj = 0
+  let anyMatched = false
+  for (const e of sortedExecs) {
+    const id = e.account_executions_id
+    if (id == null) continue
+    const eq = Math.abs(Number(e.quantity) || 0)
+    if (eq <= 1e-9) continue
+    const mq = matchedQtyById.get(id) ?? 0
+    if (mq <= 1e-9) continue
+    anyMatched = true
+    const r = mq / eq
+    stockAdj += stockSlippageTotalForOptionExecution(id, linkByOptionId) * r
+  }
+  if (!anyMatched) return pairNetSum
+  return pairNetSum + stockAdj
+}
+
+/**
+ * Closed-option group PnL: premium-based realized_pnl plus stock-leg slippage vs Flex close
+ * for each distinct option fill in the group (one sum per account_executions_id).
+ */
+export function adjustedRealizedPnlForOptGroup(
+  g: OptExecutionGroup,
+  linkByOptionId: Record<number, OptionStockLinkSummary> | undefined,
+): number {
+  const base = Number(g.realized_pnl) || 0
+  if (!linkByOptionId) return base
+  let adj = 0
+  const seen = new Set<number>()
+  for (const ex of g.trades ?? []) {
+    const oid = ex.account_executions_id
+    if (oid == null || seen.has(oid)) continue
+    seen.add(oid)
+    adj += stockSlippageTotalForOptionExecution(oid, linkByOptionId)
+  }
+  return base + adj
+}
+
+export function collectLinkIdsForOptGroup(
+  g: OptExecutionGroup,
+  linkByOptionId: Record<number, OptionStockLinkSummary> | undefined,
+): number[] {
+  const ids = new Set<number>()
+  if (!linkByOptionId) return []
+  const seen = new Set<number>()
+  for (const ex of g.trades ?? []) {
+    const oid = ex.account_executions_id
+    if (oid == null || seen.has(oid)) continue
+    seen.add(oid)
+    for (const row of linkByOptionId[oid]?.links ?? []) {
+      if (row.link_id != null && Number.isFinite(Number(row.link_id))) ids.add(Number(row.link_id))
+    }
+  }
+  return Array.from(ids).sort((a, b) => a - b)
+}
+
+/** Deduped link rows for readonly modal (same link_id appears once). */
+/** Per-option-fill linked stock rows (for Details Contract column). */
+export function getOptionStockLinkDetailForExecution(
+  ex: Execution,
+  linkByOptionId: Record<number, OptionStockLinkSummary> | undefined,
+): { linkIds: number[]; links: OptionStockLinkRow[]; slippageTotal: number | null } {
+  const oid = ex.account_executions_id
+  if (oid == null || !linkByOptionId) return { linkIds: [], links: [], slippageTotal: null }
+  const s = linkByOptionId[oid]
+  const links = s?.links ?? []
+  if (links.length === 0) return { linkIds: [], links: [], slippageTotal: null }
+  const linkIds = links
+    .map(r => r.link_id)
+    .filter((id): id is number => id != null && Number.isFinite(Number(id)))
+    .sort((a, b) => a - b)
+  return {
+    linkIds,
+    links,
+    slippageTotal: s?.slippage_total ?? null,
+  }
+}
+
+export function flattenLinksForOptGroup(
+  g: OptExecutionGroup,
+  linkByOptionId: Record<number, OptionStockLinkSummary> | undefined,
+): OptionStockLinkRow[] {
+  const byId = new Map<number, OptionStockLinkRow>()
+  if (!linkByOptionId) return []
+  const seen = new Set<number>()
+  for (const ex of g.trades ?? []) {
+    const oid = ex.account_executions_id
+    if (oid == null || seen.has(oid)) continue
+    seen.add(oid)
+    for (const row of linkByOptionId[oid]?.links ?? []) {
+      const lid = row.link_id
+      if (lid != null && !byId.has(lid)) byId.set(lid, row)
+    }
+  }
+  return Array.from(byId.values()).sort((a, b) => (a.link_id ?? 0) - (b.link_id ?? 0))
 }

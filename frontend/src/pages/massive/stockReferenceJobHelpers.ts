@@ -53,9 +53,9 @@ export const MAX_TICKER_REF_SEARCH_LIMIT = 100
 
 export const DEFAULT_TICKER_REF_SEARCH_LIMIT = 20
 
-/** Page size for ``GET .../reference/tickers/missing-overview`` (backend ``le=2000``). */
+/** Page size for missing-overview / missing-related / filled-related lists (backend ``le=2000``). */
 export const MAX_TICKER_REF_MISSING_LIMIT = 2000
-export const DEFAULT_TICKER_REF_MISSING_LIMIT = 500
+export const DEFAULT_TICKER_REF_MISSING_LIMIT = 2000
 
 export function validateMissingOverviewLimit(
   n: number,
@@ -113,6 +113,9 @@ export function validateSingleTickerSymbol(
 
 export type OverviewEnqueueMode = 'missing' | 'stale' | 'symbols' | 'all'
 
+/** Same scope modes as Overview; used for ``ticker_reference_related`` enqueue payload. */
+export type RelatedEnqueueMode = OverviewEnqueueMode
+
 /** Subtitles for PostgreSQL column (English UI). */
 export const REF_CATALOG_PG_LABELS = {
   business: 'Business tables',
@@ -167,8 +170,9 @@ export const REF_TICKER_JOB_ROWS: ReadonlyArray<{
   {
     kind: 'ticker_reference_related',
     queueNote: 'massive_stocks',
-    hint: 'mode: symbols — needs tickers.id; replaces related rows per symbol.',
-    needsSymbols: true,
+    hint:
+      'Payload mode: missing (no related rows), stale (missing or older than stale_hours by MAX(fetched_at)), symbols (list), or all tickers.',
+    needsSymbols: false,
     restEndpointShort: 'GET v1/related/{t}',
     tickersSubTab: 'related_tickers',
     businessTables: ['ticker_related_tickers'],
