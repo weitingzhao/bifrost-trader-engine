@@ -212,6 +212,30 @@ function accountTotalCashBuyingPower(acc: IbAccountSnapshot | undefined): {
   return { cash: num('TotalCashValue'), bp: num('BuyingPower') }
 }
 
+function parseIbSummaryNumber(acc: IbAccountSnapshot | undefined, key: string): number | null {
+  const s = acc?.summary
+  if (!s || typeof s !== 'object') return null
+  const rec = s as Record<string, unknown>
+  const v = rec[key]
+  if (v == null || v === '') return null
+  const n = Number(String(v).replace(/,/g, '').replace(/\s/g, ''))
+  return Number.isFinite(n) ? n : null
+}
+
+/** Sum of stock position market value (qty × last) for account filter; non-OPT rows only. */
+function sumStockMarketValueForAccountFilter(rows: LivePositionRow[], accountFilter: 'all' | string): number {
+  let sum = 0
+  for (const p of rows) {
+    const acc = (p.account_id ?? '').trim()
+    if (accountFilter !== 'all' && acc !== accountFilter) continue
+    const q = Number(p.position)
+    const px = p.price != null ? Number(p.price) : NaN
+    if (!Number.isFinite(q) || !Number.isFinite(px)) continue
+    sum += q * px
+  }
+  return sum
+}
+
 /** Surplus / gap in shares: 3 decimal places. */
 function fmtSurplusShares(n: number): string {
   if (!Number.isFinite(n)) return '—'
@@ -333,7 +357,15 @@ import { ExecutionFormModal } from './portfolio/ExecutionFormModal'
 import type { LinkExecutionContext } from './portfolio/LinkExecutionRecordModal'
 import { LinkExecutionRecordModal } from './portfolio/LinkExecutionRecordModal'
 import { QuickCloseModal } from './portfolio/QuickCloseModal'
-import type { InstanceAllGroup, InstancePositionGroup, InstanceStockCoverage, LivePositionRow, OpenOptionPosition, PortfolioView, StockCoverageItem } from './portfolio/types'
+import type {
+  InstanceAllGroup,
+  InstancePositionGroup,
+  InstanceStockCoverage,
+  LivePositionRow,
+  OpenOptionPosition,
+  PortfolioView,
+  StockCoverageItem,
+} from './portfolio/types'
 import { OFF_TRACK_ACCOUNT_ID, useExecutions } from './portfolio/useExecutions'
 
 /** Stock metrics for exactly one (symbol, account); never mixes other accounts. */
@@ -1701,16 +1733,22 @@ export function PositionsPage({
     return out
   }, [stockCoverageItems])
 
-  const optionUnderlyingPoolMarketTotal = useMemo(
-    () =>
-      optionUnderlyingPoolItems.reduce((s, ci) => {
-        const h = ci.held_shares
-        const p = ci.live_last_price
-        if (p == null || !Number.isFinite(p) || !Number.isFinite(h)) return s
-        return s + h * p
-      }, 0),
-    [optionUnderlyingPoolItems],
-  )
+  const [stockCoverageSectionAccount, setStockCoverageSectionAccount] = useState<string>('all')
+
+  const optionUnderlyingPoolMarketTotal = useMemo(() => {
+    const rows =
+      stockCoverageSectionAccount === 'all'
+        ? optionUnderlyingPoolItems
+        : optionUnderlyingPoolItems.filter(
+            ci => (ci.account_id ?? '').trim() === stockCoverageSectionAccount,
+          )
+    return rows.reduce((s, ci) => {
+      const h = ci.held_shares
+      const p = ci.live_last_price
+      if (p == null || !Number.isFinite(p) || !Number.isFinite(h)) return s
+      return s + h * p
+    }, 0)
+  }, [optionUnderlyingPoolItems, stockCoverageSectionAccount])
 
   const streamHostAccountId = (status?.config?.ib_client?.account?.event_host ?? '').toString().trim()
   const streamSecondaryAccountId = (status?.config?.ib_client?.account?.event_secondary ?? '').toString().trim()
@@ -1758,6 +1796,13 @@ export function PositionsPage({
     [optionUnderlyingPoolItems, underlyingPoolSort],
   )
 
+  const sortedOptionUnderlyingPoolItemsForSection = useMemo(() => {
+    if (stockCoverageSectionAccount === 'all') return sortedOptionUnderlyingPoolItems
+    return sortedOptionUnderlyingPoolItems.filter(
+      ci => (ci.account_id ?? '').trim() === stockCoverageSectionAccount,
+    )
+  }, [sortedOptionUnderlyingPoolItems, stockCoverageSectionAccount])
+
   const onUnderlyingPoolSortClick = useCallback((col: CoveragePoolSortCol) => {
     setUnderlyingPoolSort(prev =>
       prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' },
@@ -1775,16 +1820,25 @@ export function PositionsPage({
     [watchlistOptionableCoverageItems, backingPoolSort],
   )
 
+  const sortedWatchlistOptionableCoverageItemsForSection = useMemo(() => {
+    if (stockCoverageSectionAccount === 'all') return sortedWatchlistOptionableCoverageItems
+    return sortedWatchlistOptionableCoverageItems.filter(
+      ci => (ci.account_id ?? '').trim() === stockCoverageSectionAccount,
+    )
+  }, [sortedWatchlistOptionableCoverageItems, stockCoverageSectionAccount])
+
   const onBackingPoolSortClick = useCallback((col: CoveragePoolSortCol) => {
     setBackingPoolSort(prev =>
       prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' },
     )
   }, [])
 
-  const [backingPoolChartAccount, setBackingPoolChartAccount] = useState<string>('all')
+  /** When false (default), donut compares stock vs net cash only; buying power still listed below. */
+  const [coverageAssetPieIncludeBp, setCoverageAssetPieIncludeBp] = useState(false)
 
   const backingPoolChartData = useMemo(() => {
-    const matchAcct = (acct: string) => backingPoolChartAccount === 'all' || acct === backingPoolChartAccount
+    const matchAcct = (acct: string) =>
+      stockCoverageSectionAccount === 'all' || acct === stockCoverageSectionAccount
 
     const totalStockMV = stockCoverageItems
       .filter(ci => matchAcct(ci.account_id))
@@ -1805,7 +1859,75 @@ export function PositionsPage({
 
     const pct = totalStockMV > 0 ? Math.min(1, Math.max(0, backingMV / totalStockMV)) : 0
     return { backingMV, totalStockMV, otherMV: totalStockMV - backingMV, pct }
-  }, [stockCoverageItems, watchlistOptionableCoverageItems, backingPoolChartAccount])
+  }, [stockCoverageItems, watchlistOptionableCoverageItems, stockCoverageSectionAccount])
+
+  const coverageAssetPieData = useMemo(() => {
+    const accounts = status?.portfolio?.accounts ?? []
+    const snap = (id: string) =>
+      id ? accounts.find(a => (a.account_id ?? '').trim() === id) : undefined
+
+    const aggregateForAccounts = (ids: string[]) => {
+      let cash: number | null = null
+      let bp: number | null = null
+      for (const id of ids) {
+        const { cash: c, bp: b } = accountTotalCashBuyingPower(snap(id))
+        if (c != null && Number.isFinite(c)) cash = (cash ?? 0) + c
+        if (b != null && Number.isFinite(b)) bp = (bp ?? 0) + b
+      }
+      return { cash, bp }
+    }
+
+    let stockMV = 0
+    let cash: number | null = null
+    let bp: number | null = null
+
+    if (stockCoverageSectionAccount === 'all') {
+      stockMV = sumStockMarketValueForAccountFilter(liveStockPositions, 'all')
+      const ids = new Set<string>()
+      for (const a of accounts) {
+        const id = (a.account_id ?? '').trim()
+        if (id) ids.add(id)
+      }
+      if (ids.size > 0) {
+        const ag = aggregateForAccounts([...ids])
+        cash = ag.cash
+        bp = ag.bp
+      }
+    } else {
+      stockMV = sumStockMarketValueForAccountFilter(liveStockPositions, stockCoverageSectionAccount)
+      const ag = aggregateForAccounts([stockCoverageSectionAccount])
+      cash = ag.cash
+      bp = ag.bp
+    }
+
+    const wStock = Math.max(0, stockMV)
+    const wCash = cash != null && Number.isFinite(cash) ? Math.max(0, cash) : 0
+    const wBp = bp != null && Number.isFinite(bp) ? Math.max(0, bp) : 0
+    const denom = coverageAssetPieIncludeBp ? wStock + wCash + wBp : wStock + wCash
+    const pStock = denom > 0 ? wStock / denom : 0
+    const pCash = denom > 0 ? wCash / denom : 0
+    const pBp = coverageAssetPieIncludeBp && denom > 0 ? wBp / denom : 0
+
+    const netLiq =
+      stockCoverageSectionAccount === 'all'
+        ? accounts.reduce((s, a) => {
+            const n = parseIbSummaryNumber(a, 'NetLiquidation')
+            return s + (n != null && Number.isFinite(n) ? n : 0)
+          }, 0)
+        : parseIbSummaryNumber(snap(stockCoverageSectionAccount), 'NetLiquidation')
+
+    return {
+      stockMV,
+      cash,
+      bp,
+      denom,
+      pStock,
+      pCash,
+      pBp,
+      includeBpInChart: coverageAssetPieIncludeBp,
+      netLiq: netLiq != null && Number.isFinite(netLiq) && netLiq > 0 ? netLiq : null,
+    }
+  }, [status?.portfolio?.accounts, liveStockPositions, stockCoverageSectionAccount, coverageAssetPieIncludeBp])
 
   const independentStocks = useMemo(
     () => liveStockPositions.filter(s => {
@@ -2953,10 +3075,318 @@ export function PositionsPage({
                   )}
                   {sortedInstanceAllGroups.length > 0 ? (
                   <div className="coverage-summary-section">
-                      <h6 className="replay-sub instance-sheet-sub-heading coverage-summary-heading-row">
-                        Stock Coverage Summary
-                        <InfoTooltip text="Optionable symbols only. Positions without tradeable options (Independent Holdings below) are not listed here. Underlying pool = stock left after all current opportunity hedges." />
-                      </h6>
+                      <div className="coverage-summary-intro">
+                        <h6 className="replay-sub instance-sheet-sub-heading coverage-summary-heading-row">
+                          Coverage summary
+                          <InfoTooltip text="Asset mix and Backing pool coverage charts share the account filter in the charts block. Position pool tables below use the same filter. Optionable symbols only; Independent Holdings are not listed in pools. Underlying pool = stock left after opportunity hedges." />
+                        </h6>
+                      </div>
+                      <div className="coverage-charts-section">
+                        <div className="coverage-charts-toolbar">
+                          <span className="coverage-charts-toolbar-label">Account</span>
+                          <div
+                            className="coverage-section-account-filter"
+                            role="group"
+                            aria-label="Account filter for asset mix and backing pool coverage"
+                          >
+                            {[
+                              { id: 'all', label: 'All' },
+                              ...(streamHostAccountId ? [{ id: streamHostAccountId, label: streamHostAccountId }] : []),
+                              ...(streamSecondaryAccountId && streamSecondaryAccountId !== streamHostAccountId
+                                ? [{ id: streamSecondaryAccountId, label: streamSecondaryAccountId }]
+                                : []),
+                            ].map(opt => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                className={`coverage-asset-pie-acct-btn${stockCoverageSectionAccount === opt.id ? ' active' : ''}`}
+                                onClick={() => setStockCoverageSectionAccount(opt.id)}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="coverage-charts-grid">
+                      {(() => {
+                        const { stockMV, cash, bp, denom, pStock, pCash, pBp, netLiq, includeBpInChart } =
+                          coverageAssetPieData
+                        const cx = 66
+                        const cy = 66
+                        const rO = 56
+                        const rI = 36
+                        const rMid = (rO + rI) / 2
+                        const ringStroke = rO - rI
+                        const circ = 2 * Math.PI * rMid
+                        let ringOff = 0
+                        const ringSeg = (frac: number, className: string, key: string) => {
+                          const len = Math.max(0, frac) * circ
+                          if (len < 0.5) return null
+                          const el = (
+                            <circle
+                              key={key}
+                              cx={cx}
+                              cy={cy}
+                              r={rMid}
+                              fill="none"
+                              className={className}
+                              strokeWidth={ringStroke}
+                              strokeLinecap="butt"
+                              strokeDasharray={`${len} ${circ}`}
+                              strokeDashoffset={-ringOff}
+                              transform={`rotate(-90 ${cx} ${cy})`}
+                            />
+                          )
+                          ringOff += len
+                          return el
+                        }
+                        const centerMain =
+                          netLiq != null
+                            ? fmtUsd(netLiq)
+                            : denom > 0
+                              ? includeBpInChart
+                                ? `${(pStock * 100).toFixed(0)} / ${(pCash * 100).toFixed(0)} / ${(pBp * 100).toFixed(0)}`
+                                : `${(pStock * 100).toFixed(1)} · ${(pCash * 100).toFixed(1)}`
+                              : '—'
+                        const centerSub =
+                          netLiq != null
+                            ? 'Net liq.'
+                            : denom > 0
+                              ? '% of sum'
+                              : ''
+                        return (
+                          <div className="coverage-charts-cell coverage-asset-pie-section">
+                            <div className="coverage-asset-pie-header">
+                              <span className="coverage-asset-pie-title">Asset mix</span>
+                              <InfoTooltip text="Stock = sum of market value (qty × last) for non-option positions. Net cash = IB TotalCashValue. Buying power = IB BuyingPower. By default the ring compares stock vs net cash only; turn Include on to add buying power to the same denominator. Center shows net liquidation when available, otherwise the percentage split. Uses the account filter for this charts section." />
+                            </div>
+                            <div className="coverage-asset-pie-body">
+                              <div className="coverage-asset-pie-chart-block">
+                                <svg
+                                  width={132}
+                                  height={132}
+                                  viewBox="0 0 132 132"
+                                  className="coverage-asset-pie-svg"
+                                  role="img"
+                                  aria-label={
+                                    includeBpInChart
+                                      ? 'Ring chart: stock, net cash, and buying power as shares of their sum'
+                                      : 'Ring chart: stock and net cash as shares of stock plus cash'
+                                  }
+                                >
+                                  <circle
+                                    cx={cx}
+                                    cy={cy}
+                                    r={rMid}
+                                    fill="none"
+                                    className="coverage-asset-pie-ring-track"
+                                    strokeWidth={ringStroke}
+                                  />
+                                  {denom > 0 ? (
+                                    <>
+                                      {ringSeg(pStock, 'coverage-asset-pie-ring-seg-stock', 'seg-stock')}
+                                      {ringSeg(pCash, 'coverage-asset-pie-ring-seg-cash', 'seg-cash')}
+                                      {includeBpInChart
+                                        ? ringSeg(pBp, 'coverage-asset-pie-ring-seg-bp', 'seg-bp')
+                                        : null}
+                                    </>
+                                  ) : null}
+                                  <text
+                                    x={cx}
+                                    y={cy - 4}
+                                    className={`coverage-asset-pie-center-val${
+                                      netLiq != null
+                                        ? ' coverage-asset-pie-center-val--netliq'
+                                        : includeBpInChart
+                                          ? ' coverage-asset-pie-center-val--triplet'
+                                          : ''
+                                    }`}
+                                    textAnchor="middle"
+                                    dominantBaseline="auto"
+                                  >
+                                    {centerMain}
+                                  </text>
+                                  <text
+                                    x={cx}
+                                    y={cy + 11}
+                                    className="coverage-asset-pie-center-sub"
+                                    textAnchor="middle"
+                                    dominantBaseline="auto"
+                                  >
+                                    {centerSub}
+                                  </text>
+                                </svg>
+                                <div className="coverage-asset-pie-bp-side">
+                                  <span className="coverage-asset-pie-bp-label">Buying power in chart</span>
+                                  <div
+                                    className="coverage-asset-pie-bubble-switch"
+                                    role="group"
+                                    aria-label="Include buying power in ring denominator"
+                                  >
+                                    <button
+                                      type="button"
+                                      className={`coverage-asset-pie-bubble-btn${!coverageAssetPieIncludeBp ? ' active' : ''}`}
+                                      aria-pressed={!coverageAssetPieIncludeBp}
+                                      onClick={() => setCoverageAssetPieIncludeBp(false)}
+                                    >
+                                      Exclude
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={`coverage-asset-pie-bubble-btn${coverageAssetPieIncludeBp ? ' active' : ''}`}
+                                      aria-pressed={coverageAssetPieIncludeBp}
+                                      onClick={() => setCoverageAssetPieIncludeBp(true)}
+                                    >
+                                      Include
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="coverage-asset-pie-legend">
+                                <div className="coverage-asset-pie-legend-item">
+                                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--stock" />
+                                  <span className="coverage-asset-pie-legend-label">Stock</span>
+                                  <span className="coverage-asset-pie-legend-pct">
+                                    {denom > 0 ? `${(pStock * 100).toFixed(1)}%` : '—'}
+                                  </span>
+                                  <span className="coverage-asset-pie-legend-value">{fmtUsd(stockMV)}</span>
+                                </div>
+                                <div className="coverage-asset-pie-legend-item">
+                                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--cash" />
+                                  <span className="coverage-asset-pie-legend-label">Net cash</span>
+                                  <span className="coverage-asset-pie-legend-pct">
+                                    {denom > 0 ? `${(pCash * 100).toFixed(1)}%` : '—'}
+                                  </span>
+                                  <span className="coverage-asset-pie-legend-value">{fmtUsd(cash)}</span>
+                                </div>
+                                <div
+                                  className={`coverage-asset-pie-legend-item${!includeBpInChart ? ' coverage-asset-pie-legend-item--bp-excluded' : ''}`}
+                                  title={
+                                    !includeBpInChart
+                                      ? 'Buying power is listed for reference; ring uses stock + net cash only.'
+                                      : undefined
+                                  }
+                                >
+                                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--bp" />
+                                  <span className="coverage-asset-pie-legend-label">Buying power</span>
+                                  <span className="coverage-asset-pie-legend-pct">
+                                    {includeBpInChart && denom > 0 ? `${(pBp * 100).toFixed(1)}%` : '—'}
+                                  </span>
+                                  <span className="coverage-asset-pie-legend-value">{fmtUsd(bp)}</span>
+                                </div>
+                                {denom > 0 && (
+                                  <div className="coverage-asset-pie-legend-divider" aria-hidden />
+                                )}
+                                {denom > 0 && (
+                                  <div className="coverage-asset-pie-legend-item coverage-asset-pie-legend-sum">
+                                    <span className="coverage-asset-pie-legend-label">Sum (chart basis)</span>
+                                    <span className="coverage-asset-pie-legend-value">{fmtUsd(denom)}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })()}
+                      {(() => {
+                        const { backingMV, totalStockMV, otherMV, pct } = backingPoolChartData
+                        const cx = 66
+                        const cy = 66
+                        const rO = 56
+                        const rI = 36
+                        const pctLabel = (pct * 100).toFixed(1) + '%'
+                        const toXY = (frac: number, r: number) => {
+                          const a = frac * 2 * Math.PI - Math.PI / 2
+                          return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) }
+                        }
+                        const buildArc = (startFrac: number, endFrac: number, r1: number, r2: number) => {
+                          if (endFrac - startFrac >= 0.9999) {
+                            return `M ${cx} ${cy - r1} A ${r1} ${r1} 0 1 1 ${cx - 0.001} ${cy - r1} Z`
+                          }
+                          if (endFrac - startFrac <= 0.0001) return ''
+                          const s1 = toXY(startFrac, r1)
+                          const e1 = toXY(endFrac, r1)
+                          const s2 = toXY(endFrac, r2)
+                          const e2 = toXY(startFrac, r2)
+                          const lg = endFrac - startFrac > 0.5 ? 1 : 0
+                          return [
+                            `M ${s1.x.toFixed(3)} ${s1.y.toFixed(3)}`,
+                            `A ${r1} ${r1} 0 ${lg} 1 ${e1.x.toFixed(3)} ${e1.y.toFixed(3)}`,
+                            `L ${s2.x.toFixed(3)} ${s2.y.toFixed(3)}`,
+                            `A ${r2} ${r2} 0 ${lg} 0 ${e2.x.toFixed(3)} ${e2.y.toFixed(3)}`,
+                            'Z',
+                          ].join(' ')
+                        }
+                        const backingArc = buildArc(0, pct, rO, rI)
+                        const otherArc = buildArc(pct, 1, rO, rI)
+                        return (
+                          <div className="coverage-charts-cell backing-pool-chart-section backing-pool-chart-section--in-charts-grid">
+                            <div className="backing-pool-chart-header">
+                              <span className="backing-pool-chart-title">Backing Pool Coverage</span>
+                              <InfoTooltip text="Backing pool market value vs total stock coverage (optionable rows) for the account selected in this charts section." />
+                            </div>
+                            <div className="backing-pool-chart-body">
+                              <svg
+                                width={132}
+                                height={132}
+                                viewBox="0 0 132 132"
+                                className="backing-pool-chart-svg"
+                                role="img"
+                                aria-label={`Backing pool ${pctLabel} of total stock coverage`}
+                              >
+                                {totalStockMV > 0 ? (
+                                  <>
+                                    {otherArc ? <path d={otherArc} className="backing-pool-arc-other" /> : null}
+                                    {backingArc ? <path d={backingArc} className="backing-pool-arc-backing" /> : null}
+                                  </>
+                                ) : (
+                                  <circle cx={cx} cy={cy} r={rO} className="backing-pool-arc-other" />
+                                )}
+                                <circle cx={cx} cy={cy} r={rI} className="backing-pool-arc-hole" />
+                                <text
+                                  x={cx}
+                                  y={cy - 7}
+                                  className="backing-pool-chart-pct-text"
+                                  textAnchor="middle"
+                                  dominantBaseline="auto"
+                                >
+                                  {totalStockMV > 0 ? pctLabel : '—'}
+                                </text>
+                                <text
+                                  x={cx}
+                                  y={cy + 10}
+                                  className="backing-pool-chart-sub-text"
+                                  textAnchor="middle"
+                                  dominantBaseline="auto"
+                                >
+                                  of total
+                                </text>
+                              </svg>
+                              <div className="backing-pool-chart-legend">
+                                <div className="backing-pool-chart-legend-item">
+                                  <span className="backing-pool-chart-legend-dot backing-pool-chart-legend-dot--backing" />
+                                  <span className="backing-pool-chart-legend-label">Backing Pool</span>
+                                  <span className="backing-pool-chart-legend-value">{fmtUsd(backingMV)}</span>
+                                </div>
+                                <div className="backing-pool-chart-legend-item">
+                                  <span className="backing-pool-chart-legend-dot backing-pool-chart-legend-dot--other" />
+                                  <span className="backing-pool-chart-legend-label">Other stock</span>
+                                  <span className="backing-pool-chart-legend-value">{fmtUsd(otherMV)}</span>
+                                </div>
+                                <div className="backing-pool-chart-legend-divider" />
+                                <div className="backing-pool-chart-legend-item">
+                                  <span className="backing-pool-chart-legend-label backing-pool-chart-legend-total">
+                                    Total stock
+                                  </span>
+                                  <span className="backing-pool-chart-legend-value">{fmtUsd(totalStockMV)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })()}
+                        </div>
+                      </div>
                       <div className="coverage-pools-row">
                           <div className="coverage-pool-panel">
                             <p className="section-hint" style={{ margin: '0 0 0.35rem' }}>
@@ -3023,7 +3453,7 @@ export function PositionsPage({
                                 )}
                               </span>
                             </p>
-                            {renderStockCoverageSummaryTable(sortedOptionUnderlyingPoolItems, 'underlying-pool', {
+                            {renderStockCoverageSummaryTable(sortedOptionUnderlyingPoolItemsForSection, 'underlying-pool', {
                               underlyingPoolSlim: true,
                               underlyingPoolSort: {
                                 column: underlyingPoolSort.col,
@@ -3040,7 +3470,7 @@ export function PositionsPage({
                             <p className="section-hint" style={{ margin: '0 0 0.45rem', fontSize: '0.82em' }}>
                               Watchlist-scoped opportunities: Required = hedge from those strategies only.
                             </p>
-                            {renderStockCoverageSummaryTable(sortedWatchlistOptionableCoverageItems, 'watchlist-optionable', {
+                            {renderStockCoverageSummaryTable(sortedWatchlistOptionableCoverageItemsForSection, 'watchlist-optionable', {
                               backingPoolSlim: true,
                               underlyingPoolSort: {
                                 column: backingPoolSort.col,
@@ -3048,101 +3478,6 @@ export function PositionsPage({
                                 onColumnClick: onBackingPoolSortClick,
                               },
                             })}
-                            {/* Backing Pool vs total stock coverage donut chart */}
-                            {(() => {
-                              const { backingMV, totalStockMV, otherMV, pct } = backingPoolChartData
-                              const cx = 66, cy = 66, rO = 56, rI = 36
-                              const pctLabel = (pct * 100).toFixed(1) + '%'
-                              const toXY = (frac: number, r: number) => {
-                                const a = frac * 2 * Math.PI - Math.PI / 2
-                                return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) }
-                              }
-                              const buildArc = (startFrac: number, endFrac: number, r1: number, r2: number) => {
-                                if (endFrac - startFrac >= 0.9999) {
-                                  return `M ${cx} ${cy - r1} A ${r1} ${r1} 0 1 1 ${cx - 0.001} ${cy - r1} Z`
-                                }
-                                if (endFrac - startFrac <= 0.0001) return ''
-                                const s1 = toXY(startFrac, r1), e1 = toXY(endFrac, r1)
-                                const s2 = toXY(endFrac, r2), e2 = toXY(startFrac, r2)
-                                const lg = endFrac - startFrac > 0.5 ? 1 : 0
-                                return [
-                                  `M ${s1.x.toFixed(3)} ${s1.y.toFixed(3)}`,
-                                  `A ${r1} ${r1} 0 ${lg} 1 ${e1.x.toFixed(3)} ${e1.y.toFixed(3)}`,
-                                  `L ${s2.x.toFixed(3)} ${s2.y.toFixed(3)}`,
-                                  `A ${r2} ${r2} 0 ${lg} 0 ${e2.x.toFixed(3)} ${e2.y.toFixed(3)}`,
-                                  'Z',
-                                ].join(' ')
-                              }
-                              const backingArc = buildArc(0, pct, rO, rI)
-                              const otherArc = buildArc(pct, 1, rO, rI)
-                              return (
-                                <div className="backing-pool-chart-section">
-                                  <div className="backing-pool-chart-header">
-                                    <span className="backing-pool-chart-title">Backing Pool Coverage</span>
-                                    <div className="backing-pool-chart-account-filter" role="group" aria-label="Filter by account">
-                                      {[
-                                        { id: 'all', label: 'All' },
-                                        ...(streamHostAccountId ? [{ id: streamHostAccountId, label: streamHostAccountId }] : []),
-                                        ...(streamSecondaryAccountId && streamSecondaryAccountId !== streamHostAccountId
-                                          ? [{ id: streamSecondaryAccountId, label: streamSecondaryAccountId }]
-                                          : []),
-                                      ].map(opt => (
-                                        <button
-                                          key={opt.id}
-                                          type="button"
-                                          className={`backing-pool-chart-acct-btn${backingPoolChartAccount === opt.id ? ' active' : ''}`}
-                                          onClick={() => setBackingPoolChartAccount(opt.id)}
-                                        >
-                                          {opt.label}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-                                  <div className="backing-pool-chart-body">
-                                    <svg
-                                      width={132} height={132}
-                                      viewBox="0 0 132 132"
-                                      className="backing-pool-chart-svg"
-                                      role="img"
-                                      aria-label={`Backing pool ${pctLabel} of total stock coverage`}
-                                    >
-                                      {totalStockMV > 0 ? (
-                                        <>
-                                          {otherArc && <path d={otherArc} className="backing-pool-arc-other" />}
-                                          {backingArc && <path d={backingArc} className="backing-pool-arc-backing" />}
-                                        </>
-                                      ) : (
-                                        <circle cx={cx} cy={cy} r={rO} className="backing-pool-arc-other" />
-                                      )}
-                                      <circle cx={cx} cy={cy} r={rI} className="backing-pool-arc-hole" />
-                                      <text x={cx} y={cy - 7} className="backing-pool-chart-pct-text" textAnchor="middle" dominantBaseline="auto">
-                                        {totalStockMV > 0 ? pctLabel : '—'}
-                                      </text>
-                                      <text x={cx} y={cy + 10} className="backing-pool-chart-sub-text" textAnchor="middle" dominantBaseline="auto">
-                                        of total
-                                      </text>
-                                    </svg>
-                                    <div className="backing-pool-chart-legend">
-                                      <div className="backing-pool-chart-legend-item">
-                                        <span className="backing-pool-chart-legend-dot backing-pool-chart-legend-dot--backing" />
-                                        <span className="backing-pool-chart-legend-label">Backing Pool</span>
-                                        <span className="backing-pool-chart-legend-value">{fmtUsd(backingMV)}</span>
-                                      </div>
-                                      <div className="backing-pool-chart-legend-item">
-                                        <span className="backing-pool-chart-legend-dot backing-pool-chart-legend-dot--other" />
-                                        <span className="backing-pool-chart-legend-label">Other stock</span>
-                                        <span className="backing-pool-chart-legend-value">{fmtUsd(otherMV)}</span>
-                                      </div>
-                                      <div className="backing-pool-chart-legend-divider" />
-                                      <div className="backing-pool-chart-legend-item">
-                                        <span className="backing-pool-chart-legend-label backing-pool-chart-legend-total">Total stock</span>
-                                        <span className="backing-pool-chart-legend-value">{fmtUsd(totalStockMV)}</span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              )
-                            })()}
                           </div>
                         )}
                       </div>
@@ -3150,8 +3485,8 @@ export function PositionsPage({
                   ) : (
                     <div className="coverage-summary-section coverage-summary-section--placeholder">
                       <h6 className="replay-sub instance-sheet-sub-heading coverage-summary-heading-row">
-                        Stock Coverage Summary
-                        <InfoTooltip text="Optionable symbols only. Positions without tradeable options (Independent Holdings below) are not listed here. Underlying pool = stock left after all current opportunity hedges." />
+                        Coverage summary
+                        <InfoTooltip text="Option underlying pool, backing pool, and charts appear when instances match filters. Underlying pool = stock left after opportunity hedges." />
                       </h6>
                       <p className="section-hint coverage-summary-placeholder-text">
                         This section is computed from the instance table above. With no instances matching the current filters, there is nothing to show here—so the pools are hidden, not missing. Clear or widen filters to bring instances back and see Option underlying / backing pools.

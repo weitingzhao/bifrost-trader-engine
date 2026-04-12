@@ -15315,6 +15315,59 @@ th {
   padding: var(--space-2) 0;
 }
 
+.coverage-summary-intro {
+  margin-bottom: 0.55rem;
+}
+
+.coverage-charts-section {
+  margin-bottom: var(--space-4, 1rem);
+  padding: 0.55rem 0.65rem 0.65rem;
+  border-radius: var(--radius-md, 6px);
+  border: 1px solid var(--color-border, #2a313c);
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.03) 0%,
+    var(--color-surface-elevated, #1a1f26) 100%
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.coverage-charts-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem 0.75rem;
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-border, #2a313c);
+}
+
+.coverage-charts-toolbar-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted, #7a8492);
+}
+
+.coverage-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: 1rem 1.25rem;
+  align-items: start;
+}
+
+.coverage-charts-cell {
+  min-width: 0;
+}
+
+.coverage-section-account-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+}
+
 /* Shown when instance filters yield no rows: same heading slot, explanatory copy instead of tables */
 .coverage-summary-section--placeholder {
   padding: 0.45rem 0.55rem 0.55rem;
@@ -15495,12 +15548,17 @@ th:has(> .coverage-pool-th-held-amt) {
   border-top: 1px solid var(--color-border, #2a2f38);
 }
 
+.backing-pool-chart-section--in-charts-grid {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
 .backing-pool-chart-header {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.35rem;
   margin-bottom: 0.6rem;
 }
 
@@ -15639,6 +15697,286 @@ th:has(> .coverage-pool-th-held-amt) {
   align-items: center;
   gap: 0.35rem;
   flex-wrap: wrap;
+}
+
+/* ── Stock Coverage: asset mix (BP / cash / stock) donut ── */
+
+/* High-contrast triad on dark bg: cool blue / warm amber / magenta (hue spread ~120° each). */
+.coverage-asset-pie-section {
+  --coverage-pie-stock: #38bdf8;
+  --coverage-pie-cash: #fbbf24;
+  --coverage-pie-bp: #e879f9;
+  --coverage-pie-empty: rgba(255, 255, 255, 0.14);
+}
+
+.coverage-asset-pie-section:not(.coverage-charts-cell) {
+  margin-bottom: 0.85rem;
+  padding: 0.55rem 0.6rem 0.65rem;
+  border-radius: var(--radius-md, 6px);
+  border: 1px solid var(--color-border, #2a313c);
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    var(--color-surface-elevated, #1a1f26) 100%
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.coverage-asset-pie-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  margin-bottom: 0.45rem;
+}
+
+.coverage-asset-pie-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #7a8492);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.coverage-asset-pie-account-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  margin-left: auto;
+}
+
+.coverage-asset-pie-acct-btn {
+  padding: 0.18rem 0.55rem;
+  border-radius: 4px;
+  border: 1px solid var(--color-border, #2a313c);
+  background: transparent;
+  color: var(--color-text-muted, #7a8492);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+
+.coverage-asset-pie-acct-btn:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-main, #e4e9ef);
+  border-color: var(--color-border-strong, #3d4754);
+}
+
+.coverage-asset-pie-acct-btn.active {
+  background: color-mix(in oklab, var(--coverage-pie-stock) 18%, transparent);
+  border-color: color-mix(in oklab, var(--coverage-pie-stock) 55%, var(--color-border));
+  color: color-mix(in oklab, var(--coverage-pie-stock) 92%, white);
+}
+
+.coverage-asset-pie-chart-block {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.65rem 1rem;
+  flex-shrink: 0;
+}
+
+.coverage-asset-pie-bp-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.4rem;
+  max-width: 11rem;
+  min-height: 5.5rem;
+}
+
+.coverage-asset-pie-bp-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #7a8492);
+  line-height: 1.25;
+}
+
+.coverage-asset-pie-bubble-switch {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--color-surface, #13171d);
+  border: 1px solid var(--color-border, #2a313c);
+  gap: 2px;
+}
+
+.coverage-asset-pie-bubble-btn {
+  margin: 0;
+  padding: 0.32rem 0.95rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-muted, #7a8492);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.coverage-asset-pie-bubble-btn:hover:not(.active) {
+  color: var(--color-text-main, #e4e9ef);
+}
+
+.coverage-asset-pie-bubble-btn.active {
+  background: var(--color-surface-elevated, #1a1f26);
+  color: var(--color-text-main, #e4e9ef);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.coverage-asset-pie-bubble-btn:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--coverage-pie-stock) 70%, white);
+  outline-offset: 2px;
+}
+
+.coverage-asset-pie-body {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 1rem 1.25rem;
+  flex-wrap: wrap;
+}
+
+.coverage-asset-pie-svg {
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.4));
+}
+
+/* Stroke ring chart (percent segments) */
+.coverage-asset-pie-ring-track {
+  stroke: var(--coverage-pie-empty);
+  opacity: 0.85;
+}
+
+.coverage-asset-pie-ring-seg-stock {
+  stroke: var(--coverage-pie-stock);
+}
+
+.coverage-asset-pie-ring-seg-cash {
+  stroke: var(--coverage-pie-cash);
+}
+
+.coverage-asset-pie-ring-seg-bp {
+  stroke: var(--coverage-pie-bp);
+}
+
+.coverage-asset-pie-center-val {
+  font-size: 0.62rem;
+  font-weight: 700;
+  fill: var(--color-text-main, #e4e9ef);
+  font-variant-numeric: tabular-nums;
+}
+
+.coverage-asset-pie-center-val--triplet {
+  font-size: 0.52rem;
+  letter-spacing: -0.02em;
+}
+
+.coverage-asset-pie-center-val--netliq {
+  font-size: 0.72rem;
+  letter-spacing: 0;
+}
+
+.coverage-asset-pie-center-sub {
+  font-size: 0.52rem;
+  font-weight: 500;
+  fill: var(--color-text-dim, #5c6572);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.coverage-asset-pie-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.coverage-asset-pie-legend-item {
+  display: grid;
+  grid-template-columns: 10px 1fr auto auto;
+  align-items: center;
+  gap: 0.4rem 0.55rem;
+  font-size: 0.8rem;
+}
+
+.coverage-asset-pie-legend-item.coverage-asset-pie-legend-sum {
+  grid-template-columns: 1fr auto;
+  padding-top: 0.15rem;
+}
+
+.coverage-asset-pie-legend-item--bp-excluded .coverage-asset-pie-legend-pct {
+  color: var(--color-text-dim, #5c6572);
+  font-weight: 500;
+}
+
+.coverage-asset-pie-legend-item--bp-excluded .coverage-asset-pie-dot--bp {
+  opacity: 0.65;
+}
+
+.coverage-asset-pie-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.coverage-asset-pie-dot--stock {
+  background: var(--coverage-pie-stock);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.coverage-asset-pie-dot--cash {
+  background: var(--coverage-pie-cash);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.coverage-asset-pie-dot--bp {
+  background: var(--coverage-pie-bp);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.coverage-asset-pie-legend-label {
+  color: var(--color-text-muted, #7a8492);
+  white-space: nowrap;
+}
+
+.coverage-asset-pie-legend-pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--color-text-muted, #7a8492);
+  font-size: 0.76rem;
+  min-width: 2.75rem;
+  text-align: right;
+}
+
+.coverage-asset-pie-legend-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--color-text-main, #e4e9ef);
+  white-space: nowrap;
+  text-align: right;
+}
+
+.coverage-asset-pie-legend-sum .coverage-asset-pie-legend-label {
+  font-weight: 600;
+  color: var(--color-text-main, #e4e9ef);
+}
+
+.coverage-asset-pie-legend-divider {
+  height: 1px;
+  background: var(--color-border, #2a313c);
+  margin: 0.1rem 0;
 }
 
 .coverage-available-held-amt-cell {
