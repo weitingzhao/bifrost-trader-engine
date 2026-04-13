@@ -164,11 +164,11 @@ export function DataCoveragePanel({
             void onRefreshIndices()
           }}
           aria-label="Refresh Index"
-          title="Pull daily bars for reference indices from TradingView into stock_day."
+          title="Pull daily bars for reference indices from Massive/Polygon into stock_day."
         >
           {indicesRefreshLoading ? 'Refreshing…' : 'Refresh Index'}
         </button>
-        <InfoTooltip text="Refresh reference indices (^GSPC, ^DJI, ^IXIC) from TradingView. Daily only." />
+        <InfoTooltip text="Refresh reference indices (^GSPC, ^DJI, ^IXIC) via Massive/Polygon daily aggs. Writes source=massive." />
       </div>
       {indicesRefreshMessage && (
         <div className="replay-placeholder" role="status" style={{ marginBottom: '0.5rem' }}>
@@ -311,7 +311,7 @@ export function DataCoveragePanel({
                                   type="button"
                                   className="btn btn-secondary btn-sm"
                                   disabled={indicesRefreshLoading || backfillSymbol === row.symbol}
-                                  title="Pull daily bars for this index from TradingView (same range modal as Watchlist)"
+                                  title="Pull daily bars for this index from Massive/Polygon (same range modal as Watchlist)"
                                   aria-label={`Pull ${row.symbol}`}
                                   onClick={() => onOpenPull(row.symbol, true)}
                                 >

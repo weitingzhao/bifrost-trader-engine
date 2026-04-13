@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MutableRefObject } from 'react'
+import { useCallback, useEffect, useState, type KeyboardEvent } from 'react'
 import {
   fetchTickerReferenceDetail,
   fetchTickerReferenceFilledRelated,
@@ -11,19 +11,14 @@ import {
   fetchTickerReferenceUniverseCount,
   fetchTickerTypesFromDb,
   fetchTickerReferenceSearch,
-  postTickerReferenceJob,
-  subscribeMassiveJobEvents,
 } from '../../api'
 import type { TickerReferenceJobKind, TickerReferenceSearchRow } from '../../api'
-import { TickerReferenceJobsSheet } from './TickerReferenceJobsSheet'
 import { RefJobDetailPanel } from './RefJobDetailPanel'
+import { useMassiveRefJobSession } from './MassiveRefJobSessionContext'
 import {
   DEFAULT_TICKER_REF_SEARCH_LIMIT,
-  MAX_REF_JOBS_TRACKED,
   REF_TICKER_JOB_ROWS,
-  countActiveRefJobs,
   getRefCatalogRow,
-  isRefJobTerminal,
   parseRefJobSymbols,
   refJobKindShortLabel,
   DEFAULT_TICKER_REF_MISSING_LIMIT,
@@ -34,24 +29,10 @@ import {
   validateTickerRefSearchQuery,
   type OverviewEnqueueMode,
   type RelatedEnqueueMode,
-  type RefJobTrackItem,
 } from './stockReferenceJobHelpers'
 
 const DEFAULT_REF_JOB_SYMBOLS = 'AAPL, MSFT, GOOGL'
 
-function trimRefJobItems(
-  items: RefJobTrackItem[],
-  closers: MutableRefObject<Map<string, () => void>>,
-): RefJobTrackItem[] {
-  if (items.length <= MAX_REF_JOBS_TRACKED) return items
-  const sorted = [...items].sort((a, b) => a.enqueuedAt - b.enqueuedAt)
-  while (sorted.length > MAX_REF_JOBS_TRACKED) {
-    const ev = sorted.shift()!
-    closers.current.get(ev.jobId)?.()
-    closers.current.delete(ev.jobId)
-  }
-  return sorted
-}
 
 export interface MassiveTickerReferenceDbSectionProps {
   panelId?: string
@@ -127,20 +108,8 @@ export function MassiveTickerReferenceDbSection({
   const [tickerTypesRowCount, setTickerTypesRowCount] = useState<number | null>(null)
   const [tickerTypesRowCountLoading, setTickerTypesRowCountLoading] = useState(false)
 
-  const [jobBusy, setJobBusy] = useState<TickerReferenceJobKind | null>(null)
+  const refJobSession = useMassiveRefJobSession()
   const [jobMsg, setJobMsg] = useState<string | null>(null)
-  const [refJobItems, setRefJobItems] = useState<RefJobTrackItem[]>([])
-  const [jobsSheetOpen, setJobsSheetOpen] = useState(false)
-
-  const sseClosersRef = useRef<Map<string, () => void>>(new Map())
-
-  useEffect(
-    () => () => {
-      sseClosersRef.current.forEach(close => close())
-      sseClosersRef.current.clear()
-    },
-    [],
-  )
 
   useEffect(() => {
     setVerifyErr(null)
@@ -266,119 +235,30 @@ export function MassiveTickerReferenceDbSection({
     }
   }, [selectedRefJobKind])
 
-  const startJobStream = useCallback((jid: string) => {
-    if (sseClosersRef.current.has(jid)) return
-    const sub = subscribeMassiveJobEvents(
-      jid,
-      data => {
-        setRefJobItems(prev =>
-          prev.map(row => {
-            if (row.jobId !== jid) return row
-            if (!data.ok) {
-              sseClosersRef.current.delete(jid)
-              return {
-                ...row,
-                streamError: data.error ?? 'Job stream error',
-                status: 'failed',
-              }
-            }
-            const j = data.job
-            const st = (j?.status ?? '').trim() || 'running'
-            const stLower = st.toLowerCase()
-            if (stLower === 'done' || stLower === 'failed') {
-              sseClosersRef.current.delete(jid)
-            }
-            return {
-              ...row,
-              status: st,
-              job: j,
-              streamError: row.streamError,
-            }
-          }),
-        )
-      },
-      { timeoutSec: 86400 },
-    )
-    sseClosersRef.current.set(jid, sub.close)
-  }, [])
-
   const enqueueOne = useCallback(
     async (
       kind: TickerReferenceJobKind,
       payload: Record<string, unknown>,
       priority?: string,
     ) => {
-      setJobBusy(kind)
       setJobMsg(null)
       setEnqueueErr(null)
       setVerifyErr(null)
       setRefJobSymbolsErr(null)
       try {
-        const res = await postTickerReferenceJob({
-          kind,
-          payload,
-          ...(priority ? { priority } : {}),
-        })
+        const res = await refJobSession.enqueueTickerReferenceJob(kind, payload, priority)
         if (!res.ok) {
           setEnqueueErr(res.error ?? 'Enqueue failed')
           return
         }
         const tag = res.deduplicated ? `${res.job_id ?? '?'} (deduplicated)` : (res.job_id ?? '?')
         setJobMsg(`Enqueued ${kind}: job ${tag}. Open Jobs for details.`)
-        const jid = res.job_id
-        if (jid) {
-          const now = Date.now()
-          setRefJobItems(prev => {
-            const idx = prev.findIndex(x => x.jobId === jid)
-            let next: RefJobTrackItem[]
-            if (idx >= 0) {
-              next = [...prev]
-              next[idx] = {
-                ...next[idx],
-                kind,
-                domain: 'tickers',
-                deduplicated: Boolean(res.deduplicated),
-                status: res.deduplicated ? 'deduplicated (waiting)' : 'enqueued',
-                streamError: undefined,
-                job: undefined,
-                enqueuedAt: next[idx].enqueuedAt,
-              }
-            } else {
-              next = [
-                ...prev,
-                {
-                  jobId: jid,
-                  kind,
-                  domain: 'tickers',
-                  deduplicated: Boolean(res.deduplicated),
-                  status: res.deduplicated ? 'deduplicated (waiting)' : 'enqueued',
-                  enqueuedAt: now,
-                },
-              ]
-            }
-            return trimRefJobItems(next, sseClosersRef)
-          })
-          setJobsSheetOpen(true)
-          startJobStream(jid)
-        }
       } catch (e: unknown) {
         setEnqueueErr(e instanceof Error ? e.message : String(e))
-      } finally {
-        setJobBusy(null)
       }
     },
-    [startJobStream],
+    [refJobSession],
   )
-
-  const handleClearCompletedJobs = useCallback(() => {
-    setRefJobItems(prev => prev.filter(i => !isRefJobTerminal(i)))
-  }, [])
-
-  const handleClearAllJobs = useCallback(() => {
-    sseClosersRef.current.forEach(close => close())
-    sseClosersRef.current.clear()
-    setRefJobItems([])
-  }, [])
 
   const runEnqueueUniverse = useCallback(() => {
     void enqueueOne(
@@ -726,9 +606,9 @@ export function MassiveTickerReferenceDbSection({
     [focusRefJobTab],
   )
 
-  const anyJobBusy = jobBusy != null
+  const anyJobBusy = refJobSession.jobBusyKind != null
   const disabledForJobs = busy || anyJobBusy
-  const activeJobCount = countActiveRefJobs(refJobItems)
+  const activeJobCount = refJobSession.activeJobCount
 
   const catalogRow = getRefCatalogRow(selectedRefJobKind)
 
@@ -751,7 +631,7 @@ export function MassiveTickerReferenceDbSection({
                   {activeJobCount} active
                 </span>
               ) : null}
-              <button type="button" className="btn btn-secondary" onClick={() => setJobsSheetOpen(true)}>
+              <button type="button" className="btn btn-secondary" onClick={() => refJobSession.openJobsSheet()}>
                 Jobs
               </button>
             </div>
@@ -762,7 +642,7 @@ export function MassiveTickerReferenceDbSection({
           </p>
 
           {catalogRow ? (
-            <div className="ref-jobs-md">
+            <div className="ref-jobs-md ref-jobs-md--tabs">
               <ul className="ref-jobs-md-nav" role="tablist" aria-label="Ticker reference job kinds">
                 {REF_TICKER_JOB_ROWS.map((row, rowIndex) => {
                   const selected = selectedRefJobKind === row.kind
@@ -789,7 +669,7 @@ export function MassiveTickerReferenceDbSection({
                 catalogRow={catalogRow}
                 disabledForJobs={disabledForJobs}
                 busyVerify={busy}
-                jobBusyKind={jobBusy}
+                jobBusyKind={refJobSession.jobBusyKind}
                 overviewEnqueueMode={overviewEnqueueMode}
                 setOverviewEnqueueMode={onOverviewModeChange}
                 overviewStaleHours={overviewStaleHours}
@@ -972,13 +852,6 @@ export function MassiveTickerReferenceDbSection({
         </details>
       ) : null}
 
-      <TickerReferenceJobsSheet
-        open={jobsSheetOpen}
-        onClose={() => setJobsSheetOpen(false)}
-        items={refJobItems}
-        onClearCompleted={handleClearCompletedJobs}
-        onClearAll={handleClearAllJobs}
-      />
     </div>
   )
 }

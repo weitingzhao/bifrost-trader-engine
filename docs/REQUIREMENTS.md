@@ -173,7 +173,7 @@
   - **K 线**：股票与期权**分表存储**——股票日线 **stock_day**、股票分钟/小时线 **stock_min**（周期 1 min、5 mins、1 hour）；期权日线 **option_day**、期权分钟/小时线 **option_min**。日 K 为主；分钟/小时线供复盘与短期回测。
   - **拉取策略**：首次按标的拉取时可请求**全部历史**；后续根据**最新一根 K 线距离当前的时间**智能决定请求的 duration，避免重复拉取已入库区间。
   - **报价**：持仓与 Watchlist 标的的**当前报价**（bid/ask/last/mid）可获取；Watchlist 的报价在拉取后**写入 contract_quote_live**（与持仓共用），供前端统一展示与后续使用。
-  - **参考指数（Reference Indices）**：为与 Watchlist 股票对比，支持**美股大盘指数**（如 S&P 500 ^GSPC、Dow 30 ^DJI、Nasdaq ^IXIC）的日线数据。数据源为 **TradingView（tvDatafeed）**；在 config 中配置 `reference_indices`（symbol、label、tv_symbol、tv_exchange）；**定时任务**（脚本或 Celery）按配置拉取日线并 UPSERT 写入 **stock_day**（同一 symbol 同一 bar_time 覆盖，保证头部为最终值）；服务重启后可**补齐缺失区间**（gap-fill）。更新频率与请求间隔遵守数据源限流（如 2s 间隔、每日或每数小时一次）。GET /status 返回 `reference_indices` 供前端展示「大盘」行；现有 `/bars/benchmark` 支持传入指数 symbol 获取最新日线。
+  - **参考指数（Reference Indices）**：为与 Watchlist 股票对比，支持**美股大盘指数**（如 S&P 500 ^GSPC、Dow 30 ^DJI、Nasdaq ^IXIC）的日线数据。数据源为 **Massive/Polygon**（`POST /indices/refresh` 与 v2 daily aggs；config 中 `reference_indices` 含 `symbol`、`label`、可选 `polygon_ticker`）；按配置拉取日线并 UPSERT 写入 **stock_day**（`source='massive'`，同一 symbol 同一 bar_time 覆盖）；可**补齐缺失区间**（gap-fill）。GET /status 返回 `reference_indices` 供前端展示「大盘」行；现有 `/bars/benchmark` 支持传入指数 symbol 获取最新日线。
 - **与分步计划**：阶段 3（数据获取）；回测与复盘策略的具体形态可后续阶段再细化。
 
 ### 3.5 Massive 期权研究数据（R-A6）

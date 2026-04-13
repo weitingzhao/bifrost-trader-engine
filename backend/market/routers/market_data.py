@@ -301,7 +301,7 @@ def post_indices_refresh(
     symbol: Optional[str] = Query(None, description="Refresh only this index (e.g. ^GSPC); omit to refresh all"),
     days: Optional[int] = Query(None, description="For single-symbol refresh: number of days to fetch"),
 ) -> Dict[str, Any]:
-    """Refresh reference index daily bars from TradingView."""
+    """Refresh reference index daily bars from Massive/Polygon into stock_day."""
     control_via_db = request.app.state.control_via_db
     reader = request.app.state.reader
     if not control_via_db:

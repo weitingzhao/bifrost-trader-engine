@@ -14,6 +14,8 @@ def timespan_to_stock_period(timespan: str, multiplier: int = 1) -> str:
     ts = (timespan or "minute").strip().lower()
     m = max(1, int(multiplier or 1))
     if ts == "minute":
+        if m == 5:
+            return "5 mins"
         return f"{m} min" if m > 1 else "1 min"
     if ts == "hour":
         return f"{m} hour" if m > 1 else "1 hour"

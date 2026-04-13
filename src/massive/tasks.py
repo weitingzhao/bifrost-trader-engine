@@ -932,11 +932,20 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 return result
 
             if kind == "stock_ohlc_sync":
+                from src.massive.polygon_stock_tickers import polygon_ticker_for_massive_aggs
                 from src.persistence.postgres.stock_ohlc_massive import (
                     apply_stock_custom_bars,
                     apply_stock_daily_ticker_summary,
                     apply_stock_grouped_daily,
                     apply_stock_previous_day_bar,
+                )
+
+                # Align with IB Stock Coverage periods: 1 D, 1 min, 5 mins, 1 hour (same time window).
+                _CUSTOM_BARS_ALL_PERIODS: Tuple[Tuple[str, int], ...] = (
+                    ("day", 1),
+                    ("minute", 1),
+                    ("minute", 5),
+                    ("hour", 1),
                 )
 
                 mode = (payload.get("mode") or "custom_bars").strip().lower()
@@ -949,29 +958,166 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
 
                 with conn.cursor() as cur:
                     if mode == "custom_bars":
-                        t = (payload.get("ticker") or "").strip().upper()
                         mult = int(payload.get("multiplier") or 1)
                         ts = (payload.get("timespan") or "minute").strip()
                         start_ms = int(payload.get("start_ms") or 0)
                         end_ms = int(payload.get("end_ms") or 0)
-                        if not t:
-                            raise ValueError("payload.ticker required")
                         if not start_ms or not end_ms:
                             raise ValueError("payload.start_ms and end_ms required")
-                        data = client.fetch_stock_aggs(t, mult, ts, start_ms, end_ms)
-                        if data.get("error"):
-                            raise RuntimeError(str(data.get("error")))
-                        n = apply_stock_custom_bars(
-                            cur, t, ts, mult, data, adjusted=adjusted_bool
-                        )
+                        sync_all_periods = bool(payload.get("sync_all_periods"))
+                        ref_indices = status_cfg.get("reference_indices")
+
+                        raw_syms = payload.get("symbols")
+                        tickers: list[str] = []
+                        if raw_syms is not None:
+                            if not isinstance(raw_syms, list):
+                                raise ValueError("payload.symbols must be an array")
+                            for s in raw_syms:
+                                u = (str(s) if s is not None else "").strip().upper()
+                                if u:
+                                    tickers.append(u)
+                            if not tickers:
+                                raise ValueError(
+                                    "payload.symbols must list at least one ticker"
+                                )
+                        else:
+                            t_one = (payload.get("ticker") or "").strip().upper()
+                            if not t_one:
+                                raise ValueError("payload.ticker required")
+                            tickers = [t_one]
+
+                        multi_payload = raw_syms is not None or len(tickers) > 1
+                        failures: list[dict[str, str]] = []
+                        per_symbol: list[dict[str, object]] = []
+                        total_n = 0
+                        for t in tickers:
+                            fetch_t = polygon_ticker_for_massive_aggs(t, ref_indices)
+                            if sync_all_periods:
+                                sym_total = 0
+                                period_rows: list[dict[str, object]] = []
+                                period_errors: list[dict[str, object]] = []
+                                for ts_p, mult_p in _CUSTOM_BARS_ALL_PERIODS:
+                                    data = client.fetch_stock_aggs(
+                                        fetch_t, mult_p, ts_p, start_ms, end_ms
+                                    )
+                                    if data.get("error"):
+                                        period_errors.append(
+                                            {
+                                                "timespan": ts_p,
+                                                "multiplier": mult_p,
+                                                "error": str(data.get("error")),
+                                            }
+                                        )
+                                        continue
+                                    try:
+                                        n_p = apply_stock_custom_bars(
+                                            cur,
+                                            t,
+                                            ts_p,
+                                            mult_p,
+                                            data,
+                                            adjusted=adjusted_bool,
+                                        )
+                                    except Exception as ex:
+                                        period_errors.append(
+                                            {
+                                                "timespan": ts_p,
+                                                "multiplier": mult_p,
+                                                "error": str(ex),
+                                            }
+                                        )
+                                        continue
+                                    sym_total += n_p
+                                    period_rows.append(
+                                        {
+                                            "timespan": ts_p,
+                                            "multiplier": mult_p,
+                                            "rows_upserted": n_p,
+                                        }
+                                    )
+                                if len(period_rows) == 0:
+                                    err_one = "all period fetches failed"
+                                    if period_errors:
+                                        err_one = str(
+                                            period_errors[0].get("error") or err_one
+                                        )
+                                    if not multi_payload:
+                                        raise RuntimeError(err_one)
+                                    failures.append({"ticker": t, "error": err_one})
+                                    continue
+                                per_symbol.append(
+                                    {
+                                        "ticker": t,
+                                        "rows_upserted": sym_total,
+                                        "sync_all_periods": True,
+                                        "polygon_fetch_ticker": fetch_t,
+                                        "periods": period_rows,
+                                        "period_errors": period_errors,
+                                    }
+                                )
+                                total_n += sym_total
+                            else:
+                                data = client.fetch_stock_aggs(
+                                    fetch_t, mult, ts, start_ms, end_ms
+                                )
+                                if data.get("error"):
+                                    err_s = str(data.get("error"))
+                                    if not multi_payload:
+                                        raise RuntimeError(err_s)
+                                    failures.append({"ticker": t, "error": err_s})
+                                    continue
+                                try:
+                                    n = apply_stock_custom_bars(
+                                        cur, t, ts, mult, data, adjusted=adjusted_bool
+                                    )
+                                except Exception as ex:
+                                    if not multi_payload:
+                                        raise
+                                    failures.append({"ticker": t, "error": str(ex)})
+                                    continue
+                                total_n += n
+                                per_symbol.append(
+                                    {
+                                        "ticker": t,
+                                        "rows_upserted": n,
+                                        "polygon_fetch_ticker": fetch_t,
+                                    }
+                                )
+
                         conn.commit()
-                        result = {
-                            "ok": True,
-                            "kind": kind,
-                            "mode": mode,
-                            "rows_upserted": n,
-                            "summary": {"ticker": t, "timespan": ts, "multiplier": mult},
-                        }
+                        if multi_payload:
+                            result = {
+                                "ok": len(failures) == 0,
+                                "kind": kind,
+                                "mode": mode,
+                                "rows_upserted": total_n,
+                                "summary": {
+                                    "timespan": ts,
+                                    "multiplier": mult,
+                                    "sync_all_periods": sync_all_periods,
+                                    "symbols_requested": len(tickers),
+                                    "symbols_ok": len(per_symbol),
+                                    "failures": failures,
+                                    "per_symbol": per_symbol,
+                                },
+                            }
+                        else:
+                            t = tickers[0]
+                            sum_row: Dict[str, Any] = {
+                                "ticker": t,
+                                "timespan": ts,
+                                "multiplier": mult,
+                                "sync_all_periods": sync_all_periods,
+                            }
+                            if sync_all_periods and per_symbol:
+                                sum_row["period_detail"] = per_symbol[0]
+                            result = {
+                                "ok": True,
+                                "kind": kind,
+                                "mode": mode,
+                                "rows_upserted": total_n,
+                                "summary": sum_row,
+                            }
                     elif mode == "daily_market_summary":
                         d = (payload.get("date") or "").strip()
                         if not d:

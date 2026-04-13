@@ -304,7 +304,7 @@ export interface StatusCelery {
 
 export interface StatusLiveUi {
   subscribed_tickers?: string[]
-  reference_indices?: { symbol: string; label?: string }[]
+  reference_indices?: { symbol: string; label?: string; polygon_ticker?: string }[]
 }
 
 export type SystemMessageLevel = 'info' | 'success' | 'warning' | 'error'

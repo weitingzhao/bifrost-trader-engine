@@ -1436,6 +1436,37 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
                 },
             )
 
+    if kind == "stock_ohlc_sync":
+        mode_ohlc = (payload.get("mode") or "custom_bars").strip().lower()
+        if mode_ohlc == "custom_bars":
+            syms = payload.get("symbols")
+            raw_ticker = payload.get("ticker")
+            if syms is not None:
+                if not isinstance(syms, list) or len(syms) == 0:
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "ok": False,
+                            "error": "payload.symbols must be a non-empty array",
+                        },
+                    )
+                if len(syms) > 50:
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "ok": False,
+                            "error": "payload.symbols must have at most 50 entries",
+                        },
+                    )
+                if (raw_ticker or "").strip():
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "ok": False,
+                            "error": "Use payload.ticker or payload.symbols, not both",
+                        },
+                    )
+
     db = _db_config(request)
     if not db:
         return {"ok": False, "error": "PostgreSQL not configured"}

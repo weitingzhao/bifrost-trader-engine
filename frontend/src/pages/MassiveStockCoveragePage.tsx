@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
-import type { StatusResponse } from '../types'
-import { fetchMassiveStatus, type MassiveStatusResponse } from '../api'
+import { useCallback, useEffect, useState } from 'react'
+import type { BarCoverageItem, StatusResponse } from '../types'
+import { fetchBarsCoverage, fetchMassiveStatus, type MassiveStatusResponse } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { MassiveRefJobSessionProvider } from './massive/MassiveRefJobSessionContext'
+import { MassiveStockOhlcDbEnqueueBlock } from './massive/MassiveStockOhlcDbEnqueueBlock'
 import { MassiveTickerReferenceDbSection } from './massive/MassiveTickerReferenceDbSection'
 
 interface MassiveStockCoveragePageProps {
@@ -9,8 +11,11 @@ interface MassiveStockCoveragePageProps {
 }
 
 /** Data Coverage → Stock → Massive Delay (DB): reference tools and navigation. */
-export function MassiveStockCoveragePage({ status: _status }: MassiveStockCoveragePageProps) {
+export function MassiveStockCoveragePage({ status }: MassiveStockCoveragePageProps) {
   const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
+  const [coverage, setCoverage] = useState<BarCoverageItem[] | null>(null)
+  const [coverageLoading, setCoverageLoading] = useState(false)
+  const [coverageError, setCoverageError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -19,6 +24,24 @@ export function MassiveStockCoveragePage({ status: _status }: MassiveStockCovera
       .catch(() => { if (!cancelled) setMassiveStatus(null) })
     return () => { cancelled = true }
   }, [])
+
+  const loadCoverage = useCallback(async () => {
+    setCoverageLoading(true)
+    setCoverageError(null)
+    try {
+      const res = await fetchBarsCoverage()
+      setCoverage(res.coverage || [])
+    } catch (e) {
+      setCoverageError(e instanceof Error ? e.message : 'Load failed')
+      setCoverage([])
+    } finally {
+      setCoverageLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadCoverage()
+  }, [loadCoverage])
 
   const configured = Boolean(massiveStatus?.configured)
 
@@ -71,15 +94,39 @@ export function MassiveStockCoveragePage({ status: _status }: MassiveStockCovera
         </div>
       </section>
 
+      {!configured ? (
+        <p className="status-page-msg err" role="alert" style={{ marginBottom: 'var(--space-3)' }}>
+          Massive API key not configured. Set massive credentials in server config. Celery enqueue and REST checklist require a configured key.
+        </p>
+      ) : null}
+
       <section className="replay-section" aria-labelledby="massive-stock-coverage-refdb-title">
         <h3 id="massive-stock-coverage-refdb-title" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
           Reference (PostgreSQL)
-          <InfoTooltip text="Search and verify synced ticker reference rows. Populate via Celery ticker_reference_* jobs on massive_stocks queues." />
+          <InfoTooltip text="Ticker reference (Celery ticker_reference_* jobs) and stock OHLC persistence (stock_ohlc_sync) on massive_stocks queues." />
         </h3>
-        <MassiveTickerReferenceDbSection
-          panelId="massive-stock-coverage-refdb"
-          ariaLabelledBy="massive-stock-coverage-refdb-title"
-        />
+        <div className="feed-massive-option-page" style={{ marginTop: 'var(--space-4)' }}>
+          <MassiveRefJobSessionProvider>
+            <h4 className="feed-massive-group-header" id="massive-delay-db-group-tickers">
+              Tickers
+            </h4>
+            <MassiveTickerReferenceDbSection
+              panelId="massive-stock-coverage-refdb"
+              ariaLabelledBy="massive-delay-db-group-tickers"
+            />
+            <h4 className="feed-massive-group-header" id="massive-delay-db-group-agg-bars">
+              Aggregate Bars (OHLC)
+            </h4>
+            <MassiveStockOhlcDbEnqueueBlock
+              configured={configured}
+              status={status}
+              coverage={coverage}
+              coverageLoading={coverageLoading}
+              coverageError={coverageError}
+              onRefreshCoverage={loadCoverage}
+            />
+          </MassiveRefJobSessionProvider>
+        </div>
       </section>
     </div>
   )

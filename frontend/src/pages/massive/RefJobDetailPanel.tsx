@@ -1,4 +1,3 @@
-import type { TickerReferenceJobKind } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import { celeryQueueHash } from '../../utils/celeryQueueDeepLink'
 import { feedMassiveStockTickersSubHash } from './feedMassiveStockTabUtils'
@@ -11,6 +10,7 @@ import {
   type RelatedEnqueueMode,
   refJobKindShortLabel,
   type RefTickerCatalogRow,
+  type TrackedMassiveDbJobKind,
 } from './stockReferenceJobHelpers'
 
 const RELATED_SCOPE_BUBBLES: ReadonlyArray<{
@@ -105,7 +105,7 @@ export interface RefJobDetailPanelProps {
   catalogRow: RefTickerCatalogRow
   disabledForJobs: boolean
   busyVerify: boolean
-  jobBusyKind: TickerReferenceJobKind | null
+  jobBusyKind: TrackedMassiveDbJobKind | null
   overviewEnqueueMode: OverviewEnqueueMode
   setOverviewEnqueueMode: (m: OverviewEnqueueMode) => void
   overviewStaleHours: number

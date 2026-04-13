@@ -182,10 +182,10 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
       {cov.pullModalSymbol && (
         <div className="data-reset-modal-overlay" onClick={() => { cov.setPullModalSymbol(null); cov.setPullModalIsIndex(false) }} role="dialog" aria-modal="true" aria-labelledby="pull-range-modal-title">
           <div className="data-reset-modal data-pull-range-modal" onClick={e => e.stopPropagation()}>
-            <h3 id="pull-range-modal-title">{cov.pullModalIsIndex ? 'Pull index (TradingView)' : 'Time range for backfill'}</h3>
+            <h3 id="pull-range-modal-title">{cov.pullModalIsIndex ? 'Pull index (Massive/Polygon)' : 'Time range for backfill'}</h3>
             <p className="data-pull-range-desc">
               {cov.pullModalIsIndex
-                ? `Choose how many days to fetch for ${cov.pullModalSymbol}. Index data is Daily only from TradingView.`
+                ? `Choose how many days to fetch for ${cov.pullModalSymbol}. Index data is daily only (Massive/Polygon).`
                 : `Choose how much history to fetch for ${cov.pullModalSymbol}.`}
             </p>
             <div className="data-pull-range-options">

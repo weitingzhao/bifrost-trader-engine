@@ -7,7 +7,7 @@ from src.persistence.postgres.stock_ohlc_massive import timespan_to_stock_period
 
 def test_timespan_to_stock_period_minute() -> None:
     assert timespan_to_stock_period("minute", 1) == "1 min"
-    assert timespan_to_stock_period("minute", 5) == "5 min"
+    assert timespan_to_stock_period("minute", 5) == "5 mins"
 
 
 def test_timespan_to_stock_period_hour() -> None:

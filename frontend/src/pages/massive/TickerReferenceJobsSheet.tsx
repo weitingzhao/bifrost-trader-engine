@@ -81,7 +81,7 @@ export function TickerReferenceJobsSheet({
       >
         <div className="ref-jobs-sheet-header">
           <h3 id="ref-jobs-sheet-title" className="ref-jobs-sheet-title">
-            Ticker reference jobs
+            PostgreSQL sync jobs
           </h3>
           <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Close">
             Close

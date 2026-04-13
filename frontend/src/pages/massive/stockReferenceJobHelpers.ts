@@ -4,11 +4,14 @@ import type { MassiveStockTickersSubTab } from './feedMassiveStockTabUtils'
 export const MAX_REF_JOBS_TRACKED = 20
 
 /** Session-tracked Massive stock job scope (extend for future REST domains). */
-export type MassiveStockRefJobDomain = 'tickers'
+export type MassiveStockRefJobDomain = 'tickers' | 'ohlc'
+
+/** Jobs shown in the shared session sheet (ticker_reference_* and stock_ohlc_sync). */
+export type TrackedMassiveDbJobKind = TickerReferenceJobKind | 'stock_ohlc_sync'
 
 export type RefJobTrackItem = {
   jobId: string
-  kind: TickerReferenceJobKind
+  kind: TrackedMassiveDbJobKind
   domain?: MassiveStockRefJobDomain
   deduplicated?: boolean
   status: string
@@ -186,8 +189,10 @@ export function getRefCatalogRow(kind: TickerReferenceJobKind) {
   return REF_TICKER_JOB_ROWS.find(r => r.kind === kind)
 }
 
-export function refJobKindShortLabel(kind: TickerReferenceJobKind): string {
+export function refJobKindShortLabel(kind: TrackedMassiveDbJobKind): string {
   switch (kind) {
+    case 'stock_ohlc_sync':
+      return 'Stock OHLC'
     case 'ticker_reference_universe':
     case 'stock_reference_universe':
       return 'Universe'

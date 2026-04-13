@@ -320,7 +320,7 @@ export async function fetchBarsCoverage(symbols?: string[]): Promise<BarsCoverag
   return r.json()
 }
 
-/** Refresh reference index daily bars from TradingView into stock_day. No args: all from config; symbol+days: single index. */
+/** Refresh reference index daily bars from Massive/Polygon into stock_day. No args: all from config; symbol+days: single index. */
 export async function postIndicesRefresh(options?: { symbol?: string; days?: number }): Promise<{
   ok: boolean
   updated: string[]

@@ -526,7 +526,8 @@ class MassiveClient:
         ot = (options_ticker or "").strip()
         if not ot or not self._api_key:
             return {"results": [], "error": "ticker or api key missing"}
-        path = f"/v2/aggs/ticker/{ot}/range/{multiplier}/{timespan}/{start_ms}/{end_ms}"
+        enc = quote(ot, safe="")
+        path = f"/v2/aggs/ticker/{enc}/range/{multiplier}/{timespan}/{start_ms}/{end_ms}"
         status, data = self._get(path, {"adjusted": "true", "sort": "asc", "limit": 50000})
         if status >= 400:
             err = data.get("error", data) if isinstance(data, dict) else str(data)

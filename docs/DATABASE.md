@@ -322,7 +322,7 @@
 
 ### 2.13 表 `stock_day`（阶段 3 R-A3 扩展：股票日 K 线）
 
-- **用途**：存**股票**的**日线** OHLC 数据，供复盘、回测与风控分析；数据来源可为 **IB 历史拉取**、**Massive REST**（延迟数据，job kind `stock_ohlc_sync`）、**TradingView 参考指数**等，由 **`source`** 区分。
+- **用途**：存**股票**的**日线** OHLC 数据，供复盘、回测与风控分析；数据来源可为 **IB 历史拉取**、**Massive REST**（延迟数据，job kind `stock_ohlc_sync`、`POST /indices/refresh` 参考指数日线等），由 **`source`** 区分。
 - **写入**：监控端 POST /bars/fetch（或等效）按标的与周期 `1 D` 从 IB 拉取并 UPSERT（`source='ib'`）；Massive Worker 写入 `source='massive'`（含 Daily Market Summary、Daily Ticker Summary、Previous Day、Custom Bars 日级等）。
 - **列**：
 
@@ -566,6 +566,7 @@
 
 - **索引**：`(status, created_at)` 便于 Worker 取最旧 pending 任务；GET /research/massive/jobs 按 job_massive_backfill_id DESC 分页。
 - **去重索引**：`UNIQUE (kind, payload_hash) WHERE status IN ('pending', 'running') AND payload_hash IS NOT NULL`——防止同一 payload 同时存在多条 pending/running 任务。
+- **stock_ohlc_sync（`mode: custom_bars`）**：`payload` 可为单标的 `ticker` **或** 批量 `symbols`（字符串数组，与 `ticker` 二选一；API 校验最多 50 个），共用 `start_ms` / `end_ms`；可选 `sync_all_periods: true` 时在同一时间窗内依次拉取 **1 D / 1 min / 5 mins / 1 hour**（忽略单次 `timespan`/`multiplier`）；否则按 `multiplier`+`timespan` 单次拉取。参考指数在库内可为 `^GSPC` 等，Worker 对 Polygon v2 aggs 会映射为 `I:SPX` 等，**写入仍用配置 symbol**。`result.summary` 可含 `symbols_requested`、`symbols_ok`、`failures`、`per_symbol`。
 - **Trim**：可选保留最近 500 条。
 
 ### 2.16.5a 表 `report_option_max_pain_daily`（R-A6：Max Pain 日报表）
