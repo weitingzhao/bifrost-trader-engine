@@ -59,18 +59,47 @@ export function runtimeControlHostDisplay(
   }
 }
 
-export type IngestActionBlock = 'none' | 'admin' | 'script' | 'remote_env'
+export type IngestActionBlock = 'none' | 'admin' | 'script' | 'remote_env' | 'stack_conflict'
+
+/**
+ * Per-row Redis lease plus stack-wide view: only one of dev or prod may run Socket (or Daemon ingest)
+ * services against the same Redis. Ops writes `redis_control_env` per `redis_meta_key`; rows without a
+ * lease yet must still respect a lease held on any sibling row.
+ */
+export function resolveEffectiveRedisControlEnv(
+  svc: { id: string; redis_control_env?: string | null },
+  allRows: { id: string; redis_control_env?: string | null }[],
+): string | null | undefined {
+  const own = (svc.redis_control_env ?? '').toLowerCase().trim()
+  if (own === 'dev' || own === 'prod') {
+    return svc.redis_control_env
+  }
+  const distinct = new Set<'dev' | 'prod'>()
+  for (const r of allRows) {
+    const v = (r.redis_control_env ?? '').toLowerCase().trim()
+    if (v === 'dev' || v === 'prod') distinct.add(v)
+  }
+  if (distinct.size > 1) {
+    return '__stack_conflict__'
+  }
+  if (distinct.size === 1) {
+    const [only] = [...distinct]
+    return only
+  }
+  return svc.redis_control_env ?? null
+}
 
 export function ingestActionBlock(
   canOperate: boolean,
   disableIngestScript: boolean,
   pageEnv: 'dev' | 'prod' | null,
-  redisControlEnv: string | null | undefined,
+  effectiveRedisControlEnv: string | null | undefined,
 ): IngestActionBlock {
   if (!canOperate) return 'admin'
   if (disableIngestScript) return 'script'
+  const lease = (effectiveRedisControlEnv ?? '').toLowerCase().trim()
+  if (lease === '__stack_conflict__') return 'stack_conflict'
   if (pageEnv) {
-    const lease = (redisControlEnv ?? '').toLowerCase().trim()
     if (lease === 'dev' || lease === 'prod') {
       if (lease !== pageEnv) return 'remote_env'
     }
@@ -86,6 +115,8 @@ export function ingestActionBlockMessage(block: IngestActionBlock): string {
       return 'Control disabled: subprocess Ops without ingest script support (upgrade Ops or use Linux systemd).'
     case 'remote_env':
       return 'Control is held by the other stack (Redis). Stop the service from that Ops host first.'
+    case 'stack_conflict':
+      return 'Conflicting dev/prod Redis control leases across services. Stop processes on one stack first.'
     default:
       return ''
   }

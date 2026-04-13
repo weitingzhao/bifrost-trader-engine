@@ -21,6 +21,7 @@ import {
   ingestActionBlock,
   ingestActionBlockMessage,
   normalizedPageDevProd,
+  resolveEffectiveRedisControlEnv,
   runtimeControlHostDisplay,
   socketServicesHostColumnDisplay,
   type IngestActionBlock,
@@ -873,6 +874,7 @@ export function IngestServicesTable(props: {
 
   const showConnectionColumn = rows.some(({ svc, category }) => ingestRowUsesConnectionColumn(svc, category))
   const tableColCount = showConnectionColumn ? 6 : 5
+  const allSvcs = rows.map(r => r.svc)
 
   // Group rows by category to render section header rows
   const groups: { cat: IngestCategory; rows: { svc: MarketIngestServiceRow; category: IngestCategory }[] }[] = []
@@ -932,7 +934,12 @@ export function IngestServicesTable(props: {
                 svc.redis_meta_key,
                 svc.redis_control_host,
               )
-              const block = ingestActionBlock(canOperate, disableIngestScript, pageEnv, svc.redis_control_env)
+              const block = ingestActionBlock(
+                canOperate,
+                disableIngestScript,
+                pageEnv,
+                resolveEffectiveRedisControlEnv(svc, allSvcs),
+              )
               return (
                 <ServiceRow
                   key={svc.id}
