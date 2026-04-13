@@ -1099,6 +1099,11 @@ body::before {
   margin-top: 0;
 }
 
+/* Subgroup under Data Coverage (Stock → IB Live / Massive Delay). */
+.app-header-menu-label--coverage-stock {
+  padding-left: calc(var(--space-3) + 0.45rem);
+}
+
 .app-header-menu-divider {
   height: 0;
   border-top: 1px solid var(--color-border);

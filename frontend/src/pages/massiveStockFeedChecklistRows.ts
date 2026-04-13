@@ -40,8 +40,8 @@ const rows: ChecklistRow[] = [
     service: 'Aggregate Bars (OHLC)',
     group: 'rest',
     description:
-      'Four REST aggregate endpoints for stocks: Custom Bars (OHLCV over custom range), Grouped Daily (all tickers for a date), '
-      + 'Daily Open/Close, and Previous Close.',
+      'Four Massive REST aggregate endpoints for stocks: Custom Bars (OHLC), Daily Market Summary (OHLC), '
+      + 'Daily Ticker Summary (OHLC), and Previous Day Bar (OHLC).',
     tierMin: 'starter',
     projectStatus: 'implemented',
     verification:
@@ -49,12 +49,13 @@ const rows: ChecklistRow[] = [
       + 'Proxies: GET /research/massive/stocks/bars/range, GET /research/massive/stocks/bars/grouped-daily/{date}, '
       + 'GET /research/massive/stocks/bars/open-close/{ticker}/{date}, GET /research/massive/stocks/bars/prev/{ticker}.',
     purpose:
-      'Backfill stock OHLCV bars from Massive as a complement to IB historical data. Grouped Daily enables universe-wide screening.',
+      'Custom Bars: charting, backtesting, and interval research. Daily Market Summary: one-shot EOD-style coverage for the full U.S. equity set. '
+      + 'Daily Ticker Summary: single-name daily OHLC with extended-hours context. Previous Day Bar: prior session OHLC without calendar math.',
     helpVerification:
-      'Custom Bars: GET /v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from}/{to} — proxy query: ticker, multiplier, timespan, start_ms, end_ms. '
-      + 'Grouped Daily: GET /v2/aggs/grouped/locale/us/market/stocks/{date}. '
-      + 'Open/Close: GET /v1/open-close/{ticker}/{date}. '
-      + 'Previous day: GET /v2/aggs/ticker/{ticker}/prev. '
+      'Custom Bars (OHLC): GET /v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from}/{to} — proxy query: ticker, multiplier, timespan, start_ms, end_ms. '
+      + 'Daily Market Summary (OHLC): GET /v2/aggs/grouped/locale/us/market/stocks/{date}. '
+      + 'Daily Ticker Summary (OHLC): GET /v1/open-close/{ticker}/{date}. '
+      + 'Previous Day Bar (OHLC): GET /v2/aggs/ticker/{ticker}/prev. '
       + 'MassiveClient: fetch_stock_aggs, fetch_stock_grouped_daily, fetch_stock_open_close, fetch_stock_previous_day.',
   },
   {

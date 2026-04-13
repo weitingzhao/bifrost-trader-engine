@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import type { StatusResponse } from '../types'
 import {
+  fetchMassiveJobsList,
   fetchMassiveReferenceTickers,
   fetchMassiveRelatedCompanies,
   fetchMassiveStatus,
@@ -11,8 +12,10 @@ import {
   fetchMassiveTickerDetail,
   fetchMassiveTickerTypes,
   postMassiveStocksApiCoverageSync,
+  postMassiveSync,
+  subscribeMassiveJobEvents,
 } from '../api'
-import type { MassiveStatusResponse } from '../api'
+import type { MassiveJobApiRow, MassiveStatusResponse } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import stockChecklistRows from './massiveStockFeedChecklistRows'
 import type { ChecklistRow } from './massiveStockFeedChecklistRows'
@@ -38,6 +41,10 @@ import { MassiveTickerReferenceDbSection } from './massive/MassiveTickerReferenc
 
 /** `frontend/public/plans/` — must respect Vite `base` so `/plans/...` works when not deployed at domain root. */
 const MASSIVE_STOCKS_COVERAGE_PLAN_URL = `${import.meta.env.BASE_URL}plans/massive_stocks_api_coverage.html`
+
+/** Default Custom Bars window: one regular session (09:30–16:00 ET) on 2024-06-03 — works with multiplier 1 × timespan minute. */
+const STOCK_CUSTOM_BARS_DEFAULT_START_MS = 1717421400000
+const STOCK_CUSTOM_BARS_DEFAULT_END_MS = 1717444800000
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -165,6 +172,17 @@ export function FeedMassiveStockPage({
   const [apiCoverageSyncBusy, setApiCoverageSyncBusy] = useState(false)
   const [apiCoverageSyncMsg, setApiCoverageSyncMsg] = useState<string | null>(null)
 
+  /** Massive Delay (DB): Celery jobs + enqueue to PostgreSQL */
+  const [delayDbJobs, setDelayDbJobs] = useState<MassiveJobApiRow[]>([])
+  const [delayDbJobsLoading, setDelayDbJobsLoading] = useState(false)
+  const [delayDbJobsErr, setDelayDbJobsErr] = useState<string | null>(null)
+  const [delayDbMsg, setDelayDbMsg] = useState<string | null>(null)
+  const [delayDbBusy, setDelayDbBusy] = useState(false)
+  const [delayDbOhlcTab, setDelayDbOhlcTab] = useState<
+    'custom_bars' | 'daily_market_summary' | 'daily_ticker_summary' | 'previous_day_bar'
+  >('custom_bars')
+  const [delayDbPriorityHigh, setDelayDbPriorityHigh] = useState(false)
+
   // ── Tickers sub-tab state ─────────────────────────────────────────────────
   const [tkSubTab, setTkSubTab] = useState<
     'all_tickers' | 'ticker_overview' | 'ticker_types' | 'related_tickers' | 'reference_db'
@@ -209,12 +227,14 @@ export function FeedMassiveStockPage({
   const [tkRelTicker, setTkRelTicker] = useState('AAPL')
 
   // Aggregate Bars (OHLC) sub-tabs
-  const [aggSubTab, setAggSubTab] = useState<'custom_bars' | 'grouped_daily' | 'open_close' | 'prev'>('custom_bars')
+  const [aggSubTab, setAggSubTab] = useState<
+    'custom_bars' | 'daily_market_summary' | 'daily_ticker_summary' | 'previous_day_bar'
+  >('custom_bars')
   const [aggStTicker, setAggStTicker] = useState('AAPL')
   const [aggStMult, setAggStMult] = useState('1')
   const [aggStTs, setAggStTs] = useState('minute')
-  const [aggStStartMs, setAggStStartMs] = useState('')
-  const [aggStEndMs, setAggStEndMs] = useState('')
+  const [aggStStartMs, setAggStStartMs] = useState(String(STOCK_CUSTOM_BARS_DEFAULT_START_MS))
+  const [aggStEndMs, setAggStEndMs] = useState(String(STOCK_CUSTOM_BARS_DEFAULT_END_MS))
   const [aggStBusy, setAggStBusy] = useState(false)
   const [aggStErr, setAggStErr] = useState<string | null>(null)
   const [aggStResult, setAggStResult] = useState<Record<string, unknown> | null>(null)
@@ -240,6 +260,123 @@ export function FeedMassiveStockPage({
   }, [])
 
   useEffect(() => { loadStatus() }, [loadStatus])
+
+  const loadDelayDbJobs = useCallback(async () => {
+    setDelayDbJobsLoading(true)
+    setDelayDbJobsErr(null)
+    try {
+      const res = await fetchMassiveJobsList({ limit: 40, celery_queue: 'massive_stocks' })
+      if (!res.ok) {
+        setDelayDbJobsErr(res.error ?? 'Failed to load jobs')
+        setDelayDbJobs([])
+        return
+      }
+      setDelayDbJobs(res.jobs)
+    } catch (e: unknown) {
+      setDelayDbJobsErr(e instanceof Error ? e.message : 'Failed to load jobs')
+      setDelayDbJobs([])
+    } finally {
+      setDelayDbJobsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadDelayDbJobs()
+  }, [loadDelayDbJobs])
+
+  const runDelayEnqueue = useCallback(
+    async (kind: string, payload: Record<string, unknown>) => {
+      setDelayDbBusy(true)
+      setDelayDbMsg(null)
+      try {
+        const res = await postMassiveSync(
+          kind,
+          payload,
+          delayDbPriorityHigh ? { priority: 'high' } : undefined,
+        )
+        if (!res.ok) {
+          setDelayDbMsg(res.error ?? res.message ?? 'Enqueue failed')
+          return
+        }
+        const jid = res.job_id
+        if (res.deduplicated) {
+          setDelayDbMsg(`Job deduplicated (existing pending/running): ${jid ?? '—'}`)
+        } else {
+          setDelayDbMsg(`Enqueued job ${jid ?? '—'}`)
+        }
+        if (jid) {
+          subscribeMassiveJobEvents(jid, () => {
+            loadDelayDbJobs()
+          }, { timeoutSec: 7200 })
+        } else {
+          loadDelayDbJobs()
+        }
+      } catch (e: unknown) {
+        setDelayDbMsg(e instanceof Error ? e.message : 'Enqueue failed')
+      } finally {
+        setDelayDbBusy(false)
+      }
+    },
+    [delayDbPriorityHigh, loadDelayDbJobs],
+  )
+
+  const enqueueStockOhlcSync = useCallback(async () => {
+    if (delayDbOhlcTab === 'custom_bars') {
+      const startMs = parseInt(aggStStartMs.trim(), 10)
+      const endMs = parseInt(aggStEndMs.trim(), 10)
+      const t = aggStTicker.trim().toUpperCase()
+      if (!t || !Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+        setDelayDbMsg('Custom bars: ticker and Unix ms start/end are required.')
+        return
+      }
+      await runDelayEnqueue('stock_ohlc_sync', {
+        mode: 'custom_bars',
+        ticker: t,
+        multiplier: parseInt(aggStMult.trim(), 10) || 1,
+        timespan: aggStTs.trim() || 'minute',
+        start_ms: startMs,
+        end_ms: endMs,
+      })
+      return
+    }
+    if (delayDbOhlcTab === 'daily_market_summary') {
+      const d = gdDate.trim()
+      if (!d) {
+        setDelayDbMsg('Date (YYYY-MM-DD) is required.')
+        return
+      }
+      await runDelayEnqueue('stock_ohlc_sync', { mode: 'daily_market_summary', date: d })
+      return
+    }
+    if (delayDbOhlcTab === 'daily_ticker_summary') {
+      const t = ocStTicker.trim().toUpperCase()
+      const d = ocDate.trim()
+      if (!t || !d) {
+        setDelayDbMsg('Ticker and date are required.')
+        return
+      }
+      await runDelayEnqueue('stock_ohlc_sync', { mode: 'daily_ticker_summary', ticker: t, date: d })
+      return
+    }
+    const t = prevStTicker.trim().toUpperCase()
+    if (!t) {
+      setDelayDbMsg('Ticker is required.')
+      return
+    }
+    await runDelayEnqueue('stock_ohlc_sync', { mode: 'previous_day_bar', ticker: t })
+  }, [
+    delayDbOhlcTab,
+    aggStStartMs,
+    aggStEndMs,
+    aggStTicker,
+    aggStMult,
+    aggStTs,
+    gdDate,
+    ocStTicker,
+    ocDate,
+    prevStTicker,
+    runDelayEnqueue,
+  ])
 
   const runTkAllTickers = useCallback(async () => {
     setTkAllBusy(true)
@@ -538,6 +675,162 @@ export function FeedMassiveStockPage({
       <span className="feed-massive-svc-evidence-pending">
         Not yet implemented for stocks. See coverage sheet for target endpoints.
       </span>
+    )
+  }
+
+  function renderMassiveDelayDbSection() {
+    const refKinds = new Set([
+      'stock_reference_universe',
+      'stock_reference_overview',
+      'stock_reference_related',
+      'stock_reference_instrument_types',
+      'ticker_reference_universe',
+      'ticker_reference_overview',
+      'ticker_reference_related',
+      'ticker_reference_ticker_types',
+      'ticker_reference_instrument_types',
+    ])
+    const ohlcKinds = new Set(['stock_ohlc_sync'])
+    const shownJobs = delayDbJobs.filter(
+      j => refKinds.has((j.kind ?? '').trim()) || ohlcKinds.has((j.kind ?? '').trim()),
+    )
+
+    return (
+      <section
+        className="feed-massive-card"
+        style={{ marginBottom: 'var(--space-4)' }}
+        aria-labelledby="feed-massive-delay-db-heading"
+      >
+        <h4 id="feed-massive-delay-db-heading" className="feed-massive-section-header">
+          Massive Delay (DB)
+        </h4>
+        <p className="feed-massive-card-lead">
+          Enqueue Celery jobs that persist Massive REST responses to PostgreSQL. Ticker reference jobs update the
+          reference tables; stock OHLC jobs upsert into stock_day / stock_min with source &quot;massive&quot;.
+        </p>
+        <label className="feed-massive-field" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
+          <input
+            type="checkbox"
+            checked={delayDbPriorityHigh}
+            onChange={e => setDelayDbPriorityHigh(e.target.checked)}
+            disabled={!configured || delayDbBusy}
+          />
+          <span className="form-label" style={{ marginBottom: 0 }}>High priority queue (massive_stocks_high)</span>
+        </label>
+
+        <div style={{ marginBottom: 'var(--space-4)' }}>
+          <h5 className="form-label" style={{ marginBottom: 'var(--space-2)' }}>Reference sync</h5>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={!configured || delayDbBusy}
+              onClick={() => void runDelayEnqueue('stock_reference_universe', { max_pages: 2 })}
+            >
+              Universe (2 pages)
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={!configured || delayDbBusy}
+              onClick={() => void runDelayEnqueue('stock_reference_overview', { mode: 'stale', stale_hours: 720 })}
+            >
+              Overview (stale)
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={!configured || delayDbBusy}
+              onClick={() => void runDelayEnqueue('stock_reference_related', { mode: 'stale', stale_hours: 720 })}
+            >
+              Related (stale)
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={!configured || delayDbBusy}
+              onClick={() => void runDelayEnqueue('stock_reference_instrument_types', {})}
+            >
+              Instrument types
+            </button>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 'var(--space-4)' }}>
+          <h5 className="form-label" style={{ marginBottom: 'var(--space-2)' }}>Stock OHLC → PostgreSQL</h5>
+          <p className="feed-massive-help-text" style={{ marginBottom: 'var(--space-2)' }}>
+            Uses the same field values as Aggregate Bars (OHLC) above. Pick a mode, then Enqueue sync.
+          </p>
+          <div className="feed-massive-agg-tabs" role="tablist" aria-label="Stock OHLC DB sync mode" style={{ marginBottom: 'var(--space-3)' }}>
+            {(
+              [
+                ['custom_bars', 'Custom Bars'],
+                ['daily_market_summary', 'Daily Market Summary'],
+                ['daily_ticker_summary', 'Daily Ticker Summary'],
+                ['previous_day_bar', 'Previous Day Bar'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                className={`feed-massive-agg-tab${delayDbOhlcTab === id ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={delayDbOhlcTab === id}
+                onClick={() => setDelayDbOhlcTab(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={!configured || delayDbBusy}
+            onClick={() => void enqueueStockOhlcSync()}
+          >
+            {delayDbBusy ? 'Enqueueing…' : 'Enqueue sync'}
+          </button>
+        </div>
+
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+            <h5 className="form-label" style={{ marginBottom: 0 }}>Recent jobs (massive_stocks queue)</h5>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ padding: '2px 8px', fontSize: '0.85rem' }}
+              disabled={delayDbJobsLoading}
+              onClick={() => void loadDelayDbJobs()}
+            >
+              {delayDbJobsLoading ? 'Loading…' : 'Refresh'}
+            </button>
+          </div>
+          {delayDbJobsErr ? <p className="status-page-msg err" role="alert">{delayDbJobsErr}</p> : null}
+          {delayDbMsg ? <p className="feed-massive-api-coverage-sync-msg">{delayDbMsg}</p> : null}
+          {shownJobs.length === 0 && !delayDbJobsLoading ? (
+            <p className="feed-massive-help-text">No matching jobs yet.</p>
+          ) : (
+            <ul className="feed-massive-delay-db-job-list" style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: '16rem', overflow: 'auto' }}>
+              {shownJobs.map(j => (
+                <li
+                  key={j.job_id}
+                  style={{
+                    padding: 'var(--space-2) 0',
+                    borderBottom: '1px solid var(--border-subtle, rgba(255,255,255,0.08))',
+                    fontSize: '0.875rem',
+                  }}
+                >
+                  <code>{j.job_id}</code>
+                  {' '}
+                  <span style={{ opacity: 0.85 }}>{j.kind ?? j.type ?? '—'}</span>
+                  {' '}
+                  <strong>{j.status ?? '—'}</strong>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
     )
   }
 
@@ -1099,37 +1392,37 @@ export function FeedMassiveStockPage({
             <button
               type="button"
               role="tab"
-              id="feed-massive-stk-agg-tab-grouped"
-              className={`feed-massive-agg-tab${aggSubTab === 'grouped_daily' ? ' feed-massive-agg-tab--active' : ''}`}
-              aria-selected={aggSubTab === 'grouped_daily'}
-              tabIndex={aggSubTab === 'grouped_daily' ? 0 : -1}
-              onClick={() => setAggSubTab('grouped_daily')}
+              id="feed-massive-stk-agg-tab-daily-market"
+              className={`feed-massive-agg-tab${aggSubTab === 'daily_market_summary' ? ' feed-massive-agg-tab--active' : ''}`}
+              aria-selected={aggSubTab === 'daily_market_summary'}
+              tabIndex={aggSubTab === 'daily_market_summary' ? 0 : -1}
+              onClick={() => setAggSubTab('daily_market_summary')}
             >
-              Grouped Daily
+              Daily Market Summary
               <span className="feed-massive-agg-tab-badge">REST</span>
             </button>
             <button
               type="button"
               role="tab"
-              id="feed-massive-stk-agg-tab-oc"
-              className={`feed-massive-agg-tab${aggSubTab === 'open_close' ? ' feed-massive-agg-tab--active' : ''}`}
-              aria-selected={aggSubTab === 'open_close'}
-              tabIndex={aggSubTab === 'open_close' ? 0 : -1}
-              onClick={() => setAggSubTab('open_close')}
+              id="feed-massive-stk-agg-tab-daily-ticker"
+              className={`feed-massive-agg-tab${aggSubTab === 'daily_ticker_summary' ? ' feed-massive-agg-tab--active' : ''}`}
+              aria-selected={aggSubTab === 'daily_ticker_summary'}
+              tabIndex={aggSubTab === 'daily_ticker_summary' ? 0 : -1}
+              onClick={() => setAggSubTab('daily_ticker_summary')}
             >
-              Open / Close
+              Daily Ticker Summary
               <span className="feed-massive-agg-tab-badge">REST</span>
             </button>
             <button
               type="button"
               role="tab"
-              id="feed-massive-stk-agg-tab-prev"
-              className={`feed-massive-agg-tab${aggSubTab === 'prev' ? ' feed-massive-agg-tab--active' : ''}`}
-              aria-selected={aggSubTab === 'prev'}
-              tabIndex={aggSubTab === 'prev' ? 0 : -1}
-              onClick={() => setAggSubTab('prev')}
+              id="feed-massive-stk-agg-tab-previous-day"
+              className={`feed-massive-agg-tab${aggSubTab === 'previous_day_bar' ? ' feed-massive-agg-tab--active' : ''}`}
+              aria-selected={aggSubTab === 'previous_day_bar'}
+              tabIndex={aggSubTab === 'previous_day_bar' ? 0 : -1}
+              onClick={() => setAggSubTab('previous_day_bar')}
             >
-              Previous day
+              Previous Day Bar
               <span className="feed-massive-agg-tab-badge">REST</span>
             </button>
           </div>
@@ -1144,12 +1437,18 @@ export function FeedMassiveStockPage({
               >
                 <div className="feed-massive-agg-sub-doc">
                   <p>
-                    <strong>Use case:</strong> Retrieve aggregated OHLCV bars for a stock over a custom time range and
-                    interval (minute, hour, day, etc.). Bars are built from qualifying trades.
+                    <strong>Use case:</strong> Retrieve aggregated historical OHLC and volume for a stock ticker over a
+                    custom date range and time interval (Eastern Time). Aggregates use qualifying trades only; empty
+                    intervals mean no eligible trades in that window.
                   </p>
                   <p>
-                    <strong>When to use:</strong> Charting, backtesting, and research where you need more than a single
-                    trading day or a fixed calendar window.
+                    <strong>When to use:</strong> Data visualization, technical analysis, backtesting strategies, and
+                    market research (including pre-market, regular session, and after-hours where applicable).
+                  </p>
+                  <p>
+                    <strong>Demo inputs:</strong> Defaults are Unix ms for Mon <code>2024-06-03</code> regular hours only
+                    (09:30–16:00 America/New_York), <code>1</code> × <code>minute</code> — a small, realistic slice for Execute
+                    without editing fields.
                   </p>
                   <p className="feed-massive-agg-sub-endpoint">
                     <code>GET /v2/aggs/ticker/&#123;stocksTicker&#125;/range/&#123;multiplier&#125;/&#123;timespan&#125;/&#123;from&#125;/&#123;to&#125;</code>
@@ -1174,7 +1473,7 @@ export function FeedMassiveStockPage({
                       value={aggStStartMs}
                       onChange={e => setAggStStartMs(e.target.value)}
                       disabled={!configured || aggStBusy}
-                      placeholder="e.g. 1717200000000"
+                      placeholder={`e.g. ${STOCK_CUSTOM_BARS_DEFAULT_START_MS}`}
                       autoComplete="off"
                     />
                   </label>
@@ -1185,7 +1484,7 @@ export function FeedMassiveStockPage({
                       value={aggStEndMs}
                       onChange={e => setAggStEndMs(e.target.value)}
                       disabled={!configured || aggStBusy}
-                      placeholder="e.g. 1717286400000"
+                      placeholder={`e.g. ${STOCK_CUSTOM_BARS_DEFAULT_END_MS}`}
                       autoComplete="off"
                     />
                   </label>
@@ -1232,21 +1531,22 @@ export function FeedMassiveStockPage({
               </div>
             ) : null}
 
-            {aggSubTab === 'grouped_daily' ? (
+            {aggSubTab === 'daily_market_summary' ? (
               <div
                 className="feed-massive-agg-tab-panel"
                 role="tabpanel"
-                id="feed-massive-stk-agg-panel-grouped"
-                aria-labelledby="feed-massive-stk-agg-tab-grouped"
+                id="feed-massive-stk-agg-panel-daily-market"
+                aria-labelledby="feed-massive-stk-agg-tab-daily-market"
               >
                 <div className="feed-massive-agg-sub-doc">
                   <p>
-                    <strong>Use case:</strong> Retrieve daily OHLCV bars for <em>all</em> US stocks on a single calendar
-                    date in one response. Response can be very large.
+                    <strong>Use case:</strong> Retrieve daily OHLC, volume, and volume-weighted average price (VWAP)
+                    for <em>all</em> U.S. stocks on a specified trading date in one request. The payload can be very
+                    large.
                   </p>
                   <p>
-                    <strong>When to use:</strong> Universe-wide daily screening, gap analysis, or bulk EOD snapshots
-                    for a specific session date.
+                    <strong>When to use:</strong> Market overview, bulk data processing, historical research, and
+                    portfolio comparison.
                   </p>
                   <p className="feed-massive-agg-sub-endpoint">
                     <code>GET /v2/aggs/grouped/locale/us/market/stocks/&#123;date&#125;</code>
@@ -1285,21 +1585,21 @@ export function FeedMassiveStockPage({
               </div>
             ) : null}
 
-            {aggSubTab === 'open_close' ? (
+            {aggSubTab === 'daily_ticker_summary' ? (
               <div
                 className="feed-massive-agg-tab-panel"
                 role="tabpanel"
-                id="feed-massive-stk-agg-panel-oc"
-                aria-labelledby="feed-massive-stk-agg-tab-oc"
+                id="feed-massive-stk-agg-panel-daily-ticker"
+                aria-labelledby="feed-massive-stk-agg-tab-daily-ticker"
               >
                 <div className="feed-massive-agg-sub-doc">
                   <p>
-                    <strong>Use case:</strong> Official open, high, low, close, and volume for one stock on one date,
-                    including pre-market and after-hours where available.
+                    <strong>Use case:</strong> Retrieve opening and closing prices for one stock on one calendar date,
+                    together with high, low, volume, and pre-market / after-hours trade prices when available.
                   </p>
                   <p>
-                    <strong>When to use:</strong> Single-day summaries, EOD reporting, or extended-hours review without
-                    pulling full intraday aggregates.
+                    <strong>When to use:</strong> Daily performance analysis, historical data collection, after-hours
+                    insights, and portfolio tracking.
                   </p>
                   <p className="feed-massive-agg-sub-endpoint">
                     <code>GET /v1/open-close/&#123;stocksTicker&#125;/&#123;date&#125;</code>
@@ -1349,21 +1649,22 @@ export function FeedMassiveStockPage({
               </div>
             ) : null}
 
-            {aggSubTab === 'prev' ? (
+            {aggSubTab === 'previous_day_bar' ? (
               <div
                 className="feed-massive-agg-tab-panel"
                 role="tabpanel"
-                id="feed-massive-stk-agg-panel-prev"
-                aria-labelledby="feed-massive-stk-agg-tab-prev"
+                id="feed-massive-stk-agg-panel-previous-day"
+                aria-labelledby="feed-massive-stk-agg-tab-previous-day"
               >
                 <div className="feed-massive-agg-sub-doc">
                   <p>
-                    <strong>Use case:</strong> Previous <em>trading</em> day OHLCV for a stock in one call — no calendar
-                    math on the client.
+                    <strong>Use case:</strong> Retrieve the previous <em>trading</em> day open, high, low, and close
+                    (OHLC) for a stock, including volume, in one call — no client-side calendar logic for the prior
+                    session.
                   </p>
                   <p>
-                    <strong>When to use:</strong> Overnight change metrics, daily baselines, or quick prior-session
-                    reference.
+                    <strong>When to use:</strong> Baseline comparison, technical analysis, market research, and daily
+                    reporting.
                   </p>
                   <p className="feed-massive-agg-sub-endpoint">
                     <code>GET /v2/aggs/ticker/&#123;stocksTicker&#125;/prev</code>
@@ -1608,6 +1909,11 @@ export function FeedMassiveStockPage({
 
       {/* Main capability panels */}
       <div className="feed-massive-tab-panel">
+
+        <h3 className="feed-massive-group-header" id="feed-massive-stock-group-delay-db">
+          Operations
+        </h3>
+        {renderMassiveDelayDbSection()}
 
         {/* REST API */}
         <h3 className="feed-massive-group-header" id="feed-massive-stock-group-rest">REST API</h3>

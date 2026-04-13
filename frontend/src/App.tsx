@@ -50,7 +50,9 @@ import { isMassiveStockFeedHash } from './pages/massive/feedMassiveStockTabUtils
 import { SettingsSidebarLampGlyph } from './pages/settings/settingsSidebarLampGlyphs'
 import type { SettingsSidebarLampGlyphId } from './pages/settings/settingsSidebarLampGlyphs'
 import {
-  COVERAGE_SUBSECTIONS,
+  COVERAGE_OPTION_SUBSECTION,
+  COVERAGE_STOCK_GROUP_LABEL,
+  COVERAGE_STOCK_SUBSECTIONS,
   FEED_MASSIVE_OPTION_ID,
   FEED_MASSIVE_STOCK_ID,
   FEED_SUBSECTIONS,
@@ -1478,14 +1480,27 @@ export default function App() {
                 Celery
               </button>
               <div className="app-header-menu-label" role="presentation">Data Coverage</div>
-              {COVERAGE_SUBSECTIONS.map((sub) => (
+              <button
+                type="button"
+                role="menuitem"
+                className={`app-header-menu-item ${activeTab === 'settings' && isCoverageOptionHash(urlHash) ? 'active' : ''}`}
+                onClick={() => { openSettingsSectionById(COVERAGE_OPTION_SUBSECTION.id); setHeaderMenuOpen(false) }}
+                title={`Settings → Data Coverage → ${COVERAGE_OPTION_SUBSECTION.label}`}
+              >
+                <SettingsSectionIcon name={COVERAGE_OPTION_SUBSECTION.icon} />
+                {COVERAGE_OPTION_SUBSECTION.label}
+              </button>
+              <div className="app-header-menu-label app-header-menu-label--coverage-stock" role="presentation">
+                {COVERAGE_STOCK_GROUP_LABEL}
+              </div>
+              {COVERAGE_STOCK_SUBSECTIONS.map((sub) => (
                 <button
                   key={sub.id}
                   type="button"
                   role="menuitem"
-                  className={`app-header-menu-item ${activeTab === 'settings' && (sub.id === 'coverage-option' ? isCoverageOptionHash(urlHash) : settingsHashKey(urlHash) === sub.id) ? 'active' : ''}`}
+                  className={`app-header-menu-item app-header-menu-item-massive ${activeTab === 'settings' && settingsHashKey(urlHash) === sub.id ? 'active' : ''}`}
                   onClick={() => { openSettingsSectionById(sub.id); setHeaderMenuOpen(false) }}
-                  title={`Settings → Data Coverage → ${sub.label}`}
+                  title={`Settings → Data Coverage → Stock → ${sub.label}`}
                 >
                   <SettingsSectionIcon name={sub.icon} />
                   {sub.label}

@@ -322,8 +322,8 @@
 
 ### 2.13 表 `stock_day`（阶段 3 R-A3 扩展：股票日 K 线）
 
-- **用途**：存**股票**的**日线** OHLC 数据，供复盘、回测与风控分析；数据源为 IB 历史数据。
-- **写入**：监控端 POST /bars/fetch（或等效）按标的与周期 `1 D` 从 IB 拉取并 UPSERT；同一 (symbol, bar_time) 仅保留一行。
+- **用途**：存**股票**的**日线** OHLC 数据，供复盘、回测与风控分析；数据来源可为 **IB 历史拉取**、**Massive REST**（延迟数据，job kind `stock_ohlc_sync`）、**TradingView 参考指数**等，由 **`source`** 区分。
+- **写入**：监控端 POST /bars/fetch（或等效）按标的与周期 `1 D` 从 IB 拉取并 UPSERT（`source='ib'`）；Massive Worker 写入 `source='massive'`（含 Daily Market Summary、Daily Ticker Summary、Previous Day、Custom Bars 日级等）。
 - **列**：
 
 | 列名 | 类型 | 说明 |
@@ -336,34 +336,44 @@
 | low | double precision | 低 |
 | close | double precision | 收 |
 | volume | double precision | 成交量（可选） |
+| source | text NOT NULL | 数据来源：`ib` \| `massive` \| `tv` 等 |
+| vwap | double precision | 可选，Massive 等提供的 VWAP |
+| trade_count | bigint | 可选，成交笔数（如 API 字段 `n`） |
+| adjusted | boolean | 可选，是否复权口径 |
+| extras | jsonb | 可选，扩展字段（如盘前/盘后价） |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
-- **唯一约束**：`UNIQUE(symbol, bar_time)`，便于 UPSERT。
-- **索引**：建议 `(symbol, bar_time DESC)`，供按标的与时间范围查询。
-- **读取**：GET /bars?sec_type=STK&period=1 D 或复盘/市场数据页按 symbol、时间范围查询。
+- **唯一约束**：`UNIQUE(symbol, bar_time, source)`，便于多来源并存与 UPSERT。
+- **索引**：`(symbol, bar_time DESC)`；补充 `(symbol, source, bar_time DESC)`（见 DDL）。
+- **读取**：GET /bars?sec_type=STK&period=1 D 在应用层对同一 `(symbol, bar_time)` 按来源优先级去重（优先 `ib`，其次 `tv`，再 `massive`）；复盘/市场数据页按 symbol、时间范围查询。
 
 ### 2.14 表 `stock_min`（阶段 3 R-A3 扩展：股票分钟/小时 K 线）
 
-- **用途**：存**股票**的**分钟线、小时线** OHLC 数据（周期 1 min、5 mins、1 hour）；供复盘与短期回测。
-- **写入**：同上，周期为 `1 min`、`5 mins`、`1 hour` 时写入本表。
+- **用途**：存**股票**的**分钟线、小时线**等日内 OHLC 数据；供复盘与短期回测。来源由 **`source`** 区分（IB vs Massive 等）。
+- **写入**：POST /bars/fetch 等写入 `source='ib'`；Massive Custom Bars（非 day/week/month timespan）由 job `stock_ohlc_sync` 写入 `source='massive'`。
 - **列**：
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | id | bigserial | 自增主键 |
 | symbol | text NOT NULL | 股票代码 |
-| period | text NOT NULL | 周期：'1 min' \| '5 mins' \| '1 hour' |
+| period | text NOT NULL | 周期：如 `1 min`、`5 min`、`1 hour`（与 Massive multiplier×timespan 映射一致） |
 | bar_time | timestamptz NOT NULL | K 线周期起始时间 |
 | open | double precision | 开 |
 | high | double precision | 高 |
 | low | double precision | 低 |
 | close | double precision | 收 |
 | volume | double precision | 成交量（可选） |
+| source | text NOT NULL | 数据来源 |
+| vwap | double precision | 可选 |
+| trade_count | bigint | 可选 |
+| adjusted | boolean | 可选 |
+| extras | jsonb | 可选 |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
-- **唯一约束**：`UNIQUE(symbol, period, bar_time)`。
-- **索引**：建议 `(symbol, period, bar_time DESC)`。
-- **读取**：GET /bars?sec_type=STK&period=1 min（或 5 mins、1 hour）按 symbol、时间范围查询。
+- **唯一约束**：`UNIQUE(symbol, period, bar_time, source)`。
+- **索引**：建议 `(symbol, period, bar_time DESC)`；补充 `(symbol, period, source, bar_time DESC)`（见 DDL）。
+- **读取**：GET /bars?sec_type=STK&period=1 min（或 5 mins、1 hour）按 symbol、时间范围查询，并对同键多来源去重（优先级同 `stock_day`）。
 
 ### 2.14.1 表 `tickers`（Massive 参考标的 / All Tickers）
 
@@ -545,7 +555,7 @@
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | job_massive_backfill_id | bigserial | 自增主键（作为 job_id 返回给客户端） |
-| kind | text NOT NULL | 任务类型：`aggregates` \| `snapshot` \| `oi` \| `trades` \| `reference` \| `corporate_action` |
+| kind | text NOT NULL | 任务类型：`aggregates` \| `snapshot` \| `oi` \| `trades` \| `reference` \| `corporate_action` \| `stock_ohlc_sync`（股票 OHLC 落库）\| `ticker_reference_*` / `stock_reference_*` 等 |
 | payload | jsonb NOT NULL | 任务参数（如 { symbol, expiry, start_date, end_date } 等，仅参数） |
 | status | text NOT NULL | pending \| running \| done \| failed |
 | result | jsonb | 执行结果：{ ok, count?, message? } 或 { ok: false, error } |

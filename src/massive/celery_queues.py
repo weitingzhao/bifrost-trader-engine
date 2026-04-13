@@ -24,12 +24,17 @@ TICKER_REFERENCE_KINDS: Final[frozenset[str]] = frozenset(
     }
 )
 
+# Stock OHLC → PostgreSQL (Massive REST); same worker pool as reference for isolation from options.
+STOCK_OHLC_SYNC_KINDS: Final[frozenset[str]] = frozenset({"stock_ohlc_sync"})
+
 STOCK_REFERENCE_KINDS = TICKER_REFERENCE_KINDS  # backward compat for reader/tests
+
+MASSIVE_STOCKS_QUEUE_KINDS: Final[frozenset[str]] = TICKER_REFERENCE_KINDS | STOCK_OHLC_SYNC_KINDS
 
 
 def celery_queue_for_massive_job(kind: str, *, priority_high: bool) -> str:
     """Return broker queue for ``run_massive_job`` given job kind and API priority."""
     k = (kind or "").strip().lower()
-    if k in TICKER_REFERENCE_KINDS:
+    if k in MASSIVE_STOCKS_QUEUE_KINDS:
         return "massive_stocks_high" if priority_high else "massive_stocks"
     return "massive_high" if priority_high else "massive"

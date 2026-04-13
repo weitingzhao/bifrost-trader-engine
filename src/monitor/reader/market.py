@@ -122,8 +122,15 @@ def get_bars(
                     """
                     SELECT symbol, '1 D' AS period, extract(epoch from bar_time) AS time,
                            open, high, low, close, volume
-                    FROM stock_day
-                    WHERE symbol = %s
+                    FROM (
+                      SELECT DISTINCT ON (symbol, bar_time)
+                        symbol, bar_time, open, high, low, close, volume
+                      FROM stock_day
+                      WHERE symbol = %s
+                      ORDER BY symbol, bar_time DESC,
+                        CASE COALESCE(source, 'ib')
+                          WHEN 'ib' THEN 0 WHEN 'tv' THEN 1 WHEN 'massive' THEN 2 ELSE 3 END ASC
+                    ) d
                     ORDER BY bar_time DESC NULLS LAST
                     LIMIT %s
                     """,
@@ -134,8 +141,15 @@ def get_bars(
                     """
                     SELECT symbol, period, extract(epoch from bar_time) AS time,
                            open, high, low, close, volume
-                    FROM stock_min
-                    WHERE symbol = %s AND period = %s
+                    FROM (
+                      SELECT DISTINCT ON (symbol, period, bar_time)
+                        symbol, period, bar_time, open, high, low, close, volume
+                      FROM stock_min
+                      WHERE symbol = %s AND period = %s
+                      ORDER BY symbol, period, bar_time DESC,
+                        CASE COALESCE(source, 'ib')
+                          WHEN 'ib' THEN 0 WHEN 'tv' THEN 1 WHEN 'massive' THEN 2 ELSE 3 END ASC
+                    ) m
                     ORDER BY bar_time DESC NULLS LAST
                     LIMIT %s
                     """,
@@ -158,12 +172,34 @@ def get_bars_latest(conn: Any, symbol: Optional[str] = None, period: str = "1 D"
         with conn.cursor() as cur:
             if table == "stock_day":
                 cur.execute(
-                    "SELECT extract(epoch from bar_time) AS t FROM stock_day WHERE symbol = %s ORDER BY bar_time DESC LIMIT 1",
+                    """
+                    SELECT extract(epoch from bar_time) AS t
+                    FROM (
+                      SELECT DISTINCT ON (symbol, bar_time) symbol, bar_time
+                      FROM stock_day
+                      WHERE symbol = %s
+                      ORDER BY symbol, bar_time DESC,
+                        CASE COALESCE(source, 'ib')
+                          WHEN 'ib' THEN 0 WHEN 'tv' THEN 1 WHEN 'massive' THEN 2 ELSE 3 END ASC
+                    ) d
+                    ORDER BY bar_time DESC LIMIT 1
+                    """,
                     (symbol.strip(),),
                 )
             else:
                 cur.execute(
-                    "SELECT extract(epoch from bar_time) AS t FROM stock_min WHERE symbol = %s AND period = %s ORDER BY bar_time DESC LIMIT 1",
+                    """
+                    SELECT extract(epoch from bar_time) AS t
+                    FROM (
+                      SELECT DISTINCT ON (symbol, period, bar_time) symbol, period, bar_time
+                      FROM stock_min
+                      WHERE symbol = %s AND period = %s
+                      ORDER BY symbol, period, bar_time DESC,
+                        CASE COALESCE(source, 'ib')
+                          WHEN 'ib' THEN 0 WHEN 'tv' THEN 1 WHEN 'massive' THEN 2 ELSE 3 END ASC
+                    ) m
+                    ORDER BY bar_time DESC LIMIT 1
+                    """,
                     (symbol.strip(), per),
                 )
             row = cur.fetchone()
@@ -192,10 +228,17 @@ def get_bar_times_in_range(
                 cur.execute(
                     """
                     SELECT extract(epoch from bar_time) AS t
-                    FROM stock_day
-                    WHERE symbol = %s
-                      AND bar_time >= to_timestamp(%s)::date
-                      AND bar_time <= to_timestamp(%s)::date
+                    FROM (
+                      SELECT DISTINCT ON (symbol, bar_time)
+                        symbol, bar_time
+                      FROM stock_day
+                      WHERE symbol = %s
+                        AND bar_time >= to_timestamp(%s)::date
+                        AND bar_time <= to_timestamp(%s)::date
+                      ORDER BY symbol, bar_time ASC,
+                        CASE COALESCE(source, 'ib')
+                          WHEN 'ib' THEN 0 WHEN 'tv' THEN 1 WHEN 'massive' THEN 2 ELSE 3 END ASC
+                    ) d
                     ORDER BY bar_time ASC
                     """,
                     (sym, float(start_ts), float(end_ts)),
@@ -204,10 +247,17 @@ def get_bar_times_in_range(
                 cur.execute(
                     """
                     SELECT extract(epoch from bar_time) AS t
-                    FROM stock_min
-                    WHERE symbol = %s AND period = %s
-                      AND bar_time >= to_timestamp(%s)
-                      AND bar_time <= to_timestamp(%s)
+                    FROM (
+                      SELECT DISTINCT ON (symbol, period, bar_time)
+                        symbol, period, bar_time
+                      FROM stock_min
+                      WHERE symbol = %s AND period = %s
+                        AND bar_time >= to_timestamp(%s)
+                        AND bar_time <= to_timestamp(%s)
+                      ORDER BY symbol, period, bar_time ASC,
+                        CASE COALESCE(source, 'ib')
+                          WHEN 'ib' THEN 0 WHEN 'tv' THEN 1 WHEN 'massive' THEN 2 ELSE 3 END ASC
+                    ) m
                     ORDER BY bar_time ASC
                     """,
                     (sym, per, float(start_ts), float(end_ts)),
@@ -233,11 +283,19 @@ def get_bars_benchmark(
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
-                WITH ordered AS (
+                WITH dedup AS (
+                  SELECT DISTINCT ON (symbol, bar_time)
+                    symbol, bar_time, close
+                  FROM stock_day
+                  WHERE symbol = ANY(%s) AND bar_time <= %s
+                  ORDER BY symbol, bar_time ASC,
+                    CASE COALESCE(source, 'ib')
+                      WHEN 'ib' THEN 0 WHEN 'tv' THEN 1 WHEN 'massive' THEN 2 ELSE 3 END ASC
+                ),
+                ordered AS (
                     SELECT symbol, bar_time, close,
                            LEAD(close) OVER (PARTITION BY symbol ORDER BY bar_time DESC) AS prev_close
-                    FROM stock_day
-                    WHERE symbol = ANY(%s) AND bar_time <= %s
+                    FROM dedup
                 )
                 SELECT DISTINCT ON (symbol) symbol,
                        extract(epoch from bar_time) AS bar_time,
@@ -275,8 +333,15 @@ def get_stock_day_fallback_price(conn: Any, symbol: str) -> Optional[Tuple[float
                 """
                 SELECT bar_time, close,
                        extract(epoch from bar_time) AS bar_time_epoch
-                FROM stock_day
-                WHERE symbol = %s
+                FROM (
+                  SELECT DISTINCT ON (bar_time)
+                    bar_time, close
+                  FROM stock_day
+                  WHERE symbol = %s
+                  ORDER BY bar_time DESC,
+                    CASE COALESCE(source, 'ib')
+                      WHEN 'ib' THEN 0 WHEN 'tv' THEN 1 WHEN 'massive' THEN 2 ELSE 3 END ASC
+                ) d
                 ORDER BY bar_time DESC
                 LIMIT 3
                 """,
@@ -495,9 +560,9 @@ def write_ohlc_bars_to_db(status_config: dict, rows: List[Dict[str, Any]]) -> bo
                             bar_d = bar_dt
                         cur.execute(
                             """
-                            INSERT INTO stock_day (symbol, bar_time, open, high, low, close, volume)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (symbol, bar_time)
+                            INSERT INTO stock_day (symbol, bar_time, open, high, low, close, volume, source)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, 'ib')
+                            ON CONFLICT (symbol, bar_time, source)
                             DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
                                           close = EXCLUDED.close, volume = EXCLUDED.volume
                             """,
@@ -506,9 +571,9 @@ def write_ohlc_bars_to_db(status_config: dict, rows: List[Dict[str, Any]]) -> bo
                     else:
                         cur.execute(
                             """
-                            INSERT INTO stock_min (symbol, period, bar_time, open, high, low, close, volume)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (symbol, period, bar_time)
+                            INSERT INTO stock_min (symbol, period, bar_time, open, high, low, close, volume, source)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'ib')
+                            ON CONFLICT (symbol, period, bar_time, source)
                             DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
                                           close = EXCLUDED.close, volume = EXCLUDED.volume
                             """,

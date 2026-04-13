@@ -931,6 +931,112 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 
+            if kind == "stock_ohlc_sync":
+                from src.persistence.postgres.stock_ohlc_massive import (
+                    apply_stock_custom_bars,
+                    apply_stock_daily_ticker_summary,
+                    apply_stock_grouped_daily,
+                    apply_stock_previous_day_bar,
+                )
+
+                mode = (payload.get("mode") or "custom_bars").strip().lower()
+                adj_raw = payload.get("adjusted")
+                adjusted_bool: Optional[bool]
+                if adj_raw is None:
+                    adjusted_bool = None
+                else:
+                    adjusted_bool = bool(adj_raw)
+
+                with conn.cursor() as cur:
+                    if mode == "custom_bars":
+                        t = (payload.get("ticker") or "").strip().upper()
+                        mult = int(payload.get("multiplier") or 1)
+                        ts = (payload.get("timespan") or "minute").strip()
+                        start_ms = int(payload.get("start_ms") or 0)
+                        end_ms = int(payload.get("end_ms") or 0)
+                        if not t:
+                            raise ValueError("payload.ticker required")
+                        if not start_ms or not end_ms:
+                            raise ValueError("payload.start_ms and end_ms required")
+                        data = client.fetch_stock_aggs(t, mult, ts, start_ms, end_ms)
+                        if data.get("error"):
+                            raise RuntimeError(str(data.get("error")))
+                        n = apply_stock_custom_bars(
+                            cur, t, ts, mult, data, adjusted=adjusted_bool
+                        )
+                        conn.commit()
+                        result = {
+                            "ok": True,
+                            "kind": kind,
+                            "mode": mode,
+                            "rows_upserted": n,
+                            "summary": {"ticker": t, "timespan": ts, "multiplier": mult},
+                        }
+                    elif mode == "daily_market_summary":
+                        d = (payload.get("date") or "").strip()
+                        if not d:
+                            raise ValueError("payload.date required (YYYY-MM-DD)")
+                        use_adj = True if adjusted_bool is None else adjusted_bool
+                        data = client.fetch_stock_grouped_daily(d, adjusted=use_adj)
+                        if data.get("error"):
+                            raise RuntimeError(str(data.get("error")))
+                        n = apply_stock_grouped_daily(
+                            cur, d, data, adjusted=adjusted_bool
+                        )
+                        conn.commit()
+                        result = {
+                            "ok": True,
+                            "kind": kind,
+                            "mode": mode,
+                            "rows_upserted": n,
+                            "summary": {"date": d[:10], "results_count": len(data.get("results") or [])},
+                        }
+                    elif mode == "daily_ticker_summary":
+                        t = (payload.get("ticker") or "").strip().upper()
+                        d = (payload.get("date") or "").strip()
+                        if not t:
+                            raise ValueError("payload.ticker required")
+                        if not d:
+                            raise ValueError("payload.date required (YYYY-MM-DD)")
+                        use_adj = True if adjusted_bool is None else adjusted_bool
+                        data = client.fetch_stock_open_close(t, d, adjusted=use_adj)
+                        if data.get("error"):
+                            raise RuntimeError(str(data.get("error")))
+                        n = apply_stock_daily_ticker_summary(
+                            cur, t, data, adjusted=adjusted_bool
+                        )
+                        conn.commit()
+                        result = {
+                            "ok": True,
+                            "kind": kind,
+                            "mode": mode,
+                            "rows_upserted": n,
+                            "summary": {"ticker": t, "date": d[:10]},
+                        }
+                    elif mode == "previous_day_bar":
+                        t = (payload.get("ticker") or "").strip().upper()
+                        if not t:
+                            raise ValueError("payload.ticker required")
+                        use_adj = True if adjusted_bool is None else adjusted_bool
+                        data = client.fetch_stock_previous_day(t, adjusted=use_adj)
+                        if data.get("error"):
+                            raise RuntimeError(str(data.get("error")))
+                        n = apply_stock_previous_day_bar(
+                            cur, t, data, adjusted=adjusted_bool
+                        )
+                        conn.commit()
+                        result = {
+                            "ok": True,
+                            "kind": kind,
+                            "mode": mode,
+                            "rows_upserted": n,
+                            "summary": {"ticker": t},
+                        }
+                    else:
+                        raise ValueError(f"unknown stock_ohlc_sync mode: {mode}")
+                update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                return result
+
             if kind == "aggregates":
                 mode = (payload.get("mode") or "custom_bars").strip()
 

@@ -775,9 +775,9 @@ class PostgreSQLSink(StatusSink):
                             bar_d = bar_dt
                         cur.execute(
                             """
-                            INSERT INTO stock_day (symbol, bar_time, open, high, low, close, volume)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (symbol, bar_time)
+                            INSERT INTO stock_day (symbol, bar_time, open, high, low, close, volume, source)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, 'ib')
+                            ON CONFLICT (symbol, bar_time, source)
                             DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
                                           close = EXCLUDED.close, volume = EXCLUDED.volume
                             """,
@@ -786,9 +786,9 @@ class PostgreSQLSink(StatusSink):
                     else:
                         cur.execute(
                             """
-                            INSERT INTO stock_min (symbol, period, bar_time, open, high, low, close, volume)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (symbol, period, bar_time)
+                            INSERT INTO stock_min (symbol, period, bar_time, open, high, low, close, volume, source)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'ib')
+                            ON CONFLICT (symbol, period, bar_time, source)
                             DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
                                           close = EXCLUDED.close, volume = EXCLUDED.volume
                             """,

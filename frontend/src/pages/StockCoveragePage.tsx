@@ -25,8 +25,17 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
           Settings
         </button>
         {' / '}
-        Stock IB (Realtime)
-        <InfoTooltip text="IB-backed coverage of Watchlist stocks and reference indices by bar period. Includes backfill controls for end-of-day pulls and index refresh. For delayed Massive stock reference data, use Data Coverage → Massive Stock." />
+        <button
+          type="button"
+          className="page-title-breadcrumb-link"
+          onClick={() => { window.location.hash = '#coverage-stock' }}
+          aria-label="Go to Stock coverage group"
+        >
+          Stock
+        </button>
+        {' / '}
+        IB Live (Redis)
+        <InfoTooltip text="IB-backed coverage of Watchlist stocks and reference indices by bar period. Includes backfill controls for end-of-day pulls and index refresh. For delayed Massive stock reference data, use Data Coverage → Stock → Massive Delay (DB)." />
       </h2>
 
       <DataCoveragePanel

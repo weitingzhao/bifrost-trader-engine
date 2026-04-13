@@ -32,7 +32,10 @@ import {
   IB_CONNECTION_SUBSECTIONS,
   SETTINGS_SECTIONS,
   CONFIG_SECTIONS,
-  COVERAGE_SUBSECTIONS,
+  COVERAGE_OPTION_SUBSECTION,
+  COVERAGE_STOCK_GROUP_LABEL,
+  COVERAGE_STOCK_SUBSECTIONS,
+  isCoverageStockHash,
   FEED_MASSIVE_OPTION_ID,
   FEED_MASSIVE_STOCK_ID,
   FEED_SUBSECTIONS,
@@ -291,6 +294,7 @@ export function SettingsPage({
   const [ibConnectionExpanded, setIbConnectionExpanded] = useState(true)
   const [massiveOptionExpanded, setMassiveOptionExpanded] = useState(false)
   const [massiveStockExpanded, setMassiveStockExpanded] = useState(false)
+  const [coverageStockExpanded, setCoverageStockExpanded] = useState(true)
   const [massiveStockCapGroupExpanded, setMassiveStockCapGroupExpanded] = useState<Record<CapabilityGroup, boolean>>(() =>
     CAPABILITY_GROUP_ORDER.reduce(
       (acc, g) => { acc[g] = false; return acc },
@@ -496,6 +500,10 @@ export function SettingsPage({
     const syncFromHash = () => {
       const h = normalizeHash()
       setActiveSectionId(hashToSectionId(h))
+      const raw = h.startsWith('#') ? h.slice(1) : h
+      if (raw === 'coverage-stock' || raw === 'coverage-massive-stock') {
+        setCoverageStockExpanded(true)
+      }
     }
     window.addEventListener('hashchange', syncFromHash)
     syncFromHash()
@@ -569,6 +577,7 @@ export function SettingsPage({
   const isWsConnectorSection = activeSectionId === 'settings-ws-connector'
   const isAppSection = isWsConnectorSection || isDaemonSection || isCeleryControlSection
   const isCoverageSection = activeSectionId === 'settings-coverage'
+  const isStockCoverageParentActive = isCoverageSection && isCoverageStockHash(currentHash)
   const isFeedSection = activeSectionId === 'settings-feed'
 
   const sidebarContent = (
@@ -730,19 +739,44 @@ export function SettingsPage({
         </div>
         <div className="settings-sidebar-inline-split" role="presentation" aria-hidden />
         <div className="settings-sidebar-group-label">Data Coverage</div>
-        {COVERAGE_SUBSECTIONS.map((sub) => (
-          <a
-            key={sub.id}
-            href={`#${sub.id}`}
-            className={`settings-sidebar-link ${isCoverageSection && (currentHash === sub.id || (sub.id === 'coverage-option' && currentHash === FEED_MASSIVE_DAILY_DATA_ID))
-                ? 'active'
-                : ''
-              }`}
-          >
-            <SettingsSectionIcon name={sub.icon} />
-            {sub.label}
-          </a>
-        ))}
+        <a
+          href={`#${COVERAGE_OPTION_SUBSECTION.id}`}
+          className={`settings-sidebar-link ${isCoverageSection && (currentHash === COVERAGE_OPTION_SUBSECTION.id || currentHash === FEED_MASSIVE_DAILY_DATA_ID) ? 'active' : ''
+            }`}
+        >
+          <SettingsSectionIcon name={COVERAGE_OPTION_SUBSECTION.icon} />
+          {COVERAGE_OPTION_SUBSECTION.label}
+        </a>
+        <div className="settings-sidebar-group">
+          <div className={`settings-sidebar-parent ${isStockCoverageParentActive ? 'active' : ''}`}>
+            <a href="#coverage-stock" className="settings-sidebar-parent-label">
+              <SettingsSectionIcon name="coverage-stock" />
+              {COVERAGE_STOCK_GROUP_LABEL}
+            </a>
+            <button
+              type="button"
+              className={`settings-sidebar-chevron ${coverageStockExpanded ? 'expanded' : ''}`}
+              onClick={() => setCoverageStockExpanded(e => !e)}
+              aria-expanded={coverageStockExpanded}
+              aria-controls="settings-coverage-stock-subs"
+              aria-label={coverageStockExpanded ? 'Collapse Stock coverage' : 'Expand Stock coverage'}
+            >
+              ▼
+            </button>
+          </div>
+          <div id="settings-coverage-stock-subs" className="settings-sidebar-subs" hidden={!coverageStockExpanded}>
+            {COVERAGE_STOCK_SUBSECTIONS.map((sub) => (
+              <a
+                key={sub.id}
+                href={`#${sub.id}`}
+                className={`settings-sidebar-link settings-sidebar-link-sub ${isCoverageSection && currentHash === sub.id ? 'active' : ''}`}
+              >
+                <SettingsSectionIcon name={sub.icon} />
+                {sub.label}
+              </a>
+            ))}
+          </div>
+        </div>
         <div className="settings-sidebar-inline-split" role="presentation" aria-hidden />
         <div className="settings-sidebar-group-label">Feed</div>
         {FEED_SUBSECTIONS.map((sub) => (

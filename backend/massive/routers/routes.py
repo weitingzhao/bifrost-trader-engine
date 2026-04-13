@@ -1411,6 +1411,7 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
             "stock_reference_overview",
             "stock_reference_related",
             "stock_reference_instrument_types",
+            "stock_ohlc_sync",
         }
     )
     if kind_raw not in allowed:

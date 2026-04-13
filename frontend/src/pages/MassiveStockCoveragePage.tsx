@@ -8,7 +8,7 @@ interface MassiveStockCoveragePageProps {
   status: StatusResponse | null
 }
 
-/** Data Coverage → Massive Stock: reference tools and navigation. */
+/** Data Coverage → Stock → Massive Delay (DB): reference tools and navigation. */
 export function MassiveStockCoveragePage({ status: _status }: MassiveStockCoveragePageProps) {
   const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
 
@@ -34,8 +34,17 @@ export function MassiveStockCoveragePage({ status: _status }: MassiveStockCovera
           Settings
         </button>
         {' / '}
-        Massive Stock
-        <InfoTooltip text="Massive (Polygon) stocks: REST and synced reference data are delayed per vendor plan (~15 minutes). For realtime watchlist history and EOD bar pulls, use Data Coverage → Stock IB (Realtime)." />
+        <button
+          type="button"
+          className="page-title-breadcrumb-link"
+          onClick={() => { window.location.hash = '#coverage-stock' }}
+          aria-label="Go to Stock coverage (IB Live)"
+        >
+          Stock
+        </button>
+        {' / '}
+        Massive Delay (DB)
+        <InfoTooltip text="Massive (Polygon) stocks: REST and synced reference data are delayed per vendor plan (~15 minutes). For realtime watchlist history and EOD bar pulls, use Data Coverage → Stock → IB Live (Redis)." />
         {configured && (
           <span className="feed-massive-delay-pill" title={massiveStatus?.delay_notice} style={{ marginLeft: 'var(--space-2)' }}>
             Delayed feed
@@ -50,7 +59,7 @@ export function MassiveStockCoveragePage({ status: _status }: MassiveStockCovera
             className="btn btn-secondary"
             onClick={() => { window.location.hash = '#coverage-stock' }}
           >
-            Stock IB (Realtime)
+            IB Live (Redis)
           </button>
           <button
             type="button"

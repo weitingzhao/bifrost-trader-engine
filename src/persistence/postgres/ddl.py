@@ -406,6 +406,67 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS stock_day_symbol_time ON stock_day (symbol, bar_time DESC)"
         )
+        # R-A3 + Massive: source dimension (ib / tv / massive), extended OHLC fields
+        cur.execute(
+            """
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'stock_day'
+              ) THEN
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'stock_day' AND column_name = 'source'
+                ) THEN
+                  ALTER TABLE stock_day ADD COLUMN source text;
+                  UPDATE stock_day SET source = 'ib' WHERE source IS NULL;
+                  ALTER TABLE stock_day ALTER COLUMN source SET NOT NULL;
+                  ALTER TABLE stock_day ALTER COLUMN source SET DEFAULT 'ib';
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'stock_day' AND column_name = 'vwap'
+                ) THEN
+                  ALTER TABLE stock_day ADD COLUMN vwap double precision;
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'stock_day' AND column_name = 'trade_count'
+                ) THEN
+                  ALTER TABLE stock_day ADD COLUMN trade_count bigint;
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'stock_day' AND column_name = 'adjusted'
+                ) THEN
+                  ALTER TABLE stock_day ADD COLUMN adjusted boolean;
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'stock_day' AND column_name = 'extras'
+                ) THEN
+                  ALTER TABLE stock_day ADD COLUMN extras jsonb;
+                END IF;
+                IF EXISTS (
+                  SELECT 1 FROM pg_constraint
+                  WHERE conname = 'stock_day_symbol_bar_time_key'
+                ) THEN
+                  ALTER TABLE stock_day DROP CONSTRAINT stock_day_symbol_bar_time_key;
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM pg_constraint WHERE conname = 'stock_day_symbol_bar_time_source_key'
+                ) THEN
+                  ALTER TABLE stock_day ADD CONSTRAINT stock_day_symbol_bar_time_source_key
+                    UNIQUE (symbol, bar_time, source);
+                END IF;
+              END IF;
+            END $$
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS stock_day_symbol_source_time ON stock_day (symbol, source, bar_time DESC)"
+        )
         _log("stock_min table + index")
         _log_table("stock_min", "Stock minute OHLC bars")
         cur.execute(
@@ -427,6 +488,66 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS stock_min_symbol_period_time ON stock_min (symbol, period, bar_time DESC)"
+        )
+        cur.execute(
+            """
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'stock_min'
+              ) THEN
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'stock_min' AND column_name = 'source'
+                ) THEN
+                  ALTER TABLE stock_min ADD COLUMN source text;
+                  UPDATE stock_min SET source = 'ib' WHERE source IS NULL;
+                  ALTER TABLE stock_min ALTER COLUMN source SET NOT NULL;
+                  ALTER TABLE stock_min ALTER COLUMN source SET DEFAULT 'ib';
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'stock_min' AND column_name = 'vwap'
+                ) THEN
+                  ALTER TABLE stock_min ADD COLUMN vwap double precision;
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'stock_min' AND column_name = 'trade_count'
+                ) THEN
+                  ALTER TABLE stock_min ADD COLUMN trade_count bigint;
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'stock_min' AND column_name = 'adjusted'
+                ) THEN
+                  ALTER TABLE stock_min ADD COLUMN adjusted boolean;
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'stock_min' AND column_name = 'extras'
+                ) THEN
+                  ALTER TABLE stock_min ADD COLUMN extras jsonb;
+                END IF;
+                IF EXISTS (
+                  SELECT 1 FROM pg_constraint
+                  WHERE conname = 'stock_min_symbol_period_bar_time_key'
+                ) THEN
+                  ALTER TABLE stock_min DROP CONSTRAINT stock_min_symbol_period_bar_time_key;
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM pg_constraint WHERE conname = 'stock_min_symbol_period_bar_time_source_key'
+                ) THEN
+                  ALTER TABLE stock_min ADD CONSTRAINT stock_min_symbol_period_bar_time_source_key
+                    UNIQUE (symbol, period, bar_time, source);
+                END IF;
+              END IF;
+            END $$
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS stock_min_sym_per_src_time ON stock_min (symbol, period, source, bar_time DESC)"
         )
         _log("tickers table (Massive reference universe)")
         _log_table("tickers", "Ticker symbol reference (All Tickers)")

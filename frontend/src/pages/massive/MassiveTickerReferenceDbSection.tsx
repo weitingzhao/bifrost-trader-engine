@@ -61,7 +61,7 @@ export interface MassiveTickerReferenceDbSectionProps {
 
 /**
  * PostgreSQL-backed ticker reference: Scheme C master–detail (job list + per-job enqueue + verify).
- * Shared by Feed → Massive Stock and Data Coverage → Massive Stock.
+ * Shared by Feed → Massive Stock and Data Coverage → Stock → Massive Delay (DB).
  */
 export function MassiveTickerReferenceDbSection({
   panelId = 'massive-stock-refdb-panel',

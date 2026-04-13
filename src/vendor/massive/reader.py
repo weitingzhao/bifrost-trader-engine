@@ -1114,12 +1114,14 @@ def get_latest_massive_job_by_kind(
 
 
 def _stock_close_on_date(cur: Any, symbol: str, trade_date: date_type) -> Optional[float]:
-    """Latest stock_day close on calendar day (if any)."""
+    """Latest stock_day close on calendar day (if any). Prefer Massive when multiple sources."""
     try:
         cur.execute(
             """
             SELECT close FROM stock_day
             WHERE symbol = %s AND bar_time = %s
+            ORDER BY CASE COALESCE(source, 'ib')
+              WHEN 'massive' THEN 0 WHEN 'ib' THEN 1 WHEN 'tv' THEN 2 ELSE 3 END ASC
             LIMIT 1
             """,
             (symbol, trade_date),
@@ -1300,12 +1302,18 @@ def compute_max_pain_history_from_db(
                       SELECT MAX(trade_date) AS max_td FROM option_open_interest_daily
                       WHERE symbol = %s AND expiry = %s AND source = 'massive'
                     )
-                    SELECT (o.bar_time::date) AS trade_date, o.close
-                    FROM stock_day o, latest
-                    WHERE o.symbol = %s AND latest.max_td IS NOT NULL
-                      AND (o.bar_time::date) >= (latest.max_td - %s::integer)
-                      AND (o.bar_time::date) <= latest.max_td
-                    ORDER BY o.bar_time
+                    SELECT trade_date, close FROM (
+                      SELECT DISTINCT ON ((o.bar_time::date))
+                        (o.bar_time::date) AS trade_date, o.close
+                      FROM stock_day o, latest
+                      WHERE o.symbol = %s AND latest.max_td IS NOT NULL
+                        AND (o.bar_time::date) >= (latest.max_td - %s::integer)
+                        AND (o.bar_time::date) <= latest.max_td
+                      ORDER BY (o.bar_time::date) ASC,
+                        CASE COALESCE(o.source, 'ib')
+                          WHEN 'massive' THEN 0 WHEN 'ib' THEN 1 WHEN 'tv' THEN 2 ELSE 3 END ASC
+                    ) x
+                    ORDER BY trade_date
                     """,
                     (sym, exp_norm, sym, lb),
                 )

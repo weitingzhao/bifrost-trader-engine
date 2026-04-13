@@ -580,11 +580,16 @@ export async function fetchMaxPainComputeHistory(params: {
 export async function postMassiveSync(
   kind: string,
   payload: Record<string, unknown>,
-): Promise<{ ok: boolean; job_id?: string; error?: string; message?: string }> {
+  options?: { priority?: 'high' },
+): Promise<{ ok: boolean; job_id?: string; error?: string; message?: string; deduplicated?: boolean }> {
   const r = await fetch(massiveUrl('/research/massive/sync'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ kind, payload }),
+    body: JSON.stringify({
+      kind,
+      payload,
+      ...(options?.priority === 'high' ? { priority: 'high' } : {}),
+    }),
   })
   const j = await r.json().catch(() => ({}))
   if (r.status === 403) {
@@ -594,6 +599,7 @@ export async function postMassiveSync(
     ok: Boolean(j.ok),
     job_id: typeof j.job_id === 'string' ? j.job_id : undefined,
     error: typeof j.error === 'string' ? j.error : undefined,
+    deduplicated: typeof j.deduplicated === 'boolean' ? j.deduplicated : undefined,
   }
 }
 
