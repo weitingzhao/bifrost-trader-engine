@@ -259,7 +259,7 @@ async def post_control_refresh_accounts(request: Request) -> JSONResponse:
     if op_client is None:
         return JSONResponse(
             status_code=503,
-            content={"error": "IB Operator client not configured; start run_ib_operator.py and enable Redis / ib_operator."},
+            content={"error": "IB Operator client not configured; start scripts/systemd/run_ib_operator.py and enable Redis / ib_operator."},
         )
     try:
         env = await op_client.request_async(

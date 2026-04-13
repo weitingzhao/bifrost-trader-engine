@@ -47,9 +47,9 @@ Copy `config/config.yaml.example` to `config/config.yaml`. Set:
 **On the trading machine** (same host as TWS/IB):
 
 ```bash
-python scripts/run_engine.py
+python scripts/systemd/run_engine.py
 # default: config/config.dev.yaml; prod: add --prod or BIFROST_ENV=prod
-python scripts/run_engine.py config/config.yaml
+python scripts/systemd/run_engine.py config/config.yaml
 ```
 
 Run as a daemon via systemd, supervisor, or Docker.
@@ -62,7 +62,7 @@ The **Monitor API** (`scripts/run_server.py`, package `backend.monitor`) is a **
 
 - `postgres`: same DB config as Phase 1; control uses the same DB and tables (see [docs/DATABASE.md](docs/DATABASE.md) §2.4–2.5).
 - `server.port`: HTTP port (default 8765).
-- **Monitor API** (default port 8765): GET /status, GET /operations, POST /control/*, etc. **Monitoring UI** is the frontend in `frontend/`; it may call **multiple backend ports** (see `config` `server.*_port` in `config/config.dev.yaml.example`). **Start** the daemon on the **daemon host**: `python scripts/run_engine.py`. TWS runs on a dedicated Mac Mini; the daemon connects over the network when on Linux. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §4.0, §6.1 and §2.3–2.4.
+- **Monitor API** (default port 8765): GET /status, GET /operations, POST /control/*, etc. **Monitoring UI** is the frontend in `frontend/`; it may call **multiple backend ports** (see `config` `server.*_port` in `config/config.dev.yaml.example`). **Start** the daemon on the **daemon host**: `python scripts/systemd/run_engine.py`. TWS runs on a dedicated Mac Mini; the daemon connects over the network when on Linux. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §4.0, §6.1 and §2.3–2.4.
 
 **Start**:
 

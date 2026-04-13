@@ -86,7 +86,7 @@
 
 **要求**：
 - **队列**：拉取任务（如 backfill 请求）写入**队列**；当前实现采用 **Celery + Redis**（broker 与 result backend 使用同一 Redis，与实时行情可选共用实例、不同 db）；任务行仍写入 **job_bars_backfill** 表（job_id 即 Celery task_id），便于 GET /bars/jobs 与前端轮询。
-- **独立 Worker 进程**：单独进程从队列取任务并执行拉取（如调用 IB 历史数据接口、写 stock_day/stock_min）；**与 status server（API）进程、守护进程分离**，可部署于同一主机或不同主机，只需能连同一 PostgreSQL（及 Redis）与 IB（若 Worker 直连 TWS）。启动方式：`python scripts/run_celery.py` 或 `celery -A src.workers.celery_app worker -l info -Q bars --concurrency=1`（必须单进程，否则多进程会争用同一 IB client_id）。
+- **独立 Worker 进程**：单独进程从队列取任务并执行拉取（如调用 IB 历史数据接口、写 stock_day/stock_min）；**与 status server（API）进程、守护进程分离**，可部署于同一主机或不同主机，只需能连同一 PostgreSQL（及 Redis）与 IB（若 Worker 直连 TWS）。启动方式：`python scripts/systemd/run_celery.py` 或 `celery -A src.workers.celery_app worker -l info -Q bars --concurrency=1`（必须单进程，否则多进程会争用同一 IB client_id）。
 - **API 行为**：监控/数据 API 收到 backfill 等请求时**仅入队并返回 job_id**；客户端通过 **GET /bars/jobs/{job_id}**（或等效）轮询任务状态与结果；任务完成后可刷新 coverage/列表。
 - **限速与串行**：Worker 串行处理任务并在任务间留间隔（如 2s），以符合 IB 官方历史数据 Pacing 限制。
 
@@ -111,8 +111,8 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 当一台主机**仅作为 Management / 前端测试**（如本地 Mac 开发机）而不运行 Engine 时，遵循以下约定：
 
-- **不运行 Celery**（`scripts/run_celery.py`）：bars worker 会通过 IB 拉取数据并写 `stock_*` 等业务表，Management 主机不应有此行为。
-- **不运行 Engine**（`scripts/run_engine.py`）：守护进程连接 IB 下单/写心跳，仅在 Prod（或 Dev 调试时临时）主机运行。
+- **不运行 Celery**（`scripts/systemd/run_celery.py`）：bars worker 会通过 IB 拉取数据并写 `stock_*` 等业务表，Management 主机不应有此行为。
+- **不运行 Engine**（`scripts/systemd/run_engine.py`）：守护进程连接 IB 下单/写心跳，仅在 Prod（或 Dev 调试时临时）主机运行。
 - **仅运行 Monitor API + Frontend**：`run_server.py` + `run_frontend.sh`（若 UI 调用其他域接口，需另起对应 `run_server_*.py`），依赖 Daemon 写入 PostgreSQL 与 Redis 的数据；前端通过 SSE 消费 Redis 行情。
 - **Redis 地址**：若 Management 主机需要读取另一台（如 192.168.10.70）上 Daemon 写入的行情，将 `redis.host` 指向该服务器 IP。
 - **可选**：`server.skip_monitor_ib: true`（config 中），启用后 `run_server.py` **不**校验 YAML 中的 `ib` 段，且 `startup_event` 不初始化 `AccountIbClient` / `MarketIbClient`，避免 Management 机器连接 IB。正常运行 Status Server（与 Engine 同栈或需监控 IB）时应提供完整 `ib:`，勿依赖此项。
@@ -129,7 +129,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 **进程划分**：
 - **REST 入队类任务**（历史聚合回填、日终 OI 拉取、批量快照等）：与现有 `job_bars_backfill` 模式一致，新增 **`job_massive_backfill`** 任务表，由 **Celery Worker**（独立 queue `massive`）串行执行拉取与落库。**与 IB bars queue 分离**——两个 Worker 可独立扩缩容，互不影响限速策略。
-- **WebSocket 长连接**（延迟 quote/snapshot 流）：**不宜**放在短生命周期 Celery task 内。采用 **独立 asyncio 长驻进程**（如 `scripts/run_massive_ws.py`）或 Status Server 内**受控后台任务**，消费 Massive WS → 写 Redis（最新报价 ring）+ 可选 PG 抽样 → 经现有 SSE 或应用层 WebSocket 推前端。**Starter** 仅开延迟 quote/snapshot 通道；**Developer** 增开 trades 通道（与 REST 同 feature flag）。
+- **WebSocket 长连接**（延迟 quote/snapshot 流）：**不宜**放在短生命周期 Celery task 内。采用 **独立 asyncio 长驻进程**（如 `scripts/systemd/run_massive_ws.py`）或 Status Server 内**受控后台任务**，消费 Massive WS → 写 Redis（最新报价 ring）+ 可选 PG 抽样 → 经现有 SSE 或应用层 WebSocket 推前端。**Starter** 仅开延迟 quote/snapshot 通道；**Developer** 增开 trades 通道（与 REST 同 feature flag）。
 - **前端不直连 Massive**（密钥保护与 CORS），所有数据通过后端落库或代理。
 
 **延迟边界**：Massive Starter 数据**延迟 15 分钟**。全链路标注 **15m delay**，与守护进程实时 IB 行情严格区分。**禁止**将 Massive 数据作为 ExecutionGuard 或自动下单决策的输入——仅 IB 实盘行情可进入交易决策链路。
@@ -242,7 +242,7 @@ flowchart LR
 
 #### 2.10.8 IB ingestor 与 Redis Pub/Sub（调试）
 
-独立进程 `scripts/run_ib_ingestor.py` 将最新报价写入字符串键 `ib:ingester:tick:*`，并在**固定频道** **`ib:ingester:channel`** 上 `PUBLISH` 轻量通知（JSON 含 `contract_key`、`ts`）。**Market SSE**（`GET …/quotes/stream`）订阅该频道并 `GET` 对应 tick 键。守护进程写入的 **`quote:*`** 为另一套键空间（无 Pub/Sub；可选供 `GET /quotes` 等轮询路径）。
+独立进程 `scripts/systemd/run_ib_ingestor.py` 将最新报价写入字符串键 `ib:ingester:tick:*`，并在**固定频道** **`ib:ingester:channel`** 上 `PUBLISH` 轻量通知（JSON 含 `contract_key`、`ts`）。**Market SSE**（`GET …/quotes/stream`）订阅该频道并 `GET` 对应 tick 键。守护进程写入的 **`quote:*`** 为另一套键空间（无 Pub/Sub；可选供 `GET /quotes` 等轮询路径）。
 
 **为何在 Redis Insight / `PUBSUB CHANNELS *` 里「看不到」该频道**：Pub/Sub 频道**不是**字符串键，**不会**出现在 Browser 的 key 列表中；`EXISTS ib:ingester:channel` 对键空间恒为假。命令 **`PUBSUB CHANNELS`** 只列出**当前至少有一个客户端正在 `SUBSCRIBE` 的频道**——若尚无任何订阅者，列表为空属正常，**不代表** ingestor 未发布。
 
@@ -336,7 +336,7 @@ flowchart LR
 | Portfolio | `backend.portfolio` | `scripts/run_server_portfolio.py` | `server.portfolio_port`（8771） |
 | Market（行情、Watchlist 等） | `backend.market` | `scripts/run_server_market.py` | `server.market_port`（8772） |
 
-**Celery**：任务应用模块为 **`src.workers.celery_app`**（与 `scripts/run_celery.py` 一致）。Massive/Polygon 等队列任务在 **`src.massive.tasks`**；**`backend.massive`** 为 Massive/Feed 对应 HTTP（含 WebSocket/SSE）。
+**Celery**：任务应用模块为 **`src.workers.celery_app`**（与 `scripts/systemd/run_celery.py` 一致）。Massive/Polygon 等队列任务在 **`src.massive.tasks`**；**`backend.massive`** 为 Massive/Feed 对应 HTTP（含 WebSocket/SSE）。
 
 **运维分组（Prod systemd / `scripts/bifrost_ssh.sh`）**：HTTP 进程按四类聚合以便 deploy 后重启、systemctl 与状态扫描 — **architecture** = Monitor + Ops + Docs；**account** = Trading + Portfolio；**research** = Market + Research（`run_server_research`）+ Strategy；**feed** = Massive（`run_server_massive`）。Engine、Agent、Celery、ingest 单元不在此四类内，脚本中仍用「core / full stack」等组合。
 
@@ -385,7 +385,7 @@ flowchart LR
 | 组件 | 说明 | 交付 |
 |------|------|------|
 | **任务队列** | backfill 等非实时拉取请求入队；**实现**：**Celery + Redis**（broker/result backend），任务行仍写 job_bars_backfill 表。 | 阶段 3（与 R-A3 一并） |
-| **独立 Worker 进程** | Celery worker（`scripts/run_celery.py` 或 `celery -A src.workers.celery_app worker -Q bars`）取任务，串行执行拉取（IB 历史数据、写 stock_day/stock_min 等），任务间间隔以满足 IB Pacing。 | 阶段 3 |
+| **独立 Worker 进程** | Celery worker（`scripts/systemd/run_celery.py` 或 `celery -A src.workers.celery_app worker -Q bars`）取任务，串行执行拉取（IB 历史数据、写 stock_day/stock_min 等），任务间间隔以满足 IB Pacing。 | 阶段 3 |
 | **API 入队与查询** | POST /bars/backfill（或等效）入队并返回 job_id；GET /bars/jobs、GET /bars/jobs/{id} 查询状态与结果；前端轮询 job 状态。 | 阶段 3 |
 
 ### 4.5 Massive 期权研究数据（R-A6）
@@ -495,7 +495,7 @@ flowchart LR
   - **守护进程**（`run_engine.py`）：**目标架构**下**不直连** TWS；从 **Redis** 读行情与账户数据，执行对冲逻辑（Gamma Scalping、FSM、写 status/operations）；下单经 **IB Operator**；轮询 Prod DB（`daemon_control`、`daemon_run_status`）。**运行不依赖直连 IB**（RE-7、§2.6）：若数据或 Operator 不可用则 degraded / WAITING 类状态，持续写心跳、轮询 stop/retry。收到 **stop** 则消费并退出；**suspend** / **resume** 通过 `daemon_run_status.suspended` 切换 Daemon FSM 的 RUNNING_SUSPENDED。
   - **IB Ingestor / IB Operator / IB Account Agent**：长驻边缘服务，见 §2.11；与 Engine 同机或按运维拆分（需共享 Redis 与 PG 访问纪律）。
   - **HTTP API**（§4.0）：**Monitor**（`run_server.py`）读 Prod DB，提供 GET /status、GET /operations、POST /control/* 等；**不**在 Monitor 进程内 exec 守护进程。**Engine 启停**：经 **Ops**（`GET/POST /ops/market-ingest/*`，与 Socket Services 同源）对 **`bifrost-engine.service`** 执行 **systemd** start/stop/restart（须列入 `ops.market_ingest_services` 与 Agent/`ops.allowed_units` 白名单）。其余域（Ops、Trading、Research 等）按需同机另起进程。守护进程本体仍为本机 **`run_engine.py`**（由 systemd 拉起或开发/排障时手动）。
-  - **Redis + Celery worker**：同机部署；`bars` / `massive` 等队列见 `scripts/run_celery.py`。
+  - **Redis + Celery worker**：同机部署；`bars` / `massive` 等队列见 `scripts/systemd/run_celery.py`。
 - **Dev 开发机（Mac）**：运行 Monitor 及各域 API（+ 可选 Engine/Redis/Celery）；连接 **Dev DB**；连接 TWS 时使用与 Prod 不同的 `client_id`。Dev Engine **不得**与 Prod Engine 同时对同一 IB 账户下单（R-DV3，§2.1）。
 - **PostgreSQL（192.168.10.80）**：Prod DB 与 Dev DB 在同一服务器上不同 `database`；守护进程、各 FastAPI 进程、Worker 均连本环境对应库。
 

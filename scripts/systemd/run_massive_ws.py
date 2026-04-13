@@ -10,9 +10,9 @@ console log stream ``bifrost:console:ws_massive_option`` (Monitor ``/api/massive
 
 Usage
 ─────
-  python scripts/run_massive_ws.py
-  python scripts/run_massive_ws.py --config config/config.prod.yaml
-  python scripts/run_massive_ws.py --config config/config.dev.yaml --log-level DEBUG
+  python scripts/systemd/run_massive_ws.py
+  python scripts/systemd/run_massive_ws.py --config config/config.prod.yaml
+  python scripts/systemd/run_massive_ws.py --config config/config.dev.yaml --log-level DEBUG
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(str(_PROJECT_ROOT))
@@ -43,7 +43,7 @@ _MASSIVE_WS_LOG_STREAM_MAXLEN = 2000
 
 logger = logging.getLogger("massive_ws")
 
-# Console log colors (aligned with scripts/run_server_massive.py, run_engine.py)
+# Console log colors (aligned with scripts/run_server_massive.py, scripts/systemd/run_engine.py)
 _RESET = "\033[0m"
 _BOLD = "\033[1m"
 _GRAY = "\033[90m"

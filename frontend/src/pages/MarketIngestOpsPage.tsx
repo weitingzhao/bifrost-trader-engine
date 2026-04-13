@@ -1401,7 +1401,7 @@ export function MarketIngestOpsPage({
           sourceDefinitions={SOCKET_SERVICES_LOG_SOURCES}
           loadingText="Connecting…"
           errorText="Unable to load logs. Check Monitor API and Redis (streams bifrost:console:ws_*)."
-          emptyText="No log lines yet. Start the corresponding scripts (e.g. run_massive_ws.py, run_ib_account_agent.py)."
+          emptyText="No log lines yet. Start the corresponding scripts (e.g. scripts/systemd/run_massive_ws.py, scripts/systemd/run_ib_account_agent.py)."
           infoTooltipText="Live tail: GET /api/massive-ws/logs, /api/ib-operator/logs, /api/ib-ingestor/logs, /api/ib-account-agent/logs + SSE …/stream for each. Clear deletes all four Redis console streams."
           resizeAriaLabel="Resize Socket Services log console height"
           clearTitle="Clear displayed log and all four Redis streams"

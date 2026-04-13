@@ -1,6 +1,6 @@
 # HTTPS server block — render from template, then copy AFTER Let's Encrypt (or other) certs exist.
 #
-#   python scripts/render_nginx_status_conf.py --ssl-output deploy/nginx/bifrost-status-ssl.conf.example
+#   python scripts/systemd/render_nginx_status_conf.py --ssl-output deploy/nginx/bifrost-status-ssl.conf.example
 #   sudo cp deploy/nginx/bifrost-status-ssl.conf.example /etc/nginx/sites-available/bifrost-status-ssl
 #   # Edit ssl_certificate paths if your domain is not ai.trader
 #   sudo ln -sf /etc/nginx/sites-available/bifrost-status-ssl /etc/nginx/sites-enabled/

@@ -3,9 +3,9 @@
 
 Requires Redis (config.redis or REDIS_* env) and postgres. Usage:
 
-  python scripts/run_celery.py [config_path]
-  python scripts/run_celery.py --prod
-  BIFROST_ENV=prod python scripts/run_celery.py
+  python scripts/systemd/run_celery.py [config_path]
+  python scripts/systemd/run_celery.py --prod
+  BIFROST_ENV=prod python scripts/systemd/run_celery.py
 
 Default (no ``--instance``): subscribes ``bars,massive_stocks_high,massive_stocks,massive_high,massive`` — IB bars
 backfill, Massive/Polygon **options** queues (``massive`` / ``massive_high``), and **stock-reference** queues
@@ -38,7 +38,7 @@ import sys
 import time
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(_PROJECT_ROOT)

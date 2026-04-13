@@ -3,9 +3,9 @@
 
 Uses merged YAML (same as run_server.py). Requires ``redis.enabled`` and ``ib:`` host block.
 
-  python scripts/run_ib_operator.py
-  python scripts/run_ib_operator.py config/config.prod.yaml
-  BIFROST_ENV=prod python scripts/run_ib_operator.py
+  python scripts/systemd/run_ib_operator.py
+  python scripts/systemd/run_ib_operator.py config/config.prod.yaml
+  BIFROST_ENV=prod python scripts/systemd/run_ib_operator.py
 
 Troubleshooting:
 
@@ -28,7 +28,7 @@ import sys
 import threading
 from pathlib import Path
 
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 sys.path.insert(0, _PROJECT_ROOT)
 os.chdir(_PROJECT_ROOT)
 

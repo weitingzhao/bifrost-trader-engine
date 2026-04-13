@@ -1,9 +1,9 @@
 """Redis field on ingest meta hashes: which Ops stack (dev|prod) owns control.
 
 Written after successful Ops start; cleared after successful Ops stop. Uses Redis DB 0
-(same as ``scripts/run_massive_ws.py`` meta keys), not the Celery broker DB.
+(same as ``scripts/systemd/run_massive_ws.py`` meta keys), not the Celery broker DB.
 
-For ``ib_operator``, ``redis_meta_key`` is the same hash as ``run_ib_operator.py`` health
+For ``ib_operator``, ``redis_meta_key`` is the same hash as ``scripts/systemd/run_ib_operator.py`` health
 (``bifrost:health:ws_ib_operator``). Writes use ``HSET`` on one field only and must not replace
 the whole key; the operator process must not use a TTL that deletes that key (otherwise only
 this field may remain after expiry + a subsequent Ops write).

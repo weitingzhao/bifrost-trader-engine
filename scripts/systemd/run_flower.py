@@ -7,17 +7,17 @@ Requires: ``pip install flower`` (listed in requirements.txt).
 
 Usage::
 
-  python scripts/run_flower.py
-  python scripts/run_flower.py --prod
-  BIFROST_CONFIG=config/config.prod.yaml python scripts/run_flower.py
+  python scripts/systemd/run_flower.py
+  python scripts/systemd/run_flower.py --prod
+  BIFROST_CONFIG=config/config.prod.yaml python scripts/systemd/run_flower.py
 
 Bind / port (defaults: localhost only, port 5555)::
 
-  FLOWER_ADDRESS=0.0.0.0 FLOWER_PORT=5555 python scripts/run_flower.py
+  FLOWER_ADDRESS=0.0.0.0 FLOWER_PORT=5555 python scripts/systemd/run_flower.py
 
 Extra args are forwarded to ``celery flower`` (see ``celery flower --help``)::
 
-  python scripts/run_flower.py -- --basic_auth=user:secret
+  python scripts/systemd/run_flower.py -- --basic_auth=user:secret
 
 Open in browser: http://127.0.0.1:5555 (or your FLOWER_ADDRESS:FLOWER_PORT).
 """
@@ -31,7 +31,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(_PROJECT_ROOT)
@@ -73,7 +73,7 @@ def _ensure_listen_available(host: str, port_s: str) -> None:
         sys.stderr.write(
             f"[run_flower] Address {host!r}:{port_s} is already in use. "
             f"Stop the other process (e.g. an existing Flower), or use another port:\n"
-            f"  FLOWER_PORT={alt} python scripts/run_flower.py\n"
+            f"  FLOWER_PORT={alt} python scripts/systemd/run_flower.py\n"
         )
         raise SystemExit(1) from e
     finally:

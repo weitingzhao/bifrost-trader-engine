@@ -1,4 +1,4 @@
 # Production static build for nginx location /mkdocs/ (see deploy/nginx/bifrost-status.conf.template).
-# Local dev: use mkdocs.yml or mkdocs serve (python scripts/run_docs.py); do not require this file.
+# Local dev: use mkdocs.yml or mkdocs serve (python scripts/run_mkdocs.py); do not require this file.
 INHERIT: mkdocs.yml
 site_url: http://ai.trader/mkdocs/

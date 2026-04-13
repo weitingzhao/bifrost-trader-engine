@@ -18,7 +18,7 @@ from src.workers.celery_app import (
 
 logger = logging.getLogger(__name__)
 
-# Canonical Celery queues (see scripts/run_celery.py _DEFAULT_QUEUES, src/massive/celery_queues.py).
+# Canonical Celery queues (see scripts/systemd/run_celery.py _DEFAULT_QUEUES, src/massive/celery_queues.py).
 SUPPORTED_CELERY_QUEUES: Tuple[str, ...] = (
     "bars",
     "massive_stocks_high",

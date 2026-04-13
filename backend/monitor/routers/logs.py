@@ -210,7 +210,7 @@ def _massive_log_reader_loop(app_ref) -> None:
 
 
 def _massive_ws_log_reader_loop(app_ref) -> None:
-    """Background thread: XREAD Redis stream bifrost:console:ws_massive_option (run_massive_ws.py)."""
+    """Background thread: XREAD Redis stream bifrost:console:ws_massive_option (scripts/systemd/run_massive_ws.py)."""
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
@@ -862,7 +862,7 @@ async def get_massive_logs_stream(request: Request):
     )
 
 
-# --- Massive WS ingest logs (scripts/run_massive_ws.py → bifrost:console:ws_massive_option) ---
+# --- Massive WS ingest logs (scripts/systemd/run_massive_ws.py → bifrost:console:ws_massive_option) ---
 
 
 @router.get("/api/massive-ws/logs")
@@ -966,7 +966,7 @@ async def get_massive_ws_logs_stream(request: Request):
     )
 
 
-# --- IB Operator logs (scripts/run_ib_operator.py → bifrost:console:ws_ib_operator) ---
+# --- IB Operator logs (scripts/systemd/run_ib_operator.py → bifrost:console:ws_ib_operator) ---
 
 
 @router.get("/api/ib-operator/logs")
@@ -1070,7 +1070,7 @@ async def get_ib_operator_logs_stream(request: Request):
     )
 
 
-# --- IB ingestor logs (scripts/run_ib_ingestor.py → bifrost:console:ws_ib_ingestor) ---
+# --- IB ingestor logs (scripts/systemd/run_ib_ingestor.py → bifrost:console:ws_ib_ingestor) ---
 
 
 @router.get("/api/ib-ingestor/logs")
@@ -1174,7 +1174,7 @@ async def get_ib_ingestor_logs_stream(request: Request):
     )
 
 
-# --- IB Account Agent logs (scripts/run_ib_account_agent.py → bifrost:console:ws_ib_account_agent) ---
+# --- IB Account Agent logs (scripts/systemd/run_ib_account_agent.py → bifrost:console:ws_ib_account_agent) ---
 
 
 @router.get("/api/ib-account-agent/logs")
@@ -1282,7 +1282,7 @@ async def get_ib_account_agent_logs_stream(request: Request):
     )
 
 
-# --- Account Sync Daemon logs (run_account_sync_daemon.py → Redis stream bifrost:console:account_sync_daemon) ---
+# --- Account Sync Daemon logs (scripts/check/run_account_sync_daemon.py → Redis stream bifrost:console:account_sync_daemon) ---
 
 
 def _account_sync_daemon_log_reader_loop(app_ref) -> None:

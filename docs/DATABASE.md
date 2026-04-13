@@ -486,7 +486,7 @@
 - **主键**：`PRIMARY KEY (option_snapshots_id, snapshot_ts)`（分区表要求主键包含分区键）。
 - **分区**：`PARTITION BY RANGE (snapshot_ts)` 按月分区（命名如 `option_snapshots_y2026m03`）。`pg_ddl` 自动创建当月 + 未来 3 个月分区及 default 分区。已有非分区表的库在 `db_refresh_schema.py` 时自动迁移。
 - **索引**：`(contract_key, snapshot_ts DESC)`。
-- **保留策略**：保留最近 **90 天**热数据；早于 90 天的月份分区 `ALTER TABLE ... DETACH PARTITION` 后归档（`pg_dump` / `COPY` 到冷存储）或 `DROP`。运维步骤见 `scripts/archive_option_snapshots.sh`（占位模板）。
+- **保留策略**：保留最近 **90 天**热数据；早于 90 天的月份分区 `ALTER TABLE ... DETACH PARTITION` 后归档（`pg_dump` / `COPY` 到冷存储）或 `DROP`。运维步骤见 `scripts/db/archive_option_snapshots.sh`（占位模板）。
 
 #### 物化视图 `option_snapshots_latest`
 
@@ -798,7 +798,7 @@
 | Daemon | Trading | `client_id_daemon` / — | 主连接下单、持仓、行情 |
 | Daemon | Listener | `client_id_listener` / `ib2_client_id_listener` | 事件、订阅；Secondary 无行情订阅 |
 | Monitor | Operator (cmd RPC) | `client_id.operator` / `secondary.client_id.operator`（旧键 `account` 仍可读） | IB Operator / Secondary 账户侧连接；账户摘要、执行记录等 |
-| Standalone | IB ingestor | `ib.host.client_id.ingestor`（旧键 `ib_market_ingest` 仍可读） / — | `run_ib_ingestor.py`、Redis `ib:ingester:*` |
+| Standalone | IB ingestor | `ib.host.client_id.ingestor`（旧键 `ib_market_ingest` 仍可读） / — | `scripts/systemd/run_ib_ingestor.py`、Redis `ib:ingester:*` |
 | Celery | Market Data | `client_id.worker_market` / — | Bars 补全等 worker |
 
 - **语义**：**第二 IB**（`ib.secondary`，扁平键为 `ib2_*`）用于统一 Portfolio 与 listener_connector_2；行情仍由 Host 承担。**Flex**：token 与 Query 行由 Settings 或 POST /config/flex 写入。修改 **YAML 中的 client_id 或 host** 后需**重启**相关进程。
@@ -1345,7 +1345,7 @@ Type Config UI 通过 GET `/strategies/structure-types/param-kind-options`、`/s
 若数据库已能连接，但 **PostgreSQL schema（表或列）** 不符合要求，说明当前库中尚未创建阶段 1/2 所需的表（或列不一致）。在项目根目录执行：
 
 ```bash
-python scripts/db_refresh_schema.py
+python scripts/db/db_refresh_schema.py
 ```
 
 脚本会按 `config/config.yaml` 中的 root `postgres` 配置连接当前库，并创建/补齐 §2 所列各表（与 `PostgreSQLSink._ensure_tables` 一致）。完成后可启动守护进程或通过 psql 验证表与列是否符合 [DATABASE.md](DATABASE.md) §2。
@@ -1382,9 +1382,9 @@ WHERE c.relname = 'daemon_heartbeat';
 若发现某 `pid` 长时间占用锁且已无实际请求，可在确认安全后在该库执行 `SELECT pg_terminate_backend(<pid>);` 终止该后端（会断开对应连接并释放锁）。也可在项目根目录运行**强制释放锁脚本**（会列出并终止持有/等待上述表锁的其他后端）：
 
 ```bash
-python scripts/db_release_dblock.py              # 列出并询问确认后终止
-python scripts/db_release_dblock.py --dry-run    # 仅列出，不终止
-python scripts/db_release_dblock.py --yes       # 不确认，直接终止
+python scripts/db/db_release_dblock.py              # 列出并询问确认后终止
+python scripts/db/db_release_dblock.py --dry-run    # 仅列出，不终止
+python scripts/db/db_release_dblock.py --yes       # 不确认，直接终止
 ```
 
 **如何避免**：
@@ -1392,7 +1392,7 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 - **只保留一个写入者**：同一时间只运行 **一个** 守护进程（`run_engine.py`），不要同时跑两个会写 `daemon_heartbeat` 的进程。
 - **短事务**：本仓库的 sink 已做到每次写心跳后立即 `commit()`，不长时间持锁；若自研或改代码，请勿在未提交事务中长时间持有对 `daemon_heartbeat` 的写入或显式锁。
 - **锁等待超时**：PostgreSQLSink 连接后已设置 `lock_timeout = '5s'`，若 5 秒内拿不到行锁会报错并 rollback，不会无限阻塞；可根据需要调整超时或重试策略。
-- **自动释放锁并重试**：若因上次守护进程异常退出导致 `daemon_heartbeat` 或 `daemon_run_status` 被锁，再次启动时若遇到 lock timeout，sink 会**自动**查询并终止持有/等待这两张表锁的其他后端（逻辑同 `scripts/db_release_dblock.py`，仅针对 `daemon_heartbeat` 与 `daemon_run_status`），然后重试连接或写入一次，无需手动执行 release 脚本。
+- **自动释放锁并重试**：若因上次守护进程异常退出导致 `daemon_heartbeat` 或 `daemon_run_status` 被锁，再次启动时若遇到 lock timeout，sink 会**自动**查询并终止持有/等待这两张表锁的其他后端（逻辑同 `scripts/db/db_release_dblock.py`，仅针对 `daemon_heartbeat` 与 `daemon_run_status`），然后重试连接或写入一次，无需手动执行 release 脚本。
 
 ---
 
@@ -1448,7 +1448,7 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 机会策略移除 jsonb 列 | strategy_opportunity 表删除列 symbol_scope、entry_conditions（无历史数据需迁移）；pg_ddl 建表不再包含两列，并对已有表执行 DROP COLUMN IF EXISTS；Reader 仅从子表组装 symbols/entry_conditions。§2.24.2。 | — |
 | 策略分配（strategy_allocation）| 表 strategy_allocation、strategy_allocation_opportunity；主键 strategy_allocation_id；无 jsonb，机会列表通过关联表与 sort_order；API 请求/响应使用 allocation_limits（max_positions、max_bp_pct）。§2.24.3、§2.24.3a。 | — |
 | strategy_structure.structure_subtype | §2.24.1 表 strategy_structure 增加列 structure_subtype (text NULL)；covered_call 时存 otm/atm/itm/deep_otm，供 Edit Wizard 还原 Step 2 状态。 | — |
-| 结构类型配置表（方案 A） | 新增 6 张表：strategy_structure_type、strategy_structure_type_leg、strategy_structure_subtype、strategy_structure_subtype_characteristic、strategy_structure_subtype_meta_param、strategy_structure_subtype_rule。由 _ensure_tables 创建；初始数据由 scripts/db_init/seed_structure_type_config.py 写入。§2.24.0、§2.24.0a–f。 | — |
+| 结构类型配置表（方案 A） | 新增 6 张表：strategy_structure_type、strategy_structure_type_leg、strategy_structure_subtype、strategy_structure_subtype_characteristic、strategy_structure_subtype_meta_param、strategy_structure_subtype_rule。由 _ensure_tables 创建；初始数据由 scripts/init/db_init/seed_structure_type_config.py 写入。§2.24.0、§2.24.0a–f。 | — |
 | 策略实例与交易归属 | 新增表 strategy_instance（§2.24.11a）；account_executions 增加 strategy_opportunity_id、strategy_instance_id（§2.24.11b）。**account_positions 不存策略归属**（已移除 strategy_opportunity_id、strategy_instance_id 列）；持仓的策略信息通过 account_executions 推导 strategy_links[]。详见 §2.24.11a、§2.24.11b。 | 阶段 3 扩展 |
 | 2026-03-19 Position×Instance 归因读模型 | §2.24.11c：净仓近似归因——GET /executions/position-attribution 将持仓按实例拆分（net_estimated），返回 open_qty_est / attribution_ratio / unrealized_pnl_est / is_mixed / has_unassigned；前端 PositionsPage Opportunity Sheet 改用该 API，同一合约可在多个实例下并存展示；新增 Attribution 筛选器（Single / Mixed / Unassigned）。实时读模型（不落表），见 servers/reader/executions.py。 | 阶段 3 扩展 |
 | 2026-03-19 Executions 分源迁移 | 三张原始源表：`executions_raw_tws`（TWS/manual 源）、`executions_raw_flex`（Flex 源权威成交）、`executions_raw_journal`（journal_closed 人工会计调整）。`account_executions` 为统一只读视图（UNION ALL，Flex 优先覆盖 TWS，Journal 独立流）。**`account_executions_final`**：仅 UNION `executions_raw_flex` + `executions_raw_journal`（不含 TWS 补洞行），列与主键编码规则与全量视图中对应两分支一致。**`account_executions_fly`**：源为 `executions_raw_tws`，`account_executions_id = -(executions_raw_tws_id)`；排除 `sec_type = BAG`（多腿组合占位）；排除在 **`account_executions_final` 中已出现相同 `(account_id, contract_key)`（非空、trim 后相等）** 的 TWS 行。**GET /executions**、**GET /performance** 在 `source_scope=on_the_fly` 时读此视图。回填脚本 `scripts/db_backfill_executions_raw.py`。 | 阶段 3 扩展 |

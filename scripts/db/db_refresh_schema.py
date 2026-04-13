@@ -3,12 +3,12 @@
 
 Use an empty database or recreate objects as needed; this script does not migrate existing tables.
 
-Strategy templates: ``python scripts/db_init/seed_structure_type_config.py`` after refresh.
+Strategy templates: ``python scripts/init/db_init/seed_structure_type_config.py`` after refresh.
 
 Usage:
-  python scripts/db_refresh_schema.py [--config PATH] [--no-color]
-  python scripts/db_refresh_schema.py --prod
-  python scripts/db_refresh_schema.py --dev
+  python scripts/db/db_refresh_schema.py [--config PATH] [--no-color]
+  python scripts/db/db_refresh_schema.py --prod
+  python scripts/db/db_refresh_schema.py --dev
 
 Config resolution (when ``--config`` is omitted) matches ``run_server`` / ``run_engine``:
 ``BIFROST_CONFIG``, first positional YAML path, ``--prod`` / ``--dev`` / ``--env``,
@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(_PROJECT_ROOT)
@@ -344,7 +344,7 @@ def main() -> int:
                 _c(no_color, YELLOW, "Schema refresh timed out (another backend is holding locks)."),
                 file=sys.stderr,
             )
-            print("  Stop the API server, daemon, and bars worker; or run: python scripts/db_release_dblock.py [--yes]", file=sys.stderr)
+            print("  Stop the API server, daemon, and bars worker; or run: python scripts/db/db_release_dblock.py [--yes]", file=sys.stderr)
         print(f"{_c(no_color, RED + BOLD, 'Schema refresh failed:')} {e}", file=sys.stderr)
         return 1
     finally:

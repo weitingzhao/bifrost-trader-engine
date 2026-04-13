@@ -5,8 +5,8 @@ Uses ``client_id_account_agent`` / ``ib2_client_id_account_agent`` from ``get_ef
 Writes ``ib:account:snapshot:v1`` and health ``bifrost:health:ws_ib_account_agent``.
 
 Usage::
-  python scripts/run_ib_account_agent.py
-  python scripts/run_ib_account_agent.py --config config/config.prod.yaml
+  python scripts/systemd/run_ib_account_agent.py
+  python scripts/systemd/run_ib_account_agent.py --config config/config.prod.yaml
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any, Awaitable, Dict, List, Optional
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(str(_PROJECT_ROOT))

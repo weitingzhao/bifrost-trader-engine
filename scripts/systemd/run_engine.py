@@ -18,7 +18,9 @@ except ImportError:  # pragma: no cover - optional at import time; handler falls
     redis = None
 
 # Project root: always resolve relative to script location, not cwd
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, _PROJECT_ROOT)
 os.chdir(_PROJECT_ROOT)  # Ensure config paths resolve from project root
 

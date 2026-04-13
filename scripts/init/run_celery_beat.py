@@ -3,13 +3,13 @@
 
 Requires the same Redis broker as ``run_celery.py``. Schedule is defined in
 ``src/workers/celery_app.py`` (``beat_schedule``). Run a **worker** that consumes the
-``massive`` queue in parallel (e.g. ``python scripts/run_celery.py``).
+``massive`` queue in parallel (e.g. ``python scripts/systemd/run_celery.py``).
 
 Usage::
 
-  python scripts/run_celery_beat.py
-  python scripts/run_celery_beat.py --prod
-  BIFROST_CONFIG=config/config.prod.yaml python scripts/run_celery_beat.py
+  python scripts/init/run_celery_beat.py
+  python scripts/init/run_celery_beat.py --prod
+  BIFROST_CONFIG=config/config.prod.yaml python scripts/init/run_celery_beat.py
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(_PROJECT_ROOT)

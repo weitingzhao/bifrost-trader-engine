@@ -7,7 +7,7 @@ postgres:
   user: "bifrost"
   password: "" # or PGPASSWORD env
 
-# IB Operator cmd RPC (scripts/run_ib_operator.py). Legacy key ib_gateway is still read with a deprecation warning.
+# IB Operator cmd RPC (scripts/systemd/run_ib_operator.py). Legacy key ib_gateway is still read with a deprecation warning.
 # ib_operator:
 #   enabled: true
 #   # Bars Celery on a host without TWS: set true so backfill uses Redis RPC to run_ib_operator.
@@ -26,7 +26,7 @@ ib:
       listener: 101
       operator: 120
       worker_market: 140
-      # IB ingestor (scripts/run_ib_ingestor.py); must not overlap operator/daemon/Celery IDs.
+      # IB ingestor (scripts/systemd/run_ib_ingestor.py); must not overlap operator/daemon/Celery IDs.
       ingestor: 150
   secondary:
     ip: "127.0.0.1"
@@ -99,8 +99,8 @@ massive:
 
 # Ops control plane (run_server_ops.py): Celery systemd + optional market ingest services.
 # Whitelist stems for RestrictedExecutor (matches bifrost-celery-worker@*.service, redis, etc.).
-# On macOS, local_control: subprocess runs Celery via run_celery.py and WS Connector ingest via
-# scripts/run_massive_ws.py, run_ib_operator.py, run_ib_ingestor.py (GET /ops/health market_ingest_script_control).
+# On macOS, local_control: subprocess runs Celery via scripts/systemd/run_celery.py and WS Connector ingest via
+# scripts/systemd/run_massive_ws.py, scripts/systemd/run_ib_operator.py, scripts/systemd/run_ib_ingestor.py (GET /ops/health market_ingest_script_control).
 # ops:
 #   local_control: subprocess
 #   allowed_units:
@@ -133,7 +133,7 @@ massive:
 #       systemd_unit: bifrost-engine.service
 #       # Omit redis_meta_key for Engine — no Socket ingest lease / health rewrite
 
-# IB ingestor (scripts/run_ib_ingestor.py): Watchlist-driven; caps subscription count. Legacy top-level key ib_market_ingest still read.
+# IB ingestor (scripts/systemd/run_ib_ingestor.py): Watchlist-driven; caps subscription count. Legacy top-level key ib_market_ingest still read.
 # ib_ingestor:
 #   max_subscriptions: 200
 #   include_stk: true

@@ -2,8 +2,8 @@
 """Seed strategy_dim and strategy_template* (Option Template Config defaults).
 
 Run after schema refresh, e.g.:
-  python scripts/db_refresh_schema.py
-  python scripts/db_init/seed_structure_type_config.py [--config PATH]
+  python scripts/db/db_refresh_schema.py
+  python scripts/init/db_init/seed_structure_type_config.py [--config PATH]
 """
 
 from __future__ import annotations
@@ -13,10 +13,10 @@ import os
 import sys
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
-_db_init = _PROJECT_ROOT / "scripts" / "db_init"
+_db_init = _PROJECT_ROOT / "scripts" / "init" / "db_init"
 if str(_db_init) not in sys.path:
     sys.path.insert(0, str(_db_init))
 os.chdir(_PROJECT_ROOT)

@@ -23,6 +23,22 @@ _ALLOWED_ACTIONS = frozenset({"start", "stop", "restart"})
 _WORKER_UNIT_BASE = "bifrost-celery-worker"
 _INSTANCE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
+# Long-running daemon / IB edge entrypoints live under scripts/systemd/ (WorkingDirectory = project root).
+_SCRIPTS_IN_SYSTEMD_SUBDIR = frozenset({
+    "run_engine.py",
+    "run_celery.py",
+    "run_massive_ws.py",
+    "run_ib_operator.py",
+    "run_ib_ingestor.py",
+    "run_ib_account_agent.py",
+})
+
+
+def _ingest_script_abs_path(project_root: Path, script_name: str) -> Path:
+    if script_name in _SCRIPTS_IN_SYSTEMD_SUBDIR:
+        return project_root / "scripts" / "systemd" / script_name
+    return project_root / "scripts" / script_name
+
 
 def _ingest_script_log_for_unit(unit: str) -> Optional[Tuple[str, str]]:
     """Return (script_filename, log_filename) for market ingest units."""
@@ -330,7 +346,8 @@ class SubprocessLocalExecutor:
     ``pgrep`` + ``SIGTERM`` (same idea as ``run_celery.py`` duplicate kill).
 
     Market ingest units (``bifrost-massive-ws``, ``bifrost-ib-operator``,
-    ``bifrost-ib-ingestor``, ``bifrost-ib-account-agent``) start with ``scripts/run_*.py`` and the optional
+    ``bifrost-ib-ingestor``, ``bifrost-ib-account-agent``) start with ``scripts/systemd/run_massive_ws.py`` or
+    ``scripts/systemd/run_ib_*.py`` and the optional
     resolved YAML path (``--config`` or positional for gateway).
     """
 
@@ -376,7 +393,7 @@ class SubprocessLocalExecutor:
 
     async def _start_worker_unit(self, unit: str) -> Dict[str, Any]:
         instance_id = self._instance_from_worker_unit(unit)
-        script = self._project_root / "scripts" / "run_celery.py"
+        script = self._project_root / "scripts" / "systemd" / "run_celery.py"
         if not script.is_file():
             raise RuntimeError(f"run_celery.py not found at {script}")
         cmd = [self._python, str(script), "--instance", instance_id]
@@ -518,9 +535,9 @@ class SubprocessLocalExecutor:
         norm_root = str(self._project_root.resolve()).replace("\\", "/")
         if norm_root in norm_cmd:
             return True
-        abs_script = str((self._project_root / "scripts" / script_name).resolve()).replace(
-            "\\", "/"
-        )
+        abs_script = str(
+            _ingest_script_abs_path(self._project_root, script_name).resolve()
+        ).replace("\\", "/")
         if abs_script in norm_cmd:
             return True
         if sys.platform == "darwin":
@@ -629,7 +646,7 @@ class SubprocessLocalExecutor:
                 f"ingest_already_running: pids={existing} unit={unit!r} "
                 "(stop first or use restart)"
             )
-        script = self._project_root / "scripts" / script_name
+        script = _ingest_script_abs_path(self._project_root, script_name)
         if not script.is_file():
             raise RuntimeError(f"{script_name} not found at {script}")
         cmd: List[str] = [self._python, str(script)]

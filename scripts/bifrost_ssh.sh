@@ -7,7 +7,7 @@
 #
 # Interactive mode (no args, or -i/--interactive): SSH ControlMaster — SSH login once (unless using keys);
 # sudo password is kept in memory for the whole session (sudo -S) until quit or menu tl2 Clear.
-# Menu db1 DB refresh / db2 lock release: choose Dev (local --dev) or Prod (remote --prod); no need to exit SSH.
+# Menu db1 DB refresh / db2 lock release / db3 option_snapshots archive: choose Dev (local) or Prod (remote); no need to exit SSH.
 
 set -euo pipefail
 
@@ -97,7 +97,7 @@ BIFROST_SSH_RESULT_LINES="${BIFROST_SSH_RESULT_LINES:-20}"
 BIFROST_SSH_LAST_OUTPUT_FULL=0
 # Persistent deploy log — survives between sessions; overwritten on each deploy/pipeline run.
 BIFROST_PERSIST_DEPLOY_LOG="${PROJECT_ROOT}/logs/.bifrost-deploy-last.log"
-# MkDocs-only rsync log (menu tl6 / --deploy-mkdocs); separate from application deploy.
+# MkDocs-only rsync log (menu doc / --deploy-mkdocs); separate from application deploy.
 BIFROST_PERSIST_MKDOCS_LOG="${PROJECT_ROOT}/logs/.bifrost-mkdocs-deploy-last.log"
 # TUI "Last output" tail count; after menu tl1 systemd install set high so log + summaries fit (cleared on other menu keys).
 BIFROST_SSH_LAST_OUTPUT_LINES=""
@@ -362,13 +362,15 @@ _interactive_paint_main_menu() {
   echo "${C_DIM}  db — database${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}db1)${C_RESET} ${C_BOLD}Refresh schema${C_RESET} ${C_DIM}(Dev local / Prod remote)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}db2)${C_RESET} ${C_BOLD}Release locks${C_RESET} ${C_DIM}(dry-run then optional terminate)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}db3)${C_RESET} ${C_BOLD}Archive option_snapshots${C_RESET} ${C_DIM}(dry-run then optional live + drop)${C_RESET}"
   echo "${C_DIM}  tl — tooling${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}tl1)${C_RESET} ${C_BOLD}systemd install:${C_RESET} ${C_DIM}render nginx + rsync; register units; widens Last output; summary like ${C_BOLD}r${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}tl2)${C_RESET} Clear stored sudo password"
   echo "  ${C_GREEN}${C_BOLD}tl3)${C_RESET} Reconnect SSH master ${C_DIM}(password again)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}tl4)${C_RESET} ${C_BOLD}Local Mac:${C_RESET} Socket ingest + Celery ${C_DIM}(pgrep + pidfiles)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}tl5)${C_RESET} ${C_BOLD}Remote Prod:${C_RESET} systemd scan on ${DEPLOY_HOST} ${C_DIM}(bifrost-* + worker@*)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}tl6)${C_RESET} ${C_BOLD}MkDocs site:${C_RESET} build + rsync ${C_DIM}site/ → ${DEPLOY_PATH}/site/ ${C_RESET}${C_DIM}(no APIs or DB)${C_RESET}"
+  echo "${C_DIM}  doc — documentation${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}doc)${C_RESET} ${C_BOLD}FSM diagrams + MkDocs:${C_RESET} ${C_DIM}python scripts/docs/fsm_build_docs.py + mkdocs build + rsync site/ → ${DEPLOY_PATH}/site/ (no APIs or DB)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}o)${C_RESET} ${C_BOLD}Last output pane:${C_RESET} toggle ${C_DIM}full log vs last ${BIFROST_SSH_RESULT_LINES} lines${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}v)${C_RESET} ${C_BOLD}View last deploy log${C_RESET} ${C_DIM}(less; logs/.bifrost-deploy-last.log)${C_RESET}"
   echo "  ${C_YELLOW}${C_BOLD}q)${C_RESET} Quit"
@@ -432,11 +434,11 @@ Usage (from repo root):
       Interactive menu: open one SSH master (login once; kept until you quit), then run operations in a loop;
       sudo password you enter (or -p) is kept in memory for every menu action until quit or menu tl2 Clear.
       Main menu stays on top; last command output is shown in the bottom pane (20 lines by default; wider after tl1 systemd install; menu o toggles full log vs tail). Same flags as below.
-      Keys: r or 1 Reboot services · d or 2 Deploy · s or 3 Status · db1/db2 schema & locks · tl1–tl6 tooling (nginx/ssh/local remote/MkDocs) · o/v/q.
+      Keys: r or 1 Reboot services · d or 2 Deploy · s or 3 Status · db1/db2/db3 schema, locks & archive · tl1–tl5 tooling (nginx/ssh/local remote) · doc (FSM diagrams + MkDocs publish) · o/v/q.
       Menu s / 3 Status refreshes units grouped by category + Socket Services + Daemon (no bifrost-celery; use Ops UI). Menu tl1 appends repo unit file list + same summary as s. Deploy d / 2: 0 = deploy+restart all 9 HTTP APIs; 1–3 = single units (Engine: Dashboard); a–d = category; q or empty = cancel.
       Menu tl1 Install systemd: locally render deploy/nginx/bifrost-status.conf from merged prod YAML, rsync it to the server, then register deploy/systemd/*.service + *.target (sudo); install nginx site from that file + nginx -t + reload when nginx is present.
       Menu tl4 Local Mac: pgrep run_massive_ws / IB ingest / IB operator / run_celery + check logs/.ops-ingest-*.pid (this machine; not SSH).
-      Menu tl6 MkDocs: mkdocs build + rsync site/ to DEPLOY_PATH only (no app/DB/systemctl; nginx serves /mkdocs/).
+      Menu doc: python scripts/docs/fsm_build_docs.py (FSM diagram MD/HTML) + mkdocs build + rsync site/ to DEPLOY_PATH only (no app/DB/systemctl; nginx serves /mkdocs/). Alias: doc1, tl6, or mkdocs.
       Menu tl5 Remote Prod: systemctl scan on DEPLOY_HOST (bifrost-* units + socket ingest + bifrost-celery-worker@*); use --password if systemctl needs sudo.
       CLI: --local-mac-services | --remote-services-status | --deploy-mkdocs
       With --password / -p (or env DEPLOY_SUDO_PASSWORD), skip the sudo password prompt; value is
@@ -479,33 +481,37 @@ Usage (from repo root):
     --deploy | -deploy          rsync --delete + remote venv pip + npm build, then run systemctl if actions above are set
     --deploy-only               only rsync --delete + remote build (no systemctl); use for first push or code-only sync
 
-    --migrate                   with --deploy or --deploy-only: run db_refresh_schema.py --prod on remote
+    --migrate                   with --deploy or --deploy-only: run scripts/db/db_refresh_schema.py --prod on remote
     --sync-prod-config          with deploy: also rsync config/config.prod.yaml (overwrites remote)
 
-    --db-refresh                Remote ${DEPLOY_PATH}: python scripts/db_refresh_schema.py --prod (no rsync). Interactive menu db1 Prod.
-    --db-refresh-dev            This machine (repo root): python scripts/db_refresh_schema.py --dev (local .venv if present).
-    --db-release-locks          Remote: db_release_dblock.py --prod --dry-run.
-    --db-release-locks-dev      Local: db_release_dblock.py --dev --dry-run.
-    --db-release-locks-terminate  Remote: db_release_dblock.py --prod --yes.
-    --db-release-locks-terminate-dev  Local: db_release_dblock.py --dev --yes.
+    --db-refresh                Remote ${DEPLOY_PATH}: python scripts/db/db_refresh_schema.py --prod (no rsync). Interactive menu db1 Prod.
+    --db-refresh-dev            This machine (repo root): python scripts/db/db_refresh_schema.py --dev (local .venv if present).
+    --db-release-locks          Remote: scripts/db/db_release_dblock.py --prod --dry-run.
+    --db-release-locks-dev      Local: scripts/db/db_release_dblock.py --dev --dry-run.
+    --db-release-locks-terminate  Remote: scripts/db/db_release_dblock.py --prod --yes.
+    --db-release-locks-terminate-dev  Local: scripts/db/db_release_dblock.py --dev --yes.
+    --db-archive-option-snapshots      Remote: scripts/db/archive_option_snapshots.sh --dry-run (psql/pg_dump maintenance).
+    --db-archive-option-snapshots-dev  Local: scripts/db/archive_option_snapshots.sh --dry-run.
+
 
     --show-last-deploy            print the full output of the last deploy/pipeline run (saved to
                                   logs/.bifrost-deploy-last.log) using less -R (or cat if less is absent).
                                   Does not SSH or deploy. Use after a failed deploy to see the full log.
 
-    --deploy-mkdocs               MkDocs only: run mkdocs build -f mkdocs.prod.yml locally, then rsync site/
-                                  to DEPLOY_PATH/site/ on DEPLOY_HOST. Does not run app pip/npm, DB tools,
-                                  or systemctl. Separate from --deploy / --deploy-only. Requires mkdocs
-                                  (uv sync --extra docs). Nginx must serve /mkdocs/ (see deploy/nginx templates).
+    --deploy-mkdocs               Docs publish: run scripts/docs/fsm_build_docs.py (FSM diagram MD/HTML), then
+                                  mkdocs build -f mkdocs.prod.yml locally, then rsync site/ to DEPLOY_PATH/site/
+                                  on DEPLOY_HOST. Does not run app pip/npm, DB tools, or systemctl. Separate
+                                  from --deploy / --deploy-only. Requires mkdocs (uv sync --extra docs).
+                                  Nginx must serve /mkdocs/ (see deploy/nginx templates). Same pipeline as menu doc.
 
-    --local-mac-services          this machine only: pgrep + pidfiles for run_massive_ws / run_ib_ingestor /
-                                  run_ib_operator / run_celery (see Examples).
+    --local-mac-services          this machine only: pgrep + pidfiles for run_massive_ws /
+                                  scripts/systemd/run_ib_* / scripts/systemd/run_celery.py (see Examples).
 
     --remote-services-status      SSH to DEPLOY_HOST: systemctl is-active for bifrost HTTP stack + engine + celery + agent +
                                   Socket Services (massive-ws, ib-operator, ib-ingestor, ib-account-agent); list bifrost-celery-worker@*.
                                   Optional --password if remote systemctl requires sudo.
 
-    --install-systemd-units       Same as interactive menu tl1: on this machine run scripts/render_nginx_status_conf.py with merged
+    --install-systemd-units       Same as interactive menu tl1: on this machine run scripts/systemd/render_nginx_status_conf.py with merged
                                   config/config.prod.yaml, then rsync deploy/nginx/bifrost-status.conf to the server. Remote: register
                                   deploy/systemd/*.service and *.target, daemon-reload, copy nginx site, nginx -t, reload when nginx
                                   exists. One-shot; no other flags. Sync unit files first if needed (e.g. --deploy-only).
@@ -545,6 +551,8 @@ Examples:
   ./scripts/bifrost_ssh.sh --db-release-locks-dev
   ./scripts/bifrost_ssh.sh --db-release-locks-terminate
   ./scripts/bifrost_ssh.sh --db-release-locks-terminate-dev
+  ./scripts/bifrost_ssh.sh --db-archive-option-snapshots
+  ./scripts/bifrost_ssh.sh --db-archive-option-snapshots-dev
 
   ./scripts/bifrost_ssh.sh --local-mac-services
       On this Mac only: from repo root, pgrep Socket ingest + Celery (same scripts as
@@ -563,7 +571,7 @@ Examples:
       Log is saved at logs/.bifrost-deploy-last.log every time a pipeline runs.
 
   ./scripts/bifrost_ssh.sh --deploy-mkdocs
-      Publish static handbook only: mkdocs build + rsync site/ → remote (log: logs/.bifrost-mkdocs-deploy-last.log).
+      Publish static handbook: fsm_build_docs + mkdocs build + rsync site/ → remote (log: logs/.bifrost-mkdocs-deploy-last.log).
 
 systemctl over SSH uses ssh -t when stdin is a TTY so sudo can prompt; non-interactive needs NOPASSWD for systemctl.
 With --password, --status uses sudo -S like start/stop/restart; without it, status runs as the SSH user (often sufficient for is-active).
@@ -841,7 +849,7 @@ _bifrost_save_mkdocs_deploy_log() {
   } > "${BIFROST_PERSIST_MKDOCS_LOG}" 2>/dev/null || true
 }
 
-# Build MkDocs static site/ (mkdocs.prod.yml) and rsync to DEPLOY_PATH/site/. No venv pip of app deps, no npm, no DB, no systemctl.
+# Run scripts/docs/fsm_build_docs.py, build MkDocs static site/ (mkdocs.prod.yml), rsync to DEPLOY_PATH/site/. No app pip/npm, no DB, no systemctl.
 _bifrost_run_mkdocs_deploy_core() {
   local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
   _bifrost_restore_session_sudo
@@ -861,6 +869,11 @@ _bifrost_run_mkdocs_deploy_core() {
   fi
   if [[ ! -f "${PROJECT_ROOT}/mkdocs.prod.yml" ]]; then
     echo "ERROR: ${PROJECT_ROOT}/mkdocs.prod.yml missing." >&2
+    return 1
+  fi
+  _msg_info "Running: ${py} scripts/docs/fsm_build_docs.py (FSM diagram MD/HTML under docs/fsm/)"
+  if ! "${py}" "${PROJECT_ROOT}/scripts/docs/fsm_build_docs.py"; then
+    echo "ERROR: scripts/docs/fsm_build_docs.py failed." >&2
     return 1
   fi
   _msg_info "Running: ${py} -m mkdocs build -f mkdocs.prod.yml"
@@ -903,7 +916,7 @@ _cli_deploy_mkdocs() {
 
 _interactive_deploy_mkdocs() {
   local _ec
-  _msg_info "MkDocs: build + rsync only (no application deploy, DB, or systemctl)."
+  _msg_info "FSM docs + MkDocs: scripts/docs/fsm_build_docs.py, then build + rsync only (no application deploy, DB, or systemctl)."
   echo ""
   set +e
   _bifrost_run_mkdocs_deploy_core 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
@@ -1036,7 +1049,7 @@ cd ..
 if [[ "${DO_MIGRATE}" == "1" ]]; then
   echo "Running db_refresh_schema.py --prod ..."
   export FORCE_COLOR=1
-  python scripts/db_refresh_schema.py --prod
+  python scripts/db/db_refresh_schema.py --prod
 fi
 echo "[OK] Remote install/build finished."
 REMOTE_EOF
@@ -1203,6 +1216,18 @@ _local_run_python_script() {
   python "scripts/${_script}" "$@"
 }
 
+# Run scripts/<path>.sh from repo root (DB shell helpers; no venv required).
+_local_run_bash_script() {
+  local _script="$1"
+  shift
+  cd "${PROJECT_ROOT}" || return 1
+  if [[ ! -f "scripts/${_script}" ]]; then
+    echo "ERROR: scripts/${_script} not found under ${PROJECT_ROOT}" >&2
+    return 1
+  fi
+  bash "scripts/${_script}" "$@"
+}
+
 # Local (this Mac): pgrep Socket ingest + Celery — same scripts as SubprocessLocalExecutor
 # (backend/ops/services/executor_local.py). Helps debug “process running but Settings Socket/Celery empty”.
 _cli_local_mac_subprocess_check() {
@@ -1292,15 +1317,17 @@ _cli_local_mac_subprocess_check() {
     echo ""
   }
 
-  _bifrost_local_scan_script 'scripts/run_massive_ws\.py' 'Massive WebSocket ingest (run_massive_ws.py)'
-  _bifrost_local_scan_script 'scripts/run_ib_ingestor\.py' 'IB ingestor (run_ib_ingestor.py)'
-  _bifrost_local_scan_script 'scripts/run_ib_operator\.py' 'IB operator RPC (run_ib_operator.py)'
-  _bifrost_local_scan_script 'scripts/run_celery\.py' 'Celery worker (run_celery.py)'
+  _bifrost_local_scan_script 'scripts/systemd/run_massive_ws\.py' 'Massive WebSocket ingest (run_massive_ws.py)'
+  _bifrost_local_scan_script 'scripts/systemd/run_ib_ingestor\.py' 'IB ingestor (run_ib_ingestor.py)'
+  _bifrost_local_scan_script 'scripts/systemd/run_ib_operator\.py' 'IB operator RPC (run_ib_operator.py)'
+  _bifrost_local_scan_script 'scripts/systemd/run_ib_account_agent\.py' 'IB Account Agent (run_ib_account_agent.py)'
+  _bifrost_local_scan_script 'scripts/systemd/run_celery\.py' 'Celery worker (run_celery.py)'
 
   echo "${C_BOLD}Ops ingest pidfiles${C_RESET} ${C_DIM}(SubprocessLocalExecutor)${C_RESET}"
   _bifrost_local_pidfile 'logs/.ops-ingest-massive-ws.pid' 'massive-ws'
   _bifrost_local_pidfile 'logs/.ops-ingest-ib-operator.pid' 'ib-operator'
   _bifrost_local_pidfile 'logs/.ops-ingest-ib-ingestor.pid' 'ib-ingestor'
+  _bifrost_local_pidfile 'logs/.ops-ingest-ib-account-agent.pid' 'ib-account-agent'
 
   echo "${C_DIM}--- end ---${C_RESET}"
 }
@@ -1435,19 +1462,19 @@ _interactive_db_refresh_schema() {
   local _ec _env
   _env="$(_interactive_pick_db_env)"
   if [[ "${_env}" == "dev" ]]; then
-    _msg_info "Local: python scripts/db_refresh_schema.py --dev …"
+    _msg_info "Local: python scripts/db/db_refresh_schema.py --dev …"
     echo ""
     if [[ ! -f "${PROJECT_ROOT}/.venv/bin/activate" ]]; then
       _msg_warn "No .venv at repo root — install deps or create venv; run may fail."
     fi
     set +e
     # FORCE_COLOR: piped to tee → stderr not a TTY; script honors env (see db_refresh_schema.py).
-    FORCE_COLOR=1 _local_run_python_script db_refresh_schema.py --dev 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
+    FORCE_COLOR=1 _local_run_python_script db/db_refresh_schema.py --dev 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
     _ec=${PIPESTATUS[0]}
     set -e
   else
     _bifrost_restore_session_sudo
-    _msg_info "Remote ${DEPLOY_HOST}: python scripts/db_refresh_schema.py --prod …"
+    _msg_info "Remote ${DEPLOY_HOST}: python scripts/db/db_refresh_schema.py --prod …"
     echo ""
     set +e
     ssh_remote_tty "${REMOTE}" DEPLOY_PATH="${DEPLOY_PATH}" bash -s <<'REMOTE_DB_REFRESH_EOF' 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
@@ -1460,7 +1487,7 @@ fi
 # shellcheck source=/dev/null
 source .venv/bin/activate
 export FORCE_COLOR=1
-python scripts/db_refresh_schema.py --prod
+python scripts/db/db_refresh_schema.py --prod
 REMOTE_DB_REFRESH_EOF
     _ec=${PIPESTATUS[0]}
     set -e
@@ -1479,20 +1506,20 @@ _interactive_db_release_locks() {
   local _ec _ans _env _term_q
   _env="$(_interactive_pick_db_env)"
   if [[ "${_env}" == "dev" ]]; then
-    _term_q="python scripts/db_release_dblock.py --dev --yes"
+    _term_q="python scripts/db/db_release_dblock.py --dev --yes"
     _msg_info "Step 1/2 (local): db_release_dblock.py --dev --dry-run …"
     if [[ ! -f "${PROJECT_ROOT}/.venv/bin/activate" ]]; then
       _msg_warn "No .venv at repo root — run may fail."
     fi
   else
-    _term_q="python scripts/db_release_dblock.py --prod --yes"
+    _term_q="python scripts/db/db_release_dblock.py --prod --yes"
     _bifrost_restore_session_sudo
     _msg_info "Step 1/2 (remote): db_release_dblock.py --prod --dry-run …"
   fi
   echo ""
   set +e
   if [[ "${_env}" == "dev" ]]; then
-    _local_run_python_script db_release_dblock.py --dev --dry-run 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
+    _local_run_python_script db/db_release_dblock.py --dev --dry-run 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
   else
     ssh_remote_tty "${REMOTE}" DEPLOY_PATH="${DEPLOY_PATH}" bash -s <<'REMOTE_DB_REL_DRY_EOF' 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
 set -euo pipefail
@@ -1503,7 +1530,7 @@ if [[ ! -f .venv/bin/activate ]]; then
 fi
 # shellcheck source=/dev/null
 source .venv/bin/activate
-python scripts/db_release_dblock.py --prod --dry-run
+python scripts/db/db_release_dblock.py --prod --dry-run
 REMOTE_DB_REL_DRY_EOF
   fi
   _ec=${PIPESTATUS[0]}
@@ -1527,14 +1554,14 @@ REMOTE_DB_REL_DRY_EOF
   echo ""
   set +e
   if [[ "${_env}" == "dev" ]]; then
-    _local_run_python_script db_release_dblock.py --dev --yes 2>&1 | tee -a "${BIFROST_SSH_LAST_LOG}"
+    _local_run_python_script db/db_release_dblock.py --dev --yes 2>&1 | tee -a "${BIFROST_SSH_LAST_LOG}"
   else
     ssh_remote_tty "${REMOTE}" DEPLOY_PATH="${DEPLOY_PATH}" bash -s <<'REMOTE_DB_REL_YES_EOF' 2>&1 | tee -a "${BIFROST_SSH_LAST_LOG}"
 set -euo pipefail
 cd "$DEPLOY_PATH"
 # shellcheck source=/dev/null
 source .venv/bin/activate
-python scripts/db_release_dblock.py --prod --yes
+python scripts/db/db_release_dblock.py --prod --yes
 REMOTE_DB_REL_YES_EOF
   fi
   _ec=${PIPESTATUS[0]}
@@ -1544,6 +1571,86 @@ REMOTE_DB_REL_YES_EOF
   } | tee -a "${BIFROST_SSH_LAST_LOG}"
   set -e
   _msg_info "DB lock release finished (exit ${_ec}). Redrawing menu…"
+  return 0
+}
+
+# Interactive menu db3: archive_option_snapshots.sh (local or remote); dry-run then optional live + drop.
+_interactive_db_archive_option_snapshots() {
+  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
+  local _ec _env _ans _drop
+  _env="$(_interactive_pick_db_env)"
+  if [[ "${_env}" == "dev" ]]; then
+    _msg_info "Step 1/2 (local): scripts/db/archive_option_snapshots.sh --dry-run …"
+  else
+    _bifrost_restore_session_sudo
+    _msg_info "Step 1/2 (remote): scripts/db/archive_option_snapshots.sh --dry-run …"
+  fi
+  echo ""
+  set +e
+  if [[ "${_env}" == "dev" ]]; then
+    _local_run_bash_script db/archive_option_snapshots.sh --dry-run 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
+  else
+    ssh_remote_tty "${REMOTE}" DEPLOY_PATH="${DEPLOY_PATH}" bash -s <<'REMOTE_ARCH_DRY_EOF' 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
+set -euo pipefail
+cd "$DEPLOY_PATH"
+if [[ ! -f scripts/db/archive_option_snapshots.sh ]]; then
+  echo "ERROR: scripts/db/archive_option_snapshots.sh missing on remote. Deploy first." >&2
+  exit 1
+fi
+bash scripts/db/archive_option_snapshots.sh --dry-run
+REMOTE_ARCH_DRY_EOF
+  fi
+  _ec=${PIPESTATUS[0]}
+  {
+    echo ""
+    echo "--- dry-run exit code: ${_ec} ---"
+  } | tee -a "${BIFROST_SSH_LAST_LOG}"
+  set -e
+  echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Run live (detach + export)? ${C_DIM}[y/N]${C_RESET} "
+  read -r _ans
+  _ans=$(echo "${_ans}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if [[ "${_ans}" != "y" && "${_ans}" != "yes" ]]; then
+    _msg_info "Skipped live run (dry-run only)."
+    return 0
+  fi
+  echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Drop detached partitions after export? ${C_DIM}[y/N]${C_RESET} ${C_DIM}(destructive)${C_RESET} "
+  read -r _drop
+  _drop=$(echo "${_drop}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if [[ "${_env}" == "dev" ]]; then
+    _msg_info "Step 2/2 (local): live …"
+  else
+    _msg_info "Step 2/2 (remote): live …"
+  fi
+  echo ""
+  set +e
+  if [[ "${_env}" == "dev" ]]; then
+    if [[ "${_drop}" == "y" || "${_drop}" == "yes" ]]; then
+      _local_run_bash_script db/archive_option_snapshots.sh --drop-after-export 2>&1 | tee -a "${BIFROST_SSH_LAST_LOG}"
+    else
+      _local_run_bash_script db/archive_option_snapshots.sh 2>&1 | tee -a "${BIFROST_SSH_LAST_LOG}"
+    fi
+  else
+    if [[ "${_drop}" == "y" || "${_drop}" == "yes" ]]; then
+      ssh_remote_tty "${REMOTE}" DEPLOY_PATH="${DEPLOY_PATH}" bash -s <<'REMOTE_ARCH_LIVE_DROP_EOF' 2>&1 | tee -a "${BIFROST_SSH_LAST_LOG}"
+set -euo pipefail
+cd "$DEPLOY_PATH"
+bash scripts/db/archive_option_snapshots.sh --drop-after-export
+REMOTE_ARCH_LIVE_DROP_EOF
+    else
+      ssh_remote_tty "${REMOTE}" DEPLOY_PATH="${DEPLOY_PATH}" bash -s <<'REMOTE_ARCH_LIVE_EOF' 2>&1 | tee -a "${BIFROST_SSH_LAST_LOG}"
+set -euo pipefail
+cd "$DEPLOY_PATH"
+bash scripts/db/archive_option_snapshots.sh
+REMOTE_ARCH_LIVE_EOF
+    fi
+  fi
+  _ec=${PIPESTATUS[0]}
+  {
+    echo ""
+    echo "--- exit code: ${_ec} ---"
+  } | tee -a "${BIFROST_SSH_LAST_LOG}"
+  set -e
+  _msg_info "option_snapshots archive finished (exit ${_ec}). Redrawing menu…"
   return 0
 }
 
@@ -1560,7 +1667,7 @@ if [[ ! -f .venv/bin/activate ]]; then
 fi
 source .venv/bin/activate
 export FORCE_COLOR=1
-python scripts/db_refresh_schema.py --prod
+python scripts/db/db_refresh_schema.py --prod
 REMOTE_DB_REFRESH_EOF
 }
 
@@ -1569,7 +1676,7 @@ _cli_local_db_refresh_schema() {
   if [[ ! -f "${PROJECT_ROOT}/.venv/bin/activate" ]]; then
     _msg_warn "No .venv at ${PROJECT_ROOT}; run may fail."
   fi
-  FORCE_COLOR=1 _local_run_python_script db_refresh_schema.py --dev
+  FORCE_COLOR=1 _local_run_python_script db/db_refresh_schema.py --dev
 }
 
 # Non-interactive: remote db_release_dblock.py --prod ($1 empty or --yes).
@@ -1590,7 +1697,7 @@ if [[ ! -f .venv/bin/activate ]]; then
 fi
 # shellcheck source=/dev/null
 source .venv/bin/activate
-python scripts/db_release_dblock.py --prod ${extra}
+python scripts/db/db_release_dblock.py --prod ${extra}
 EOF
 }
 
@@ -1604,7 +1711,27 @@ _cli_local_db_release_locks() {
     _msg_warn "No .venv at ${PROJECT_ROOT}; run may fail."
   fi
   # shellcheck disable=SC2086
-  _local_run_python_script db_release_dblock.py --dev ${extra}
+  _local_run_python_script db/db_release_dblock.py --dev ${extra}
+}
+
+# Non-interactive: remote scripts/db/archive_option_snapshots.sh --dry-run.
+_cli_remote_db_archive_option_snapshots_dry() {
+  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
+  _bifrost_restore_session_sudo
+  ssh_remote_tty "${REMOTE}" DEPLOY_PATH="${DEPLOY_PATH}" bash -s <<'REMOTE_ARCH_CLI_EOF'
+set -euo pipefail
+cd "$DEPLOY_PATH"
+if [[ ! -f scripts/db/archive_option_snapshots.sh ]]; then
+  echo "ERROR: scripts/db/archive_option_snapshots.sh missing on remote. Deploy first." >&2
+  exit 1
+fi
+bash scripts/db/archive_option_snapshots.sh --dry-run
+REMOTE_ARCH_CLI_EOF
+}
+
+# Non-interactive: local scripts/db/archive_option_snapshots.sh --dry-run.
+_cli_local_db_archive_option_snapshots_dry() {
+  _local_run_bash_script db/archive_option_snapshots.sh --dry-run
 }
 
 # Local (Mac/repo): write deploy/nginx/bifrost-status.conf from merged prod YAML before rsync to server.
@@ -1612,7 +1739,7 @@ _bifrost_local_render_nginx_status_conf_prod() {
   local py="${PROJECT_ROOT}/.venv/bin/python"
   [[ -x "${py}" ]] || py="python3"
   local cfg="${PROJECT_ROOT}/config/config.prod.yaml"
-  local rs="${PROJECT_ROOT}/scripts/render_nginx_status_conf.py"
+  local rs="${PROJECT_ROOT}/scripts/systemd/render_nginx_status_conf.py"
   if [[ ! -f "${rs}" ]]; then
     _msg_warn "Missing ${rs}; skip local nginx render."
     return 1
@@ -1621,8 +1748,8 @@ _bifrost_local_render_nginx_status_conf_prod() {
     _msg_warn "Missing ${cfg}; skip local nginx render (need prod overlay for merged server ports)."
     return 1
   fi
-  _msg_info "Local: python scripts/render_nginx_status_conf.py (BIFROST_CONFIG=config/config.prod.yaml) …"
-  (cd "${PROJECT_ROOT}" && BIFROST_CONFIG="${cfg}" "${py}" scripts/render_nginx_status_conf.py)
+  _msg_info "Local: python scripts/systemd/render_nginx_status_conf.py (BIFROST_CONFIG=config/config.prod.yaml) …"
+  (cd "${PROJECT_ROOT}" && BIFROST_CONFIG="${cfg}" "${py}" scripts/systemd/render_nginx_status_conf.py)
 }
 
 # Push generated bifrost-status.conf to remote repo tree (then remote sudo copies it into /etc/nginx).
@@ -2126,7 +2253,7 @@ interactive_mode() {
 
   while true; do
     _interactive_paint_full
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[r/1 d/2 s/3 db1 db2 tl1 tl2 tl3 tl4 tl5 tl6 o v q]${C_RESET} "
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[r/1 d/2 s/3 db1 db2 db3 tl1 tl2 tl3 tl4 tl5 doc o v q]${C_RESET} "
     read -r _ch
     _ch=$(echo "${_ch}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')
     case "${_ch}" in
@@ -2137,6 +2264,10 @@ interactive_mode() {
       db2)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
         _interactive_db_release_locks
+        ;;
+      db3)
+        BIFROST_SSH_LAST_OUTPUT_LINES=""
+        _interactive_db_archive_option_snapshots
         ;;
       tl1) _interactive_install_systemd_units ;;
       tl2)
@@ -2183,7 +2314,7 @@ interactive_mode() {
           echo "--- exit code: ${_ec_p} ---"
         } >>"${BIFROST_SSH_LAST_LOG}"
         ;;
-      tl6|mkdocs)
+      doc|doc1|tl6|mkdocs)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
         _interactive_deploy_mkdocs
         ;;
@@ -2230,7 +2361,7 @@ interactive_mode() {
         ;;
       4|5|6|7|9)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
-        echo "[WARN] Main menu no longer uses these number keys — use r/1 d/2 s/3 db1 db2 tl1–tl6 o v q (see menu above)." >"${BIFROST_SSH_LAST_LOG}"
+        echo "[WARN] Main menu no longer uses these number keys — use r/1 d/2 s/3 db1 db2 db3 tl1–tl5 doc o v q (see menu above)." >"${BIFROST_SSH_LAST_LOG}"
         ;;
       l)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
@@ -2242,11 +2373,11 @@ interactive_mode() {
         ;;
       m)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
-        echo "[INFO] MkDocs deploy is now tl6 (not m)." >"${BIFROST_SSH_LAST_LOG}"
+        echo "[INFO] MkDocs deploy is now doc (not m). Alias: doc1, tl6." >"${BIFROST_SSH_LAST_LOG}"
         ;;
       *)
         BIFROST_SSH_LAST_OUTPUT_LINES=""
-        echo "[WARN] Unknown choice — try r/1 d/2 s/3 db1 db2 tl1 tl2 tl3 tl4 tl5 tl6 o v q. (db*=database · tl1=systemd/nginx · tl6=MkDocs · o=full Last output · v=deploy log)" >"${BIFROST_SSH_LAST_LOG}"
+        echo "[WARN] Unknown choice — try r/1 d/2 s/3 db1 db2 db3 tl1 tl2 tl3 tl4 tl5 doc o v q. (db*=database · tl1=systemd/nginx · doc=FSM diagrams+MkDocs · o=full Last output · v=deploy log)" >"${BIFROST_SSH_LAST_LOG}"
         ;;
     esac
   done
@@ -2313,6 +2444,8 @@ CLI_DB_REL_DRY=0
 CLI_DB_REL_DRY_DEV=0
 CLI_DB_REL_YES=0
 CLI_DB_REL_YES_DEV=0
+CLI_DB_ARCH_OPT_SNAP_DRY=0
+CLI_DB_ARCH_OPT_SNAP_DRY_DEV=0
 CLI_LOCAL_MAC_SERVICES=0
 CLI_REMOTE_SERVICES_STATUS=0
 CLI_INSTALL_SYSTEMD=0
@@ -2331,6 +2464,8 @@ while [[ $# -gt 0 ]]; do
     --db-release-locks-dev) CLI_DB_REL_DRY_DEV=1 ;;
     --db-release-locks-terminate) CLI_DB_REL_YES=1 ;;
     --db-release-locks-terminate-dev) CLI_DB_REL_YES_DEV=1 ;;
+    --db-archive-option-snapshots) CLI_DB_ARCH_OPT_SNAP_DRY=1 ;;
+    --db-archive-option-snapshots-dev) CLI_DB_ARCH_OPT_SNAP_DRY_DEV=1 ;;
     --local-mac-services) CLI_LOCAL_MAC_SERVICES=1 ;;
     --remote-services-status) CLI_REMOTE_SERVICES_STATUS=1 ;;
     --install-systemd-units) CLI_INSTALL_SYSTEMD=1 ;;
@@ -2419,7 +2554,7 @@ if [[ "${CLI_SHOW_LAST_DEPLOY}" == "1" ]]; then
 fi
 
 # DB-only: schema refresh or lock release (local or remote; no rsync / systemctl).
-_db_cli_count=$((CLI_DB_REFRESH + CLI_DB_REFRESH_DEV + CLI_DB_REL_DRY + CLI_DB_REL_DRY_DEV + CLI_DB_REL_YES + CLI_DB_REL_YES_DEV))
+_db_cli_count=$((CLI_DB_REFRESH + CLI_DB_REFRESH_DEV + CLI_DB_REL_DRY + CLI_DB_REL_DRY_DEV + CLI_DB_REL_YES + CLI_DB_REL_YES_DEV + CLI_DB_ARCH_OPT_SNAP_DRY + CLI_DB_ARCH_OPT_SNAP_DRY_DEV))
 if [[ "${CLI_LOCAL_MAC_SERVICES}" == "1" ]] && [[ "${CLI_REMOTE_SERVICES_STATUS}" == "1" ]]; then
   usage_error "use only one of --local-mac-services or --remote-services-status."
 fi
@@ -2428,7 +2563,7 @@ if [[ "${_db_cli_count}" -gt 0 ]]; then
     usage_error "cannot combine --db-* with --local-mac-services or --remote-services-status."
   fi
   if [[ "${_db_cli_count}" -gt 1 ]]; then
-    usage_error "use only one of --db-refresh / --db-refresh-dev / --db-release-locks / --db-release-locks-dev / --db-release-locks-terminate / --db-release-locks-terminate-dev."
+    usage_error "use only one of --db-refresh / --db-refresh-dev / --db-release-locks / --db-release-locks-dev / --db-release-locks-terminate / --db-release-locks-terminate-dev / --db-archive-option-snapshots / --db-archive-option-snapshots-dev."
   fi
   if [[ "${DO_DEPLOY}" == "1" ]] || [[ "${DO_DEPLOY_ONLY}" == "1" ]] || [[ -n "${ACTION:-}" ]] || [[ "${DO_STATUS}" == "1" ]] \
     || [[ "${RESTART_ALL}" == "1" ]] || [[ "${RESTART_ALL_STACK}" == "1" ]] || [[ "${RESTART_ALL_APIS}" == "1" ]] || [[ -n "${RESTART_CATEGORY}" ]] || [[ ${#RESTART_UNITS[@]} -gt 0 ]] || [[ "${DO_MIGRATE}" == "1" ]] || [[ "${SYNC_PROD_CONFIG}" == "1" ]]; then
@@ -2458,6 +2593,14 @@ if [[ "${_db_cli_count}" -gt 0 ]]; then
     _cli_remote_db_release_locks --yes
     exit $?
   fi
+  if [[ "${CLI_DB_ARCH_OPT_SNAP_DRY_DEV}" == "1" ]]; then
+    _cli_local_db_archive_option_snapshots_dry
+    exit $?
+  fi
+  if [[ "${CLI_DB_ARCH_OPT_SNAP_DRY}" == "1" ]]; then
+    _cli_remote_db_archive_option_snapshots_dry
+    exit $?
+  fi
 fi
 
 # Install systemd units only (remote sudo cp + daemon-reload).
@@ -2473,7 +2616,7 @@ if [[ "${CLI_INSTALL_SYSTEMD}" == "1" ]]; then
   exit $?
 fi
 
-# MkDocs static site only (mkdocs build + rsync site/; no app deps, DB, or systemctl).
+# FSM docs + MkDocs static site (fsm_build_docs + mkdocs build + rsync site/; no app deps, DB, or systemctl).
 if [[ "${CLI_DEPLOY_MKDOCS}" == "1" ]]; then
   if [[ "${_db_cli_count}" -gt 0 ]] || [[ "${CLI_INSTALL_SYSTEMD}" == "1" ]] || [[ "${CLI_LOCAL_MAC_SERVICES}" == "1" ]] || [[ "${CLI_REMOTE_SERVICES_STATUS}" == "1" ]]; then
     usage_error "--deploy-mkdocs cannot be combined with --db-*, --install-systemd-units, --local-mac-services, or --remote-services-status."

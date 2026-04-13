@@ -9,7 +9,7 @@ Comparison of official Massive / Polygon **Options** REST, WebSocket, and flat-f
 
 ## MkDocs URLs
 
-With the docs site running (`mkdocs serve` or `python scripts/run_docs.py`, default [http://127.0.0.1:8000](http://127.0.0.1:8000)):
+With the docs site running (`mkdocs serve` or `python scripts/run_mkdocs.py`, default [http://127.0.0.1:8000](http://127.0.0.1:8000)):
 
 | Asset | Path |
 |-------|------|

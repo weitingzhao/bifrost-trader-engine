@@ -22,8 +22,8 @@ def test_ingest_script_log_for_unit() -> None:
 @pytest.mark.asyncio
 async def test_start_ingest_massive_happy_path(tmp_path: Path) -> None:
     root = tmp_path / "proj"
-    (root / "scripts").mkdir(parents=True)
-    (root / "scripts" / "run_massive_ws.py").write_text("#\n", encoding="utf-8")
+    (root / "scripts" / "systemd").mkdir(parents=True)
+    (root / "scripts" / "systemd" / "run_massive_ws.py").write_text("#\n", encoding="utf-8")
     cfg = root / "config" / "c.yaml"
     cfg.parent.mkdir()
     cfg.write_text("redis:\n  enabled: false\n", encoding="utf-8")
@@ -57,8 +57,8 @@ async def test_start_ingest_massive_happy_path(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_start_ingest_operator_positional_config(tmp_path: Path) -> None:
     root = tmp_path / "proj"
-    (root / "scripts").mkdir(parents=True)
-    (root / "scripts" / "run_ib_operator.py").write_text("#\n", encoding="utf-8")
+    (root / "scripts" / "systemd").mkdir(parents=True)
+    (root / "scripts" / "systemd" / "run_ib_operator.py").write_text("#\n", encoding="utf-8")
     cfg = root / "config" / "c.yaml"
     cfg.parent.mkdir()
     cfg.write_text("redis:\n  enabled: false\n", encoding="utf-8")
@@ -88,8 +88,8 @@ async def test_start_ingest_operator_positional_config(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_start_ingest_already_running_raises(tmp_path: Path) -> None:
     root = tmp_path / "proj"
-    (root / "scripts").mkdir(parents=True)
-    (root / "scripts" / "run_massive_ws.py").write_text("#\n", encoding="utf-8")
+    (root / "scripts" / "systemd").mkdir(parents=True)
+    (root / "scripts" / "systemd" / "run_massive_ws.py").write_text("#\n", encoding="utf-8")
 
     ex = SubprocessLocalExecutor(
         allowed_units=[],
@@ -106,8 +106,8 @@ async def test_start_ingest_already_running_raises(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_stop_ingest_sends_sigterm(tmp_path: Path) -> None:
     root = tmp_path / "proj"
-    (root / "scripts").mkdir(parents=True)
-    (root / "scripts" / "run_massive_ws.py").write_text("#\n", encoding="utf-8")
+    (root / "scripts" / "systemd").mkdir(parents=True)
+    (root / "scripts" / "systemd" / "run_massive_ws.py").write_text("#\n", encoding="utf-8")
 
     ex = SubprocessLocalExecutor(
         allowed_units=[],
@@ -135,8 +135,8 @@ async def test_stop_ingest_sends_sigterm(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_worker_unit_still_uses_run_celery(tmp_path: Path) -> None:
     root = tmp_path / "proj"
-    (root / "scripts").mkdir(parents=True)
-    (root / "scripts" / "run_celery.py").write_text("#\n", encoding="utf-8")
+    (root / "scripts" / "systemd").mkdir(parents=True)
+    (root / "scripts" / "systemd" / "run_celery.py").write_text("#\n", encoding="utf-8")
 
     ex = SubprocessLocalExecutor(
         allowed_units=[],

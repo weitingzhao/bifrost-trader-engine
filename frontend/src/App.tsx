@@ -86,7 +86,7 @@ import './styles/settings-celery.css'
 const THEME_KEY = 'bifrost-monitor-theme'
 const SYSTEM_MESSAGE_BOOTSTRAP_LIMIT = 50
 
-/** Header ⋮ → Docs: MkDocs handbook (not Monitor /docs). Dev: `python scripts/run_docs.py`. Prod: static `/mkdocs/` after `./scripts/bifrost_ssh.sh --deploy-mkdocs`. */
+/** Header ⋮ → Docs: MkDocs handbook (not Monitor /docs). Dev: `python scripts/run_mkdocs.py`. Prod: static `/mkdocs/` after `./scripts/bifrost_ssh.sh --deploy-mkdocs`. */
 function mkdocsHandbookHref(): string {
   const explicit = import.meta.env.VITE_MKDOCS_URL?.trim()
   if (explicit) return explicit

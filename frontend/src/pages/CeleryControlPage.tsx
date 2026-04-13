@@ -116,7 +116,7 @@ function DashboardWorkerRedisConsole({ workerId }: { workerId: string }) {
       controller={ctrl}
       loadingText="Connecting…"
       errorText="Unable to load (Redis/Celery broker may be down)."
-      emptyText="No log lines yet. Start Worker: python scripts/run_celery.py"
+      emptyText="No log lines yet. Start Worker: python scripts/systemd/run_celery.py"
       infoTooltipText="Per-worker Redis console stream for this nodename (Ops GET /ops/celery/logs, SSE /ops/console/worker/…)."
       resizeAriaLabel="Resize worker console height"
       clearTitle="Clear displayed log and this worker's Redis stream; new lines continue when Worker runs"
@@ -1488,7 +1488,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                   </p>
                 ) : (
                   <>
-                    No workers detected. Start a Celery worker: <code>python scripts/run_celery.py</code>
+                    No workers detected. Start a Celery worker: <code>python scripts/systemd/run_celery.py</code>
                   </>
                 )}
               </div>

@@ -52,7 +52,7 @@ stateDiagram-v2
 
 ## Transition Table
 
-The table below lists **every possible transition** the Trading FSM can take. It is **manually authored** in `scripts/fsm/fsm_trading_diagram.py` as `TRADING_TRANSITIONS` and kept in sync with the runtime logic in `src/fsm/trading_fsm.py`.
+The table below lists **every possible transition** the Trading FSM can take. It is **manually authored** in `scripts/docs/fsm/fsm_trading_diagram.py` as `TRADING_TRANSITIONS` and kept in sync with the runtime logic in `src/fsm/trading_fsm.py`.
 
 - **One row** = one (from_state, event, to_state) with the **guard** that selects that outcome.
 - The same (from_state, event) can appear in **multiple rows** with different (to_state, guard), because the handler evaluates guards in order and picks one next state (e.g. from MONITOR, event TICK → NO_TRADE if `in_no_trade_band`, else NEED_HEDGE if cost and liquidity OK, else PAUSE_COST or PAUSE_LIQ).

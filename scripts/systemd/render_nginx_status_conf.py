@@ -3,15 +3,15 @@
 
 Nginx cannot read YAML; after changing ``config/config.yaml`` (or env overlay), run::
 
-  python scripts/render_nginx_status_conf.py
+  python scripts/systemd/render_nginx_status_conf.py
 
 Production host (merge base + prod)::
 
-  BIFROST_CONFIG=config/config.prod.yaml python scripts/render_nginx_status_conf.py
+  BIFROST_CONFIG=config/config.prod.yaml python scripts/systemd/render_nginx_status_conf.py
 
 Optional second file for HTTPS example::
 
-  python scripts/render_nginx_status_conf.py --ssl-output deploy/nginx/bifrost-status-ssl.conf.example
+  python scripts/systemd/render_nginx_status_conf.py --ssl-output deploy/nginx/bifrost-status-ssl.conf.example
 """
 
 from __future__ import annotations
@@ -21,7 +21,8 @@ import os
 import sys
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Repo root: scripts/systemd/<this_file> → parents[2]
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(_PROJECT_ROOT)

@@ -8,10 +8,10 @@ Modes:
   --yes       Skip confirmation and terminate all listed backends.
 
 Usage:
-  python scripts/db_release_dblock.py [--config PATH] [--all] [--yes] [--dry-run]
-  python scripts/db_release_dblock.py --dev [--yes]          # config/config.dev.yaml
-  python scripts/db_release_dblock.py --prod [--yes]         # config/config.prod.yaml
-  python scripts/db_release_dblock.py --env prod [--yes]
+  python scripts/db/db_release_dblock.py [--config PATH] [--all] [--yes] [--dry-run]
+  python scripts/db/db_release_dblock.py --dev [--yes]          # config/config.dev.yaml
+  python scripts/db/db_release_dblock.py --prod [--yes]         # config/config.prod.yaml
+  python scripts/db/db_release_dblock.py --env prod [--yes]
 
 Config resolution (when ``--config`` is omitted) matches ``run_server`` / ``db_refresh_schema.py``:
 ``BIFROST_CONFIG``, ``--prod`` / ``--dev`` / ``--env``, ``BIFROST_ENV``, then
@@ -25,7 +25,7 @@ import os
 import sys
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(_PROJECT_ROOT)
@@ -161,7 +161,7 @@ def main() -> int:
     if not pg and not os.environ.get("PGHOST"):
         print(
             "postgres block required in config (or set PGHOST). "
-            f"Try: python scripts/db_release_dblock.py --dev   (uses config/config.dev.yaml if present)\n"
+            f"Try: python scripts/db/db_release_dblock.py --dev   (uses config/config.dev.yaml if present)\n"
             f"  Resolved config path was: {config_path}",
             file=sys.stderr,
         )

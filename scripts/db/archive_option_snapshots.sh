@@ -5,7 +5,7 @@
 # exports them via pg_dump / COPY, then optionally drops the detached table.
 #
 # Usage:
-#   ./scripts/archive_option_snapshots.sh [--dry-run] [--drop-after-export]
+#   ./scripts/db/archive_option_snapshots.sh [--dry-run] [--drop-after-export]
 #
 # Prerequisites:
 #   - PGHOST, PGPORT, PGDATABASE, PGUSER env vars or ~/.pgpass

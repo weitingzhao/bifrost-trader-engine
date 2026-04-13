@@ -18,7 +18,7 @@ def reconnect_delay_s(
     max_s: float = DEFAULT_RECONNECT_MAX_SEC,
     max_exp: int = DEFAULT_RECONNECT_MAX_EXP,
 ) -> float:
-    """Exponential backoff matching scripts/run_ib_ingestor (cap exponent, cap max delay)."""
+    """Exponential backoff matching scripts/systemd/run_ib_ingestor (cap exponent, cap max delay)."""
     if attempt_1_based < 1:
         attempt_1_based = 1
     exp = min(attempt_1_based - 1, max_exp)

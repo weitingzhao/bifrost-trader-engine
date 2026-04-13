@@ -11,7 +11,7 @@ User=vision
 Group=vision
 WorkingDirectory=/home/vision/bifrost-trader-engine
 Environment=BIFROST_CONFIG=/home/vision/bifrost-trader-engine/config/config.prod.yaml
-ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/run_ib_operator.py --config config/config.prod.yaml
+ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/systemd/run_ib_operator.py --config config/config.prod.yaml
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=60

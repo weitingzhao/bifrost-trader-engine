@@ -1,4 +1,4 @@
-"""IB ingestor: Redis keys and writer (scripts/run_ib_ingestor.py)."""
+"""IB ingestor: Redis keys and writer (scripts/systemd/run_ib_ingestor.py)."""
 
 from src.vendor.ib_ingestor.redis_keys import (
     IB_INGESTER_CHANNEL,

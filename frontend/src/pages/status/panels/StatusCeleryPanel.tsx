@@ -51,7 +51,7 @@ export function StatusCeleryPanel({
                     ? 'Broker not connected'
                     : celeryWorkersAlive
                       ? 'Running (OK)'
-                      : 'No worker process (start: python scripts/run_celery.py)'
+                      : 'No worker process (start: python scripts/systemd/run_celery.py)'
                   : 'Fetch failed'}
               </strong>
             </div>
@@ -75,7 +75,7 @@ export function StatusCeleryPanel({
                 </p>
               ) : (
                 <p className="section-hint">
-                  Redis reachable — <strong>no worker process</strong> (start: python scripts/run_celery.py)
+                  Redis reachable — <strong>no worker process</strong> (start: python scripts/systemd/run_celery.py)
                 </p>
               )
             ) : (
@@ -95,7 +95,7 @@ export function StatusCeleryPanel({
             <p className="section-hint">
               {(j?.celery?.workers?.length ?? 0) > 0
                 ? (j?.celery?.workers ?? []).join(', ')
-                : 'None (start worker: python scripts/run_celery.py)'}
+                : 'None (start worker: python scripts/systemd/run_celery.py)'}
             </p>
             <p className="section-hint countdown-line">
               Last job:{' '}
@@ -110,7 +110,7 @@ export function StatusCeleryPanel({
               ) : (
                 <>
                   Not connected{' '}
-                  <InfoTooltip text="IB runs inside Worker. Start worker first (python scripts/run_celery.py); client_id in Settings → Celery worker_market." />
+                  <InfoTooltip text="IB runs inside Worker. Start worker first (python scripts/systemd/run_celery.py); client_id in Settings → Celery worker_market." />
                 </>
               )}
             </p>

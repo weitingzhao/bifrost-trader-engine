@@ -37,7 +37,7 @@
 | **[Massive API 覆盖比对（Stocks）](plans/massive-stocks-api-coverage.md)** | Polygon/Massive Stocks 官方接口（参考数据、K 线聚合、快照、Trades & Quotes、技术指标、WS、Flat Files）与项目实现对照；监控 UI（Settings → Feed → Massive Stock）内嵌同源查看器 |
 | **[Linux SSH 部署](deploy/linux-ssh.md)** | 本机 `rsync` + 远端 venv/npm build、`bifrost_ssh.sh`（经 SSH 同步与 `systemctl`）、`deploy/systemd` 单元与首次上线顺序；可选 **`deploy/nginx`** 将 80/443 反代至 Monitor 与各域 API 端口（见 [ARCHITECTURE.md](ARCHITECTURE.md) §4.0） |
 
-**Reference（部署初始化数据）**：**reference/init/** 目录可放置一次性 SQL 脚本；执行顺序见 [reference/init/README.md](../reference/init/README.md)。当前无必跑脚本，仅需执行 `db_refresh_schema.py`；Flex 默认范围由 settings.flex_default_range_days 控制。
+**Reference（部署初始化数据）**：**reference/init/** 目录可放置一次性 SQL 脚本；执行顺序见 [reference/init/README.md](../reference/init/README.md)。当前无必跑脚本，仅需执行 `scripts/db/db_refresh_schema.py`；Flex 默认范围由 settings.flex_default_range_days 控制。
 
 Cursor 规则：监控页面 UI 的修改原则与 Skote 参考路径见 **.cursor/rules/monitoring-ui.mdc**。界面与代码使用英文、沟通使用中文等约定见 **.cursor/rules/language.mdc**。
 
@@ -51,12 +51,12 @@ Cursor 规则：监控页面 UI 的修改原则与 Skote 参考路径见 **.curs
 
 | 组成部分 | 说明 | 运行脚本与命令（项目根目录） |
 |----------|------|------------------------------|
-| **Engine** | 自动交易守护程序，执行对冲、写状态与心跳；运行在**守护程序主机**（Mac Mini 或 Linux）。**目标架构**：不直连 TWS，消费 Redis（IB Ingestor / IB Account Agent）并经 **IB Operator** RPC 执行；见 [REQUIREMENTS.md](REQUIREMENTS.md) §3.6、[ARCHITECTURE.md](ARCHITECTURE.md) §2.11。 | **[scripts/run_engine.py](../scripts/run_engine.py)**：`python scripts/run_engine.py`（默认 `config/config.dev.yaml`）或 `python scripts/run_engine.py config/config.yaml` |
+| **Engine** | 自动交易守护程序，执行对冲、写状态与心跳；运行在**守护程序主机**（Mac Mini 或 Linux）。**目标架构**：不直连 TWS，消费 Redis（IB Ingestor / IB Account Agent）并经 **IB Operator** RPC 执行；见 [REQUIREMENTS.md](REQUIREMENTS.md) §3.6、[ARCHITECTURE.md](ARCHITECTURE.md) §2.11。 | **[scripts/systemd/run_engine.py](../scripts/systemd/run_engine.py)**：`python scripts/systemd/run_engine.py`（默认 `config/config.dev.yaml`）或 `python scripts/systemd/run_engine.py config/config.yaml` |
 | **Monitor API** | 监控与控制：读 PostgreSQL，GET /status、GET /operations、POST /control/* 等；**不提供**守护进程启动。端口 **`server.port`**（未配置时 `run_server.py` 默认 **8765**）。 | **[scripts/run_server.py](../scripts/run_server.py)**：`python scripts/run_server.py` 或 `python scripts/run_server.py config/config.yaml` |
 | **分域 FastAPI（按需）** | Research、Ops、Trading、Strategy、Portfolio、Market、Docs 等独立进程，代码在 **`backend/<domain>/`**。 | **`run_server_massive.py`**（Research，`server.massive_port`）、**`run_server_ops.py`**（`ops_port`）、**`run_server_trading.py`**（`trading_port`）、**`run_server_strategy.py`**（`strategy_port`）、**`run_server_portfolio.py`**（`portfolio_port`）、**`run_server_market.py`**（`market_port`）、**`run_server_docs.py`**（`docs_port`）；均为 `python scripts/<script>.py`，配置选择方式同 Monitor。 |
-| **Celery Worker（可选）** | 非实时拉取（`bars`、`massive` 等队列），**Celery + Redis**；bars 任务写 **job_bars_backfill**，须 **单进程**（`--pool=solo` 或 `--concurrency=1`）以免争用 IB `client_id`。见 [ARCHITECTURE.md](ARCHITECTURE.md) §2.7、§4.4。 | **[scripts/run_celery.py](../scripts/run_celery.py)**：`python scripts/run_celery.py`；或直接 `celery -A src.workers.celery_app worker -l info -Q bars --pool=solo`、`celery -A src.workers.celery_app worker -l info -Q massive --pool=solo` |
-| **Massive WS（可选）** | Massive（Polygon）Options WebSocket 长驻 ingest；与 IB 独立。见 [ARCHITECTURE.md](ARCHITECTURE.md) §2.10.2。 | **[scripts/run_massive_ws.py](../scripts/run_massive_ws.py)**：`python scripts/run_massive_ws.py` 或 `python scripts/run_massive_ws.py --config config/config.yaml` |
+| **Celery Worker（可选）** | 非实时拉取（`bars`、`massive` 等队列），**Celery + Redis**；bars 任务写 **job_bars_backfill**，须 **单进程**（`--pool=solo` 或 `--concurrency=1`）以免争用 IB `client_id`。见 [ARCHITECTURE.md](ARCHITECTURE.md) §2.7、§4.4。 | **[scripts/systemd/run_celery.py](../scripts/systemd/run_celery.py)**：`python scripts/systemd/run_celery.py`；或直接 `celery -A src.workers.celery_app worker -l info -Q bars --pool=solo`、`celery -A src.workers.celery_app worker -l info -Q massive --pool=solo` |
+| **Massive WS（可选）** | Massive（Polygon）Options WebSocket 长驻 ingest；与 IB 独立。见 [ARCHITECTURE.md](ARCHITECTURE.md) §2.10.2。 | **[scripts/systemd/run_massive_ws.py](../scripts/systemd/run_massive_ws.py)**：`python scripts/systemd/run_massive_ws.py` 或 `python scripts/systemd/run_massive_ws.py --config config/config.yaml` |
 | **Frontend** | 监控 UI；按页面调用多个后端基址（见前端 env / 代理配置）。 | **[scripts/run_frontend.sh](../scripts/run_frontend.sh)**：`./scripts/run_frontend.sh dev`（端口见 `frontend.port`，默认 5173）、`build`、`install` |
-| **Docs（MkDocs）** | 文档站点。 | `python scripts/fsm_build_docs.py` → `mkdocs build`；`mkdocs serve` 或 **`python scripts/run_docs.py`**（默认 http://127.0.0.1:8000） |
+| **Docs（MkDocs）** | 文档站点。 | `python scripts/docs/fsm_build_docs.py` → `mkdocs build`；`mkdocs serve` 或 **`python scripts/run_mkdocs.py`**（默认 http://127.0.0.1:8000） |
 
-其他常用脚本（均在 `scripts/` 下）：`db_refresh_schema.py`、`db_release_dblock.py`、`scripts/check/ib/check_ib_connect.py` 等；详见 [README.md](../README.md)。
+其他常用脚本：`scripts/db/db_refresh_schema.py`、`scripts/db/db_release_dblock.py`、`scripts/check/ib/check_ib_connect.py` 等；详见 [README.md](../README.md)。

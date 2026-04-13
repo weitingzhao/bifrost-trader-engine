@@ -140,25 +140,25 @@ def create_app(
     app.state._massive_log_thread: Optional[threading.Thread] = None
     app.state._massive_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    # Massive WS ingest log stream (scripts/run_massive_ws.py → bifrost:console:ws_massive_option)
+    # Massive WS ingest log stream (scripts/systemd/run_massive_ws.py → bifrost:console:ws_massive_option)
     app.state.massive_ws_log_queues: list = []
     app.state.massive_ws_log_lock = threading.Lock()
     app.state._massive_ws_log_thread: Optional[threading.Thread] = None
     app.state._massive_ws_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    # IB Operator log stream (scripts/run_ib_operator.py → bifrost:console:ws_ib_operator)
+    # IB Operator log stream (scripts/systemd/run_ib_operator.py → bifrost:console:ws_ib_operator)
     app.state.ib_operator_log_queues: list = []
     app.state.ib_operator_log_lock = threading.Lock()
     app.state._ib_operator_log_thread: Optional[threading.Thread] = None
     app.state._ib_operator_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    # IB ingestor log stream (scripts/run_ib_ingestor.py → bifrost:console:ws_ib_ingestor)
+    # IB ingestor log stream (scripts/systemd/run_ib_ingestor.py → bifrost:console:ws_ib_ingestor)
     app.state.ib_ingestor_log_queues: list = []
     app.state.ib_ingestor_log_lock = threading.Lock()
     app.state._ib_ingestor_log_thread: Optional[threading.Thread] = None
     app.state._ib_ingestor_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    # IB Account Agent log stream (scripts/run_ib_account_agent.py → bifrost:console:ws_ib_account_agent)
+    # IB Account Agent log stream (scripts/systemd/run_ib_account_agent.py → bifrost:console:ws_ib_account_agent)
     app.state.ib_account_agent_log_queues: list = []
     app.state.ib_account_agent_log_lock = threading.Lock()
     app.state._ib_account_agent_log_thread: Optional[threading.Thread] = None

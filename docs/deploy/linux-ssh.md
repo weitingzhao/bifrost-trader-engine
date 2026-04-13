@@ -92,7 +92,7 @@ Prod stack on a single host (e.g. `192.168.10.70`): Engine, status server, Celer
 
    Later, use `bifrost_ssh.sh` with **service flags** (`--server`, per-API flags, **`--architecture` / `--account` / `--research` / `--feed`** for HTTP category groups, `--all` for **bifrost-server only**, **`--apis`** for all nine HTTP APIs, or **`--all-stack`** for those nine + `bifrost-agent` + four Socket Services units — **no** `bifrost-celery`, **no** `bifrost-engine`) and **one action** (`--stop` / `--start` / `--restart`), optionally with **`--deploy`** to rsync + build before `systemctl`. **Trading Engine** and **Celery workers**: use the Dashboard / Ops UI (or `systemctl` on the host directly); this script does not restart `bifrost-engine` or batch-restart `bifrost-celery`.
 
-5. Optional: schema refresh against Prod DB (only when you intend to run DDL; review `scripts/db_refresh_schema.py` first). **`--migrate` must be used with `--deploy` or `--deploy-only`:**
+5. Optional: schema refresh against Prod DB (only when you intend to run DDL; review `scripts/db/db_refresh_schema.py` first). **`--migrate` must be used with `--deploy` or `--deploy-only`:**
 
    ```bash
    ./scripts/bifrost_ssh.sh --deploy-only --migrate

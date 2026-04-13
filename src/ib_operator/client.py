@@ -180,7 +180,7 @@ def build_monitor_ib_status(
     health = read_operator_health(s["redis_url"], s["health_key"])
     if health:
         health = normalize_operator_health_payload(health)
-    unreachable = "IB Operator unreachable (is run_ib_operator.py running?)"
+    unreachable = "IB Operator unreachable (is scripts/systemd/run_ib_operator.py running?)"
     try:
         _eff = get_effective_ib_config(config)
         _stale_m = float(_eff.get("ib_probe_stale_multiplier") or 2.5)

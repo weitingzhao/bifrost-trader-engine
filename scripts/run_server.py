@@ -19,7 +19,7 @@ try:
 except ImportError:  # pragma: no cover - optional at import time; handler falls back to no-op
     redis = None
 
-# Project root: same as run_engine.py
+# Project root: same as scripts/systemd/run_engine.py
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PROJECT_ROOT)
 os.chdir(_PROJECT_ROOT)

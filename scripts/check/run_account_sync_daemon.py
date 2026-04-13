@@ -5,8 +5,8 @@ Persists Account, Position, Execution, and Open Order data independently of the
 Trading Daemon.  Uses Redis Stream XREADGROUP for incremental consumption.
 
 Usage::
-  python scripts/run_account_sync_daemon.py
-  python scripts/run_account_sync_daemon.py --config config/config.prod.yaml
+  python scripts/check/run_account_sync_daemon.py
+  python scripts/check/run_account_sync_daemon.py --config config/config.prod.yaml
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import os
 import sys
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(str(_PROJECT_ROOT))

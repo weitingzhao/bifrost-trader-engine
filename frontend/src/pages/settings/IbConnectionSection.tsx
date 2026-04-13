@@ -258,7 +258,7 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                 <tr>
                   <td className="flex-query-cell-type">
                     Ingestor
-                    <InfoTooltip text="Client ID for scripts/run_ib_ingestor.py (YAML ib.host.client_id.ingestor; legacy key ib_market_ingest still read server-side). Host only — Secondary has no ingestor client." />
+                    <InfoTooltip text="Client ID for scripts/systemd/run_ib_ingestor.py (YAML ib.host.client_id.ingestor; legacy key ib_market_ingest still read server-side). Host only — Secondary has no ingestor client." />
                   </td>
                   <td className="flex-query-cell-input">
                     <input
@@ -276,7 +276,7 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                 <tr>
                   <td className="flex-query-cell-type">
                     Account Agent
-                    <InfoTooltip text="Client IDs for scripts/run_ib_account_agent.py: Host uses ib.host.client_id.account_agent; Secondary uses ib.secondary.client_id.account_agent when Second IB is configured. Distinct from Operator and Ingestor." />
+                    <InfoTooltip text="Client IDs for scripts/systemd/run_ib_account_agent.py: Host uses ib.host.client_id.account_agent; Secondary uses ib.secondary.client_id.account_agent when Second IB is configured. Distinct from Operator and Ingestor." />
                   </td>
                   <td className="flex-query-cell-input">
                     <input

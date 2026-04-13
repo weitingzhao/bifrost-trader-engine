@@ -9,7 +9,7 @@ User=vision
 Group=vision
 WorkingDirectory=/home/vision/bifrost-trader-engine
 Environment=BIFROST_ENV=prod
-ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/run_celery.py --prod --instance %i
+ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/systemd/run_celery.py --prod --instance %i
 Restart=on-failure
 RestartSec=10
 

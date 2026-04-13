@@ -13,13 +13,13 @@
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "${REPO_ROOT}"
-if [[ -f scripts/render_nginx_status_conf.py ]]; then
+if [[ -f scripts/systemd/render_nginx_status_conf.py ]]; then
   RENDER_ARGS=()
   if [[ -n "${BIFROST_CONFIG:-}" ]]; then
     RENDER_ARGS+=(--config "${BIFROST_CONFIG}")
   fi
   echo "Regenerating deploy/nginx/bifrost-status.conf from YAML${BIFROST_CONFIG:+ (BIFROST_CONFIG=${BIFROST_CONFIG})}..."
-  python scripts/render_nginx_status_conf.py "${RENDER_ARGS[@]}"
+  python scripts/systemd/render_nginx_status_conf.py "${RENDER_ARGS[@]}"
 fi
 CONF_SRC="${REPO_ROOT}/deploy/nginx/bifrost-status.conf"
 if [[ ! -f "${CONF_SRC}" ]]; then

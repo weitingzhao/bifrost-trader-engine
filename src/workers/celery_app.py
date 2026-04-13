@@ -5,9 +5,9 @@ Usage:
   celery -A src.workers.celery_app worker -l info -Q massive --pool=solo   # Massive/Polygon options (no IB)
   # Stock reference jobs use queues massive_stocks / massive_stocks_high (see src.massive.celery_queues).
 
-Or: python scripts/run_celery.py [config_path]
+Or: python scripts/systemd/run_celery.py [config_path]
 
-Celery Beat (Massive schedules): python scripts/run_celery_beat.py
+Celery Beat (Massive schedules): python scripts/init/run_celery_beat.py
 
 Solo pool: single process, one IB connection (client_id). Stop-poll runs in worker_init so Stop button works.
 """
@@ -320,7 +320,7 @@ def _resolve_celery_worker_id(sender: object | None) -> str:
     """Celery nodename (e.g. workermassive-8@host.local); must match Dashboard / inspect worker_id.
 
     ``worker_init`` / ``worker_process_init`` often run before ``Worker.hostname`` is set (solo / sender=None),
-    so ``scripts/run_celery.py`` sets ``BIFROST_CELERY_NODENAME`` to match ``-n`` when using ``--instance``.
+    so ``scripts/systemd/run_celery.py`` sets ``BIFROST_CELERY_NODENAME`` to match ``-n`` when using ``--instance``.
     """
     env_id = (os.environ.get("BIFROST_CELERY_NODENAME") or "").strip()
     if env_id:

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Generate Trading FSM diagram: TradingState, TradingEvent, apply_transition + caller mapping.
 
-Run: python scripts/fsm/fsm_trading_diagram.py
+Run: python scripts/docs/fsm/fsm_trading_diagram.py
 Output: Mermaid diagram (paste into https://mermaid.live) or markdown table.
 """
 import sys
 from pathlib import Path
 
-# Add project root so "from src..." works when run from scripts/fsm/ or project root
-_project_root = Path(__file__).resolve().parent.parent.parent
+# Add project root so "from src..." works when run from scripts/docs/fsm/ or project root
+_project_root = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(_project_root))
 
 from src.daemon.core.state.enums import TradingState
@@ -262,7 +262,7 @@ Callers in `GsTrading` (src/app/gs_trading.py).
 
 ## Transition Table
 
-The table below lists **every possible transition** the Trading FSM can take. It is **manually authored** in `scripts/fsm/fsm_trading_diagram.py` as `TRADING_TRANSITIONS` and kept in sync with the runtime logic in `src/fsm/trading_fsm.py`.
+The table below lists **every possible transition** the Trading FSM can take. It is **manually authored** in `scripts/docs/fsm/fsm_trading_diagram.py` as `TRADING_TRANSITIONS` and kept in sync with the runtime logic in `src/fsm/trading_fsm.py`.
 
 - **One row** = one (from_state, event, to_state) with the **guard** that selects that outcome.
 - The same (from_state, event) can appear in **multiple rows** with different (to_state, guard), because the handler evaluates guards in order and picks one next state (e.g. from MONITOR, event TICK → NO_TRADE if `in_no_trade_band`, else NEED_HEDGE if cost and liquidity OK, else PAUSE_COST or PAUSE_LIQ).
@@ -291,7 +291,7 @@ def main() -> None:
         out = emit_html()
         print(f"Wrote {out} - open in browser")
     else:
-        print("Usage: python scripts/fsm/fsm_trading_diagram.py [mode]")
+        print("Usage: python scripts/docs/fsm/fsm_trading_diagram.py [mode]")
         print("  mermaid       - full state diagram with caller/guard labels")
         print("  mermaid_simple - simplified (merged edges)")
         print("  table         - markdown table")

@@ -10,8 +10,8 @@ Console log stream ``bifrost:console:ws_ib_ingestor`` (Monitor ingestor log APIs
 
 Usage
 -----
-  python scripts/run_ib_ingestor.py
-  python scripts/run_ib_ingestor.py --config config/config.prod.yaml --log-level DEBUG
+  python scripts/systemd/run_ib_ingestor.py
+  python scripts/systemd/run_ib_ingestor.py --config config/config.prod.yaml --log-level DEBUG
 
 Phase 2 optional PostgreSQL sampling is not implemented; see plan (DATABASE.md review).
 """
@@ -29,7 +29,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(str(_PROJECT_ROOT))
