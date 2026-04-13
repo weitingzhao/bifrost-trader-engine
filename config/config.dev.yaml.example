@@ -129,7 +129,7 @@ massive:
 #       systemd_unit: bifrost-ib-account-agent.service
 #       redis_meta_key: bifrost:health:ws_ib_account_agent
 #     - id: trading_engine
-#       label: "Trading daemon (Engine)"
+#       label: "Strategy Trading Daemon"
 #       systemd_unit: bifrost-engine.service
 #       # Omit redis_meta_key for Engine — no Socket ingest lease / health rewrite
 

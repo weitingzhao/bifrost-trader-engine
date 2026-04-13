@@ -189,6 +189,7 @@ function categoryForServiceId(id: string): IngestCategory {
   if (id === 'ib_ingestor' || id === 'ib_market' || id === 'ib_operator' || id === 'ib_account_agent') {
     return 'IB'
   }
+  if (id === 'account_sync_daemon') return 'Engine'
   return 'Other'
 }
 
@@ -825,7 +826,7 @@ function ServiceRow(props: {
 const CATEGORY_LABELS: Record<IngestCategory, string> = {
   Massive: 'Massive Options WS',
   IB: 'IB Broker Services',
-  Engine: 'Engine',
+  Engine: 'Strategy Trading',
   Other: 'Other',
 }
 
@@ -1055,7 +1056,7 @@ export function MarketIngestOpsPage({
   )
 
   const ingestServicesForTable = useMemo(
-    () => services.filter(s => s.id !== 'trading_engine'),
+    () => services.filter(s => s.id !== 'trading_engine' && s.id !== 'account_sync_daemon'),
     [services],
   )
 

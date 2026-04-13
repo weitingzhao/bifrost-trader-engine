@@ -286,7 +286,7 @@ def market_api_console_stream_key(profile: Optional[str]) -> str:
 
 
 def daemon_trading_console_stream_key(profile: Optional[str]) -> str:
-    """Redis Stream for Trading Daemon console (``run_engine.py`` → Monitor ``/api/daemon/logs*``).
+    """Redis Stream for Strategy Trading Daemon console (``run_engine.py`` → Monitor ``/api/daemon/logs*``).
 
     Same dev|prod split as API monitor/ops logs so Dev and Prod engines sharing one Redis do not
     overwrite each other's lines. Non-``prod`` profiles map to the ``dev`` stream."""

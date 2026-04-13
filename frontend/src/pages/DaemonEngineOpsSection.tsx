@@ -45,6 +45,24 @@ const INITIAL_CONFIRM: ConfirmState = {
   action: null,
 }
 
+/** Richer Ops error text when Account Sync Daemon start/stop fails (subprocess or systemd). */
+function formatAccountSyncOpsError(raw: string): string {
+  const m = raw.trim()
+  if (m.includes('exited immediately')) {
+    return `${m} Open logs/account-sync-daemon.log or logs/account-sync-daemon-dev.log under the project. Typical causes: PostgreSQL or Redis URL wrong, IB Account Agent stream unavailable, or import/config errors.`
+  }
+  if (m.includes('ingest_already_running')) {
+    return `${m} Use Stop first, or Restart instead of Start.`
+  }
+  if (m.includes('not found at') && m.includes('run_account_sync_daemon')) {
+    return `${m} Ensure you run Ops from the repo root and scripts/systemd/run_account_sync_daemon.py exists.`
+  }
+  if (m.includes('sudo') && m.includes('NOPASSWD')) {
+    return `${m} Linux Ops needs passwordless sudo for systemctl. On macOS, enable script-based control (GET /ops/health market_ingest_script_control) or start the daemon manually.`
+  }
+  return m
+}
+
 export interface DaemonEngineOpsSectionProps {
   status: StatusResponse | null
   loadStatus: () => Promise<StatusResponse | null>
@@ -56,6 +74,7 @@ export interface DaemonEngineOpsSectionProps {
  */
 export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSectionProps) {
   const [engineRow, setEngineRow] = useState<MarketIngestServiceRow | null>(null)
+  const [accountSyncRow, setAccountSyncRow] = useState<MarketIngestServiceRow | null>(null)
   const [opsErr, setOpsErr] = useState<string | null>(null)
   const [engineConfigMissing, setEngineConfigMissing] = useState(false)
   const [caps, setCaps] = useState<OpsCapabilities | null>(null)
@@ -84,11 +103,14 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
       ])
       if (svcRes.ok && Array.isArray(svcRes.services)) {
         const eng = svcRes.services.find(s => s.id === 'trading_engine') ?? null
+        const asd = svcRes.services.find(s => s.id === 'account_sync_daemon') ?? null
         setEngineRow(eng)
+        setAccountSyncRow(asd)
         setOpsErr(typeof svcRes.error === 'string' && svcRes.error.trim() ? svcRes.error : null)
         setEngineConfigMissing(!eng)
       } else {
         setEngineRow(null)
+        setAccountSyncRow(null)
         setEngineConfigMissing(false)
         setOpsErr(svcRes.error ?? 'Failed to load Ops services')
       }
@@ -96,6 +118,7 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
     } catch (e) {
       setOpsErr((e as Error).message)
       setEngineRow(null)
+      setAccountSyncRow(null)
       setEngineConfigMissing(false)
       setCaps(null)
     }
@@ -149,9 +172,11 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
   )
 
   const engineRows = useMemo((): { svc: MarketIngestServiceRow; category: IngestCategory }[] => {
-    if (!engineRow) return []
-    return [{ svc: engineRow, category: 'Engine' }]
-  }, [engineRow])
+    const out: { svc: MarketIngestServiceRow; category: IngestCategory }[] = []
+    if (engineRow) out.push({ svc: engineRow, category: 'Engine' })
+    if (accountSyncRow) out.push({ svc: accountSyncRow, category: 'Engine' })
+    return out
+  }, [engineRow, accountSyncRow])
 
   const engineLamp = useMemo(
     () => ingestRedisHealthLamp('trading_engine', status),
@@ -192,12 +217,25 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
         }
         return 'Monitor /status heartbeat (not Redis ingest meta)'
       }
+      if (svc.id === 'account_sync_daemon') {
+        const hb = (status as { account_sync_daemon?: { heartbeat?: { daemon_alive?: boolean; last_ts?: number } } })
+          ?.account_sync_daemon?.heartbeat
+        if (hb?.daemon_alive && hb.last_ts != null) {
+          return `Alive; last sync heartbeat ${fmtAge(Date.now() / 1000 - hb.last_ts)} ago`
+        }
+        return 'GET /status account_sync_daemon (PostgreSQL heartbeat)'
+      }
       return '—'
     },
     [status],
   )
 
-  const openConfirm = (title: string, message: string, fn: () => Promise<void>) => {
+  const openConfirm = (
+    title: string,
+    message: string,
+    fn: () => Promise<void>,
+    options?: { formatError?: (msg: string) => string },
+  ) => {
     setConfirmState({
       open: true,
       title,
@@ -215,7 +253,8 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
           })()
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
-          setConfirmState(prev => ({ ...prev, confirming: false, error: msg }))
+          const errOut = options?.formatError ? options.formatError(msg) : msg
+          setConfirmState(prev => ({ ...prev, confirming: false, error: errOut }))
         }
       },
     })
@@ -231,22 +270,34 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
     verb: string,
   ) => {
     let message: string
-    if (action === 'start') {
+    if (svc.id === 'account_sync_daemon') {
+      if (action === 'start') {
+        message = `Start ${svc.label}? Launches scripts/systemd/run_account_sync_daemon.py via systemd; syncs IB account stream to PostgreSQL.`
+      } else if (action === 'stop') {
+        message = `Stop ${svc.label}? systemd sends SIGTERM. Account sync pauses until started again.`
+      } else {
+        message = `Restart ${svc.label}? Brief gap in account/position sync.`
+      }
+    } else if (action === 'start') {
       message = `Start ${svc.label}? Launches run_engine.py via systemd (or local Ops subprocess on Mac). Hedging still follows DB suspend/resume.`
     } else if (action === 'stop') {
-      message = `Stop ${svc.label}? systemd sends SIGTERM (graceful). On exit the engine updates daemon_heartbeat (e.g. graceful_shutdown_at). This is not the same as Stop Daemon in Trading daemon below (POST /control/stop → daemon_control).`
+      message = `Stop ${svc.label}? systemd sends SIGTERM (graceful). On exit the engine updates daemon_heartbeat (e.g. graceful_shutdown_at). This is not the same as Stop Daemon in Strategy Trading Daemon below (POST /control/stop → daemon_control).`
     } else {
       message = `Restart ${svc.label}? Brief outage; equivalent to stop then start.`
     }
-    openConfirm(`${verb} Engine`, message, () => runControl(svc.id, action))
+    openConfirm(`${verb} ${svc.label}`, message, () => runControl(svc.id, action), {
+      formatError: svc.id === 'account_sync_daemon' ? formatAccountSyncOpsError : undefined,
+    })
   }
 
   const openResetConfirm = (svc: MarketIngestServiceRow) => {
-    openConfirm(
-      'Reset Engine',
-      `Reset ${svc.label}? This restarts the Engine process (same end state as Restart).`,
-      () => runControl(svc.id, 'reset'),
-    )
+    const body =
+      svc.id === 'account_sync_daemon'
+        ? `Reset ${svc.label}? Restarts the Account Sync process (same end state as Restart).`
+        : `Reset ${svc.label}? This restarts the Engine process (same end state as Restart).`
+    openConfirm(`Reset ${svc.label}`, body, () => runControl(svc.id, 'reset'), {
+      formatError: svc.id === 'account_sync_daemon' ? formatAccountSyncOpsError : undefined,
+    })
   }
 
   return (
@@ -268,7 +319,7 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
                 <SettingsSidebarLampGlyph id="daemon" />
               </span>
               <span>Daemon</span>
-              <InfoTooltip text="Ops API: POST /ops/market-ingest/control (service_id trading_engine) for systemd start/stop. Authenticate here or on Settings → Socket; the token is shared." />
+              <InfoTooltip text="Ops API: POST /ops/market-ingest/control for systemd start/stop (trading_engine, account_sync_daemon, …). Authenticate here or on Settings → Socket; the token is shared." />
             </span>
           </h2>
           <p
@@ -396,6 +447,12 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
       {engineConfigMissing && !opsErr ? (
         <p className="massive-api-doc-hint" style={{ marginTop: 'var(--space-2)' }}>
           No <code>trading_engine</code> row in Ops <code>market_ingest_services</code> (see backend/ops/market_ingest_config.py).
+          {accountSyncRow ? (
+            <>
+              {' '}
+              <code>account_sync_daemon</code> is available below.
+            </>
+          ) : null}
         </p>
       ) : null}
 
@@ -432,7 +489,7 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
           elapsed={elapsed}
           pageEnv={normalizedPageDevProd(configProfile)}
           disableIngestScript={disableIngestActions}
-          emptyHint="No trading_engine row in Ops config (backend/ops/market_ingest_config.py)."
+          emptyHint="No trading_engine or account_sync_daemon rows in Ops config (backend/ops/market_ingest_config.py)."
           logicalSummary={logicalSummary}
           canOperate={canOperate}
           onStart={svc => openServiceConfirm(svc, 'start', 'Start')}

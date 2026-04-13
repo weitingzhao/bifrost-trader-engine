@@ -70,6 +70,44 @@ export async function clearDaemonLogs(): Promise<{ ok: boolean; error?: string }
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
+export async function fetchAccountSyncDaemonLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
+  const params = new URLSearchParams({ tail: String(tail) })
+  const url = bifrostMonitorApiUrl(`/api/account-sync-daemon/logs?${params}`)
+  const r = await fetch(url)
+  const j = await r.json().catch(() => ({ lines: [] }))
+  return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
+}
+
+export function subscribeAccountSyncDaemonLogs(
+  onLine: (line: string) => void,
+  onError?: () => void,
+): () => void {
+  const url = bifrostMonitorApiUrl('/api/account-sync-daemon/logs/stream')
+  const es = new EventSource(url)
+  es.onmessage = (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data) as { line?: string }
+      if (data && typeof data.line === 'string') onLine(data.line)
+    } catch {
+      // ignore
+    }
+  }
+  es.onerror = () => {
+    onError?.()
+    es.close()
+  }
+  return () => {
+    es.close()
+  }
+}
+
+export async function clearAccountSyncDaemonLogs(): Promise<{ ok: boolean; error?: string }> {
+  const url = bifrostMonitorApiUrl('/api/account-sync-daemon/logs')
+  const r = await fetch(url, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
 export async function clearMonitorLogs(): Promise<{ ok: boolean; error?: string }> {
   const r = await fetch(`${apiBase()}/api/monitor/logs`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))

@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 import type { DaemonHeartbeat, StatusResponse } from '../../../types'
 import { fmtTs } from '../../../utils/format'
-import { computeAccountSyncLamp } from '../../../utils/livePageLamps'
 import { ingestRedisHealthLamp } from '../../../utils/socketIngestLamp'
 import { ingestLampToBrokerRowLamp } from '../daemonIbBrokerLamp'
 
@@ -14,7 +13,7 @@ const ACTIVITY_LAMP_SVG = (
   </svg>
 )
 
-function IbBrokerServiceLamp({ lamp, title }: { lamp: Lamp; title: string }) {
+export function IbBrokerServiceLamp({ lamp, title }: { lamp: Lamp; title: string }) {
   return (
     <span
       className={`title-inline-lamp lamp-icon ib-broker-service-lamp ${lamp}`}
@@ -66,7 +65,6 @@ export function StatusDaemonPanel({
   const opLamp = ingestRedisHealthLamp('ib_operator', j)
   const ingLamp = ingestRedisHealthLamp('ib_ingestor', j)
   const aaLamp = ingestRedisHealthLamp('ib_account_agent', j)
-  const asdLamp = computeAccountSyncLamp(j)
 
   return (
     <div id="system-panel-daemon" role="tabpanel" aria-labelledby="tab-daemon" className={className ? `system-tab-panel ${className}` : 'system-tab-panel'}>
@@ -77,7 +75,7 @@ export function StatusDaemonPanel({
               <span className={`title-inline-lamp lamp-icon ${daemonLamp}`} title="Daemon status lamp" aria-hidden>
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden><path d="M8 5v14l11-7L8 5z" /></svg>
               </span>
-              Trading daemon
+              Strategy Trading Daemon
             </h3>
             <div>
               <strong>Status: {j ? (daemonLabel === 'Running' ? 'Running (OK)' : `${daemonLabel} (${daemonSelfCheckText})`) : 'Fetch failed'}</strong>
@@ -144,12 +142,6 @@ export function StatusDaemonPanel({
                   <th scope="row" className="ib-connection-row-label">IB Account Agent</th>
                   <td className="ib-connection-cell ib-connection-cell--lamp">
                     <IbBrokerServiceLamp lamp={ingestLampToBrokerRowLamp(aaLamp.lamp)} title={aaLamp.title} />
-                  </td>
-                </tr>
-                <tr>
-                  <th scope="row" className="ib-connection-row-label">Account Sync</th>
-                  <td className="ib-connection-cell ib-connection-cell--lamp">
-                    <IbBrokerServiceLamp lamp={ingestLampToBrokerRowLamp(asdLamp.lamp)} title={asdLamp.title} />
                   </td>
                 </tr>
               </tbody>

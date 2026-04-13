@@ -547,7 +547,7 @@ def get_daemon_logs(
     request: Request,
     tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
 ) -> Dict[str, Any]:
-    """Return last N lines from Trading Daemon console streams (dev + prod + legacy, merged by time)."""
+    """Return last N lines from Strategy Trading Daemon console streams (dev + prod + legacy, merged by time)."""
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url(), decode_responses=True)
@@ -564,7 +564,7 @@ def get_daemon_logs(
 
 @router.delete("/api/daemon/logs")
 def clear_daemon_logs(request: Request) -> Dict[str, Any]:
-    """Delete Trading Daemon console Redis streams (dev + prod + legacy). UI Clear uses this."""
+    """Delete Strategy Trading Daemon console Redis streams (dev + prod + legacy). UI Clear uses this."""
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url(), decode_responses=True)
@@ -578,7 +578,7 @@ def clear_daemon_logs(request: Request) -> Dict[str, Any]:
 
 @router.post("/api/daemon/logs/trim")
 def trim_daemon_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """Trim each Trading Daemon console stream to at most max_lines (keep newest)."""
+    """Trim each Strategy Trading Daemon console stream to at most max_lines (keep newest)."""
     try:
         max_lines = body.get("max_lines")
         if max_lines is None:
@@ -1282,7 +1282,41 @@ async def get_ib_account_agent_logs_stream(request: Request):
     )
 
 
-# --- Account Sync Daemon logs (scripts/check/run_account_sync_daemon.py → Redis stream bifrost:console:account_sync_daemon) ---
+# --- Account Sync Daemon logs (scripts/systemd/run_account_sync_daemon.py → Redis stream bifrost:console:account_sync_daemon) ---
+
+
+@router.get("/api/account-sync-daemon/logs")
+def get_account_sync_daemon_logs(
+    request: Request,
+    tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
+) -> Dict[str, Any]:
+    """Return last N lines from Account Sync Daemon console Redis stream."""
+    try:
+        import redis
+
+        r = redis.from_url(daemon_log_redis_url(), decode_responses=True)
+        raw = r.xrevrange(ACCOUNT_SYNC_DAEMON_LOG_STREAM_KEY, max="+", min="-", count=tail)
+        lines: List[str] = []
+        for _eid, fields in reversed(raw):
+            lines.append(_redis_stream_line(fields))
+        return {"lines": lines}
+    except Exception as e:
+        logger.warning("get_account_sync_daemon_logs failed: %s", e)
+        return {"lines": [], "error": str(e)}
+
+
+@router.delete("/api/account-sync-daemon/logs")
+def clear_account_sync_daemon_logs(request: Request) -> Dict[str, Any]:
+    """Delete Account Sync Daemon console Redis stream (UI Clear)."""
+    try:
+        import redis
+
+        r = redis.from_url(daemon_log_redis_url(), decode_responses=True)
+        r.delete(ACCOUNT_SYNC_DAEMON_LOG_STREAM_KEY)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("clear_account_sync_daemon_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
 
 
 def _account_sync_daemon_log_reader_loop(app_ref) -> None:

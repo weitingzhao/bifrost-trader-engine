@@ -1,6 +1,6 @@
 """YAML-driven registry for Ops-managed systemd services (Socket ingest + optional Engine).
 
-**trading_engine** uses ``redis_meta_key`` ``bifrost:health:daemon_trading_engine`` by default (Dev/Prod
+**trading_engine** uses ``redis_meta_key`` ``bifrost:health:daemon_strategy_trading`` by default (Dev/Prod
 Ops lease + ``engine_ops_active``, same exclusivity rules as Socket rows in
 :mod:`backend.ops.routers.market_ingest`). YAML may omit ``redis_meta_key`` for that id and the
 default meta key is applied.
@@ -11,7 +11,10 @@ from __future__ import annotations
 from typing import Dict, List
 
 from src.bifrost.redis_health_keys import (
+    BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON,
     BIFROST_HEALTH_DAEMON_TRADING_ENGINE,
+    LEGACY_BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON,
+    LEGACY_BIFROST_HEALTH_DAEMON_TRADING_ENGINE,
     BIFROST_HEALTH_IB_ACCOUNT_AGENT,
     BIFROST_HEALTH_IB_INGESTOR,
     BIFROST_HEALTH_IB_OPERATOR,
@@ -53,9 +56,15 @@ DEFAULT_MARKET_INGEST_SERVICES: List[Dict[str, str]] = [
     },
     {
         "id": "trading_engine",
-        "label": "Trading daemon (Engine)",
+        "label": "Strategy Trading Daemon",
         "systemd_unit": "bifrost-engine.service",
         "redis_meta_key": BIFROST_HEALTH_DAEMON_TRADING_ENGINE,
+    },
+    {
+        "id": "account_sync_daemon",
+        "label": "Account Sync Daemon",
+        "systemd_unit": "bifrost-account-sync-daemon.service",
+        "redis_meta_key": BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON,
     },
 ]
 
@@ -95,6 +104,10 @@ def market_ingest_services_from_config(config: dict) -> List[Dict[str, str]]:
             meta = BIFROST_HEALTH_IB_ACCOUNT_AGENT
         elif sid == "trading_engine" and meta == LEGACY_BIFROST_OPS_TRADING_ENGINE_META:
             meta = BIFROST_HEALTH_DAEMON_TRADING_ENGINE
+        elif sid == "trading_engine" and meta == LEGACY_BIFROST_HEALTH_DAEMON_TRADING_ENGINE:
+            meta = BIFROST_HEALTH_DAEMON_TRADING_ENGINE
+        elif sid == "account_sync_daemon" and meta == LEGACY_BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON:
+            meta = BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON
         if sid == "trading_engine" and not meta:
             meta = BIFROST_HEALTH_DAEMON_TRADING_ENGINE
         out.append({

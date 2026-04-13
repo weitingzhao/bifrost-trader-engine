@@ -323,10 +323,13 @@ def get_account_sync_heartbeat(conn: Any) -> Optional[Dict[str, Any]]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT extract(epoch from last_ts) AS last_ts,
-                       last_sync_version, accounts_synced, positions_synced,
-                       executions_synced, open_orders_synced, stream_lag
-                FROM account_sync_heartbeat WHERE id = 1
+                SELECT extract(epoch from h.last_ts) AS last_ts,
+                       h.last_sync_version, h.accounts_synced, h.positions_synced,
+                       h.executions_synced, h.open_orders_synced, h.stream_lag,
+                       COALESCE(rs.heartbeat_interval_sec, 5.0) AS heartbeat_interval_sec
+                FROM account_sync_heartbeat h
+                LEFT JOIN account_sync_run_status rs ON rs.id = 1
+                WHERE h.id = 1
                 """
             )
             row = cur.fetchone()
@@ -334,6 +337,7 @@ def get_account_sync_heartbeat(conn: Any) -> Optional[Dict[str, Any]]:
                 return None
             # extract(epoch) may be Decimal from psycopg2; coerce for time arithmetic / JSON.
             _lts = row[0]
+            _hi = row[7]
             return {
                 "last_ts": float(_lts) if _lts is not None else None,
                 "last_sync_version": row[1],
@@ -342,6 +346,7 @@ def get_account_sync_heartbeat(conn: Any) -> Optional[Dict[str, Any]]:
                 "executions_synced": row[4],
                 "open_orders_synced": row[5],
                 "stream_lag": row[6],
+                "heartbeat_interval_sec": float(_hi) if _hi is not None else 5.0,
             }
     except Exception:
         return None

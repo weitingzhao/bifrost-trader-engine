@@ -1,0 +1,20 @@
+# Account Sync Daemon — dev config (e.g. Linux dev host). Adjust paths/User to match.
+
+[Unit]
+Description=Bifrost Account Sync Daemon (dev)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vision
+Group=vision
+WorkingDirectory=/home/vision/bifrost-trader-engine
+Environment=BIFROST_CONFIG=/home/vision/bifrost-trader-engine/config/config.dev.yaml
+ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/systemd/run_account_sync_daemon.py --config config/config.dev.yaml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

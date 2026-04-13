@@ -1,6 +1,9 @@
 """Market ingest registry from YAML."""
 
-from src.bifrost.redis_health_keys import BIFROST_HEALTH_DAEMON_TRADING_ENGINE
+from src.bifrost.redis_health_keys import (
+    BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON,
+    BIFROST_HEALTH_DAEMON_TRADING_ENGINE,
+)
 
 from backend.ops.market_ingest_config import (
     market_ingest_service_by_id,
@@ -10,7 +13,7 @@ from backend.ops.market_ingest_config import (
 
 def test_default_services():
     rows = market_ingest_services_from_config({})
-    assert len(rows) == 5
+    assert len(rows) == 6
     assert rows[0]["id"] == "massive_ws"
     assert rows[0]["systemd_unit"] == "bifrost-massive-ws.service"
     assert rows[0]["redis_meta_key"] == "bifrost:health:ws_massive_option"
@@ -23,8 +26,11 @@ def test_default_services():
     assert rows[3]["systemd_unit"] == "bifrost-ib-account-agent.service"
     assert rows[3]["redis_meta_key"] == "bifrost:health:ws_ib_account_agent"
     assert rows[4]["id"] == "trading_engine"
+    assert rows[4]["label"] == "Strategy Trading Daemon"
     assert rows[4]["systemd_unit"] == "bifrost-engine.service"
     assert rows[4]["redis_meta_key"] == BIFROST_HEALTH_DAEMON_TRADING_ENGINE
+    assert rows[5]["id"] == "account_sync_daemon"
+    assert rows[5]["redis_meta_key"] == BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON
 
 
 def test_custom_services_override():

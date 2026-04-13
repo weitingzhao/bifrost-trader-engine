@@ -2,7 +2,7 @@
 
 When ``frontend/dist`` exists (``npm run build``), GET ``/`` serves the SPA and ``/assets`` is mounted; otherwise GET ``/`` returns a small API stub. Dev hot-reload: ``./scripts/run_frontend.sh dev``.
 
-Monitoring runs on a separate host from the trading daemon (RE-5). Start of the daemon is only on the trading machine (run_engine.py); no subprocess/start on this server.
+Monitoring runs on a separate host from the Strategy Trading Daemon (RE-5). Start of the daemon is only on the trading machine (run_engine.py); no subprocess/start on this server.
 """
 
 import json
@@ -122,7 +122,7 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    # Trading Daemon console (run_engine.py → bifrost:console:{dev|prod}:daemon_trading + legacy); reader thread + queues
+    # Strategy Trading Daemon console (run_engine.py → bifrost:console:{dev|prod}:daemon_trading + legacy); reader thread + queues
     app.state.daemon_log_queues: list = []
     app.state.daemon_log_lock = threading.Lock()
     app.state._daemon_log_thread: Optional[threading.Thread] = None

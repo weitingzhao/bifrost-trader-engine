@@ -90,16 +90,27 @@ def _write_heartbeat(
 def _write_redis_health(r: Any, *, alive: bool, last_sync_version: int, stream_lag: int) -> None:
     from src.daemon.account_sync.redis_keys import ACCOUNT_SYNC_HEALTH_KEY
 
+    # Preserve Ops market-ingest lease fields on the same hash (HSET subset does not delete others).
+    _OPS_FIELDS = ("bifrost_ops_control_env", "bifrost_ops_control_host")
+
     try:
-        r.hset(
-            ACCOUNT_SYNC_HEALTH_KEY,
-            mapping={
-                "alive": "1" if alive else "0",
-                "last_sync_version": str(last_sync_version),
-                "stream_lag": str(stream_lag),
-                "updated_at": str(time.time()),
-            },
-        )
+        preserve: dict[str, str] = {}
+        for fld in _OPS_FIELDS:
+            raw = r.hget(ACCOUNT_SYNC_HEALTH_KEY, fld)
+            if raw is None:
+                continue
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", errors="replace")
+            preserve[fld] = str(raw)
+
+        mapping = {
+            "alive": "1" if alive else "0",
+            "last_sync_version": str(last_sync_version),
+            "stream_lag": str(stream_lag),
+            "updated_at": str(time.time()),
+        }
+        mapping.update(preserve)
+        r.hset(ACCOUNT_SYNC_HEALTH_KEY, mapping=mapping)
     except Exception as e:
         logger.debug("write_redis_health: %s", e)
 

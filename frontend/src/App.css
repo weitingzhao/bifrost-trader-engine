@@ -3151,6 +3151,22 @@ tr:hover .realtime-quote-drag-handle {
   min-width: 0;
 }
 
+/* Account Sync Daemon card (Daemon page): Heartbeat | IB account table | Sync details — mirrors Strategy Trading Daemon groups */
+.daemon-groups-account-sync-layout {
+  flex-wrap: nowrap;
+}
+
+.daemon-groups-account-sync-layout .daemon-group-heartbeat,
+.daemon-groups-account-sync-layout .daemon-group-ib {
+  flex: 1;
+  min-width: 0;
+}
+
+.daemon-groups-account-sync-layout .daemon-group-account-sync-sync {
+  flex: 2;
+  min-width: 0;
+}
+
 .daemon-group {
   flex: 1;
   min-width: 200px;
@@ -4219,6 +4235,17 @@ tr:hover .realtime-quote-drag-handle {
   font-variant-numeric: tabular-nums;
   color: var(--color-accent);
   text-shadow: 0 0 6px var(--color-accent-glow);
+}
+
+/* Account Sync Daemon: next heartbeat countdown — same accent emphasis as Strategy Trading Daemon */
+.account-sync-next-hb-countdown .countdown-num {
+  font-size: var(--text-body);
+  font-weight: 700;
+}
+.account-sync-hb-interval-hint {
+  opacity: 0.75;
+  font-weight: 500;
+  font-size: 0.8rem;
 }
 
 /* IB 断连时的重试提示：稍高亮，便于扫一眼看到 */

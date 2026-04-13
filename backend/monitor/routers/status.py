@@ -730,6 +730,9 @@ def get_status(request: Request) -> Dict[str, Any]:
                 "heartbeat": {
                     "last_ts": _as_last_ts,
                     "daemon_alive": _as_alive,
+                    "heartbeat_interval_sec": float(
+                        account_sync_hb.get("heartbeat_interval_sec") or 5.0,
+                    ),
                     "last_sync_version": account_sync_hb.get("last_sync_version", 0),
                     "accounts_synced": account_sync_hb.get("accounts_synced", 0),
                     "positions_synced": account_sync_hb.get("positions_synced", 0),
@@ -748,6 +751,7 @@ def get_status(request: Request) -> Dict[str, Any]:
                             "heartbeat": {
                                 "last_ts": None,
                                 "daemon_alive": _asd_alive,
+                                "heartbeat_interval_sec": 5.0,
                                 "last_sync_version": 0,
                                 "stream_lag": int(_asd_h.get("stream_lag") or 0),
                             },

@@ -1,0 +1,20 @@
+# Account Sync Daemon — Redis ib:account:stream:v1 → PostgreSQL (see ARCHITECTURE).
+
+[Unit]
+Description=Bifrost Account Sync Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vision
+Group=vision
+WorkingDirectory=/home/vision/bifrost-trader-engine
+Environment=BIFROST_CONFIG=/home/vision/bifrost-trader-engine/config/config.prod.yaml
+ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/systemd/run_account_sync_daemon.py --config config/config.prod.yaml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

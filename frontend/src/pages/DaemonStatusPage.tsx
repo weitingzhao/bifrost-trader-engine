@@ -7,6 +7,9 @@ import {
   fetchDaemonLogs,
   subscribeDaemonLogs,
   clearDaemonLogs,
+  fetchAccountSyncDaemonLogs,
+  subscribeAccountSyncDaemonLogs,
+  clearAccountSyncDaemonLogs,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
@@ -21,9 +24,22 @@ import {
   STATUS_FIELDS,
 } from './status/statusLabels'
 import { useControlAction } from './status/useControlAction'
-import { StatusDaemonPanel, StatusStrategyPanel } from './status/panels'
-import { computeIbBrokerGroupLamp } from './status/daemonIbBrokerLamp'
+import { IbBrokerServiceLamp, StatusDaemonPanel, StatusStrategyPanel } from './status/panels'
+import {
+  accountSyncLampToBrokerRowLamp,
+  computeAccountSyncIbGroupLamp,
+  computeIbBrokerGroupLamp,
+  ingestLampToBrokerRowLamp,
+} from './status/daemonIbBrokerLamp'
+import { ingestRedisHealthLamp } from '../utils/socketIngestLamp'
 import { DaemonEngineOpsSection } from './DaemonEngineOpsSection'
+
+/** Same stroke lamp as Strategy Trading Daemon Heartbeat / IB broker groups (StatusDaemonPanel). */
+const ACCOUNT_SYNC_GROUP_LAMP_SVG = (
+  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M22 12h-4l-3 9L9 3 6 12H2" />
+  </svg>
+)
 
 export interface DaemonStatusPageProps {
   status: StatusResponse | null
@@ -54,6 +70,12 @@ export function DaemonStatusPage({
     clearLogs: clearDaemonLogs,
     enabled: deferredStart,
   })
+  const accountSyncConsole = useLogConsole({
+    fetchLogs: fetchAccountSyncDaemonLogs,
+    subscribeLogs: subscribeAccountSyncDaemonLogs,
+    clearLogs: clearAccountSyncDaemonLogs,
+    enabled: deferredStart,
+  })
 
   const runCtrlAction = useControlAction(setCtrlMsg, ctrlMsgClearRef, { onSuccess: loadStatus })
   const runHedgeAction = useControlAction(setHedgeCtrlMsg, hedgeCtrlMsgClearRef)
@@ -76,11 +98,26 @@ export function DaemonStatusPage({
       ? Math.max(0, Math.ceil(hb.last_ts + intervalSec - nowSec))
       : null
 
+  const asdHeart = (j as { account_sync_daemon?: { heartbeat?: {
+    daemon_alive?: boolean
+    last_ts?: number
+    heartbeat_interval_sec?: number
+  } } } | null)?.account_sync_daemon?.heartbeat
+  const asIntervalSec =
+    typeof asdHeart?.heartbeat_interval_sec === 'number' && Number.isFinite(asdHeart.heartbeat_interval_sec)
+      ? Math.max(2, Math.min(120, asdHeart.heartbeat_interval_sec))
+      : 5
+  const secondsUntilNextAccountSyncHb =
+    asdHeart?.daemon_alive && asdHeart?.last_ts != null
+      ? Math.max(0, Math.ceil(asdHeart.last_ts + asIntervalSec - nowSec))
+      : null
+
   useEffect(() => {
-    if (!hb?.daemon_alive) return
+    const needTick = Boolean(hb?.daemon_alive) || Boolean(asdHeart?.daemon_alive)
+    if (!needTick) return
     const id = setInterval(() => setTick(n => n + 1), 1000)
     return () => clearInterval(id)
-  }, [hb?.daemon_alive])
+  }, [hb?.daemon_alive, asdHeart?.daemon_alive])
 
   const suspended = j?.daemon?.trading?.trading_suspended === true
   let daemonLabel = 'Not running (or single-process mode)'
@@ -214,49 +251,200 @@ export function DaemonStatusPage({
           />
         </section>
 
+        {(() => {
+          const asd = (status as any)?.account_sync_daemon
+          const asdHb = asdHeart
+          const asdL = computeAccountSyncLamp(status)
+          const aaLamp = ingestRedisHealthLamp('ib_account_agent', status)
+          const syncPathLamp = computeAccountSyncLamp(status)
+          const { lamp: ibAccountGroupLamp, title: ibAccountGroupTitle } = computeAccountSyncIbGroupLamp(status)
+          return (
+            <section className="replay-section" aria-labelledby="daemon-account-sync-head">
+              <div className="daemon-header" style={{ marginBottom: 'var(--space-3)' }}>
+                <div className="daemon-header-main daemon-header-with-lamp">
+                  <div>
+                    <h3 id="daemon-account-sync-head" className="page-title-with-tooltip">
+                      <span className={`title-inline-lamp lamp-icon ${asdL.lamp}`} title={asdL.title} aria-hidden>
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
+                      </span>
+                      Account Sync Daemon
+                      <InfoTooltip text="Independent process (not the Strategy Trading Daemon). Syncs IB Account Agent stream to PostgreSQL. Liveness: PostgreSQL account_sync_heartbeat.last_ts refreshed each loop (~35s stale threshold), same idea as Strategy Trading Daemon heartbeat." />
+                    </h3>
+                    <div>
+                      <strong>
+                        Status:{' '}
+                        {asdHb
+                          ? (asdHb.daemon_alive ? 'Running (OK)' : 'Not running (heartbeat stale)')
+                          : status ? 'No heartbeat row' : 'Fetch failed'}
+                      </strong>
+                      {asdHb && !asdHb.daemon_alive && (
+                        <p className="section-hint section-hint--retry" style={{ marginTop: '0.35rem', marginBottom: 0 }}>
+                          Last DB heartbeat is older than ~35s, or Redis health shows down. Start the process (Ops above or manual script), then check PostgreSQL connectivity and IB Account Agent stream.
+                        </p>
+                      )}
+                      {!asdHb && status ? (
+                        <p className="section-hint" style={{ marginTop: '0.35rem', marginBottom: 0 }}>
+                          Start Account Sync Daemon from Ops (authenticated) or run{' '}
+                          <code style={{ fontSize: '0.85em' }}>python scripts/systemd/run_account_sync_daemon.py --config …</code>
+                          . Ensure <code>account_sync_heartbeat</code> exists and Redis hash <code>bifrost:health:daemon_account_sync</code> updates when running.
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="daemon-groups daemon-groups-layout daemon-groups-account-sync-layout">
+                <div className="daemon-group daemon-group-heartbeat">
+                  <div className="daemon-group-header">
+                    <span className={`title-inline-lamp lamp-icon ${asdL.lamp}`} title={asdL.title} aria-hidden>
+                      {ACCOUNT_SYNC_GROUP_LAMP_SVG}
+                    </span>
+                    <span className="daemon-group-title">Heartbeat</span>
+                  </div>
+                  <div className="daemon-group-body">
+                    {asdHb?.daemon_alive && asdHb.last_ts != null ? (
+                      <>
+                        <p className="section-hint">
+                          Last heartbeat: <strong>{fmtTs(asdHb.last_ts)}</strong>
+                        </p>
+                        {secondsUntilNextAccountSyncHb != null && (
+                          <p className="section-hint countdown-line account-sync-next-hb-countdown">
+                            Next heartbeat:{' '}
+                            <span className="countdown-num">{secondsUntilNextAccountSyncHb}</span> s
+                            <span className="account-sync-hb-interval-hint"> (interval {asIntervalSec}s from DB)</span>
+                          </p>
+                        )}
+                      </>
+                    ) : asdHb?.last_ts != null ? (
+                      <p className="section-hint">
+                        Last heartbeat: <strong>{fmtTs(asdHb.last_ts)}</strong> (timed out; start Account Sync Daemon or check Redis/PostgreSQL)
+                      </p>
+                    ) : asdHb ? (
+                      <p className="section-hint">Heartbeat present but no timestamp — check PostgreSQL <code>account_sync_heartbeat</code>.</p>
+                    ) : (
+                      <p className="section-hint">
+                        No heartbeat in GET /status yet (PostgreSQL <code>account_sync_heartbeat</code> or Redis <code>bifrost:health:daemon_account_sync</code>).
+                      </p>
+                    )}
+                    {asdHb?.daemon_alive === true && (
+                      <p className="section-hint" style={{ opacity: 0.85, fontSize: '0.8rem', marginTop: '0.35rem' }}>
+                        Monitor marks the daemon down if last update is older than ~35s (same freshness idea as Strategy Trading Daemon).
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="daemon-group daemon-group-ib">
+                  <div className="daemon-group-header">
+                    <span className={`title-inline-lamp lamp-icon ${ibAccountGroupLamp}`} title={ibAccountGroupTitle} aria-hidden>
+                      {ACCOUNT_SYNC_GROUP_LAMP_SVG}
+                    </span>
+                    <span className="daemon-group-title">IB account</span>
+                  </div>
+                  <div className="daemon-group-body">
+                    <table className="ib-connection-table" aria-label="IB account sync path services">
+                      <thead>
+                        <tr>
+                          <th scope="col" className="ib-connection-th">Service</th>
+                          <th scope="col" className="ib-connection-th">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <th scope="row" className="ib-connection-row-label">IB Account Agent</th>
+                          <td className="ib-connection-cell ib-connection-cell--lamp">
+                            <IbBrokerServiceLamp
+                              lamp={ingestLampToBrokerRowLamp(aaLamp.lamp)}
+                              title={aaLamp.title}
+                            />
+                          </td>
+                        </tr>
+                        <tr>
+                          <th scope="row" className="ib-connection-row-label">Sync</th>
+                          <td className="ib-connection-cell ib-connection-cell--lamp">
+                            <IbBrokerServiceLamp
+                              lamp={accountSyncLampToBrokerRowLamp(syncPathLamp.lamp)}
+                              title={syncPathLamp.title}
+                            />
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <a
+                      href="#settings-ws-connector"
+                      className="daemon-ib-broker-socket-link section-hint"
+                      onClick={e => {
+                        if (onNavigateToSocket) {
+                          e.preventDefault()
+                          onNavigateToSocket()
+                        }
+                      }}
+                    >
+                      Open Socket services…
+                    </a>
+                  </div>
+                </div>
+                <div className="daemon-group daemon-group-account-sync-sync">
+                  <div className="daemon-group-header">
+                    <span className="daemon-group-title">Sync details</span>
+                  </div>
+                  <div className="daemon-group-body">
+                    {asdHb ? (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.5rem 1rem', fontSize: '0.85rem', lineHeight: 1.5 }}>
+                        <div><span style={{ opacity: 0.65 }}>Stream lag</span>{' '}{asdHb.stream_lag ?? '—'}</div>
+                        <div><span style={{ opacity: 0.65 }}>Sync version</span>{' '}{asdHb.last_sync_version ?? '—'}</div>
+                        <div><span style={{ opacity: 0.65 }}>Accounts</span>{' '}{asdHb.accounts_synced ?? '—'}</div>
+                        <div><span style={{ opacity: 0.65 }}>Positions</span>{' '}{asdHb.positions_synced ?? '—'}</div>
+                        <div><span style={{ opacity: 0.65 }}>Executions</span>{' '}{asdHb.executions_synced ?? '—'}</div>
+                        <div><span style={{ opacity: 0.65 }}>Open orders</span>{' '}{asdHb.open_orders_synced ?? '—'}</div>
+                      </div>
+                    ) : (
+                      <p className="section-hint">—</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <p className="massive-api-doc-hint" style={{ marginTop: 'var(--space-2)', marginBottom: 0 }}>
+                <strong>Start (manual):</strong>{' '}
+                <code style={{ fontSize: '0.85em' }}>python scripts/systemd/run_account_sync_daemon.py --config config/config.dev.yaml</code>
+                {' '}(dev){' '}
+                <span style={{ opacity: 0.7 }}>|</span>{' '}
+                <code style={{ fontSize: '0.85em' }}>python scripts/systemd/run_account_sync_daemon.py --config config/config.prod.yaml</code>
+                {' '}(prod). Or use <strong>Ops</strong> on this page (market ingest → Account Sync Daemon) if your host runs systemd.
+              </p>
+              <h4 className="page-title-with-tooltip" style={{ marginTop: 'var(--space-3)', marginBottom: 'var(--space-2)', fontSize: '0.95rem' }}>
+                Account Sync Daemon log
+                <InfoTooltip text="Redis stream bifrost:console:account_sync_daemon (same as scripts/systemd/run_account_sync_daemon.py console)." />
+              </h4>
+              <LogConsolePanel
+                controller={accountSyncConsole}
+                loadingText="Connecting…"
+                errorText="Unable to load (Redis may be down)."
+                emptyText="No log lines yet. Start Account Sync Daemon to populate the stream."
+                infoTooltipText="Account Sync Daemon logs (Redis stream bifrost:console:account_sync_daemon)."
+                resizeAriaLabel="Resize Account Sync daemon console height"
+                clearTitle="Clear displayed log and Redis stream"
+              />
+            </section>
+          )
+        })()}
+
         <section className="replay-section" aria-labelledby="daemon-console-head">
           <h3 id="daemon-console-head" className="page-title-with-tooltip">
-            Trading Daemon log
-            <InfoTooltip text="Trading daemon console (Redis Streams: bifrost:console:{dev|prod}:daemon_trading; legacy bifrost:console:daemon_trading merged). Start: python scripts/systemd/run_engine.py" />
+            Strategy Trading Daemon log
+            <InfoTooltip text="Strategy Trading Daemon console (Redis Streams: bifrost:console:{dev|prod}:daemon_trading; legacy bifrost:console:daemon_trading merged). Start: python scripts/systemd/run_engine.py" />
           </h3>
           <LogConsolePanel
             controller={daemonConsole}
             loadingText="Connecting…"
             errorText="Unable to load (Redis may be down)."
-            emptyText="No log lines yet. Start daemon: python scripts/systemd/run_engine.py"
-            infoTooltipText="Trading daemon logs merged from dev/prod streams (same Redis)."
-            resizeAriaLabel="Resize trading daemon console height"
+            emptyText="No log lines yet. Start: python scripts/systemd/run_engine.py"
+            infoTooltipText="Strategy Trading Daemon logs merged from dev/prod streams (same Redis)."
+            resizeAriaLabel="Resize Strategy Trading Daemon console height"
             clearTitle="Clear displayed log and Redis streams"
           />
         </section>
-
-        {(() => {
-          const asd = (status as any)?.account_sync_daemon
-          const asdHb = asd?.heartbeat
-          const asdL = computeAccountSyncLamp(status)
-          if (!asdHb) return null
-          return (
-            <section className="replay-section" aria-labelledby="daemon-account-sync-head">
-              <h3 id="daemon-account-sync-head" className="page-title-with-tooltip">
-                <span className={`title-inline-lamp lamp-icon ${asdL.lamp}`} title={asdL.title} aria-hidden>
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
-                </span>
-                Account Sync Daemon
-                <InfoTooltip text="Independent daemon that syncs Account / Position / Execution data from IB Account Agent (Redis Stream) to PostgreSQL." />
-              </h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem 1.5rem', fontSize: '0.85rem', lineHeight: 1.5 }}>
-                <div><span style={{ opacity: 0.65 }}>Status:</span>{' '}<strong>{asdHb.daemon_alive ? 'Running' : 'Not running'}</strong></div>
-                <div><span style={{ opacity: 0.65 }}>Last heartbeat:</span>{' '}{asdHb.last_ts != null ? fmtTs(asdHb.last_ts) : '—'}</div>
-                <div><span style={{ opacity: 0.65 }}>Stream lag:</span>{' '}{asdHb.stream_lag ?? '—'}</div>
-                <div><span style={{ opacity: 0.65 }}>Sync version:</span>{' '}{asdHb.last_sync_version ?? '—'}</div>
-                <div><span style={{ opacity: 0.65 }}>Accounts synced:</span>{' '}{asdHb.accounts_synced ?? '—'}</div>
-                <div><span style={{ opacity: 0.65 }}>Positions synced:</span>{' '}{asdHb.positions_synced ?? '—'}</div>
-                <div><span style={{ opacity: 0.65 }}>Executions synced:</span>{' '}{asdHb.executions_synced ?? '—'}</div>
-                <div><span style={{ opacity: 0.65 }}>Open orders synced:</span>{' '}{asdHb.open_orders_synced ?? '—'}</div>
-              </div>
-            </section>
-          )
-        })()}
 
         <section className="replay-section" aria-labelledby="daemon-ops-head">
           <h3 id="daemon-ops-head" className="page-title-with-tooltip">

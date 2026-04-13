@@ -25,7 +25,7 @@ export function HeartbeatSection({
       <div className="daemon-group-body">
         <div className="settings-heartbeat-row">
           <label className="settings-heartbeat-label">
-            <span className="settings-heartbeat-label-text">Trading Daemon Heartbeat</span>
+            <span className="settings-heartbeat-label-text">Strategy Trading Daemon Heartbeat</span>
             <span className="settings-heartbeat-input-wrap">
               <input
                 type="number"

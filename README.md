@@ -56,7 +56,7 @@ Run as a daemon via systemd, supervisor, or Docker.
 
 ### Phase 2: Status server (monitoring and control)
 
-The **Monitor API** (`scripts/run_server.py`, package `backend.monitor`) is a **separate process** from the trading daemon (RE-5). **Default deployment** is **cross-host**: monitoring APIs on one machine, daemon (`run_engine.py`) on another (trading host, same machine as IB). The daemon must run on the same machine as IB; the API processes can run anywhere that can reach PostgreSQL. Control (stop/flatten/suspend/resume) uses **PostgreSQL** (`daemon_control`, `daemon_run_status`); no shared filesystem is required. The full UI also uses **additional FastAPI apps** (Ops, Trading, Strategy, etc.); see **[docs/index.md](docs/index.md)**「项目组成与启动」and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §4.0.
+The **Monitor API** (`scripts/run_server.py`, package `backend.monitor`) is a **separate process** from the Strategy Trading Daemon (RE-5). **Default deployment** is **cross-host**: monitoring APIs on one machine, daemon (`run_engine.py`) on another (trading host, same machine as IB). The daemon must run on the same machine as IB; the API processes can run anywhere that can reach PostgreSQL. Control (stop/flatten/suspend/resume) uses **PostgreSQL** (`daemon_control`, `daemon_run_status`); no shared filesystem is required. The full UI also uses **additional FastAPI apps** (Ops, Trading, Strategy, etc.); see **[docs/index.md](docs/index.md)**「项目组成与启动」and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §4.0.
 
 **Config** (in `config/config.yaml`):
 

@@ -1,4 +1,4 @@
-"""Trading Daemon console: merged stream keys for Monitor (dev/prod + legacy)."""
+"""Strategy Trading Daemon console: merged stream keys for Monitor (dev/prod + legacy)."""
 
 from backend.monitor.routers.logs import _daemon_console_stream_keys_for_read
 from src.config.yaml_config import daemon_trading_console_stream_key

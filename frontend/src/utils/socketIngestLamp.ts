@@ -320,23 +320,43 @@ export function ingestRedisHealthLamp(
   if (id === 'trading_engine') {
     const hb = status.daemon?.heartbeat
     if (hb == null) {
-      return { lamp: 'gray', title: 'Daemon heartbeat not in GET /status yet.' }
+      return { lamp: 'gray', title: 'Strategy Trading Daemon heartbeat not in GET /status yet.' }
     }
     if (hb.daemon_alive === true) {
       return {
         lamp: 'green',
-        title: 'Engine alive (Monitor GET /status daemon.heartbeat.daemon_alive).',
+        title: 'Strategy Trading Daemon alive (Monitor GET /status daemon.heartbeat.daemon_alive).',
       }
     }
     if (hb.graceful_shutdown_at != null && Number.isFinite(hb.graceful_shutdown_at)) {
       return {
         lamp: 'yellow',
-        title: 'Engine not running; graceful_shutdown_at set (SIGTERM or control stop).',
+        title: 'Strategy Trading Daemon not running; graceful_shutdown_at set (SIGTERM or control stop).',
       }
     }
     return {
       lamp: 'red',
-      title: 'Engine not running or heartbeat stale (check systemd / local process).',
+      title: 'Strategy Trading Daemon not running or heartbeat stale (check systemd / local process).',
+    }
+  }
+  if (id === 'account_sync_daemon') {
+    const asd = (status as { account_sync_daemon?: { heartbeat?: { daemon_alive?: boolean } } })
+      .account_sync_daemon?.heartbeat
+    if (asd == null) {
+      return {
+        lamp: 'gray',
+        title: 'Account Sync Daemon block missing from GET /status (PostgreSQL heartbeat or Redis health).',
+      }
+    }
+    if (asd.daemon_alive === true) {
+      return {
+        lamp: 'green',
+        title: 'Account Sync Daemon alive (GET /status account_sync_daemon.heartbeat).',
+      }
+    }
+    return {
+      lamp: 'red',
+      title: 'Account Sync Daemon not running or heartbeat stale (start systemd unit or run script).',
     }
   }
   return { lamp: 'gray', title: 'Unknown ingest service id for Redis health.' }

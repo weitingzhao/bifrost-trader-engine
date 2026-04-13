@@ -1,8 +1,8 @@
 """Canonical Redis keys for Socket ingest health under ``bifrost:health:*``.
 
 Service **ids** in Ops YAML stay ``massive_ws`` / ``ib_ingestor`` / ``ib_operator``; Redis **health**
-hashes use the ``ws_*`` suffix names below. Trading daemon (Engine) health + Ops lease use
-``bifrost:health:daemon_trading_engine``.
+hashes use the ``ws_*`` suffix names below. Strategy Trading Daemon health + Ops lease use
+``bifrost:health:daemon_strategy_trading``.
 
 Readers fall back to prior bifrost key names and (Massive only) ``massive:meta:status`` when the
 canonical hash is empty.
@@ -22,11 +22,13 @@ BIFROST_HEALTH_IB_ACCOUNT_AGENT = "bifrost:health:ws_ib_account_agent"
 
 # Account Sync Daemon: independent process that consumes ib:account:stream:v1 and
 # persists Account / Position / Execution data to PostgreSQL.
-BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON = "bifrost:health:account_sync_daemon"
+BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON = "bifrost:health:daemon_account_sync"
+LEGACY_BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON = "bifrost:health:account_sync_daemon"
 
-# Trading daemon (Engine): health hash + Ops Dev/Prod lease fields (``bifrost_ops_control_*``,
+# Strategy Trading Daemon: health hash + Ops Dev/Prod lease fields (``bifrost_ops_control_*``,
 # ``engine_ops_active``) on the same key, same pattern as ``bifrost:health:ws_ib_operator``.
-BIFROST_HEALTH_DAEMON_TRADING_ENGINE = "bifrost:health:daemon_trading_engine"
+BIFROST_HEALTH_DAEMON_TRADING_ENGINE = "bifrost:health:daemon_strategy_trading"
+LEGACY_BIFROST_HEALTH_DAEMON_TRADING_ENGINE = "bifrost:health:daemon_trading_engine"
 # Previous key (YAML / Redis migration); normalized in ``market_ingest_config``.
 LEGACY_BIFROST_OPS_TRADING_ENGINE_META = "bifrost:ops:trading_engine"
 # Deprecated alias — prefer ``BIFROST_HEALTH_DAEMON_TRADING_ENGINE``.
@@ -91,6 +93,9 @@ def hgetall_ib_account_agent_health(r: Any) -> Dict[str, str]:
 
 
 def hgetall_account_sync_daemon_health(r: Any) -> Dict[str, str]:
-    """Account Sync Daemon health hash."""
-    h = r.hgetall(BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON)
-    return dict(h or {})
+    """Account Sync Daemon health hash (canonical key, then legacy migration key)."""
+    for key in (BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON, LEGACY_BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON):
+        h = r.hgetall(key)
+        if h:
+            return dict(h)
+    return {}

@@ -2,7 +2,7 @@
 
 - After a successful Ops **stop**, rewrite canonical health fields to a disconnected snapshot so
   Monitor GET /status updates without waiting for TTL or a graceful writer exit.
-- **trading_engine**: Health / Ops meta hash ``bifrost:health:daemon_trading_engine`` uses ``engine_ops_active`` +
+- **trading_engine**: Health / Ops meta hash ``bifrost:health:daemon_strategy_trading`` uses ``engine_ops_active`` +
   ``updated_at`` for the same exclusive-start guard as Socket rows.
 - Before **start** when no ``bifrost_ops_control_env`` lease exists, detect a still-fresh connected
   hash so only one Dev/Prod stack runs a writer against the same Redis.
@@ -95,6 +95,8 @@ def ingest_redis_health_looks_live(redis_url: str, meta_key: str, service_id: st
         if not redis_hash_field_truthy(m, ENGINE_OPS_ACTIVE_REDIS_FIELD):
             return False
         return True
+    if sid == "account_sync_daemon":
+        return redis_hash_field_truthy(m, "alive")
     return False
 
 
@@ -174,6 +176,16 @@ def clear_ingest_health_after_stop(redis_url: str, meta_key: str, service_id: st
                 key,
                 mapping={
                     ENGINE_OPS_ACTIVE_REDIS_FIELD: "0",
+                    "updated_at": str(now),
+                },
+            )
+        elif sid == "account_sync_daemon":
+            r.hset(
+                key,
+                mapping={
+                    "alive": "0",
+                    "stream_lag": "0",
+                    "last_sync_version": "0",
                     "updated_at": str(now),
                 },
             )

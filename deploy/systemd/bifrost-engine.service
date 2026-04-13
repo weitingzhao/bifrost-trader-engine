@@ -1,5 +1,5 @@
 [Unit]
-Description=Bifrost trading daemon (run_engine.py)
+Description=Bifrost Strategy Trading Daemon (run_engine.py)
 After=network-online.target
 Wants=network-online.target
 

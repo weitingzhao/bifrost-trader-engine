@@ -31,6 +31,7 @@ _SCRIPTS_IN_SYSTEMD_SUBDIR = frozenset({
     "run_ib_operator.py",
     "run_ib_ingestor.py",
     "run_ib_account_agent.py",
+    "run_account_sync_daemon.py",
 })
 
 
@@ -53,6 +54,11 @@ def _ingest_script_log_for_unit(unit: str) -> Optional[Tuple[str, str]]:
         return ("run_ib_ingestor.py", "ib-ingestor.log")
     if stem == "bifrost-engine" or "bifrost-engine" in stem:
         return ("run_engine.py", "engine.log")
+    # Account Sync Daemon (not Celery): scripts/systemd/run_account_sync_daemon.py
+    if "account-sync-daemon-dev" in stem:
+        return ("run_account_sync_daemon.py", "account-sync-daemon-dev.log")
+    if "account-sync-daemon" in stem:
+        return ("run_account_sync_daemon.py", "account-sync-daemon.log")
     return None
 
 
@@ -347,8 +353,9 @@ class SubprocessLocalExecutor:
 
     Market ingest units (``bifrost-massive-ws``, ``bifrost-ib-operator``,
     ``bifrost-ib-ingestor``, ``bifrost-ib-account-agent``) start with ``scripts/systemd/run_massive_ws.py`` or
-    ``scripts/systemd/run_ib_*.py`` and the optional
-    resolved YAML path (``--config`` or positional for gateway).
+    ``scripts/systemd/run_ib_*.py``; **Account Sync Daemon** uses
+    ``scripts/systemd/run_account_sync_daemon.py`` (IB account stream → PostgreSQL, not Celery).
+    Optional resolved YAML path (``--config`` or positional for gateway).
     """
 
     worker_to_unit = staticmethod(RestrictedExecutor.worker_to_unit)
@@ -587,6 +594,10 @@ class SubprocessLocalExecutor:
             return "ib-account-agent"
         if "massive-ws" in u:
             return "massive-ws"
+        if "account-sync-daemon-dev" in u:
+            return "account-sync-daemon-dev"
+        if "account-sync-daemon" in u:
+            return "account-sync-daemon"
         return None
 
     def _ingest_ops_pid_path(self, unit: str) -> Optional[Path]:
@@ -823,7 +834,7 @@ class SubprocessLocalExecutor:
             )
         raise PermissionError(
             f"Unit {unit!r} not supported in subprocess mode "
-            f"(use {_WORKER_UNIT_BASE}@… or ingest units)."
+            f"(use {_WORKER_UNIT_BASE}@…, ingest units, or account-sync-daemon units)."
         )
 
     async def list_instances(self) -> List[Dict[str, str]]:

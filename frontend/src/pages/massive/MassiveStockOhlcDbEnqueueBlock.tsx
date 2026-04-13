@@ -78,6 +78,8 @@ export function MassiveStockOhlcDbEnqueueBlock({
   const [dbOhlcEndMs, setDbOhlcEndMs] = useState(String(STOCK_CUSTOM_BARS_DEFAULT_END_MS))
   const [dbOhlcTs, setDbOhlcTs] = useState('minute')
   const [dbOhlcMult, setDbOhlcMult] = useState('1')
+  /** When false (default), custom_bars enqueue matches table Sync: 1 D, 1 min, 5 min, 1 hour for the window. */
+  const [customBarsSingleTimespanOnly, setCustomBarsSingleTimespanOnly] = useState(false)
   const [presetBusy, setPresetBusy] = useState(false)
   const [dbGdDate, setDbGdDate] = useState('2024-06-03')
   const [dbOcTicker, setDbOcTicker] = useState('AAPL')
@@ -273,15 +275,25 @@ export function MassiveStockOhlcDbEnqueueBlock({
         setOhlcMsg('Custom bars: ticker and Unix ms start/end are required.')
         return
       }
-      await runOhlcEnqueue({
-        mode: 'custom_bars',
-        ticker: t,
-        multiplier: parseInt(dbOhlcMult.trim(), 10) || 1,
-        timespan: dbOhlcTs.trim() || 'minute',
-        start_ms: startMs,
-        end_ms: endMs,
-        sync_all_periods: false,
-      })
+      await runOhlcEnqueue(
+        customBarsSingleTimespanOnly
+          ? {
+              mode: 'custom_bars',
+              ticker: t,
+              multiplier: parseInt(dbOhlcMult.trim(), 10) || 1,
+              timespan: dbOhlcTs.trim() || 'minute',
+              start_ms: startMs,
+              end_ms: endMs,
+              sync_all_periods: false,
+            }
+          : {
+              mode: 'custom_bars',
+              ticker: t,
+              start_ms: startMs,
+              end_ms: endMs,
+              sync_all_periods: true,
+            },
+      )
       return
     }
     if (delayDbOhlcTab === 'daily_market_summary') {
@@ -314,6 +326,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
     dbOhlcStartMs,
     dbOhlcEndMs,
     dbOhlcTicker,
+    customBarsSingleTimespanOnly,
     dbOhlcMult,
     dbOhlcTs,
     dbGdDate,
@@ -398,7 +411,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
           {delayDbOhlcTab === 'custom_bars' ? (
             <div>
               <p className="ref-jobs-md-enqueue-hint" style={{ marginBottom: 'var(--space-2)' }}>
-                Data source is <strong>Massive (delayed) → PostgreSQL</strong>, not IB Live bars in Redis. The table mirrors <strong>Stock Coverage (IB Live)</strong> (bars + range). Click a bars cell to open IB Live coverage for inspection. <strong>Sync</strong> / <strong>Sync all symbols</strong> enqueue one job that pulls <strong>all four periods</strong> for the active time window: Daily (1 D), 1 min, 5 mins, and 1 hour (Polygon/Massive v2 aggs). Reference indices use Yahoo-style symbols in the app (e.g. <code>^GSPC</code>); Massive requests use Polygon index tickers (<code>I:SPX</code> S&amp;P 500, <code>I:DJI</code> Dow, <code>I:COMP</code> Nasdaq Composite) while rows stay keyed by your configured symbol. Use <strong>Advanced</strong> below only for a single timespan + multiplier (no multi-period).
+                Data source is <strong>Massive (delayed) → PostgreSQL</strong>, not IB Live bars in Redis. The table mirrors <strong>Stock Coverage (IB Live)</strong> (bars + range). Click a bars cell to open IB Live coverage for inspection. <strong>Sync</strong> / <strong>Sync all symbols</strong> / default <strong>Advanced → Enqueue sync</strong> enqueue one job that pulls <strong>all four periods</strong> for the active time window: Daily (1 D), 1 min, 5 mins, and 1 hour (Polygon/Massive v2 aggs). Reference indices use Yahoo-style symbols in the app (e.g. <code>^GSPC</code>); Massive requests use Polygon index tickers (<code>I:SPX</code> S&amp;P 500, <code>I:DJI</code> Dow, <code>I:COMP</code> Nasdaq Composite) while rows stay keyed by your configured symbol. In <strong>Advanced</strong>, enable <em>Single timespan only</em> to fetch one multiplier × timespan instead of all four.
               </p>
               <div className="replay-toolbar" style={{ flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-3)', alignItems: 'center' }}>
                 <span className="form-label" style={{ marginBottom: 0 }}>Time window</span>
@@ -640,8 +653,17 @@ export function MassiveStockOhlcDbEnqueueBlock({
                   Advanced — manual ticker and Unix ms
                 </summary>
                 <p className="ref-jobs-md-enqueue-hint">
-                  Custom-range aggregates for one ticker (Unix ms window, timespan, multiplier). Use when presets do not match your range.
+                  Custom-range aggregates for one ticker. By default, <strong>Enqueue sync</strong> pulls the same multi-period set as row <strong>Sync</strong> (1 day, 1 min, 5 mins, 1 hour) for the Unix window. Enable <em>Single timespan only</em> to fetch exactly one timespan and multiplier.
                 </p>
+                <label className="feed-massive-field" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
+                  <input
+                    type="checkbox"
+                    checked={customBarsSingleTimespanOnly}
+                    onChange={e => setCustomBarsSingleTimespanOnly(e.target.checked)}
+                    disabled={disabled}
+                  />
+                  <span className="form-label" style={{ marginBottom: 0 }}>Single timespan only (one multiplier × timespan, no multi-period)</span>
+                </label>
                 <div className="ref-jobs-md-enqueue-row" style={{ alignItems: 'flex-start', marginTop: 'var(--space-2)' }}>
                   <div className="ref-jobs-md-enqueue-fields">
                     <label className="feed-massive-field" style={{ display: 'block' }}>
@@ -684,7 +706,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
                           className="form-input"
                           value={dbOhlcTs}
                           onChange={e => setDbOhlcTs(e.target.value)}
-                          disabled={disabled}
+                          disabled={disabled || !customBarsSingleTimespanOnly}
                           placeholder="minute"
                           autoComplete="off"
                         />
@@ -695,7 +717,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
                           className="form-input"
                           value={dbOhlcMult}
                           onChange={e => setDbOhlcMult(e.target.value)}
-                          disabled={disabled}
+                          disabled={disabled || !customBarsSingleTimespanOnly}
                           placeholder="1"
                           autoComplete="off"
                         />

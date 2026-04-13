@@ -36,20 +36,3 @@ export async function postAccountSyncSetHeartbeatInterval(
   const j = await r.json().catch(() => ({}))
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
-
-export function subscribeAccountSyncLogs(
-  onLine: (line: string) => void,
-  onError?: (e: Event) => void,
-): EventSource {
-  const es = new EventSource(`${apiBase()}/api/account-sync-daemon/logs/stream`)
-  es.onmessage = (ev) => {
-    try {
-      const data = JSON.parse(ev.data)
-      if (data.line) onLine(data.line)
-    } catch {
-      onLine(ev.data)
-    }
-  }
-  if (onError) es.onerror = onError
-  return es
-}

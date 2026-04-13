@@ -1,4 +1,5 @@
 import type { DaemonHeartbeat, StatusResponse } from '../../types'
+import { computeAccountSyncLamp } from '../../utils/livePageLamps'
 import { ingestRedisHealthLamp, type IngestLamp } from '../../utils/socketIngestLamp'
 
 export type DaemonPanelLamp = 'green' | 'yellow' | 'red' | 'none'
@@ -57,4 +58,52 @@ export function computeIbBrokerGroupLamp(
 /** Map ingest lamp to daemon row lamp (no gray in UI — same as group roll-up). */
 export function ingestLampToBrokerRowLamp(lamp: IngestLamp): 'green' | 'yellow' | 'red' {
   return lamp === 'gray' ? 'yellow' : lamp
+}
+
+/** Map Account Sync Daemon heartbeat lamp to IB broker row (no gray in table). */
+export function accountSyncLampToBrokerRowLamp(
+  lamp: 'green' | 'yellow' | 'red' | 'gray',
+): 'green' | 'yellow' | 'red' {
+  return lamp === 'gray' ? 'yellow' : lamp
+}
+
+/**
+ * IB account card for Account Sync Daemon: socket IB Account Agent + PostgreSQL sync heartbeat.
+ * Mirrors Strategy Trading Daemon IB broker group roll-up (subset of services).
+ */
+export function computeAccountSyncIbGroupLamp(
+  status: StatusResponse | null,
+): { lamp: DaemonPanelLamp; title: string } {
+  if (!status) {
+    return { lamp: 'none', title: 'Monitor GET /status not loaded.' }
+  }
+  const aa = ingestRedisHealthLamp('ib_account_agent', status)
+  const sync = computeAccountSyncLamp(status)
+
+  const aaT = mapIngestToPanel(aa.lamp)
+  const syncT = accountSyncLampToBrokerRowLamp(sync.lamp)
+
+  const tiers: ('green' | 'yellow' | 'red')[] = [aaT, syncT]
+  if (tiers.every(t => t === 'green')) {
+    return {
+      lamp: 'green',
+      title: 'IB Account Agent and PostgreSQL account sync both healthy.',
+    }
+  }
+  if (tiers.some(t => t === 'red')) {
+    const parts: string[] = []
+    if (aaT === 'red') parts.push(aa.title)
+    if (syncT === 'red') parts.push(sync.title)
+    return {
+      lamp: 'red',
+      title: parts.join(' · ') || 'Account sync path unhealthy.',
+    }
+  }
+  const parts: string[] = []
+  if (aaT !== 'green') parts.push(aa.title)
+  if (syncT !== 'green') parts.push(sync.title)
+  return {
+    lamp: 'yellow',
+    title: parts.join(' · ') || 'Account sync path degraded or unknown.',
+  }
 }
