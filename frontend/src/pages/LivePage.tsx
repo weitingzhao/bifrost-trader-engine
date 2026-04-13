@@ -5,9 +5,9 @@ import { fetchBarsBenchmark, fetchMarketStreamsSymbolOrder, fetchOpenOrders, fet
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtSince, fmtTs, fmtUsd, fmtUsdRound0, parseOptionContractKey } from '../utils/format'
 import {
+  computeAccountSyncLamp,
   computeMarketStreamsOk,
   computeOpenOrdersSectionOk,
-  OPEN_ORDERS_POLL_FRESH_MAX_S,
 } from '../utils/livePageLamps'
 import {
   computeDailyChange,
@@ -344,7 +344,11 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
     () => computeMarketStreamsOk(j, quotesMap),
     [j, quotesMap, freshnessTick],
   )
-  const openOrdersSectionOk = computeOpenOrdersSectionOk(openOrdersUpdatedAt)
+  const accountSyncLamp = useMemo(() => computeAccountSyncLamp(j), [j, freshnessTick])
+  const openOrdersSectionOk = useMemo(
+    () => computeOpenOrdersSectionOk(j, Date.now() / 1000),
+    [j, freshnessTick],
+  )
 
   const subscribedSet = useMemo(
     () =>
@@ -632,576 +636,12 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
 
   return (
     <div className="app-page-stack">
-      <div className="card card-operations strategy-active-live-card strategy-section">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
-          <h2 className="daemon-card-title page-title-with-tooltip" style={{ margin: 0 }}>
-            Strategy Active
-            <InfoTooltip text="Current active structure, gate safety set, and allocation. Daemon uses these on next start. To change them, click Manage to open Strategy → Structure." />
-          </h2>
-          {onNavigateToStrategy && (
-            <button
-              type="button"
-              className="btn-secondary page-title-breadcrumb-link"
-              onClick={onNavigateToStrategy}
-              aria-label="Manage strategy"
-            >
-              Manage
-            </button>
-          )}
-        </div>
-        <div className="statusSummary">
-          <div>
-            <strong>Structure:</strong> {j?.strategy?.active?.structure?.name ?? '—'}
-            {j?.strategy?.active?.structure?.id != null && ` (${j?.strategy?.active?.structure?.id})`}
-          </div>
-          <div>
-            <strong>Gate safety:</strong> {j?.strategy?.active?.gate_safety?.name ?? '—'}
-            {j?.strategy?.active?.gate_safety?.id != null && ` (${j?.strategy?.active?.gate_safety?.id})`}
-          </div>
-          <div>
-            <strong>Allocation:</strong> {j?.strategy?.active?.allocation?.name ?? '—'}
-            {j?.strategy?.active?.allocation?.id != null && ` (${j?.strategy?.active?.allocation?.id})`}
-          </div>
-        </div>
-        <p className="section-hint">Daemon uses these on next start.</p>
-      </div>
-
-      <div className="card card-operations realtime-quotes-card">
-        <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
-          <h2 className="daemon-card-title page-title-with-tooltip">
-            <span
-              className={`title-inline-lamp lamp-icon ${marketStreamsOk ? 'green' : 'red'}`}
-              title="Market streams: green when Market API can read Redis quotes and IB ingestor is connected (socket)"
-              aria-hidden
-            >
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M22 12h-4l-3 9L9 3 6 12H2" />
-              </svg>
-            </span>
-            Market Streams
-            <InfoTooltip
-              text={
-                marketStreamsOk
-                  ? `Live quotes: IB ingestor writes Redis (ib:ingester:tick:*); Market API SSE + polling. Symbols: Watchlist ∪ Host & Secondary STK positions. ${watchlistSymbols.length} symbol(s). Refresh reloads quotes and daily benchmarks from the API.`
-                  : 'Requires Market API Redis (quotes) and IB ingestor connected (see System status). Symbols: Watchlist ∪ Host & Secondary positions.'
-              }
-            />
-          </h2>
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            {onNavigateToSubscribe && (
-              <button
-                type="button"
-                className="section-header-icon-btn"
-                onClick={onNavigateToSubscribe}
-                title="Open Subscribe page (IB Event Subscribe — Redis ingestor stream health)"
-                aria-label="Open Subscribe page"
-              >
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M22 12h-4l-3 9L9 3 6 12H2" />
-                </svg>
-              </button>
-            )}
-            <button
-              type="button"
-              className="section-header-icon-btn"
-              onClick={async () => {
-                setStreamSyncFeedback('Refreshing…')
-                try {
-                  const [qRes, bRes] = await Promise.all([
-                    fetchQuotes(),
-                    fetchBarsBenchmark(benchmarkSymbols),
-                  ])
-                  if (qRes.quotes?.length) mergeQuotes(qRes.quotes)
-                  setBenchmarks(normalizeBenchmarkMap(bRes.benchmarks))
-                  setStreamSyncFeedback('Updated')
-                } catch {
-                  setStreamSyncFeedback('Failed')
-                }
-                setTimeout(() => setStreamSyncFeedback(null), 4000)
-              }}
-              title="Reload quotes (GET /quotes) and daily benchmarks (GET /bars/benchmark) from the Market API. Does not change daemon or ingestor processes."
-              aria-label="Refresh quotes and daily benchmarks"
-            >
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                <path d="M3 3v5h5" />
-                <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
-                <path d="M16 21h5v-5" />
-              </svg>
-            </button>
-            {streamSyncFeedback != null && (
-              <span className="section-hint" aria-live="polite">{streamSyncFeedback}</span>
-            )}
-          </div>
-        </div>
-        <div className="realtime-stream-filters-row">
-          {hasStreamAccounts && (
-            <div className="realtime-stream-filter">
-              <span className="section-hint">Account:</span>
-              <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by stream account">
-                {(['all', 'host', 'secondary', 'wishlist'] as const).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={`replay-filter-pill ${streamCategoryFilter === value ? 'active' : ''}`}
-                    onClick={() => setStreamCategoryFilter(value)}
-                    aria-pressed={streamCategoryFilter === value}
-                  >
-                    {value === 'all' ? 'All' : value === 'host' ? 'Host' : value === 'secondary' ? 'Secondary' : 'Wishlist'}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="realtime-stream-filter">
-            <span className="section-hint">Category:</span>
-            <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by position category">
-              <button
-                type="button"
-                className={`replay-filter-pill ${positionCategoryFilter === 'all' ? 'active' : ''}`}
-                onClick={() => setPositionCategoryFilter('all')}
-                aria-pressed={positionCategoryFilter === 'all'}
-              >
-                All
-              </button>
-              {streamCategoryOrder.map((cat) => (
-                <button
-                  key={cat}
-                  type="button"
-                  className={`replay-filter-pill replay-filter-pill-draggable ${positionCategoryFilter === cat ? 'active' : ''}`}
-                  onClick={() => setPositionCategoryFilter(cat)}
-                  aria-pressed={positionCategoryFilter === cat}
-                  draggable
-                  onDragStart={(e) => handleCategoryDragStart(e, cat)}
-                  onDragOver={handleCategoryDragOver}
-                  onDrop={(e) => handleCategoryDrop(e, cat)}
-                  title="Drag to reorder category"
-                >
-                  <span className="replay-filter-pill-grip" aria-hidden>⋮⋮</span>
-                  {cat}
-                </button>
-              ))}
-            </div>
-            {categoryOrderSaving && <span className="section-hint" style={{ marginLeft: '0.5rem' }}>Saving order…</span>}
-          </div>
-        </div>
-        <div className="realtime-quotes-table-wrap">
-          <table className="table-operations realtime-quotes-table">
-            <colgroup>
-              <col style={{ width: '5rem' }} />
-              {hasStreamAccounts && <col style={{ width: '4rem' }} />}
-              {hasStreamAccounts && <col style={{ width: '5rem' }} />}
-              {hasStreamAccounts && <col style={{ width: '5.5rem' }} />}
-              {hasStreamAccounts && <col style={{ width: '4rem' }} />}
-              {hasStreamAccounts && <col style={{ width: '5rem' }} />}
-              {hasStreamAccounts && <col style={{ width: '5.5rem' }} />}
-              <col style={{ width: '4rem' }} />
-              <col style={{ width: '5.5rem' }} />
-              <col style={{ width: '8rem' }} />
-              <col style={{ width: '4.25rem' }} />
-              <col style={{ width: '5.25rem' }} />
-              <col style={{ width: '4.25rem' }} />
-              <col style={{ width: '5.5rem' }} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                {hasStreamAccounts && (
-                  <>
-                    <th colSpan={3} scope="colgroup" className="realtime-quote-colgroup">
-                      Host
-                    </th>
-                    <th colSpan={3} scope="colgroup" className="realtime-quote-colgroup">
-                      Secondary
-                    </th>
-                  </>
-                )}
-                <th>Qty</th>
-                <th>Cost</th>
-                <th title="Last price; Bid and Ask shown as spread vs Last (green if above Last, red if below). Last is colored green/red vs previous close.">Last (Bid / Ask)</th>
-                <th>Daily %</th>
-                <th>Daily $</th>
-                <th>SINCE %</th>
-                <th>SINCE $</th>
-              </tr>
-              {hasStreamAccounts && (
-                <tr>
-                  <th aria-hidden />
-                  <th>Qty</th>
-                  <th>Cost</th>
-                  <th>SINCE $</th>
-                  <th>Qty</th>
-                  <th>Cost</th>
-                  <th>SINCE $</th>
-                  <th aria-hidden colSpan={7} />
-                </tr>
-              )}
-            </thead>
-            <tbody>
-              {filteredRows.length === 0 ? (
-                <tr>
-                  <td colSpan={hasStreamAccounts ? 14 : 8}>
-                    {watchlistRows.length === 0
-                      ? 'No symbols (add symbols in Watchlist, or ensure Event Account (Host/Secondary) have positions, or daemon is running)'
-                      : 'No rows match the selected filters.'}
-                  </td>
-                </tr>
-              ) : (
-                categoryOrderFiltered.map((cat) => (
-                  <Fragment key={cat}>
-                    <tr className="ib-stock-group-header">
-                      <td colSpan={hasStreamAccounts ? 14 : 8}>{cat}</td>
-                    </tr>
-                    {(sortedRowsByCategory[cat] ?? rowsByCategory[cat]).map((row) => {
-                      const {
-                        symbol,
-                        quote: q,
-                        qty,
-                        avgCost,
-                        changePct,
-                        pnlVsBench,
-                        pnlCost,
-                        hostQty,
-                        hostAvgCost,
-                        hostPnlCost,
-                        secondaryQty,
-                        secondaryAvgCost,
-                        secondaryPnlCost,
-                      } = row
-                      const symbolFreshness = getQuoteFreshness(q?.ts)
-                      return (
-                        <tr
-                          key={row.symbol}
-                          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
-                          onDrop={(e) => {
-                            e.preventDefault()
-                            try {
-                              const raw = e.dataTransfer.getData('application/x-market-streams-symbol')
-                              if (!raw) return
-                              const { category: fromCat, symbol: fromSymbol } = JSON.parse(raw) as { category: string; symbol: string }
-                              if (fromCat === cat && fromSymbol !== row.symbol) applySymbolReorder(cat, fromSymbol, row.symbol)
-                            } catch {
-                              /* ignore */
-                            }
-                          }}
-                        >
-                      <td
-                        className={symbolFreshness ? `realtime-quote-symbol realtime-quote-symbol-${symbolFreshness}` : 'realtime-quote-symbol'}
-                        title={[
-                          q?.ts != null ? `Last update ${symbolFreshness === 'fresh' ? '<3s ago' : symbolFreshness === 'stale' ? '3–10s ago' : '>10s ago'}` : null,
-                          getDailyRefTooltip(benchmarks[(symbol || '').trim().toUpperCase()], quoteDisplayLast(q)),
-                        ]
-                          .filter(Boolean)
-                          .join('\n') || undefined}
-                      >
-                        <span
-                          className="realtime-quote-drag-handle"
-                          draggable
-                          onDragStart={(e) => {
-                            e.dataTransfer.setData('application/x-market-streams-symbol', JSON.stringify({ category: cat, symbol: row.symbol }))
-                            e.dataTransfer.effectAllowed = 'move'
-                          }}
-                          title="Drag to reorder symbol"
-                          aria-hidden
-                        >
-                          ⋮⋮
-                        </span>
-                        <strong>{symbol}</strong>
-                      </td>
-                      {hasStreamAccounts && (
-                        <>
-                          <td className="realtime-quote-num">{hostQty != null && Number.isFinite(hostQty) ? hostQty : '—'}</td>
-                          <td className="realtime-quote-num">{hostAvgCost != null && Number.isFinite(hostAvgCost) ? fmtUsd(hostAvgCost) : '—'}</td>
-                          <td className="realtime-quote-num">
-                            {hostPnlCost != null && Number.isFinite(hostPnlCost) ? (
-                              <span className={hostPnlCost > 0 ? 'pnl-positive' : hostPnlCost < 0 ? 'pnl-negative' : ''}>
-                                {fmtUsdRound0(hostPnlCost)}
-                              </span>
-                            ) : (
-                              '—'
-                            )}
-                          </td>
-                          <td className="realtime-quote-num">{secondaryQty != null && Number.isFinite(secondaryQty) ? secondaryQty : '—'}</td>
-                          <td className="realtime-quote-num">{secondaryAvgCost != null && Number.isFinite(secondaryAvgCost) ? fmtUsd(secondaryAvgCost) : '—'}</td>
-                          <td className="realtime-quote-num">
-                            {secondaryPnlCost != null && Number.isFinite(secondaryPnlCost) ? (
-                              <span className={secondaryPnlCost > 0 ? 'pnl-positive' : secondaryPnlCost < 0 ? 'pnl-negative' : ''}>
-                                {fmtUsdRound0(secondaryPnlCost)}
-                              </span>
-                            ) : (
-                              '—'
-                            )}
-                          </td>
-                        </>
-                      )}
-                      <td className="realtime-quote-num">{qty != null && Number.isFinite(qty) ? qty : '—'}</td>
-                      <td className="realtime-quote-num">{avgCost != null && Number.isFinite(avgCost) ? fmtUsd(avgCost) : '—'}</td>
-                      <td className="realtime-quote-num realtime-quote-last-bid-ask">
-                        {q ? (() => {
-                          const displayLast = quoteDisplayLast(q)
-                          const bid = q.bid != null && Number.isFinite(q.bid) ? q.bid : null
-                          const ask = q.ask != null && Number.isFinite(q.ask) ? q.ask : null
-                          const bidDiff = displayLast != null && bid != null ? bid - displayLast : null
-                          const askDiff = displayLast != null && ask != null ? ask - displayLast : null
-                          const bench = benchmarks[(symbol || '').trim().toUpperCase()]
-                          const prevClose = bench && (bench.prev_close != null && Number.isFinite(bench.prev_close))
-                            ? bench.prev_close
-                            : (bench && Number.isFinite(bench.close) ? bench.close : null)
-                          const lastVsPrev = displayLast != null && prevClose != null && prevClose > 0
-                            ? (displayLast > prevClose ? 'pnl-positive' : displayLast < prevClose ? 'pnl-negative' : '')
-                            : ''
-                          return (
-                            <>
-                              {displayLast != null ? (
-                                <span className={lastVsPrev}>{fmtUsd(displayLast)}</span>
-                              ) : '—'}
-                              {bidDiff != null && (
-                                <span className={`realtime-quote-spread ${bidDiff > 0 ? 'pnl-positive' : bidDiff < 0 ? 'pnl-negative' : ''}`} title="Bid vs Last"> {Math.abs(bidDiff).toFixed(2)}</span>
-                              )}
-                              {askDiff != null && (
-                                <span className={`realtime-quote-spread ${askDiff > 0 ? 'pnl-positive' : askDiff < 0 ? 'pnl-negative' : ''}`} title="Ask vs Last"> {Math.abs(askDiff).toFixed(2)}</span>
-                              )}
-                            </>
-                          )
-                        })() : '—'}
-                      </td>
-                      <td className="realtime-quote-num">
-                        {changePct != null && Number.isFinite(changePct) ? (
-                          <span className={changePct > 0 ? 'pnl-positive' : changePct < 0 ? 'pnl-negative' : ''}>
-                            {Math.abs(changePct).toFixed(2)}%
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td className="realtime-quote-num">
-                        {pnlVsBench != null && Number.isFinite(pnlVsBench) ? (
-                          <span className={pnlVsBench > 0 ? 'pnl-positive' : pnlVsBench < 0 ? 'pnl-negative' : ''}>
-                            {fmtUsd(Math.abs(pnlVsBench))}
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td className="realtime-quote-num">
-                        {(() => {
-                          const dl = quoteDisplayLast(q)
-                          if (avgCost == null || !Number.isFinite(avgCost) || avgCost <= 0 || dl == null) return '—'
-                          const sincePct = ((dl - avgCost) / avgCost) * 100
-                          return (
-                            <span className={sincePct > 0 ? 'pnl-positive' : sincePct < 0 ? 'pnl-negative' : ''}>
-                              {Math.abs(sincePct).toFixed(2)}%
-                            </span>
-                          )
-                        })()}
-                      </td>
-                      <td className="realtime-quote-num">
-                        {pnlCost != null && Number.isFinite(pnlCost) ? (
-                          <span className={pnlCost > 0 ? 'pnl-positive' : pnlCost < 0 ? 'pnl-negative' : ''}>
-                            {fmtUsdRound0(pnlCost)}
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                    </tr>
-                      )
-                    })}
-                  </Fragment>
-                ))
-              )}
-              {filteredRows.length > 0 && (() => {
-                const hostCostSum = filteredRows.reduce((a, r) => {
-                  const q = r.hostQty != null && Number.isFinite(r.hostQty) ? r.hostQty : 0
-                  const c = r.hostAvgCost != null && Number.isFinite(r.hostAvgCost) ? r.hostAvgCost : 0
-                  return a + q * c
-                }, 0)
-                const hostPnlSum = filteredRows.reduce((a, r) => a + (r.hostPnlCost != null && Number.isFinite(r.hostPnlCost) ? r.hostPnlCost : 0), 0)
-                const secondaryCostSum = filteredRows.reduce((a, r) => {
-                  const q = r.secondaryQty != null && Number.isFinite(r.secondaryQty) ? r.secondaryQty : 0
-                  const c = r.secondaryAvgCost != null && Number.isFinite(r.secondaryAvgCost) ? r.secondaryAvgCost : 0
-                  return a + q * c
-                }, 0)
-                const secondaryPnlSum = filteredRows.reduce((a, r) => a + (r.secondaryPnlCost != null && Number.isFinite(r.secondaryPnlCost) ? r.secondaryPnlCost : 0), 0)
-                const totalCost = filteredRows.reduce((a, r) => {
-                  const q = r.qty != null && Number.isFinite(r.qty) ? r.qty : 0
-                  const c = r.avgCost != null && Number.isFinite(r.avgCost) ? r.avgCost : 0
-                  return a + q * c
-                }, 0)
-                const totalCostPnl = filteredRows.reduce((a, r) => a + (r.pnlCost != null && Number.isFinite(r.pnlCost) ? r.pnlCost : 0), 0)
-                const totalDailyDollar = filteredRows.reduce((a, r) => a + (r.pnlVsBench != null && Number.isFinite(r.pnlVsBench) ? r.pnlVsBench : 0), 0)
-                const sumLastQty = filteredRows.reduce((a, r) => {
-                  const q = r.qty != null && Number.isFinite(r.qty) ? r.qty : 0
-                  const last = quoteDisplayLast(r.quote) ?? 0
-                  return a + last * q
-                }, 0)
-                const totalDailyDenom = sumLastQty - totalDailyDollar
-                const totalDailyPct = totalDailyDenom > 0 && Number.isFinite(totalDailyDollar) ? (totalDailyDollar / totalDailyDenom) * 100 : null
-                const totalPct = totalCost > 0 && Number.isFinite(totalCostPnl) ? (totalCostPnl / totalCost) * 100 : null
-                return (
-                  <tr className="realtime-quotes-sum-row">
-                    <td><strong>Total</strong></td>
-                    {hasStreamAccounts && (
-                      <>
-                        <td className="realtime-quote-num">—</td>
-                        <td className="realtime-quote-num">{hostCostSum !== 0 ? fmtUsdRound0(hostCostSum) : '—'}</td>
-                        <td className="realtime-quote-num">
-                          <span className={hostPnlSum > 0 ? 'pnl-positive' : hostPnlSum < 0 ? 'pnl-negative' : ''}>
-                            {hostPnlSum !== 0 ? fmtUsdRound0(hostPnlSum) : '—'}
-                          </span>
-                        </td>
-                        <td className="realtime-quote-num">—</td>
-                        <td className="realtime-quote-num">{secondaryCostSum !== 0 ? fmtUsdRound0(secondaryCostSum) : '—'}</td>
-                        <td className="realtime-quote-num">
-                          <span className={secondaryPnlSum > 0 ? 'pnl-positive' : secondaryPnlSum < 0 ? 'pnl-negative' : ''}>
-                            {secondaryPnlSum !== 0 ? fmtUsdRound0(secondaryPnlSum) : '—'}
-                          </span>
-                        </td>
-                      </>
-                    )}
-                    <td className="realtime-quote-num">—</td>
-                    <td className="realtime-quote-num">{totalCost !== 0 ? fmtUsdRound0(totalCost) : '—'}</td>
-                    <td className="realtime-quote-num">—</td>
-                    <td className="realtime-quote-num">
-                      {totalDailyPct != null && Number.isFinite(totalDailyPct) ? (
-                        <span className={totalDailyPct > 0 ? 'pnl-positive' : totalDailyPct < 0 ? 'pnl-negative' : ''}>
-                          {Math.abs(totalDailyPct).toFixed(2)}%
-                        </span>
-                      ) : '—'}
-                    </td>
-                    <td className="realtime-quote-num">
-                      <span className={totalDailyDollar > 0 ? 'pnl-positive' : totalDailyDollar < 0 ? 'pnl-negative' : ''}>
-                        {totalDailyDollar !== 0 ? fmtUsdRound0(totalDailyDollar) : '—'}
-                      </span>
-                    </td>
-                    <td className="realtime-quote-num">
-                      {totalPct != null && Number.isFinite(totalPct) ? (
-                        <span className={totalPct > 0 ? 'pnl-positive' : totalPct < 0 ? 'pnl-negative' : ''}>
-                          {Math.abs(totalPct).toFixed(2)}%
-                        </span>
-                      ) : '—'}
-                    </td>
-                    <td className="realtime-quote-num">
-                      <span className={totalCostPnl > 0 ? 'pnl-positive' : totalCostPnl < 0 ? 'pnl-negative' : ''}>
-                        {totalCostPnl !== 0 ? fmtUsdRound0(totalCostPnl) : '—'}
-                      </span>
-                    </td>
-                  </tr>
-                )
-              })()}
-            </tbody>
-          </table>
-        </div>
-        {filteredRows.length > 0 &&
-          (() => {
-            const totalCostPnl = filteredRows.reduce((acc, row) => {
-              const v = row.pnlCost
-              return acc + (v != null && Number.isFinite(v) ? v : 0)
-            }, 0)
-            const totalCost = filteredRows.reduce((acc, row) => {
-              const qty = row.qty != null && Number.isFinite(row.qty) ? row.qty : 0
-              const cost = row.avgCost != null && Number.isFinite(row.avgCost) ? row.avgCost : 0
-              return acc + qty * cost
-            }, 0)
-            const totalPct = totalCost > 0 && Number.isFinite(totalCostPnl) ? (totalCostPnl / totalCost) * 100 : null
-            const totalDailyDollar = filteredRows.reduce((acc, row) => {
-              const v = row.pnlVsBench
-              return acc + (v != null && Number.isFinite(v) ? v : 0)
-            }, 0)
-            const sumLastQty = filteredRows.reduce((acc, row) => {
-              const qty = row.qty != null && Number.isFinite(row.qty) ? row.qty : 0
-              const last = quoteDisplayLast(row.quote) ?? 0
-              return acc + last * qty
-            }, 0)
-            const totalDailyDenom = sumLastQty - totalDailyDollar
-            const totalDailyPct =
-              totalDailyDenom > 0 && Number.isFinite(totalDailyDollar)
-                ? (totalDailyDollar / totalDailyDenom) * 100
-                : null
-            return (
-              <div className="watchlist-summary-row" style={{ marginTop: 'var(--space-3)' }}>
-                <span className="watchlist-summary-segment">
-                  SINCE $
-                  <span className={`watchlist-summary-value ${totalCostPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-                    {fmtUsdRound0(totalCostPnl)}
-                  </span>
-                </span>
-                {totalPct != null && Number.isFinite(totalPct) && (
-                  <span className="watchlist-summary-segment">
-                    SINCE %
-                    <span className={`watchlist-summary-value watchlist-summary-value-pct ${totalPct >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-                      {totalPct >= 0 ? '+' : ''}{totalPct.toFixed(2)}%
-                    </span>
-                  </span>
-                )}
-                {(Number.isFinite(totalDailyDollar) || (totalDailyPct != null && Number.isFinite(totalDailyPct))) && (
-                  <>
-                    <span className="watchlist-summary-segment">
-                      DAILY $
-                      <span className={`watchlist-summary-value ${totalDailyDollar >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-                        {fmtUsdRound0(totalDailyDollar)}
-                      </span>
-                    </span>
-                    {totalDailyPct != null && Number.isFinite(totalDailyPct) && (
-                      <span className="watchlist-summary-segment">
-                        DAILY %
-                        <span className={`watchlist-summary-value watchlist-summary-value-pct ${totalDailyPct >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-                          {totalDailyPct >= 0 ? '+' : ''}{totalDailyPct.toFixed(2)}%
-                        </span>
-                      </span>
-                    )}
-                  </>
-                )}
-              </div>
-            )
-          })()}
-      </div>
-
-      {watchlistOptionItems.length > 0 && (
-        <div className="card card-operations watchlist-options-live-card" style={{ marginTop: 'var(--space-3)' }}>
-          <h2 className="daemon-card-title" style={{ marginBottom: '0.5rem' }}>
-            Watchlist Options
-            <InfoTooltip text="Option contracts from Watchlist; quotes from daemon (contract_quote_live). Updates every few seconds." />
-          </h2>
-          <div className="realtime-quotes-table-wrap">
-            <table className="table-operations realtime-quotes-table" aria-label="Watchlist option quotes">
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th title="Last price; Bid and Ask shown as spread vs Last">Last (Bid / Ask)</th>
-                  <th>Expiry</th>
-                  <th>Right</th>
-                  <th>Strike</th>
-                  <th>Category</th>
-                </tr>
-              </thead>
-              <tbody>
-                {watchlistOptionItems.map((item) => {
-                  const q = quotesByContractKey[item.contract_key]
-                  const categoryName = (item.category ?? '').trim() || 'Uncategorized'
-                  return (
-                    <tr key={item.contract_key}>
-                      <td title={item.contract_key} style={{ fontWeight: 'bold' }}>{watchlistOptionLabel(item)}</td>
-                      <td className="realtime-quote-num realtime-quote-last-bid-ask">{renderLastBidAskOption(q)}</td>
-                      <td>{formatExpiry(item.expiry)}</td>
-                      <td>{formatOptionRight(item.option_right)}</td>
-                      <td>{item.strike != null ? formatStrike(item.strike) : '—'}</td>
-                      <td>{categoryName}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
       <div className="card card-operations open-orders-live-card">
         <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
           <h2 className="daemon-card-title page-title-with-tooltip">
             <span
               className={`title-inline-lamp lamp-icon ${openOrdersSectionOk ? 'green' : 'red'}`}
-              title={`Open orders: green when GET /open-orders succeeded within ${OPEN_ORDERS_POLL_FRESH_MAX_S}s (polled every 6s).${openOrdersUpdatedAt != null ? ` Last poll: ${Math.round(Date.now() / 1000 - openOrdersUpdatedAt)}s ago.` : ' No successful poll yet.'}`}
+              title={`Open orders lamp: green when Account Sync Daemon is healthy (GET /status account_sync_daemon) and heartbeat is fresh. ${accountSyncLamp.title}${openOrdersUpdatedAt != null ? ` · Last UI read (GET /open-orders): ${fmtSince(openOrdersUpdatedAt)} ago.` : ''}`}
               aria-hidden
             >
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -1209,7 +649,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
               </svg>
             </span>
             Open Orders
-            <InfoTooltip text="Unfilled orders from daemon (event-driven). Daemon writes to DB on orderStatus/openOrder events; this page polls GET /open-orders and also receives open_orders via GET /status. Data source: PostgreSQL table daemon_open_orders. Account ID is the IB account that placed each order. Updates every few seconds." />
+            <InfoTooltip text="Unfilled orders from PostgreSQL (daemon_open_orders). The Account Sync Daemon writes this table from the IB account stream. This page polls GET /open-orders every few seconds for UI updates. Account ID is the IB account that placed each order." />
           </h2>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             {openOrdersUpdatedAt != null && (
@@ -1354,6 +794,584 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
             </>
           )}
         </div>
+      </div>
+
+      <div className="card card-operations realtime-quotes-card">
+        <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
+          <h2 className="daemon-card-title page-title-with-tooltip">
+            <span
+              className={`title-inline-lamp lamp-icon ${marketStreamsOk ? 'green' : 'red'}`}
+              title="Market streams: green when Market API can read Redis quotes and IB ingestor is connected (socket)"
+              aria-hidden
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M22 12h-4l-3 9L9 3 6 12H2" />
+              </svg>
+            </span>
+            Market Streams
+            <InfoTooltip
+              text={
+                marketStreamsOk
+                  ? `Live quotes: IB ingestor writes Redis (ib:ingester:tick:*); Market API SSE + polling. Symbols: Watchlist ∪ Host & Secondary STK positions. ${watchlistSymbols.length} symbol(s). Refresh reloads quotes and daily benchmarks from the API.`
+                  : 'Requires Market API Redis (quotes) and IB ingestor connected (see System status). Symbols: Watchlist ∪ Host & Secondary positions.'
+              }
+            />
+          </h2>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {onNavigateToSubscribe && (
+              <button
+                type="button"
+                className="section-header-icon-btn"
+                onClick={onNavigateToSubscribe}
+                title="Open Subscribe page (IB Event Subscribe — Redis ingestor stream health)"
+                aria-label="Open Subscribe page"
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M22 12h-4l-3 9L9 3 6 12H2" />
+                </svg>
+              </button>
+            )}
+            <button
+              type="button"
+              className="section-header-icon-btn"
+              onClick={async () => {
+                setStreamSyncFeedback('Refreshing…')
+                try {
+                  const [qRes, bRes] = await Promise.all([
+                    fetchQuotes(),
+                    fetchBarsBenchmark(benchmarkSymbols),
+                  ])
+                  if (qRes.quotes?.length) mergeQuotes(qRes.quotes)
+                  setBenchmarks(normalizeBenchmarkMap(bRes.benchmarks))
+                  setStreamSyncFeedback('Updated')
+                } catch {
+                  setStreamSyncFeedback('Failed')
+                }
+                setTimeout(() => setStreamSyncFeedback(null), 4000)
+              }}
+              title="Reload quotes (GET /quotes) and daily benchmarks (GET /bars/benchmark) from the Market API. Does not change daemon or ingestor processes."
+              aria-label="Refresh quotes and daily benchmarks"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                <path d="M3 3v5h5" />
+                <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                <path d="M16 21h5v-5" />
+              </svg>
+            </button>
+            {streamSyncFeedback != null && (
+              <span className="section-hint" aria-live="polite">{streamSyncFeedback}</span>
+            )}
+          </div>
+        </div>
+        <div className="realtime-stream-filters-row">
+          {hasStreamAccounts && (
+            <div className="realtime-stream-filter">
+              <span className="section-hint">Account:</span>
+              <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by stream account">
+                {(['all', 'host', 'secondary', 'wishlist'] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`replay-filter-pill ${streamCategoryFilter === value ? 'active' : ''}`}
+                    onClick={() => setStreamCategoryFilter(value)}
+                    aria-pressed={streamCategoryFilter === value}
+                  >
+                    {value === 'all' ? 'All' : value === 'host' ? 'Host' : value === 'secondary' ? 'Secondary' : 'Wishlist'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="realtime-stream-filter">
+            <span className="section-hint">Category:</span>
+            <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by position category">
+              <button
+                type="button"
+                className={`replay-filter-pill ${positionCategoryFilter === 'all' ? 'active' : ''}`}
+                onClick={() => setPositionCategoryFilter('all')}
+                aria-pressed={positionCategoryFilter === 'all'}
+              >
+                All
+              </button>
+              {streamCategoryOrder.map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  className={`replay-filter-pill replay-filter-pill-draggable ${positionCategoryFilter === cat ? 'active' : ''}`}
+                  onClick={() => setPositionCategoryFilter(cat)}
+                  aria-pressed={positionCategoryFilter === cat}
+                  draggable
+                  onDragStart={(e) => handleCategoryDragStart(e, cat)}
+                  onDragOver={handleCategoryDragOver}
+                  onDrop={(e) => handleCategoryDrop(e, cat)}
+                  title="Drag to reorder category"
+                >
+                  <span className="replay-filter-pill-grip" aria-hidden>⋮⋮</span>
+                  {cat}
+                </button>
+              ))}
+            </div>
+            {categoryOrderSaving && <span className="section-hint" style={{ marginLeft: '0.5rem' }}>Saving order…</span>}
+          </div>
+        </div>
+        <div className="realtime-quotes-table-wrap">
+          <table className="table-operations realtime-quotes-table">
+            <colgroup>
+              <col style={{ width: '5rem' }} />
+              {hasStreamAccounts && <col style={{ width: '4rem' }} />}
+              {hasStreamAccounts && <col style={{ width: '5rem' }} />}
+              {hasStreamAccounts && <col style={{ width: '5.5rem' }} />}
+              {hasStreamAccounts && <col style={{ width: '4rem' }} />}
+              {hasStreamAccounts && <col style={{ width: '5rem' }} />}
+              {hasStreamAccounts && <col style={{ width: '5.5rem' }} />}
+              <col style={{ width: '4rem' }} />
+              <col style={{ width: '5.5rem' }} />
+              <col style={{ width: '8rem' }} />
+              <col style={{ width: '6.25rem' }} />
+              <col style={{ width: '6.25rem' }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                {hasStreamAccounts && (
+                  <>
+                    <th colSpan={3} scope="colgroup" className="realtime-quote-colgroup">
+                      Host
+                    </th>
+                    <th colSpan={3} scope="colgroup" className="realtime-quote-colgroup">
+                      Secondary
+                    </th>
+                  </>
+                )}
+                <th>Qty</th>
+                <th>Cost</th>
+                <th title="Last price; Bid and Ask shown as spread vs Last (green if above Last, red if below). Last is colored green/red vs previous close.">Last (Bid / Ask)</th>
+                <th scope="col" className="realtime-quote-pnl-stacked-th" title="Daily change vs prior close: percent (top) and dollar P&amp;L (bottom).">
+                  Daily
+                  <span className="realtime-quote-pnl-stacked-th-sub">% / $</span>
+                </th>
+                <th scope="col" className="realtime-quote-pnl-stacked-th" title="Since average cost: percent (top) and dollar P&amp;L (bottom).">
+                  SINCE
+                  <span className="realtime-quote-pnl-stacked-th-sub">% / $</span>
+                </th>
+              </tr>
+              {hasStreamAccounts && (
+                <tr>
+                  <th aria-hidden />
+                  <th>Qty</th>
+                  <th>Cost</th>
+                  <th>SINCE $</th>
+                  <th>Qty</th>
+                  <th>Cost</th>
+                  <th>SINCE $</th>
+                  <th aria-hidden colSpan={5} />
+                </tr>
+              )}
+            </thead>
+            <tbody>
+              {filteredRows.length === 0 ? (
+                <tr>
+                  <td colSpan={hasStreamAccounts ? 12 : 6}>
+                    {watchlistRows.length === 0
+                      ? 'No symbols (add symbols in Watchlist, or ensure Event Account (Host/Secondary) have positions, or daemon is running)'
+                      : 'No rows match the selected filters.'}
+                  </td>
+                </tr>
+              ) : (
+                categoryOrderFiltered.map((cat) => (
+                  <Fragment key={cat}>
+                    <tr className="ib-stock-group-header">
+                      <td colSpan={hasStreamAccounts ? 12 : 6}>{cat}</td>
+                    </tr>
+                    {(sortedRowsByCategory[cat] ?? rowsByCategory[cat]).map((row) => {
+                      const {
+                        symbol,
+                        quote: q,
+                        qty,
+                        avgCost,
+                        changePct,
+                        pnlVsBench,
+                        pnlCost,
+                        hostQty,
+                        hostAvgCost,
+                        hostPnlCost,
+                        secondaryQty,
+                        secondaryAvgCost,
+                        secondaryPnlCost,
+                      } = row
+                      const symbolFreshness = getQuoteFreshness(q?.ts)
+                      return (
+                        <tr
+                          key={row.symbol}
+                          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
+                          onDrop={(e) => {
+                            e.preventDefault()
+                            try {
+                              const raw = e.dataTransfer.getData('application/x-market-streams-symbol')
+                              if (!raw) return
+                              const { category: fromCat, symbol: fromSymbol } = JSON.parse(raw) as { category: string; symbol: string }
+                              if (fromCat === cat && fromSymbol !== row.symbol) applySymbolReorder(cat, fromSymbol, row.symbol)
+                            } catch {
+                              /* ignore */
+                            }
+                          }}
+                        >
+                      <td
+                        className={symbolFreshness ? `realtime-quote-symbol realtime-quote-symbol-${symbolFreshness}` : 'realtime-quote-symbol'}
+                        title={[
+                          q?.ts != null ? `Last update ${symbolFreshness === 'fresh' ? '<3s ago' : symbolFreshness === 'stale' ? '3–10s ago' : '>10s ago'}` : null,
+                          getDailyRefTooltip(benchmarks[(symbol || '').trim().toUpperCase()], quoteDisplayLast(q)),
+                        ]
+                          .filter(Boolean)
+                          .join('\n') || undefined}
+                      >
+                        <span
+                          className="realtime-quote-drag-handle"
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('application/x-market-streams-symbol', JSON.stringify({ category: cat, symbol: row.symbol }))
+                            e.dataTransfer.effectAllowed = 'move'
+                          }}
+                          title="Drag to reorder symbol"
+                          aria-hidden
+                        >
+                          ⋮⋮
+                        </span>
+                        <strong>{symbol}</strong>
+                      </td>
+                      {hasStreamAccounts && (
+                        <>
+                          <td className="realtime-quote-num">{hostQty != null && Number.isFinite(hostQty) ? hostQty : '—'}</td>
+                          <td className="realtime-quote-num">{hostAvgCost != null && Number.isFinite(hostAvgCost) ? fmtUsd(hostAvgCost) : '—'}</td>
+                          <td className="realtime-quote-num">
+                            {hostPnlCost != null && Number.isFinite(hostPnlCost) ? (
+                              <span className={hostPnlCost > 0 ? 'pnl-positive' : hostPnlCost < 0 ? 'pnl-negative' : ''}>
+                                {fmtUsdRound0(hostPnlCost)}
+                              </span>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td className="realtime-quote-num">{secondaryQty != null && Number.isFinite(secondaryQty) ? secondaryQty : '—'}</td>
+                          <td className="realtime-quote-num">{secondaryAvgCost != null && Number.isFinite(secondaryAvgCost) ? fmtUsd(secondaryAvgCost) : '—'}</td>
+                          <td className="realtime-quote-num">
+                            {secondaryPnlCost != null && Number.isFinite(secondaryPnlCost) ? (
+                              <span className={secondaryPnlCost > 0 ? 'pnl-positive' : secondaryPnlCost < 0 ? 'pnl-negative' : ''}>
+                                {fmtUsdRound0(secondaryPnlCost)}
+                              </span>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                        </>
+                      )}
+                      <td className="realtime-quote-num">{qty != null && Number.isFinite(qty) ? qty : '—'}</td>
+                      <td className="realtime-quote-num">{avgCost != null && Number.isFinite(avgCost) ? fmtUsd(avgCost) : '—'}</td>
+                      <td className="realtime-quote-num realtime-quote-last-bid-ask">
+                        {q ? (() => {
+                          const displayLast = quoteDisplayLast(q)
+                          const bid = q.bid != null && Number.isFinite(q.bid) ? q.bid : null
+                          const ask = q.ask != null && Number.isFinite(q.ask) ? q.ask : null
+                          const bidDiff = displayLast != null && bid != null ? bid - displayLast : null
+                          const askDiff = displayLast != null && ask != null ? ask - displayLast : null
+                          const bench = benchmarks[(symbol || '').trim().toUpperCase()]
+                          const prevClose = bench && (bench.prev_close != null && Number.isFinite(bench.prev_close))
+                            ? bench.prev_close
+                            : (bench && Number.isFinite(bench.close) ? bench.close : null)
+                          const lastVsPrev = displayLast != null && prevClose != null && prevClose > 0
+                            ? (displayLast > prevClose ? 'pnl-positive' : displayLast < prevClose ? 'pnl-negative' : '')
+                            : ''
+                          return (
+                            <>
+                              {displayLast != null ? (
+                                <span className={lastVsPrev}>{fmtUsd(displayLast)}</span>
+                              ) : '—'}
+                              {bidDiff != null && (
+                                <span className={`realtime-quote-spread ${bidDiff > 0 ? 'pnl-positive' : bidDiff < 0 ? 'pnl-negative' : ''}`} title="Bid vs Last"> {Math.abs(bidDiff).toFixed(2)}</span>
+                              )}
+                              {askDiff != null && (
+                                <span className={`realtime-quote-spread ${askDiff > 0 ? 'pnl-positive' : askDiff < 0 ? 'pnl-negative' : ''}`} title="Ask vs Last"> {Math.abs(askDiff).toFixed(2)}</span>
+                              )}
+                            </>
+                          )
+                        })() : '—'}
+                      </td>
+                      <td className="realtime-quote-num realtime-quote-pnl-stacked">
+                        <span className="realtime-quote-pnl-stacked-line">
+                          {changePct != null && Number.isFinite(changePct) ? (
+                            <span className={changePct > 0 ? 'pnl-positive' : changePct < 0 ? 'pnl-negative' : ''}>
+                              {Math.abs(changePct).toFixed(2)}%
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </span>
+                        <span className="realtime-quote-pnl-stacked-line">
+                          {pnlVsBench != null && Number.isFinite(pnlVsBench) ? (
+                            <span className={pnlVsBench > 0 ? 'pnl-positive' : pnlVsBench < 0 ? 'pnl-negative' : ''}>
+                              {fmtUsd(Math.abs(pnlVsBench))}
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </span>
+                      </td>
+                      <td className="realtime-quote-num realtime-quote-pnl-stacked">
+                        <span className="realtime-quote-pnl-stacked-line">
+                          {(() => {
+                            const dl = quoteDisplayLast(q)
+                            if (avgCost == null || !Number.isFinite(avgCost) || avgCost <= 0 || dl == null) return '—'
+                            const sincePct = ((dl - avgCost) / avgCost) * 100
+                            return (
+                              <span className={sincePct > 0 ? 'pnl-positive' : sincePct < 0 ? 'pnl-negative' : ''}>
+                                {Math.abs(sincePct).toFixed(2)}%
+                              </span>
+                            )
+                          })()}
+                        </span>
+                        <span className="realtime-quote-pnl-stacked-line">
+                          {pnlCost != null && Number.isFinite(pnlCost) ? (
+                            <span className={pnlCost > 0 ? 'pnl-positive' : pnlCost < 0 ? 'pnl-negative' : ''}>
+                              {fmtUsdRound0(pnlCost)}
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </span>
+                      </td>
+                    </tr>
+                      )
+                    })}
+                  </Fragment>
+                ))
+              )}
+              {filteredRows.length > 0 && (() => {
+                const hostCostSum = filteredRows.reduce((a, r) => {
+                  const q = r.hostQty != null && Number.isFinite(r.hostQty) ? r.hostQty : 0
+                  const c = r.hostAvgCost != null && Number.isFinite(r.hostAvgCost) ? r.hostAvgCost : 0
+                  return a + q * c
+                }, 0)
+                const hostPnlSum = filteredRows.reduce((a, r) => a + (r.hostPnlCost != null && Number.isFinite(r.hostPnlCost) ? r.hostPnlCost : 0), 0)
+                const secondaryCostSum = filteredRows.reduce((a, r) => {
+                  const q = r.secondaryQty != null && Number.isFinite(r.secondaryQty) ? r.secondaryQty : 0
+                  const c = r.secondaryAvgCost != null && Number.isFinite(r.secondaryAvgCost) ? r.secondaryAvgCost : 0
+                  return a + q * c
+                }, 0)
+                const secondaryPnlSum = filteredRows.reduce((a, r) => a + (r.secondaryPnlCost != null && Number.isFinite(r.secondaryPnlCost) ? r.secondaryPnlCost : 0), 0)
+                const totalCost = filteredRows.reduce((a, r) => {
+                  const q = r.qty != null && Number.isFinite(r.qty) ? r.qty : 0
+                  const c = r.avgCost != null && Number.isFinite(r.avgCost) ? r.avgCost : 0
+                  return a + q * c
+                }, 0)
+                const totalCostPnl = filteredRows.reduce((a, r) => a + (r.pnlCost != null && Number.isFinite(r.pnlCost) ? r.pnlCost : 0), 0)
+                const totalDailyDollar = filteredRows.reduce((a, r) => a + (r.pnlVsBench != null && Number.isFinite(r.pnlVsBench) ? r.pnlVsBench : 0), 0)
+                const sumLastQty = filteredRows.reduce((a, r) => {
+                  const q = r.qty != null && Number.isFinite(r.qty) ? r.qty : 0
+                  const last = quoteDisplayLast(r.quote) ?? 0
+                  return a + last * q
+                }, 0)
+                const totalDailyDenom = sumLastQty - totalDailyDollar
+                const totalDailyPct = totalDailyDenom > 0 && Number.isFinite(totalDailyDollar) ? (totalDailyDollar / totalDailyDenom) * 100 : null
+                const totalPct = totalCost > 0 && Number.isFinite(totalCostPnl) ? (totalCostPnl / totalCost) * 100 : null
+                return (
+                  <tr className="realtime-quotes-sum-row">
+                    <td><strong>Total</strong></td>
+                    {hasStreamAccounts && (
+                      <>
+                        <td className="realtime-quote-num">—</td>
+                        <td className="realtime-quote-num">{hostCostSum !== 0 ? fmtUsdRound0(hostCostSum) : '—'}</td>
+                        <td className="realtime-quote-num">
+                          <span className={hostPnlSum > 0 ? 'pnl-positive' : hostPnlSum < 0 ? 'pnl-negative' : ''}>
+                            {hostPnlSum !== 0 ? fmtUsdRound0(hostPnlSum) : '—'}
+                          </span>
+                        </td>
+                        <td className="realtime-quote-num">—</td>
+                        <td className="realtime-quote-num">{secondaryCostSum !== 0 ? fmtUsdRound0(secondaryCostSum) : '—'}</td>
+                        <td className="realtime-quote-num">
+                          <span className={secondaryPnlSum > 0 ? 'pnl-positive' : secondaryPnlSum < 0 ? 'pnl-negative' : ''}>
+                            {secondaryPnlSum !== 0 ? fmtUsdRound0(secondaryPnlSum) : '—'}
+                          </span>
+                        </td>
+                      </>
+                    )}
+                    <td className="realtime-quote-num">—</td>
+                    <td className="realtime-quote-num">{totalCost !== 0 ? fmtUsdRound0(totalCost) : '—'}</td>
+                    <td className="realtime-quote-num">—</td>
+                    <td className="realtime-quote-num realtime-quote-pnl-stacked">
+                      <span className="realtime-quote-pnl-stacked-line">
+                        {totalDailyPct != null && Number.isFinite(totalDailyPct) ? (
+                          <span className={totalDailyPct > 0 ? 'pnl-positive' : totalDailyPct < 0 ? 'pnl-negative' : ''}>
+                            {Math.abs(totalDailyPct).toFixed(2)}%
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </span>
+                      <span className="realtime-quote-pnl-stacked-line">
+                        <span className={totalDailyDollar > 0 ? 'pnl-positive' : totalDailyDollar < 0 ? 'pnl-negative' : ''}>
+                          {totalDailyDollar !== 0 ? fmtUsdRound0(totalDailyDollar) : '—'}
+                        </span>
+                      </span>
+                    </td>
+                    <td className="realtime-quote-num realtime-quote-pnl-stacked">
+                      <span className="realtime-quote-pnl-stacked-line">
+                        {totalPct != null && Number.isFinite(totalPct) ? (
+                          <span className={totalPct > 0 ? 'pnl-positive' : totalPct < 0 ? 'pnl-negative' : ''}>
+                            {Math.abs(totalPct).toFixed(2)}%
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </span>
+                      <span className="realtime-quote-pnl-stacked-line">
+                        <span className={totalCostPnl > 0 ? 'pnl-positive' : totalCostPnl < 0 ? 'pnl-negative' : ''}>
+                          {totalCostPnl !== 0 ? fmtUsdRound0(totalCostPnl) : '—'}
+                        </span>
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })()}
+            </tbody>
+          </table>
+        </div>
+        {filteredRows.length > 0 &&
+          (() => {
+            const totalCostPnl = filteredRows.reduce((acc, row) => {
+              const v = row.pnlCost
+              return acc + (v != null && Number.isFinite(v) ? v : 0)
+            }, 0)
+            const totalCost = filteredRows.reduce((acc, row) => {
+              const qty = row.qty != null && Number.isFinite(row.qty) ? row.qty : 0
+              const cost = row.avgCost != null && Number.isFinite(row.avgCost) ? row.avgCost : 0
+              return acc + qty * cost
+            }, 0)
+            const totalPct = totalCost > 0 && Number.isFinite(totalCostPnl) ? (totalCostPnl / totalCost) * 100 : null
+            const totalDailyDollar = filteredRows.reduce((acc, row) => {
+              const v = row.pnlVsBench
+              return acc + (v != null && Number.isFinite(v) ? v : 0)
+            }, 0)
+            const sumLastQty = filteredRows.reduce((acc, row) => {
+              const qty = row.qty != null && Number.isFinite(row.qty) ? row.qty : 0
+              const last = quoteDisplayLast(row.quote) ?? 0
+              return acc + last * qty
+            }, 0)
+            const totalDailyDenom = sumLastQty - totalDailyDollar
+            const totalDailyPct =
+              totalDailyDenom > 0 && Number.isFinite(totalDailyDollar)
+                ? (totalDailyDollar / totalDailyDenom) * 100
+                : null
+            return (
+              <div className="watchlist-summary-row" style={{ marginTop: 'var(--space-3)' }}>
+                <span className="watchlist-summary-segment">
+                  SINCE $
+                  <span className={`watchlist-summary-value ${totalCostPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                    {fmtUsdRound0(totalCostPnl)}
+                  </span>
+                </span>
+                {totalPct != null && Number.isFinite(totalPct) && (
+                  <span className="watchlist-summary-segment">
+                    SINCE %
+                    <span className={`watchlist-summary-value watchlist-summary-value-pct ${totalPct >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                      {totalPct >= 0 ? '+' : ''}{totalPct.toFixed(2)}%
+                    </span>
+                  </span>
+                )}
+                {(Number.isFinite(totalDailyDollar) || (totalDailyPct != null && Number.isFinite(totalDailyPct))) && (
+                  <>
+                    <span className="watchlist-summary-segment">
+                      DAILY $
+                      <span className={`watchlist-summary-value ${totalDailyDollar >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                        {fmtUsdRound0(totalDailyDollar)}
+                      </span>
+                    </span>
+                    {totalDailyPct != null && Number.isFinite(totalDailyPct) && (
+                      <span className="watchlist-summary-segment">
+                        DAILY %
+                        <span className={`watchlist-summary-value watchlist-summary-value-pct ${totalDailyPct >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                          {totalDailyPct >= 0 ? '+' : ''}{totalDailyPct.toFixed(2)}%
+                        </span>
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+            )
+          })()}
+      </div>
+
+      {watchlistOptionItems.length > 0 && (
+        <div className="card card-operations watchlist-options-live-card" style={{ marginTop: 'var(--space-3)' }}>
+          <h2 className="daemon-card-title" style={{ marginBottom: '0.5rem' }}>
+            Watchlist Options
+            <InfoTooltip text="Option contracts from Watchlist; quotes from daemon (contract_quote_live). Updates every few seconds." />
+          </h2>
+          <div className="realtime-quotes-table-wrap">
+            <table className="table-operations realtime-quotes-table" aria-label="Watchlist option quotes">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th title="Last price; Bid and Ask shown as spread vs Last">Last (Bid / Ask)</th>
+                  <th>Expiry</th>
+                  <th>Right</th>
+                  <th>Strike</th>
+                  <th>Category</th>
+                </tr>
+              </thead>
+              <tbody>
+                {watchlistOptionItems.map((item) => {
+                  const q = quotesByContractKey[item.contract_key]
+                  const categoryName = (item.category ?? '').trim() || 'Uncategorized'
+                  return (
+                    <tr key={item.contract_key}>
+                      <td title={item.contract_key} style={{ fontWeight: 'bold' }}>{watchlistOptionLabel(item)}</td>
+                      <td className="realtime-quote-num realtime-quote-last-bid-ask">{renderLastBidAskOption(q)}</td>
+                      <td>{formatExpiry(item.expiry)}</td>
+                      <td>{formatOptionRight(item.option_right)}</td>
+                      <td>{item.strike != null ? formatStrike(item.strike) : '—'}</td>
+                      <td>{categoryName}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className="card card-operations strategy-active-live-card strategy-section" style={{ marginTop: 'var(--space-3)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+          <h2 className="daemon-card-title page-title-with-tooltip" style={{ margin: 0 }}>
+            Strategy Active
+            <InfoTooltip text="Current active structure, gate safety set, and allocation. Daemon uses these on next start. To change them, click Manage to open Strategy → Structure." />
+          </h2>
+          {onNavigateToStrategy && (
+            <button
+              type="button"
+              className="btn-secondary page-title-breadcrumb-link"
+              onClick={onNavigateToStrategy}
+              aria-label="Manage strategy"
+            >
+              Manage
+            </button>
+          )}
+        </div>
+        <div className="statusSummary">
+          <div>
+            <strong>Structure:</strong> {j?.strategy?.active?.structure?.name ?? '—'}
+            {j?.strategy?.active?.structure?.id != null && ` (${j?.strategy?.active?.structure?.id})`}
+          </div>
+          <div>
+            <strong>Gate safety:</strong> {j?.strategy?.active?.gate_safety?.name ?? '—'}
+            {j?.strategy?.active?.gate_safety?.id != null && ` (${j?.strategy?.active?.gate_safety?.id})`}
+          </div>
+          <div>
+            <strong>Allocation:</strong> {j?.strategy?.active?.allocation?.name ?? '—'}
+            {j?.strategy?.active?.allocation?.id != null && ` (${j?.strategy?.active?.allocation?.id})`}
+          </div>
+        </div>
+        <p className="section-hint">Daemon uses these on next start.</p>
       </div>
     </div>
   )

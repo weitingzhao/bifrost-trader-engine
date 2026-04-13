@@ -258,19 +258,19 @@ export function subscribeMassiveLogs(onLine: (line: string) => void, onError?: (
 
 export async function fetchMassiveWsLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
   const params = new URLSearchParams({ tail: String(tail) })
-  const r = await fetch(`${apiBase()}/api/massive-ws/logs?${params}`)
+  const r = await fetch(bifrostMonitorApiUrl(`/api/massive-ws/logs?${params}`))
   const j = await r.json().catch(() => ({ lines: [] }))
   return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
 }
 
 export async function clearMassiveWsLogs(): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${apiBase()}/api/massive-ws/logs`, { method: 'DELETE' })
+  const r = await fetch(bifrostMonitorApiUrl('/api/massive-ws/logs'), { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
 export async function trimMassiveWsLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${apiBase()}/api/massive-ws/logs/trim`, {
+  const r = await fetch(bifrostMonitorApiUrl('/api/massive-ws/logs/trim'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ max_lines: maxLines }),
@@ -280,7 +280,7 @@ export async function trimMassiveWsLogs(maxLines: number): Promise<{ ok: boolean
 }
 
 export function subscribeMassiveWsLogs(onLine: (line: string) => void, onError?: () => void): () => void {
-  const url = `${apiBase()}/api/massive-ws/logs/stream`
+  const url = bifrostMonitorApiUrl('/api/massive-ws/logs/stream')
   const es = new EventSource(url)
   es.onmessage = (e: MessageEvent) => {
     try {
@@ -301,19 +301,19 @@ export function subscribeMassiveWsLogs(onLine: (line: string) => void, onError?:
 
 export async function fetchIbOperatorLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
   const params = new URLSearchParams({ tail: String(tail) })
-  const r = await fetch(`${apiBase()}/api/ib-operator/logs?${params}`)
+  const r = await fetch(bifrostMonitorApiUrl(`/api/ib-operator/logs?${params}`))
   const j = await r.json().catch(() => ({ lines: [] }))
   return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
 }
 
 export async function clearIbOperatorLogs(): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${apiBase()}/api/ib-operator/logs`, { method: 'DELETE' })
+  const r = await fetch(bifrostMonitorApiUrl('/api/ib-operator/logs'), { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
 export async function trimIbOperatorLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${apiBase()}/api/ib-operator/logs/trim`, {
+  const r = await fetch(bifrostMonitorApiUrl('/api/ib-operator/logs/trim'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ max_lines: maxLines }),
@@ -323,7 +323,7 @@ export async function trimIbOperatorLogs(maxLines: number): Promise<{ ok: boolea
 }
 
 export function subscribeIbOperatorLogs(onLine: (line: string) => void, onError?: () => void): () => void {
-  const url = `${apiBase()}/api/ib-operator/logs/stream`
+  const url = bifrostMonitorApiUrl('/api/ib-operator/logs/stream')
   const es = new EventSource(url)
   es.onmessage = (e: MessageEvent) => {
     try {
@@ -344,19 +344,19 @@ export function subscribeIbOperatorLogs(onLine: (line: string) => void, onError?
 
 export async function fetchIbIngestorLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
   const params = new URLSearchParams({ tail: String(tail) })
-  const r = await fetch(`${apiBase()}/api/ib-ingestor/logs?${params}`)
+  const r = await fetch(bifrostMonitorApiUrl(`/api/ib-ingestor/logs?${params}`))
   const j = await r.json().catch(() => ({ lines: [] }))
   return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
 }
 
 export async function clearIbIngestorLogs(): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${apiBase()}/api/ib-ingestor/logs`, { method: 'DELETE' })
+  const r = await fetch(bifrostMonitorApiUrl('/api/ib-ingestor/logs'), { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
 export async function trimIbIngestorLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${apiBase()}/api/ib-ingestor/logs/trim`, {
+  const r = await fetch(bifrostMonitorApiUrl('/api/ib-ingestor/logs/trim'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ max_lines: maxLines }),
@@ -366,7 +366,7 @@ export async function trimIbIngestorLogs(maxLines: number): Promise<{ ok: boolea
 }
 
 export function subscribeIbIngestorLogs(onLine: (line: string) => void, onError?: () => void): () => void {
-  const url = `${apiBase()}/api/ib-ingestor/logs/stream`
+  const url = bifrostMonitorApiUrl('/api/ib-ingestor/logs/stream')
   const es = new EventSource(url)
   es.onmessage = (e: MessageEvent) => {
     try {
@@ -387,19 +387,19 @@ export function subscribeIbIngestorLogs(onLine: (line: string) => void, onError?
 
 export async function fetchIbAccountAgentLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
   const params = new URLSearchParams({ tail: String(tail) })
-  const r = await fetch(`${apiBase()}/api/ib-account-agent/logs?${params}`)
+  const r = await fetch(bifrostMonitorApiUrl(`/api/ib-account-agent/logs?${params}`))
   const j = await r.json().catch(() => ({ lines: [] }))
   return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
 }
 
 export async function clearIbAccountAgentLogs(): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${apiBase()}/api/ib-account-agent/logs`, { method: 'DELETE' })
+  const r = await fetch(bifrostMonitorApiUrl('/api/ib-account-agent/logs'), { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
 export async function trimIbAccountAgentLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${apiBase()}/api/ib-account-agent/logs/trim`, {
+  const r = await fetch(bifrostMonitorApiUrl('/api/ib-account-agent/logs/trim'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ max_lines: maxLines }),
@@ -409,7 +409,7 @@ export async function trimIbAccountAgentLogs(maxLines: number): Promise<{ ok: bo
 }
 
 export function subscribeIbAccountAgentLogs(onLine: (line: string) => void, onError?: () => void): () => void {
-  const url = `${apiBase()}/api/ib-account-agent/logs/stream`
+  const url = bifrostMonitorApiUrl('/api/ib-account-agent/logs/stream')
   const es = new EventSource(url)
   es.onmessage = (e: MessageEvent) => {
     try {

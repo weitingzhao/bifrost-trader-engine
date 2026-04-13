@@ -8,7 +8,6 @@ import {
   fetchQuotes,
   subscribeQuotes,
   fetchBarsBenchmark,
-  fetchOpenOrders,
   fetchSystemMessages,
   subscribeSystemMessages,
 } from './api'
@@ -68,10 +67,10 @@ import {
 } from './utils/systemMessageLifecycle'
 import { aggregateDaemonProcessesHealthFromStatus } from './utils/socketIngestLamp'
 import {
+  computeAccountSyncLamp,
   computeLiveNavLamp,
   computeMarketStreamsOk,
   computeOpenOrdersSectionOk,
-  OPEN_ORDERS_POLL_FRESH_MAX_S,
 } from './utils/livePageLamps'
 import {
   computeDailyChange,
@@ -123,6 +122,7 @@ function DashboardStrip({
   openOrderCount,
   onOpenOrdersClick,
   openOrdersLamp,
+  openOrdersLampTitle,
 }: {
   streamLamp: 'green' | 'yellow' | 'red' | 'none'
   streamItems: StreamSummaryItem[]
@@ -131,6 +131,8 @@ function DashboardStrip({
   onOpenOrdersClick?: () => void
   /** Lamp shown before "Open orders" (e.g. green when there are orders). */
   openOrdersLamp?: 'green' | 'yellow' | 'red' | 'none'
+  /** Tooltip for the lamp (Account Sync drives DB open orders). */
+  openOrdersLampTitle?: string
 }) {
   const tickerItems =
     streamItems.length > 0
@@ -156,9 +158,11 @@ function DashboardStrip({
                 className={`lamp-icon ${openOrdersLamp}`}
                 aria-hidden
                 title={
-                  openOrdersLamp === 'green'
-                    ? `Open orders: GET /open-orders succeeded within ${OPEN_ORDERS_POLL_FRESH_MAX_S}s`
-                    : 'Open orders: no recent successful GET /open-orders poll'
+                  openOrdersLampTitle != null && openOrdersLampTitle !== ''
+                    ? openOrdersLampTitle
+                    : openOrdersLamp === 'green'
+                      ? 'Open orders: Account Sync Daemon healthy (DB sync).'
+                      : 'Open orders: Account Sync Daemon degraded or unknown.'
                 }
               >
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -342,9 +346,7 @@ export default function App() {
   /** Short feedback after account refresh (success/fail/timeout); auto-cleared after a few seconds */
   const [accountsRefreshFeedback, setAccountsRefreshFeedback] = useState<string | null>(null)
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
-  /** Last successful GET /open-orders (unix s); drives dashboard + Live nav lamps with Market Streams. */
-  const [openOrdersPollAtSec, setOpenOrdersPollAtSec] = useState<number | null>(null)
-  /** Tick so quote-age and open-orders freshness lamps update without waiting on fetch. */
+  /** Tick so quote-age and Account Sync–based open-orders lamps update without waiting on fetch. */
   const [liveLampClock, setLiveLampClock] = useState(0)
   const [benchmarks, setBenchmarks] = useState<Record<string, DailyBenchmark>>({})
   /** Celery: Ops /ops/workers + /ops/queues/summary (header lamp + badge; falls back to /status if Ops fails). */
@@ -609,22 +611,6 @@ export default function App() {
 
   useEffect(() => {
     if (isDetailMode) return
-    const poll = () => {
-      fetchOpenOrders()
-        .then(() => {
-          setOpenOrdersPollAtSec(Date.now() / 1000)
-        })
-        .catch(() => {
-          /* keep previous timestamp; lamp goes stale via liveLampClock */
-        })
-    }
-    poll()
-    const id = setInterval(poll, 6000)
-    return () => clearInterval(id)
-  }, [isDetailMode])
-
-  useEffect(() => {
-    if (isDetailMode) return
     const id = setInterval(() => setLiveLampClock((c) => c + 1), 5000)
     return () => clearInterval(id)
   }, [isDetailMode])
@@ -792,9 +778,13 @@ export default function App() {
     () => computeMarketStreamsOk(j, quotesMap),
     [j, quotesMap, liveLampClock],
   )
+  const accountSyncLampForOpenOrders = useMemo(
+    () => computeAccountSyncLamp(j),
+    [j, liveLampClock],
+  )
   const openOrdersSectionOk = useMemo(
-    () => computeOpenOrdersSectionOk(openOrdersPollAtSec),
-    [openOrdersPollAtSec, liveLampClock],
+    () => computeOpenOrdersSectionOk(j, Date.now() / 1000),
+    [j, liveLampClock],
   )
   /** Live nav lamp: IB Broker Services + Daemon liveness (Open Orders requires daemon). */
   const liveNavLamp = useMemo(
@@ -1663,6 +1653,7 @@ export default function App() {
           openOrderCount={(status?.portfolio?.open_orders ?? []).length}
           onOpenOrdersClick={() => setActiveTab('live')}
           openOrdersLamp={dashboardOpenOrdersLamp}
+          openOrdersLampTitle={`Open orders (PostgreSQL): ${accountSyncLampForOpenOrders.title}`}
         />
       )}
 

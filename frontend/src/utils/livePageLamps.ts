@@ -4,8 +4,11 @@ import { ingestRedisHealthLamp, ingestRedisTruthyConnected } from './socketInges
 /** Quote age threshold for treating Market Streams as live (same as Live page). */
 const RECENT_QUOTE_MAX_AGE_S = 60
 
-/** Open Orders section: green after a successful GET /open-orders within this window. */
-export const OPEN_ORDERS_POLL_FRESH_MAX_S = 30
+/**
+ * Max age (seconds) for Account Sync `last_ts` vs wall clock on the client.
+ * Matches backend `get_status` heartbeat staleness (35s).
+ */
+export const ACCOUNT_SYNC_HEARTBEAT_MAX_AGE_S = 35
 
 /**
  * Market Streams section: green when Monitor reports Redis quotes reader + IB ingestor OK,
@@ -25,12 +28,6 @@ export function computeMarketStreamsOk(
       ingestRedisTruthyConnected(j?.socket?.ib_ingestor?.connected)) ||
     hasRecentQuotes
   )
-}
-
-/** Open Orders section: true when last successful DB poll timestamp (unix s) is within OPEN_ORDERS_POLL_FRESH_MAX_S. */
-export function computeOpenOrdersSectionOk(openOrdersPollAtUnixSec: number | null): boolean {
-  if (openOrdersPollAtUnixSec == null) return false
-  return Date.now() / 1000 - openOrdersPollAtUnixSec < OPEN_ORDERS_POLL_FRESH_MAX_S
 }
 
 /** Live nav lamp: all sections with lamps must be OK (Market Streams + Open Orders). */
@@ -62,6 +59,27 @@ export function computeAccountSyncLamp(
   return { lamp: 'green', title: 'Account Sync Daemon healthy.' }
 }
 
+/**
+ * Open Orders section lamp: `daemon_open_orders` is populated by **Account Sync Daemon** (IB stream → PostgreSQL).
+ * Green when Account Sync is fully healthy (same as {@link computeAccountSyncLamp} green), and when
+ * `heartbeat.last_ts` is present, it must be younger than {@link ACCOUNT_SYNC_HEARTBEAT_MAX_AGE_S} on the client
+ * so the lamp can go red if status JSON is stale while the process has stopped.
+ */
+export function computeOpenOrdersSectionOk(
+  status: StatusResponse | null | undefined,
+  nowSec: number = Date.now() / 1000,
+): boolean {
+  const sync = computeAccountSyncLamp(status)
+  if (sync.lamp !== 'green') return false
+  const hb = (status as { account_sync_daemon?: { heartbeat?: { last_ts?: number | null } } })?.account_sync_daemon
+    ?.heartbeat
+  const lastTs = hb?.last_ts
+  if (lastTs != null && Number.isFinite(Number(lastTs))) {
+    if (nowSec - Number(lastTs) >= ACCOUNT_SYNC_HEARTBEAT_MAX_AGE_S) return false
+  }
+  return true
+}
+
 export type LiveNavLampResult = {
   lamp: 'green' | 'yellow' | 'red'
   title: string
@@ -69,7 +87,7 @@ export type LiveNavLampResult = {
 
 /**
  * Live nav lamp: IB Broker Services health (ib_operator + ib_ingestor + ib_account_agent)
- * combined with daemon liveness (required for Open Orders sync via PostgreSQL).
+ * combined with strategy daemon liveness (legacy nav semantics; Open Orders DB sync is Account Sync Daemon).
  *
  * - green  = all IB services healthy AND daemon running
  * - yellow = IB services healthy but daemon down (market data OK; Open Orders unavailable),

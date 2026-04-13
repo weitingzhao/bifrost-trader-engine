@@ -30,6 +30,35 @@ from src.bifrost.redis_health_keys import (
 _LEGACY_IB_INGESTER_META_HEALTH = "ib:ingester:meta:health"
 _LEGACY_IB_OPERATOR_META_HEALTH = "ib:operator:meta:health"
 
+# Ingest processes that publish quotes / WS health (Socket Services page). When YAML lists only
+# daemon rows (trading_engine, account_sync_daemon), merge these defaults so Ops UI still shows
+# socket units alongside Daemon-only overrides.
+_SOCKET_FEED_IDS: tuple[str, ...] = (
+    "massive_ws",
+    "ib_operator",
+    "ib_ingestor",
+    "ib_account_agent",
+)
+_DAEMON_ONLY_IDS = frozenset({"trading_engine", "account_sync_daemon"})
+
+
+def _default_row_by_id(service_id: str) -> Dict[str, str]:
+    for row in DEFAULT_MARKET_INGEST_SERVICES:
+        if row["id"] == service_id:
+            return dict(row)
+    raise KeyError(service_id)
+
+
+def _ensure_socket_feed_rows_for_daemon_only_yaml(out: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    if not out:
+        return out
+    ids = {r["id"] for r in out}
+    if not ids <= _DAEMON_ONLY_IDS:
+        return out
+    head = [_default_row_by_id(sid) for sid in _SOCKET_FEED_IDS]
+    return head + out
+
+
 DEFAULT_MARKET_INGEST_SERVICES: List[Dict[str, str]] = [
     {
         "id": "massive_ws",
@@ -119,7 +148,9 @@ def market_ingest_services_from_config(config: dict) -> List[Dict[str, str]]:
             "systemd_unit": norm_unit,
             "redis_meta_key": meta,
         })
-    return out if out else list(DEFAULT_MARKET_INGEST_SERVICES)
+    if not out:
+        return list(DEFAULT_MARKET_INGEST_SERVICES)
+    return _ensure_socket_feed_rows_for_daemon_only_yaml(out)
 
 
 def market_ingest_service_by_id(config: dict, service_id: str) -> Dict[str, str] | None:

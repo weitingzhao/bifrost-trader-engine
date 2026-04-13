@@ -2749,6 +2749,39 @@ tr:hover .realtime-quote-drag-handle {
   font-size: var(--text-caption);
 }
 
+/* Market Streams: Daily % + $ and SINCE % + $ in one column (stacked lines) */
+.realtime-quotes-table th.realtime-quote-pnl-stacked-th {
+  white-space: normal;
+  line-height: 1.2;
+  text-align: right;
+  vertical-align: bottom;
+  font-weight: 600;
+  font-size: var(--text-caption);
+}
+
+.realtime-quotes-table .realtime-quote-pnl-stacked-th-sub {
+  display: block;
+  font-weight: 500;
+  font-size: 0.85em;
+  color: var(--color-text-muted);
+  margin-top: 0.1rem;
+}
+
+.realtime-quotes-table td.realtime-quote-pnl-stacked {
+  white-space: normal;
+  line-height: 1.25;
+  vertical-align: middle;
+}
+
+.realtime-quotes-table .realtime-quote-pnl-stacked-line {
+  display: block;
+  text-align: right;
+}
+
+.realtime-quotes-table .realtime-quote-pnl-stacked-line + .realtime-quote-pnl-stacked-line {
+  margin-top: 0.12rem;
+}
+
 /* Symbol cell: color = quote freshness */
 .realtime-quotes-table .realtime-quote-symbol {
   font-weight: 700;

@@ -75,8 +75,10 @@ def test_engine_row_allows_omitted_redis_meta_key():
         },
     }
     rows = market_ingest_services_from_config(cfg)
-    assert len(rows) == 1
-    assert rows[0]["redis_meta_key"] == BIFROST_HEALTH_DAEMON_TRADING_ENGINE
+    assert len(rows) == 5
+    assert rows[0]["id"] == "massive_ws"
+    assert rows[4]["id"] == "trading_engine"
+    assert rows[4]["redis_meta_key"] == BIFROST_HEALTH_DAEMON_TRADING_ENGINE
 
 
 def test_account_sync_row_allows_omitted_redis_meta_key():
@@ -92,8 +94,10 @@ def test_account_sync_row_allows_omitted_redis_meta_key():
         },
     }
     rows = market_ingest_services_from_config(cfg)
-    assert len(rows) == 1
-    assert rows[0]["redis_meta_key"] == BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON
+    assert len(rows) == 5
+    assert rows[0]["id"] == "massive_ws"
+    assert rows[4]["id"] == "account_sync_daemon"
+    assert rows[4]["redis_meta_key"] == BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON
 
 
 def test_trading_engine_legacy_ops_redis_meta_key_normalizes():
@@ -110,8 +114,9 @@ def test_trading_engine_legacy_ops_redis_meta_key_normalizes():
         },
     }
     rows = market_ingest_services_from_config(cfg)
-    assert len(rows) == 1
-    assert rows[0]["redis_meta_key"] == BIFROST_HEALTH_DAEMON_TRADING_ENGINE
+    assert len(rows) == 5
+    assert rows[4]["id"] == "trading_engine"
+    assert rows[4]["redis_meta_key"] == BIFROST_HEALTH_DAEMON_TRADING_ENGINE
 
 
 def test_yaml_legacy_redis_meta_keys_normalize_to_bifrost_health():
