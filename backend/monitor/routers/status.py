@@ -42,6 +42,28 @@ _STATUS_CELERY_INSPECT_TIMEOUT_SEC = float(
 
 STATUS_SCHEMA_VERSION = 9
 
+# PG heartbeat can refresh when Redis writes fail (e.g. suspended loop); require Redis health when configured.
+_ACCOUNT_SYNC_REDIS_HEALTH_MAX_AGE_SEC = 45.0
+
+
+def _account_sync_redis_reports_alive(r: Any, *, now_ts: float) -> bool:
+    """True when ``bifrost:health:daemon_account_sync`` exists, alive is truthy, and updated_at is recent."""
+    try:
+        _h = hgetall_account_sync_daemon_health(r)
+    except Exception:
+        return False
+    if not _h:
+        return False
+    if not redis_hash_field_truthy(_h, "alive"):
+        return False
+    _ua = _h.get("updated_at")
+    if _ua is None or str(_ua).strip() == "":
+        return True
+    try:
+        return (now_ts - float(_ua)) < _ACCOUNT_SYNC_REDIS_HEALTH_MAX_AGE_SEC
+    except (TypeError, ValueError):
+        return True
+
 
 def _strategy_status_block(
     *,
@@ -414,6 +436,8 @@ def get_status(request: Request) -> Dict[str, Any]:
         massive = None
         ib_ingestor = None
         ib_account_agent = None
+        _rurl: Optional[str] = None
+        _r: Any = None
         try:
             from src.app.config import get_effective_ib_config
             from src.monitor.integrations.ib_probe_derived import (
@@ -723,9 +747,11 @@ def get_status(request: Request) -> Dict[str, Any]:
         account_sync_block: Optional[Dict[str, Any]] = None
         if account_sync_hb is not None:
             _as_last_ts = account_sync_hb.get("last_ts")
-            _as_alive = _as_last_ts is not None and (
-                time.time() - float(_as_last_ts)
-            ) < 35
+            _now_ts = time.time()
+            _as_alive = _as_last_ts is not None and (_now_ts - float(_as_last_ts)) < 35
+            if _rurl:
+                if _r is None or not _account_sync_redis_reports_alive(_r, now_ts=_now_ts):
+                    _as_alive = False
             account_sync_block = {
                 "heartbeat": {
                     "last_ts": _as_last_ts,

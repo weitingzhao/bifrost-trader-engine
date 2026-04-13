@@ -18,6 +18,11 @@ def test_validate_unit_bifrost_engine() -> None:
     assert validate_unit(" bifrost-engine.service ") is True
 
 
+def test_validate_unit_account_sync_daemon() -> None:
+    assert validate_unit("bifrost-account-sync-daemon.service") is True
+    assert validate_unit("bifrost-account-sync-daemon-dev.service") is True
+
+
 def test_validate_unit_rejects_unknown() -> None:
     assert validate_unit("random.service") is False
     assert validate_unit("") is False

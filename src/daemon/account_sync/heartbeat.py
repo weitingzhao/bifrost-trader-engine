@@ -5,9 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Capped XREADGROUP block so `stop` in PG is visible within ~1s, not full heartbeat interval.
+ACCOUNT_SYNC_MAX_BLOCK_MS = 1000
+ACCOUNT_SYNC_SLEEP_CHUNK_SEC = 1.0
 
 
 def _poll_control(conn: Any) -> Optional[str]:
@@ -87,6 +91,35 @@ def _write_heartbeat(
             pass
 
 
+def _apply_consumed_control(
+    app: Any, cmd: Optional[str], diff: Any
+) -> bool:
+    """Handle a consumed control row. Returns True if heartbeat_loop should exit."""
+    if cmd == "stop":
+        logger.info("[AccountSync] control: stop → requesting shutdown")
+        app.running = False
+        return True
+    if cmd == "force_sync":
+        logger.info("[AccountSync] control: force_sync → clearing diff cache")
+        diff._account_cache.clear()
+        diff._position_cache.clear()
+        diff._seen_exec_ids.clear()
+    return False
+
+
+async def _sleep_account_sync_interruptible(app: Any, total_sec: float, diff: Any) -> bool:
+    """Sleep up to ``total_sec`` in chunks; poll control after each chunk. Returns True to exit loop."""
+    remaining = float(total_sec)
+    chunk = ACCOUNT_SYNC_SLEEP_CHUNK_SEC
+    while remaining > 0 and app.running:
+        await asyncio.sleep(min(chunk, remaining))
+        remaining -= min(chunk, remaining)
+        cmd = _poll_control(app.pg_conn)
+        if _apply_consumed_control(app, cmd, diff):
+            return True
+    return False
+
+
 def _write_redis_health(r: Any, *, alive: bool, last_sync_version: int, stream_lag: int) -> None:
     from src.daemon.account_sync.redis_keys import ACCOUNT_SYNC_HEALTH_KEY
 
@@ -126,28 +159,33 @@ async def heartbeat_loop(app: Any) -> None:
 
     while app.running:
         cmd = _poll_control(app.pg_conn)
-        if cmd == "stop":
-            logger.info("[AccountSync] control: stop → requesting shutdown")
-            app.running = False
+        if _apply_consumed_control(app, cmd, diff):
             return
-        if cmd == "force_sync":
-            logger.info("[AccountSync] control: force_sync → clearing diff cache")
-            diff._account_cache.clear()
-            diff._position_cache.clear()
-            diff._seen_exec_ids.clear()
 
         suspended, interval_sec = _poll_run_status(app.pg_conn)
         interval_sec = max(2.0, min(60.0, interval_sec))
 
         if suspended:
-            logger.info("[AccountSync] suspended — sleeping %.0fs", interval_sec)
-            await asyncio.sleep(interval_sec)
+            logger.info("[AccountSync] suspended — sleeping up to %.0fs (interruptible)", interval_sec)
+            if await _sleep_account_sync_interruptible(app, interval_sec, diff):
+                return
             _write_heartbeat(app.pg_conn, last_sync_version=last_version, stream_lag=0)
             _write_redis_health(app.redis, alive=True, last_sync_version=last_version, stream_lag=0)
             continue
 
-        block_ms = int(interval_sec * 1000)
-        entries = consumer.read(count=10, block_ms=block_ms)
+        remaining_sec = float(interval_sec)
+        entries: List[Dict[str, Any]] = []
+        while remaining_sec > 0 and app.running:
+            cmd = _poll_control(app.pg_conn)
+            if _apply_consumed_control(app, cmd, diff):
+                return
+            cap_ms = min(ACCOUNT_SYNC_MAX_BLOCK_MS, int(remaining_sec * 1000))
+            block_ms = max(1, cap_ms)
+            entries = consumer.read(count=10, block_ms=block_ms)
+            remaining_sec -= block_ms / 1000.0
+            if entries:
+                break
+
         latest = consumer.merge_latest(entries)
 
         if latest is not None:

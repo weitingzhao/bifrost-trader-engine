@@ -14,7 +14,6 @@ import {
 } from '../api'
 import { postAccountSyncSetHeartbeatInterval } from '../api/monitor/accountSync'
 import { utilizedEnvFor } from '../utils/utilizedServices'
-import { ingestRedisHealthLamp } from '../utils/socketIngestLamp'
 import { InfoTooltip } from '../components/InfoTooltip'
 import {
   DEFAULT_IB_OPERATOR,
@@ -88,7 +87,12 @@ import { MassiveStockCoveragePage } from './MassiveStockCoveragePage'
 import { useDeferredStart } from '../hooks/useDeferredStart'
 import type { SettingsApiHealthProbesState } from '../hooks/useSettingsApiHealthProbes'
 import { fetchMarketIngestServices, type MarketIngestServiceRow } from '../api/ops/ops'
-import { aggregateIngestRedisHealthLamp, type AggregateIngestLamp } from '../utils/socketIngestLamp'
+import {
+  aggregateDaemonProcessesHealthFromStatus,
+  aggregateIngestRedisHealthLamp,
+  marketIngestServicesForSocketAggregate,
+  type AggregateIngestLamp,
+} from '../utils/socketIngestLamp'
 
 const API_SETTINGS_DETAIL_HASHES = [
   'settings-api-architecture',
@@ -333,8 +337,26 @@ export function SettingsPage({
   const activeIbStockFeed = activeSectionId === 'settings-feed' && currentHash === 'feed-ib-stock'
   const isMassiveOptionFeedActive = activeSectionId === 'settings-feed' && isMassiveOptionFeedHash(currentHash)
   const isMassiveStockFeedActive = activeSectionId === 'settings-feed' && isMassiveStockFeedHash(currentHash)
-  /** Same as Daemon page title lamp: trading_engine Redis/heartbeat via GET /status (DaemonEngineOpsSection). */
-  const daemonPageLamp = useMemo(() => ingestRedisHealthLamp('trading_engine', status), [status])
+  /** Same roll-up as Daemon page title: all Ops-configured Daemon processes (Engine + Account Sync). */
+  const daemonPageRows = useMemo(
+    () =>
+      ingestServicesCache
+        .filter((s) => s.id === 'trading_engine' || s.id === 'account_sync_daemon')
+        .sort((a, b) => {
+          const order = ['trading_engine', 'account_sync_daemon']
+          return order.indexOf(a.id) - order.indexOf(b.id)
+        }),
+    [ingestServicesCache],
+  )
+  const daemonPageLamp = useMemo(() => {
+    if (ingestServicesFetchError) {
+      return { lamp: 'none' as AggregateIngestLamp, title: ingestServicesFetchError }
+    }
+    if (daemonPageRows.length > 0) {
+      return aggregateIngestRedisHealthLamp(daemonPageRows.map((svc) => ({ svc })), status)
+    }
+    return aggregateDaemonProcessesHealthFromStatus(status)
+  }, [daemonPageRows, status, ingestServicesFetchError])
   const daemonLamp = daemonPageLamp.lamp
   const subscribeLamp: 'none' = 'none'
   const isSubscribeSection = activeSectionId === 'settings-subscribe'
@@ -397,7 +419,7 @@ export function SettingsPage({
     if (ingestServicesFetchError) {
       return { lamp: 'none' as AggregateIngestLamp, title: ingestServicesFetchError }
     }
-    const ingestOnly = ingestServicesCache.filter(s => s.id !== 'trading_engine')
+    const ingestOnly = marketIngestServicesForSocketAggregate(ingestServicesCache)
     return aggregateIngestRedisHealthLamp(ingestOnly.map(svc => ({ svc })), status)
   }, [ingestServicesCache, ingestServicesFetchError, status])
 

@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { StatusResponse } from '../types'
 import { fetchMarketIngestServices, type MarketIngestServiceRow } from '../api/ops/ops'
-import { aggregateIngestRedisHealthLamp, type AggregateIngestLamp } from '../utils/socketIngestLamp'
+import {
+  aggregateIngestRedisHealthLamp,
+  marketIngestServicesForSocketAggregate,
+  type AggregateIngestLamp,
+} from '../utils/socketIngestLamp'
 
 const POLL_MS = 20_000
 
@@ -53,7 +57,7 @@ export function useSocketIngestProbe(enabled: boolean, status: StatusResponse | 
     if (fetchError) {
       return { lamp: 'none' as AggregateIngestLamp, title: fetchError }
     }
-    const ingestOnly = services.filter(s => s.id !== 'trading_engine')
+    const ingestOnly = marketIngestServicesForSocketAggregate(services)
     return aggregateIngestRedisHealthLamp(ingestOnly.map(svc => ({ svc })), status)
   }, [services, fetchError, status])
 }

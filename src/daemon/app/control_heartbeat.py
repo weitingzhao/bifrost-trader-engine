@@ -9,6 +9,9 @@ from src.daemon.fsm.daemon_fsm import DaemonState
 
 logger = logging.getLogger(__name__)
 
+# Chunked sleep so DB-written `stop` is visible within ~1s instead of up to full heartbeat interval.
+HEARTBEAT_SLEEP_CHUNK_SEC = 1.0
+
 
 def poll_control(app: Any) -> Optional[str]:
     """Poll control command from sink (PostgreSQL daemon_control table when sink is postgres). Return stop/flatten or None."""
@@ -146,6 +149,24 @@ async def _consume_one_control_command(app: Any, cmd: Optional[str]) -> bool:
     return False
 
 
+async def sleep_until_heartbeat_or_stop(app: Any, total_sec: float) -> bool:
+    """Sleep for ``total_sec`` in small slices; poll control after each slice.
+
+    Returns True if the heartbeat loop should exit (stop consumed, FSM no longer running, etc.).
+    """
+    remaining = float(total_sec)
+    chunk = HEARTBEAT_SLEEP_CHUNK_SEC
+    while remaining > 0:
+        await asyncio.sleep(min(chunk, remaining))
+        remaining -= min(chunk, remaining)
+        if not app._fsm_daemon.is_running():
+            return True
+        cmd = poll_control(app)
+        if await _consume_one_control_command(app, cmd):
+            return True
+    return False
+
+
 async def heartbeat(app: Any) -> None:
     """Periodic heartbeat: snapshot, optional hedge, status writes."""
     while app._fsm_daemon.is_running():
@@ -158,21 +179,17 @@ async def heartbeat(app: Any) -> None:
         state_label = app._fsm_daemon.current.value
         if suspended:
             logger.info(
-                "[Daemon] state=%s | heartbeat: sleep %.0fs, skip maybe_hedge (suspended)",
+                "[Daemon] state=%s | heartbeat: sleep up to %.0fs (interruptible), skip maybe_hedge (suspended)",
                 state_label,
                 interval_sec,
             )
         else:
             logger.info(
-                "[Daemon] state=%s | heartbeat: sleep %.0fs, then maybe_hedge",
+                "[Daemon] state=%s | heartbeat: sleep up to %.0fs (interruptible), then maybe_hedge",
                 state_label,
                 interval_sec,
             )
-        await asyncio.sleep(interval_sec)
-        if not app._fsm_daemon.is_running():
-            return
-        cmd = poll_control(app)
-        if await _consume_one_control_command(app, cmd):
+        if await sleep_until_heartbeat_or_stop(app, interval_sec):
             return
 
         suspended = apply_run_status_transition(app)

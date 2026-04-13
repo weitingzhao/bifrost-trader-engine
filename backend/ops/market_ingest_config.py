@@ -2,8 +2,9 @@
 
 **trading_engine** uses ``redis_meta_key`` ``bifrost:health:daemon_strategy_trading`` by default (Dev/Prod
 Ops lease + ``engine_ops_active``, same exclusivity rules as Socket rows in
-:mod:`backend.ops.routers.market_ingest`). YAML may omit ``redis_meta_key`` for that id and the
-default meta key is applied.
+:mod:`backend.ops.routers.market_ingest`). **account_sync_daemon** uses
+``bifrost:health:daemon_account_sync`` by default for the same Ops lease fields on that hash.
+YAML may omit ``redis_meta_key`` for either id and the default meta key is applied.
 """
 
 from __future__ import annotations
@@ -110,6 +111,8 @@ def market_ingest_services_from_config(config: dict) -> List[Dict[str, str]]:
             meta = BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON
         if sid == "trading_engine" and not meta:
             meta = BIFROST_HEALTH_DAEMON_TRADING_ENGINE
+        if sid == "account_sync_daemon" and not meta:
+            meta = BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON
         out.append({
             "id": sid,
             "label": label or sid,

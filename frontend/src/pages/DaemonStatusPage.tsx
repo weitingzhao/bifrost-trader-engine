@@ -1,18 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Operation, StatusResponse } from '../types'
-import {
-  postSuspend,
-  postResume,
-  postFlatten,
-  fetchDaemonLogs,
-  subscribeDaemonLogs,
-  clearDaemonLogs,
-  fetchAccountSyncDaemonLogs,
-  subscribeAccountSyncDaemonLogs,
-  clearAccountSyncDaemonLogs,
-} from '../api'
+import { postSuspend, postResume, postFlatten } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
-import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
+import { AggregatedLogConsolePanel } from '../components/AggregatedLogConsolePanel'
+import {
+  DAEMON_PAGE_LOG_SOURCE_DEFINITIONS,
+  useDaemonPageUnifiedLogConsole,
+} from '../components/useDaemonPageUnifiedLogConsole'
 import { useDeferredStart } from '../hooks/useDeferredStart'
 import { computeAccountSyncLamp } from '../utils/livePageLamps'
 import { fmtTs, fmtUsd } from '../utils/format'
@@ -64,17 +58,10 @@ export function DaemonStatusPage({
   const deferredStart = useDeferredStart()
   const ctrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hedgeCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const daemonConsole = useLogConsole({
-    fetchLogs: fetchDaemonLogs,
-    subscribeLogs: subscribeDaemonLogs,
-    clearLogs: clearDaemonLogs,
+  const daemonUnifiedLogConsole = useDaemonPageUnifiedLogConsole({
     enabled: deferredStart,
-  })
-  const accountSyncConsole = useLogConsole({
-    fetchLogs: fetchAccountSyncDaemonLogs,
-    subscribeLogs: subscribeAccountSyncDaemonLogs,
-    clearLogs: clearAccountSyncDaemonLogs,
-    enabled: deferredStart,
+    initialHeightPx: 280,
+    initialMaxLines: 500,
   })
 
   const runCtrlAction = useControlAction(setCtrlMsg, ctrlMsgClearRef, { onSuccess: loadStatus })
@@ -98,11 +85,21 @@ export function DaemonStatusPage({
       ? Math.max(0, Math.ceil(hb.last_ts + intervalSec - nowSec))
       : null
 
-  const asdHeart = (j as { account_sync_daemon?: { heartbeat?: {
-    daemon_alive?: boolean
-    last_ts?: number
-    heartbeat_interval_sec?: number
-  } } } | null)?.account_sync_daemon?.heartbeat
+  const asdHeart = (j as {
+    account_sync_daemon?: {
+      heartbeat?: {
+        daemon_alive?: boolean
+        last_ts?: number
+        heartbeat_interval_sec?: number
+        stream_lag?: number
+        last_sync_version?: number
+        accounts_synced?: number
+        positions_synced?: number
+        executions_synced?: number
+        open_orders_synced?: number
+      }
+    }
+  } | null)?.account_sync_daemon?.heartbeat
   const asIntervalSec =
     typeof asdHeart?.heartbeat_interval_sec === 'number' && Number.isFinite(asdHeart.heartbeat_interval_sec)
       ? Math.max(2, Math.min(120, asdHeart.heartbeat_interval_sec))
@@ -252,7 +249,6 @@ export function DaemonStatusPage({
         </section>
 
         {(() => {
-          const asd = (status as any)?.account_sync_daemon
           const asdHb = asdHeart
           const asdL = computeAccountSyncLamp(status)
           const aaLamp = ingestRedisHealthLamp('ib_account_agent', status)
@@ -413,36 +409,27 @@ export function DaemonStatusPage({
                 <code style={{ fontSize: '0.85em' }}>python scripts/systemd/run_account_sync_daemon.py --config config/config.prod.yaml</code>
                 {' '}(prod). Or use <strong>Ops</strong> on this page (market ingest → Account Sync Daemon) if your host runs systemd.
               </p>
-              <h4 className="page-title-with-tooltip" style={{ marginTop: 'var(--space-3)', marginBottom: 'var(--space-2)', fontSize: '0.95rem' }}>
-                Account Sync Daemon log
-                <InfoTooltip text="Redis stream bifrost:console:account_sync_daemon (same as scripts/systemd/run_account_sync_daemon.py console)." />
-              </h4>
-              <LogConsolePanel
-                controller={accountSyncConsole}
-                loadingText="Connecting…"
-                errorText="Unable to load (Redis may be down)."
-                emptyText="No log lines yet. Start Account Sync Daemon to populate the stream."
-                infoTooltipText="Account Sync Daemon logs (Redis stream bifrost:console:account_sync_daemon)."
-                resizeAriaLabel="Resize Account Sync daemon console height"
-                clearTitle="Clear displayed log and Redis stream"
-              />
             </section>
           )
         })()}
 
         <section className="replay-section" aria-labelledby="daemon-console-head">
           <h3 id="daemon-console-head" className="page-title-with-tooltip">
-            Strategy Trading Daemon log
-            <InfoTooltip text="Strategy Trading Daemon console (Redis Streams: bifrost:console:{dev|prod}:daemon_trading; legacy bifrost:console:daemon_trading merged). Start: python scripts/systemd/run_engine.py" />
+            Daemon logs
+            <InfoTooltip text="Strategy Trading Daemon: Redis streams bifrost:console:{dev|prod}:daemon_trading (legacy merged). Account Sync: bifrost:console:account_sync_daemon. Same Sources filter pattern as Socket → Logs on Market ingest Ops." />
           </h3>
-          <LogConsolePanel
-            controller={daemonConsole}
+          <p className="massive-api-doc-hint" style={{ marginBottom: 'var(--space-3)' }}>
+            Merged console from Strategy Trading Daemon and Account Sync Daemon. Toggle sources to filter; clear removes both Redis streams on the Monitor host (same idea as Socket service logs).
+          </p>
+          <AggregatedLogConsolePanel
+            controller={daemonUnifiedLogConsole}
             loadingText="Connecting…"
             errorText="Unable to load (Redis may be down)."
-            emptyText="No log lines yet. Start: python scripts/systemd/run_engine.py"
-            infoTooltipText="Strategy Trading Daemon logs merged from dev/prod streams (same Redis)."
-            resizeAriaLabel="Resize Strategy Trading Daemon console height"
-            clearTitle="Clear displayed log and Redis streams"
+            emptyText="No log lines yet. Start run_engine.py and/or run_account_sync_daemon.py to populate streams."
+            infoTooltipText="Daemon logs: Strategy Trading (merged dev/prod daemon_trading streams) and Account Sync (bifrost:console:account_sync_daemon)."
+            resizeAriaLabel="Resize daemon logs console height"
+            clearTitle="Clear displayed log and both Redis streams"
+            sourceDefinitions={[...DAEMON_PAGE_LOG_SOURCE_DEFINITIONS]}
           />
         </section>
 

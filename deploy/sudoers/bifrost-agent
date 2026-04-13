@@ -62,3 +62,13 @@ bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start bifrost-engine.servi
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop bifrost-engine.service
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart bifrost-engine.service
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active bifrost-engine.service
+
+# Account Sync Daemon (Redis stream → PostgreSQL)
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start bifrost-account-sync-daemon.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop bifrost-account-sync-daemon.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart bifrost-account-sync-daemon.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active bifrost-account-sync-daemon.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start bifrost-account-sync-daemon-dev.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop bifrost-account-sync-daemon-dev.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart bifrost-account-sync-daemon-dev.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active bifrost-account-sync-daemon-dev.service

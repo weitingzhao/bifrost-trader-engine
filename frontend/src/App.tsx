@@ -66,7 +66,7 @@ import {
   SYSTEM_MESSAGE_BACKEND_TTL_SEC,
   isIbOperatorCommandMessage,
 } from './utils/systemMessageLifecycle'
-import { ingestRedisHealthLamp } from './utils/socketIngestLamp'
+import { aggregateDaemonProcessesHealthFromStatus } from './utils/socketIngestLamp'
 import {
   computeLiveNavLamp,
   computeMarketStreamsOk,
@@ -351,6 +351,8 @@ export default function App() {
   const [celeryRuntimeLampOverride, setCeleryRuntimeLampOverride] = useState<LampId | null>(null)
   const [celeryQueuePendingTotal, setCeleryQueuePendingTotal] = useState<number | null>(null)
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
+  /** ⋮ menu: UI build line hidden until user clicks "?". */
+  const [headerMenuUiBuildOpen, setHeaderMenuUiBuildOpen] = useState(false)
   const headerMenuRef = useRef<HTMLDivElement>(null)
   const messageCenterRef = useRef<MessageCenterHandle>(null) as RefObject<MessageCenterHandle>
   const [msgDismissedIds, setMsgDismissedIds] = useState<Set<string>>(() => new Set())
@@ -481,6 +483,10 @@ export default function App() {
     }
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
+  }, [headerMenuOpen])
+
+  useEffect(() => {
+    if (!headerMenuOpen) setHeaderMenuUiBuildOpen(false)
   }, [headerMenuOpen])
 
   useEffect(() => {
@@ -772,8 +778,8 @@ export default function App() {
   }, [loadStatus])
 
   const j = status
-  /** Same as Settings → Daemon sidebar + page title: trading_engine / heartbeat via GET /status. */
-  const daemonShortcutLamp = useMemo(() => ingestRedisHealthLamp('trading_engine', j), [j])
+  /** Same roll-up as Settings → Daemon: Strategy Engine + Account Sync process health (GET /status). */
+  const daemonShortcutLamp = useMemo(() => aggregateDaemonProcessesHealthFromStatus(j), [j])
   const dl = daemonShortcutLamp.lamp
   // Strategy tab lamp = Trading Strategy status (same as Settings → Daemon → Trading Strategy)
   const hb = j?.daemon?.heartbeat
@@ -1623,16 +1629,25 @@ export default function App() {
                 </a>
                 <button
                   type="button"
-                  className="app-header-menu-version-icon"
-                  title={`UI build: ${UI_BUILD_LABEL}. Compare after deploy to detect cache or stale static files.`}
-                  aria-label={`UI build: ${UI_BUILD_LABEL}`}
+                  className={`app-header-menu-ui-build-help-btn${headerMenuUiBuildOpen ? ' active' : ''}`}
+                  onClick={() => setHeaderMenuUiBuildOpen((o) => !o)}
+                  aria-expanded={headerMenuUiBuildOpen}
+                  aria-controls="app-header-menu-ui-build-panel"
+                  title="Show UI build label (compare after deploy for cache / stale static files)"
                 >
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M4 7V4a2 2 0 0 1 2-2h4.5a2 2 0 0 1 1.6.8L14 6h4a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3" />
-                    <path d="M2 12h4" />
-                    <path d="M4 10v4" />
-                  </svg>
+                  ?
                 </button>
+              </div>
+              <div
+                id="app-header-menu-ui-build-panel"
+                className="app-header-menu-ui-build"
+                role="region"
+                aria-label="UI build"
+                hidden={!headerMenuUiBuildOpen}
+                title="Compare after deploy to detect cache or stale static files."
+              >
+                <span className="app-header-menu-ui-build-label">UI build</span>
+                <span className="app-header-menu-ui-build-value">{UI_BUILD_LABEL}</span>
               </div>
             </div>
           )}

@@ -352,6 +352,7 @@ function groupCoverageByAccount(
     items: sortStockCoverageItemsByColumn(by.get(accountId)!, sortCol, sortDir),
   }))
 }
+import { isLedgerCashLikeCategory, isLedgerFixedIncomeCategory } from './portfolio/ledgerStockCategoryBuckets'
 import { buildOptExecutionGroups } from './portfolio/buildOptExecutionGroups'
 import { ExecutionFormModal } from './portfolio/ExecutionFormModal'
 import type { LinkExecutionContext } from './portfolio/LinkExecutionRecordModal'
@@ -367,6 +368,74 @@ import type {
   StockCoverageItem,
 } from './portfolio/types'
 import { OFF_TRACK_ACCOUNT_ID, useExecutions } from './portfolio/useExecutions'
+
+/** Rows for open STK table: account sub-headers + position lines (used under category sections). */
+function buildOpenStockPositionRows(positions: LivePositionRow[], rowKeyPrefix: string): JSX.Element[] {
+  const byAccount: Record<string, LivePositionRow[]> = {}
+  for (const position of positions) {
+    const accId = (position.account_id ?? '').trim() || '—'
+    if (!byAccount[accId]) byAccount[accId] = []
+    byAccount[accId].push(position)
+  }
+  const accountIds = Object.keys(byAccount).sort()
+  const rows: JSX.Element[] = []
+  for (const accId of accountIds) {
+    rows.push(
+      <tr key={`${rowKeyPrefix}-acc-${accId}`} className="replay-portfolio-group-header">
+        <td colSpan={8}>
+          <strong>{accId}</strong>
+        </td>
+      </tr>,
+    )
+    for (const position of byAccount[accId]) {
+      const qty = Number(position.position)
+      const lastPrice = position.price != null && Number.isFinite(Number(position.price)) ? Number(position.price) : null
+      const avgCost = position.avgCost != null && Number.isFinite(Number(position.avgCost)) ? Number(position.avgCost) : null
+      const prevClose =
+        position.daily_prev_close != null && Number.isFinite(Number(position.daily_prev_close))
+          ? Number(position.daily_prev_close)
+          : null
+      const pnl =
+        position.unrealized_pnl != null && Number.isFinite(Number(position.unrealized_pnl))
+          ? Number(position.unrealized_pnl)
+          : null
+      const sincePct =
+        pnl != null && avgCost != null && avgCost !== 0 && Number.isFinite(qty) ? (pnl / (Math.abs(avgCost * qty))) * 100 : null
+      const dailyPnl =
+        lastPrice != null && prevClose != null && Number.isFinite(qty) ? (lastPrice - prevClose) * qty : null
+      const dailyPct =
+        dailyPnl != null && prevClose != null && prevClose !== 0 ? ((lastPrice! - prevClose) / prevClose) * 100 : null
+      const contractKey = position.contract_key ?? `${position.symbol ?? ''}|STK|||`
+      rows.push(
+        <tr key={`${rowKeyPrefix}-open-stk-${accId}-${position.symbol ?? ''}-${contractKey}`}>
+          <td>{accId}</td>
+          <td>
+            <strong>{position.symbol ?? '—'}</strong>
+          </td>
+          <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
+          <td>{Number.isFinite(qty) ? qty : '—'}</td>
+          <td>{fmtUsd(position.avgCost)}</td>
+          <td>{fmtUsd(position.price)}</td>
+          <td className="coverage-pnl-stacked-cell">
+            <div className={(dailyPnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}>
+              {dailyPnl != null ? fmtUsd(dailyPnl) : '—'}
+            </div>
+            <div className={`coverage-pnl-stacked-pct ${(dailyPct ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+              {dailyPct != null ? fmtSignedPct(dailyPct) : '—'}
+            </div>
+          </td>
+          <td className="coverage-pnl-stacked-cell">
+            <div className={(pnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}>{pnl != null ? fmtUsd(pnl) : '—'}</div>
+            <div className={`coverage-pnl-stacked-pct ${(sincePct ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+              {sincePct != null ? fmtSignedPct(sincePct) : '—'}
+            </div>
+          </td>
+        </tr>,
+      )
+    }
+  }
+  return rows
+}
 
 /** Stock metrics for exactly one (symbol, account); never mixes other accounts. */
 function underlyingCoverageStockMetrics(
@@ -1292,6 +1361,19 @@ export function PositionsPage({
     () => livePositions.filter(position => (position.secType ?? '').toUpperCase() !== 'OPT'),
     [livePositions],
   )
+
+  const { fixedIncomeStockPositions, cashLikeStockPositions, coreStockPositions } = useMemo(() => {
+    const fixedIncomeStockPositions: LivePositionRow[] = []
+    const cashLikeStockPositions: LivePositionRow[] = []
+    const coreStockPositions: LivePositionRow[] = []
+    for (const p of liveStockPositions) {
+      const cat = String(p.category ?? '').trim()
+      if (isLedgerFixedIncomeCategory(cat)) fixedIncomeStockPositions.push(p)
+      else if (isLedgerCashLikeCategory(cat)) cashLikeStockPositions.push(p)
+      else coreStockPositions.push(p)
+    }
+    return { fixedIncomeStockPositions, cashLikeStockPositions, coreStockPositions }
+  }, [liveStockPositions])
 
   const instanceAllGroups = useMemo((): InstanceAllGroup[] => {
     type Bucket = {
@@ -3826,71 +3908,22 @@ export function PositionsPage({
                           </tr>
                         </thead>
                         <tbody>
-                          {(() => {
-                            const byAccount: Record<string, typeof liveStockPositions> = {}
-                            for (const position of liveStockPositions) {
-                              const accId = (position.account_id ?? '').trim() || '—'
-                              if (!byAccount[accId]) byAccount[accId] = []
-                              byAccount[accId].push(position)
-                            }
-                            const accountIds = Object.keys(byAccount).sort()
-                            const rows: JSX.Element[] = []
-                            for (const accId of accountIds) {
-                              rows.push(
-                                <tr key={`open-stk-header-${accId}`} className="replay-portfolio-group-header">
-                                  <td colSpan={8}>
-                                    <strong>{accId}</strong>
-                                  </td>
-                                </tr>,
-                              )
-                              for (const position of byAccount[accId]) {
-                                const qty = Number(position.position)
-                                const lastPrice = position.price != null && Number.isFinite(Number(position.price)) ? Number(position.price) : null
-                                const avgCost = position.avgCost != null && Number.isFinite(Number(position.avgCost)) ? Number(position.avgCost) : null
-                                const prevClose = position.daily_prev_close != null && Number.isFinite(Number(position.daily_prev_close)) ? Number(position.daily_prev_close) : null
-                                const pnl = position.unrealized_pnl != null && Number.isFinite(Number(position.unrealized_pnl))
-                                  ? Number(position.unrealized_pnl)
-                                  : null
-                                const sincePct = pnl != null && avgCost != null && avgCost !== 0 && Number.isFinite(qty)
-                                  ? (pnl / (Math.abs(avgCost * qty))) * 100
-                                  : null
-                                const dailyPnl = lastPrice != null && prevClose != null && Number.isFinite(qty)
-                                  ? (lastPrice - prevClose) * qty
-                                  : null
-                                const dailyPct = dailyPnl != null && prevClose != null && prevClose !== 0
-                                  ? ((lastPrice! - prevClose) / prevClose) * 100
-                                  : null
-                                const contractKey = position.contract_key ?? `${position.symbol ?? ''}|STK|||`
-                                rows.push(
-                                  <tr key={`open-stk-${accId}-${position.symbol ?? ''}-${contractKey}`}>
-                                    <td>{accId}</td>
-                                    <td><strong>{position.symbol ?? '—'}</strong></td>
-                                    <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
-                                    <td>{Number.isFinite(qty) ? qty : '—'}</td>
-                                    <td>{fmtUsd(position.avgCost)}</td>
-                                    <td>{fmtUsd(position.price)}</td>
-                                    <td className="coverage-pnl-stacked-cell">
-                                      <div className={(dailyPnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}>
-                                        {dailyPnl != null ? fmtUsd(dailyPnl) : '—'}
-                                      </div>
-                                      <div className={`coverage-pnl-stacked-pct ${(dailyPct ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-                                        {dailyPct != null ? fmtSignedPct(dailyPct) : '—'}
-                                      </div>
-                                    </td>
-                                    <td className="coverage-pnl-stacked-cell">
-                                      <div className={(pnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}>
-                                        {pnl != null ? fmtUsd(pnl) : '—'}
-                                      </div>
-                                      <div className={`coverage-pnl-stacked-pct ${(sincePct ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-                                        {sincePct != null ? fmtSignedPct(sincePct) : '—'}
-                                      </div>
-                                    </td>
-                                  </tr>,
-                                )
-                              }
-                            }
-                            return rows
-                          })()}
+                          {(
+                            [
+                              { title: 'Fixed income', key: 'fi', rows: fixedIncomeStockPositions },
+                              { title: 'Cash-like', key: 'cash', rows: cashLikeStockPositions },
+                              { title: 'Stocks', key: 'stk', rows: coreStockPositions },
+                            ] as const
+                          )
+                            .filter((s) => s.rows.length > 0)
+                            .flatMap((section) => [
+                              <tr key={`${section.key}-section`} className="replay-portfolio-group-header">
+                                <td colSpan={8}>
+                                  <strong>{section.title}</strong>
+                                </td>
+                              </tr>,
+                              ...buildOpenStockPositionRows(section.rows, section.key),
+                            ])}
                         </tbody>
                       </table>
                     </div>

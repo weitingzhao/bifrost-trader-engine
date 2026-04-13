@@ -28,6 +28,7 @@ ALLOWED_UNIT_PATTERNS = [
     re.compile(r"^bifrost-ib-ingestor\.service$"),
     re.compile(r"^bifrost-ib-account-agent\.service$"),
     re.compile(r"^bifrost-engine\.service$"),
+    re.compile(r"^bifrost-account-sync-daemon(-dev)?\.service$"),
 ]
 
 

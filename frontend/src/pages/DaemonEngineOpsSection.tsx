@@ -13,7 +13,11 @@ import {
   type OpsCapabilities,
 } from '../api/ops/ops'
 import { OpsHostEnvPillBadge } from '../components/OpsHostEnvPillBadge'
-import { ingestRedisHealthLamp, localControlAgentLamp } from '../utils/socketIngestLamp'
+import {
+  aggregateDaemonProcessesHealthFromStatus,
+  aggregateIngestRedisHealthLamp,
+  localControlAgentLamp,
+} from '../utils/socketIngestLamp'
 import {
   normalizedPageDevProd,
   socketServicesHostColumnDisplay,
@@ -69,8 +73,8 @@ export interface DaemonEngineOpsSectionProps {
 }
 
 /**
- * Page title row: Daemon — Ops auth + systemd start/stop (POST /ops/market-ingest/control, trading_engine).
- * Renders at the top of the Daemon page; live status panel sits below.
+ * Page title row: Daemon — Ops auth + systemd start/stop (POST /ops/market-ingest/control).
+ * Title lamp rolls up all process rows below (Strategy Engine + Account Sync when in Ops config).
  */
 export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSectionProps) {
   const [engineRow, setEngineRow] = useState<MarketIngestServiceRow | null>(null)
@@ -178,10 +182,11 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
     return out
   }, [engineRow, accountSyncRow])
 
-  const engineLamp = useMemo(
-    () => ingestRedisHealthLamp('trading_engine', status),
-    [status],
-  )
+  /** Title lamp: worst-of rows below; before Ops rows load, same canonical two-process roll-up as App menu. */
+  const daemonPageRollup = useMemo(() => {
+    if (engineRows.length > 0) return aggregateIngestRedisHealthLamp(engineRows, status)
+    return aggregateDaemonProcessesHealthFromStatus(status)
+  }, [engineRows, status])
 
   const localAgentPanel = useMemo(() => {
     if ((opsHealth?.executor_mode ?? '').toLowerCase() !== 'agent') {
@@ -311,10 +316,10 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
           >
             <span style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
               <span
-                className={`title-inline-lamp lamp-icon ${engineLamp.lamp}`}
-                title={engineLamp.title}
+                className={`title-inline-lamp lamp-icon ${daemonPageRollup.lamp}`}
+                title={daemonPageRollup.title}
                 role="img"
-                aria-label={engineLamp.title}
+                aria-label={daemonPageRollup.title}
               >
                 <SettingsSidebarLampGlyph id="daemon" />
               </span>

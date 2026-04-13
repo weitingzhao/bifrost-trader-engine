@@ -2080,6 +2080,17 @@ button.dashboard-queue-summary-status-console-nav:focus-visible {
   color: var(--color-text);
 }
 
+/* Daemon page — merged Strategy Trading + Account Sync */
+.architecture-log-source--strategy_trading {
+  background: rgba(245, 158, 11, 0.22);
+  color: var(--color-text);
+}
+
+.architecture-log-source--account_sync {
+  background: rgba(20, 184, 166, 0.22);
+  color: var(--color-text);
+}
+
 .architecture-console-status-line .architecture-console-status-messages {
   display: flex;
   flex-direction: column;

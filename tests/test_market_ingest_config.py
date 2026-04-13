@@ -79,6 +79,23 @@ def test_engine_row_allows_omitted_redis_meta_key():
     assert rows[0]["redis_meta_key"] == BIFROST_HEALTH_DAEMON_TRADING_ENGINE
 
 
+def test_account_sync_row_allows_omitted_redis_meta_key():
+    cfg = {
+        "ops": {
+            "market_ingest_services": [
+                {
+                    "id": "account_sync_daemon",
+                    "label": "Account Sync Daemon",
+                    "systemd_unit": "bifrost-account-sync-daemon.service",
+                },
+            ],
+        },
+    }
+    rows = market_ingest_services_from_config(cfg)
+    assert len(rows) == 1
+    assert rows[0]["redis_meta_key"] == BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON
+
+
 def test_trading_engine_legacy_ops_redis_meta_key_normalizes():
     cfg = {
         "ops": {

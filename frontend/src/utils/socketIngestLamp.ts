@@ -8,6 +8,18 @@ export type AggregateIngestLamp = IngestLamp | 'none'
 export type LocalControlAgentLamp = 'green' | 'yellow' | 'red'
 
 /**
+ * Ops-configured services included in the "Socket Services" Redis health aggregate (header ⋮ menu,
+ * Settings → App → Socket, and Socket Services page title).
+ * Excludes `trading_engine` (Daemon / strategy process) and `account_sync_daemon` (Account Sync on
+ * Daemon — PostgreSQL heartbeat, not a quote/WS ingest row on this page).
+ */
+export function marketIngestServicesForSocketAggregate(
+  services: MarketIngestServiceRow[],
+): MarketIngestServiceRow[] {
+  return services.filter((s) => s.id !== 'trading_engine' && s.id !== 'account_sync_daemon')
+}
+
+/**
  * JSON `connected` from Monitor may be boolean; some paths historically used 1/0 or strings.
  * Strict `=== true` misses numeric truthy and breaks Socket Services lamps.
  */
@@ -400,4 +412,28 @@ export function aggregateIngestRedisHealthLamp(
     title:
       'Mixed Redis health: some services healthy, disconnected, or unknown. See each row tooltip.',
   }
+}
+
+function minimalMarketIngestRowForId(id: string): MarketIngestServiceRow {
+  return {
+    id,
+    label: '',
+    systemd_unit: '',
+    redis_meta_key: '',
+    process_active: '',
+  }
+}
+
+/** Canonical process ids on Settings → Daemon (Strategy Engine + Account Sync). */
+export const DAEMON_PAGE_SERVICE_IDS = ['trading_engine', 'account_sync_daemon'] as const
+
+/**
+ * Worst-of roll-up for Daemon header when Ops service list is not loaded (e.g. App ⋮ menu).
+ * Uses the same per-id rules as each row on the Daemon page (`ingestRedisHealthLamp`).
+ */
+export function aggregateDaemonProcessesHealthFromStatus(status: StatusResponse | null) {
+  return aggregateIngestRedisHealthLamp(
+    DAEMON_PAGE_SERVICE_IDS.map((id) => ({ svc: minimalMarketIngestRowForId(id) })),
+    status,
+  )
 }

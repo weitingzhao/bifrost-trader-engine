@@ -31,6 +31,7 @@ import {
   ingestRedisHealthLamp,
   ingestRedisTruthyConnected,
   localControlAgentLamp,
+  marketIngestServicesForSocketAggregate,
 } from '../utils/socketIngestLamp'
 
 export interface MarketIngestOpsPageProps {
@@ -191,6 +192,12 @@ function categoryForServiceId(id: string): IngestCategory {
   }
   if (id === 'account_sync_daemon') return 'Engine'
   return 'Other'
+}
+
+/** Connection column: IB client slots / heartbeats / Massive last-msg — not used for Engine-only Daemon rows. */
+function ingestRowUsesConnectionColumn(svc: MarketIngestServiceRow, category: IngestCategory): boolean {
+  if (category === 'IB') return true
+  return svc.id === 'massive_ws'
 }
 
 /** One IB Client ID line under Socket Services (ingest: single row; IB Operator: Host + optional Sec). */
@@ -558,6 +565,7 @@ function ServiceRow(props: {
   onStop: () => void
   onRestart: () => void
   onReset: () => void
+  showConnectionColumn: boolean
 }) {
   const {
     svc,
@@ -572,6 +580,7 @@ function ServiceRow(props: {
     onStop,
     onRestart,
     onReset,
+    showConnectionColumn,
   } = props
   const redisHealth = ingestRedisHealthLamp(svc.id, status)
   const lamp = redisHealth.lamp
@@ -618,6 +627,7 @@ function ServiceRow(props: {
           <code>{svc.systemd_unit}</code>
         </div>
       </td>
+      {showConnectionColumn ? (
       <td className="massive-api-kv-label ingest-services-connection-cell">
         {category === 'IB' && liveServiceHeartbeatS != null ? (
           <div
@@ -754,10 +764,8 @@ function ServiceRow(props: {
         {svc.id === 'massive_ws' && !massive ? (
           <span className="massive-api-doc-hint">—</span>
         ) : null}
-        {category !== 'IB' && svc.id !== 'massive_ws' ? (
-          <span className="massive-api-doc-hint">—</span>
-        ) : null}
       </td>
+      ) : null}
       <td>{logicalText}</td>
       <td>
         {!actionsDisabled ? (
@@ -863,6 +871,9 @@ export function IngestServicesTable(props: {
     return <p className="massive-api-doc-hint">{emptyHint}</p>
   }
 
+  const showConnectionColumn = rows.some(({ svc, category }) => ingestRowUsesConnectionColumn(svc, category))
+  const tableColCount = showConnectionColumn ? 6 : 5
+
   // Group rows by category to render section header rows
   const groups: { cat: IngestCategory; rows: { svc: MarketIngestServiceRow; category: IngestCategory }[] }[] = []
   for (const row of rows) {
@@ -884,7 +895,9 @@ export function IngestServicesTable(props: {
             <InfoTooltip text="Only one of Dev or Prod may run each service against the same Redis: bifrost_ops_control_env and bifrost_ops_control_host on the meta hash record which stack and host last started it from Ops. Starting elsewhere is rejected if the lease differs or if health still shows a fresh active writer. After Stop, Ops clears those fields and rewrites health to disconnected so Status updates." />
           </th>
           <th className="massive-api-kv-label">Service</th>
-          <th className="massive-api-kv-label">Connection</th>
+          {showConnectionColumn ? (
+            <th className="massive-api-kv-label">Connection</th>
+          ) : null}
           <th>Redis / logical</th>
           <th>Actions</th>
         </tr>
@@ -899,7 +912,7 @@ export function IngestServicesTable(props: {
               }}
             >
               <td
-                colSpan={6}
+                colSpan={tableColCount}
                 style={{
                   padding: '6px 10px',
                   fontSize: '0.68rem',
@@ -935,6 +948,7 @@ export function IngestServicesTable(props: {
                   onStop={() => onStop(svc)}
                   onRestart={() => onRestart(svc)}
                   onReset={() => onReset(svc)}
+                  showConnectionColumn={showConnectionColumn}
                 />
               )
             })}
@@ -1056,7 +1070,7 @@ export function MarketIngestOpsPage({
   )
 
   const ingestServicesForTable = useMemo(
-    () => services.filter(s => s.id !== 'trading_engine' && s.id !== 'account_sync_daemon'),
+    () => marketIngestServicesForSocketAggregate(services),
     [services],
   )
 
