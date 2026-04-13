@@ -2782,6 +2782,85 @@ tr:hover .realtime-quote-drag-handle {
   margin-top: 0.12rem;
 }
 
+/* Market Streams: Daily %/$ hover breakdown (must not clip popup) */
+.realtime-quotes-table td.market-streams-daily-calc-cell {
+  position: relative;
+  overflow: visible;
+  cursor: help;
+}
+
+.realtime-quotes-table td.market-streams-daily-calc-cell .market-streams-daily-calc-popup {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 0.35rem;
+  z-index: 200;
+  min-width: 17rem;
+  max-width: min(32rem, 92vw);
+  padding: 0.65rem 0.85rem;
+  font-size: var(--text-tiny);
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--transition-fast), visibility var(--transition-fast);
+}
+
+.realtime-quotes-table td.market-streams-daily-calc-cell:hover .market-streams-daily-calc-popup {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.market-streams-daily-calc-body .market-streams-daily-calc-title {
+  font-weight: 600;
+  font-size: var(--text-caption);
+  margin-bottom: 0.45rem;
+  color: var(--color-text-main);
+}
+
+.market-streams-daily-calc-body .market-streams-daily-calc-line {
+  margin-bottom: 0.2rem;
+  color: var(--color-text);
+}
+
+.market-streams-daily-calc-body .market-streams-daily-calc-line strong {
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.market-streams-daily-calc-body .market-streams-daily-calc-mono {
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  word-break: break-word;
+}
+
+.market-streams-daily-calc-body .market-streams-daily-calc-hint {
+  margin-top: 0.25rem;
+  font-size: 0.88em;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.market-streams-daily-calc-body .market-streams-daily-calc-muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.market-streams-daily-calc-body .market-streams-daily-calc-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 0.45rem 0;
+}
+
 /* Symbol cell: color = quote freshness */
 .realtime-quotes-table .realtime-quote-symbol {
   font-weight: 700;
@@ -4135,30 +4214,46 @@ tr:hover .realtime-quote-drag-handle {
   background: var(--color-bg-subtle);
 }
 
-/* Live page Open Orders section */
-.open-orders-live-card .open-orders-table-wrap {
+/* Live page: Open Orders + Watchlist Options in one row (50% / 50%) */
+.live-open-watchlist-split .live-open-watchlist-split-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.live-open-watchlist-split .live-watchlist-options-pane {
+  min-width: 0;
+}
+
+.live-open-watchlist-split .live-open-orders-pane {
+  min-width: 0;
+}
+
+/* Live page Open Orders pane (split section) */
+.live-open-watchlist-split .live-open-orders-pane .open-orders-table-wrap {
   overflow-x: auto;
   margin-top: var(--space-2);
   border-radius: 8px;
   border: 1px solid var(--color-border);
 }
 
-.open-orders-live-card .open-orders-table {
+.live-open-watchlist-split .live-open-orders-pane .open-orders-table {
   border-collapse: collapse;
   font-size: var(--text-caption);
   width: 100%;
   min-width: 360px;
 }
 
-.open-orders-live-card .open-orders-table th,
-.open-orders-live-card .open-orders-table td {
+.live-open-watchlist-split .live-open-orders-pane .open-orders-table th,
+.live-open-watchlist-split .live-open-orders-pane .open-orders-table td {
   padding: var(--space-2) var(--space-3);
   text-align: left;
   vertical-align: middle;
   border-bottom: 1px solid var(--color-border);
 }
 
-.open-orders-live-card .open-orders-table thead th {
+.live-open-watchlist-split .live-open-orders-pane .open-orders-table thead th {
   font-weight: 600;
   color: var(--color-text-muted);
   background: var(--color-surface-elevated);
@@ -4167,53 +4262,53 @@ tr:hover .realtime-quote-drag-handle {
   font-size: var(--text-tiny);
 }
 
-.open-orders-live-card .open-orders-table tbody tr {
+.live-open-watchlist-split .live-open-orders-pane .open-orders-table tbody tr {
   transition: background var(--transition-fast);
 }
 
-.open-orders-live-card .open-orders-table tbody tr:hover {
+.live-open-watchlist-split .live-open-orders-pane .open-orders-table tbody tr:hover {
   background: rgba(163, 230, 53, 0.04);
 }
 
-[data-theme="light"] .open-orders-live-card .open-orders-table tbody tr:hover {
+[data-theme="light"] .live-open-watchlist-split .live-open-orders-pane .open-orders-table tbody tr:hover {
   background: rgba(14, 165, 233, 0.06);
 }
 
-.open-orders-live-card .open-orders-table tbody td {
+.live-open-watchlist-split .live-open-orders-pane .open-orders-table tbody td {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
-.open-orders-live-card .open-order-qty-intrinsic {
+.live-open-watchlist-split .live-open-orders-pane .open-order-qty-intrinsic {
   font-weight: 700;
   color: var(--color-warning);
 }
 
-.open-orders-live-card .decimal-muted {
+.live-open-watchlist-split .live-open-orders-pane .decimal-muted {
   color: var(--color-text-dim);
   font-weight: 400;
 }
 
-.open-orders-live-card .open-orders-subtitle {
+.live-open-watchlist-split .live-open-orders-pane .open-orders-subtitle {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-muted);
 }
 
-.open-orders-live-card .section-hint {
+.live-open-watchlist-split .live-open-orders-pane .section-hint {
   padding: var(--space-3);
   text-align: center;
   color: var(--color-text-dim);
   font-style: italic;
 }
 
-/* Watchlist Options card */
-.watchlist-options-live-card .realtime-quotes-table-wrap {
+/* Watchlist Options pane (split section) */
+.live-open-watchlist-split .live-watchlist-options-pane .realtime-quotes-table-wrap {
   border-radius: 8px;
   border: 1px solid var(--color-border);
 }
 
-.watchlist-options-live-card .realtime-quotes-table thead th {
+.live-open-watchlist-split .live-watchlist-options-pane .realtime-quotes-table thead th {
   background: var(--color-surface-elevated);
 }
 

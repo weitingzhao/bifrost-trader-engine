@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { JSX, ReactNode } from 'react'
 import type { OpenOrder, PositionCategory, RealtimeQuote, StatusResponse, WatchlistItem } from '../types'
 import { fetchBarsBenchmark, fetchMarketStreamsSymbolOrder, fetchOpenOrders, fetchPositionCategories, fetchQuotes, fetchWatchlist, patchPositionCategory, putMarketStreamsSymbolOrder, subscribeQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
@@ -14,10 +14,37 @@ import {
   mergeQuotesIntoSymbolMap,
   normalizeBenchmarkMap,
   quoteDisplayLast,
+  resolveDailyBasePrice,
   type DailyBenchmark,
 } from './accounts/accountsUtils'
 
 const SYMBOL_ORDER_STORAGE_KEY = 'market_streams_symbol_order'
+
+/** Total Daily $ and weighted Daily % for Market Streams (denominator = Σ base × |qty| per Accounts group logic). */
+function aggregateMarketStreamsDailyTotals(
+  rows: {
+    symbol: string
+    quote?: RealtimeQuote | null
+    qty: number | null
+    positionDailyPrevClose: number | null
+    pnlVsBench: number | null
+  }[],
+  benchmarks: Record<string, DailyBenchmark>,
+): { totalDailyDollar: number; totalDailyPct: number | null } {
+  let totalDailyDollar = 0
+  let totalDailyDenom = 0
+  for (const r of rows) {
+    const sym = (r.symbol || '').trim().toUpperCase()
+    const bench = benchmarks[sym]
+    const qty = r.qty != null && Number.isFinite(r.qty) ? r.qty : 0
+    if (r.pnlVsBench != null && Number.isFinite(r.pnlVsBench)) totalDailyDollar += r.pnlVsBench
+    const base = resolveDailyBasePrice(bench, r.positionDailyPrevClose ?? undefined)
+    if (base != null && qty !== 0) totalDailyDenom += base * Math.abs(qty)
+  }
+  const totalDailyPct =
+    totalDailyDenom !== 0 && Number.isFinite(totalDailyDollar) ? (totalDailyDollar / totalDailyDenom) * 100 : null
+  return { totalDailyDollar, totalDailyPct }
+}
 
 function loadSymbolOrderFromStorage(): Record<string, string[]> {
   try {
@@ -46,6 +73,95 @@ function getQuoteFreshness(ts: number | null | undefined): 'fresh' | 'stale' | '
   if (ageSec < 3) return 'fresh'
   if (ageSec <= 10) return 'stale'
   return 'very-stale'
+}
+
+/** Hover breakdown for Market Streams Daily % / $ (substituted values, English UI). */
+function MarketStreamsDailyCalcBreakdown({
+  symbol,
+  bench,
+  positionDailyPrevClose,
+  last,
+  qty,
+}: {
+  symbol: string
+  bench: DailyBenchmark | undefined
+  positionDailyPrevClose: number | null
+  last: number | null
+  qty: number | null
+}): JSX.Element {
+  const base = resolveDailyBasePrice(bench, positionDailyPrevClose ?? undefined)
+  const qNum = qty != null && Number.isFinite(qty) ? qty : null
+
+  let baseSource = '—'
+  if (positionDailyPrevClose != null && Number.isFinite(positionDailyPrevClose) && positionDailyPrevClose > 0) {
+    baseSource = 'Position daily_prev_close (IB / account_positions)'
+  } else if (bench && Number.isFinite(bench.close) && bench.close > 0) {
+    const prevOk = bench.prev_close != null && Number.isFinite(bench.prev_close) && bench.prev_close > 0
+    baseSource =
+      bench.is_today && prevOk
+        ? 'Benchmark prev_close (GET /bars/benchmark, stock_day)'
+        : 'Benchmark close (GET /bars/benchmark, stock_day)'
+    if (Number.isFinite(bench.bar_time) && bench.bar_time > 0) {
+      const barDate = new Date(bench.bar_time * 1000).toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      })
+      baseSource += ` · bar date ${barDate}`
+    }
+  }
+
+  if (last == null || !Number.isFinite(last)) {
+    return (
+      <div className="market-streams-daily-calc-body">
+        <div className="market-streams-daily-calc-title">Daily % / Daily $</div>
+        <p className="market-streams-daily-calc-muted">No usable last price (quote last/mid). Add a live quote or refresh.</p>
+      </div>
+    )
+  }
+
+  if (base == null || !Number.isFinite(base) || base <= 0) {
+    return (
+      <div className="market-streams-daily-calc-body">
+        <div className="market-streams-daily-calc-title">Daily % / Daily $ · {symbol}</div>
+        <p className="market-streams-daily-calc-muted">
+          No prior close: need position <code>daily_prev_close</code> or a benchmark row for this symbol.
+        </p>
+      </div>
+    )
+  }
+
+  const diff = last - base
+  const pctRaw = (diff / base) * 100
+  const dollarRaw = qNum != null ? diff * qNum : null
+  const fmt4 = (n: number) => (Number.isFinite(n) ? n.toFixed(4) : '—')
+
+  return (
+    <div className="market-streams-daily-calc-body">
+      <div className="market-streams-daily-calc-title">Daily % / Daily $ · {symbol}</div>
+      <div className="market-streams-daily-calc-line">
+        <strong>Base</strong> (prior close): {fmtUsd(base)} — {baseSource}
+      </div>
+      <div className="market-streams-daily-calc-line">
+        <strong>Last</strong> (quote last or mid): {fmtUsd(last)}
+      </div>
+      <div className="market-streams-daily-calc-line">
+        <strong>Qty</strong> (STK shares, all accounts, signed): {qNum ?? '—'}
+      </div>
+      <div className="market-streams-daily-calc-divider" />
+      <div className="market-streams-daily-calc-line">Daily % = ((Last − Base) / Base) × 100</div>
+      <div className="market-streams-daily-calc-line market-streams-daily-calc-mono">
+        = (({fmt4(last)} − {fmt4(base)}) / {fmt4(base)}) × 100 = {fmt4(pctRaw)}%
+      </div>
+      <div className="market-streams-daily-calc-hint">The table shows the absolute % with color for direction.</div>
+      <div className="market-streams-daily-calc-divider" />
+      <div className="market-streams-daily-calc-line">Daily $ = (Last − Base) × Qty</div>
+      <div className="market-streams-daily-calc-line market-streams-daily-calc-mono">
+        = ({fmt4(last)} − {fmt4(base)}) × ({qNum ?? '—'}) = {dollarRaw != null && Number.isFinite(dollarRaw) ? fmtUsd(dollarRaw) : '—'}
+      </div>
+      <div className="market-streams-daily-calc-hint">The table shows the absolute dollar amount with color for direction.</div>
+    </div>
+  )
 }
 
 /** Tooltip text for Symbol: raw data used for Daily % / Daily $ (ref price, bar date). */
@@ -375,6 +491,8 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
     let secondaryHasCost = false
     let positionCategory = 'Uncategorized'
     const accountIdsWithSymbol: string[] = []
+    let positionDailyPrevClose: number | null = null
+    let positionDailyPrevClosePickWeight = -1
     for (const acc of accountsList) {
       const accId = (acc?.account_id ?? (acc as { account?: string }).account ?? '').toString().trim()
       const accIdNorm = norm(accId)
@@ -386,6 +504,14 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
         const secType = (p.secType ?? '').toString().toUpperCase()
         const posQty = typeof p.position === 'number' ? p.position : 0
         if (!sym || sym !== symbol || secType !== 'STK' || !Number.isFinite(posQty) || posQty === 0) continue
+        const absQ = Math.abs(posQty)
+        const dpcRaw = p.daily_prev_close
+        const dpc =
+          dpcRaw != null && Number.isFinite(Number(dpcRaw)) && Number(dpcRaw) > 0 ? Number(dpcRaw) : null
+        if (dpc != null && absQ > positionDailyPrevClosePickWeight) {
+          positionDailyPrevClose = dpc
+          positionDailyPrevClosePickWeight = absQ
+        }
         if (positionCategory === 'Uncategorized' && p.category && String(p.category).trim()) {
           positionCategory = String(p.category).trim()
         }
@@ -430,6 +556,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
       bench,
       quoteDisplayLast(quote),
       qty ?? 0,
+      positionDailyPrevClose,
     )
     const lastVal = quoteDisplayLast(quote)
     const pnlCost =
@@ -462,6 +589,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
       secondaryQty: secondaryQty || null,
       secondaryAvgCost,
       secondaryPnlCost,
+      positionDailyPrevClose,
     }
   })
 
@@ -481,6 +609,11 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
     if (positionCategoryFilter === 'all') return filteredByAccount
     return filteredByAccount.filter((row) => row.category === positionCategoryFilter)
   }, [filteredByAccount, positionCategoryFilter])
+
+  const marketStreamsDailyTotals = useMemo(
+    () => aggregateMarketStreamsDailyTotals(filteredRows, benchmarks),
+    [filteredRows, benchmarks],
+  )
 
   /** Category names that appear in data. */
   const categoryNamesFromData = useMemo(() => {
@@ -636,163 +769,208 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
 
   return (
     <div className="app-page-stack">
-      <div className="card card-operations open-orders-live-card">
-        <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
-          <h2 className="daemon-card-title page-title-with-tooltip">
-            <span
-              className={`title-inline-lamp lamp-icon ${openOrdersSectionOk ? 'green' : 'red'}`}
-              title={`Open orders lamp: green when Account Sync Daemon is healthy (GET /status account_sync_daemon) and heartbeat is fresh. ${accountSyncLamp.title}${openOrdersUpdatedAt != null ? ` · Last UI read (GET /open-orders): ${fmtSince(openOrdersUpdatedAt)} ago.` : ''}`}
-              aria-hidden
-            >
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-              </svg>
-            </span>
-            Open Orders
-            <InfoTooltip text="Unfilled orders from PostgreSQL (daemon_open_orders). The Account Sync Daemon writes this table from the IB account stream. This page polls GET /open-orders every few seconds for UI updates. Account ID is the IB account that placed each order." />
-          </h2>
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            {openOrdersUpdatedAt != null && (
-              <span
-                className="open-orders-freshness-badge"
-                title={`DB polled at ${fmtTs(openOrdersUpdatedAt)}`}
-              >
-                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ opacity: 0.7 }}>
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M12 6v6l4 2" />
-                </svg>
-                <span className="open-orders-freshness-age">{fmtSince(openOrdersUpdatedAt)} ago</span>
-              </span>
-            )}
-            {onNavigateToSubscribe && (
-              <button
-                type="button"
-                className="section-header-icon-btn"
-                onClick={onNavigateToSubscribe}
-                title="Open Subscribe page (IB Event Subscribe — account agent stream)"
-                aria-label="Open Subscribe page"
-              >
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M22 12h-4l-3 9L9 3 6 12H2" />
-                </svg>
-              </button>
-            )}
+      <div className="card card-operations live-open-watchlist-split">
+        <div className="live-open-watchlist-split-grid" role="group" aria-label="Open orders and Watchlist options">
+          <div className="live-open-orders-pane">
+            <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
+              <h2 className="daemon-card-title page-title-with-tooltip">
+                <span
+                  className={`title-inline-lamp lamp-icon ${openOrdersSectionOk ? 'green' : 'red'}`}
+                  title={`Open orders lamp: green when Account Sync Daemon is healthy (GET /status account_sync_daemon) and heartbeat is fresh. ${accountSyncLamp.title}${openOrdersUpdatedAt != null ? ` · Last UI read (GET /open-orders): ${fmtSince(openOrdersUpdatedAt)} ago.` : ''}`}
+                  aria-hidden
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+                  </svg>
+                </span>
+                Open Orders
+                <InfoTooltip text="Unfilled orders from PostgreSQL (daemon_open_orders). The Account Sync Daemon writes this table from the IB account stream. This page polls GET /open-orders every few seconds for UI updates. Account ID is the IB account that placed each order." />
+              </h2>
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                {openOrdersUpdatedAt != null && (
+                  <span
+                    className="open-orders-freshness-badge"
+                    title={`DB polled at ${fmtTs(openOrdersUpdatedAt)}`}
+                  >
+                    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ opacity: 0.7 }}>
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M12 6v6l4 2" />
+                    </svg>
+                    <span className="open-orders-freshness-age">{fmtSince(openOrdersUpdatedAt)} ago</span>
+                  </span>
+                )}
+                {onNavigateToSubscribe && (
+                  <button
+                    type="button"
+                    className="section-header-icon-btn"
+                    onClick={onNavigateToSubscribe}
+                    title="Open Subscribe page (IB Event Subscribe — account agent stream)"
+                    aria-label="Open Subscribe page"
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M22 12h-4l-3 9L9 3 6 12H2" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              <span className="section-hint" style={{ marginLeft: 8 }}>Source: DB table daemon_open_orders</span>
+            </div>
+            <div className="open-orders-table-wrap">
+              {openOrders.length === 0 ? (
+                <p className="section-hint">No open orders</p>
+              ) : (
+                <>
+                  {(() => {
+                    const optionOrders = openOrders.filter((o) => ((o.sec_type ?? '').toString().toUpperCase()) === 'OPT')
+                    const stockOrders = openOrders.filter((o) => ((o.sec_type ?? '').toString().toUpperCase()) === 'STK')
+                    return (
+                      <>
+                        {optionOrders.length > 0 && (
+                          <div className="open-orders-section" style={{ marginBottom: 'var(--space-3)' }}>
+                            <h3 className="open-orders-subtitle" style={{ fontSize: 'var(--text-caption)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Option (OPT)</h3>
+                            <table className="open-orders-table table-operations" role="grid" aria-label="Open orders Option">
+                              <thead>
+                                <tr>
+                                  <th scope="col">Account ID</th>
+                                  <th scope="col">Symbol</th>
+                                  <th scope="col">Expiry</th>
+                                  <th scope="col">Strike</th>
+                                  <th scope="col">Opt side</th>
+                                  <th scope="col">Side</th>
+                                  <th scope="col">Qty</th>
+                                  <th scope="col">Limit</th>
+                                  <th scope="col">Status</th>
+                                  <th scope="col">Filled / Rem</th>
+                                  <th scope="col">Submit</th>
+                                  <th scope="col">Since</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {optionOrders.map((o, i) => {
+                                  const optParts = parseOptionContractKey(o.contract_key)
+                                  const submitTs = o.updated_ts != null && Number.isFinite(Number(o.updated_ts)) ? Number(o.updated_ts) : null
+                                  return (
+                                    <tr key={o.order_id ?? o.perm_id ?? i}>
+                                      <td>{o.account_id ?? '—'}</td>
+                                      <td>{o.symbol ?? '—'}</td>
+                                      <td>{optParts.expiry}</td>
+                                      <td>{optParts.strike === '—' ? '—' : fmtUsd(Number(optParts.strike))}</td>
+                                      <td>{optParts.rightLabel}</td>
+                                      <td>{o.action ?? '—'}</td>
+                                      <td>{o.total_quantity != null ? Math.round(Number(o.total_quantity)) : '—'}</td>
+                                      <td>{o.limit_price != null ? fmtUsd(Number(o.limit_price)) : '—'}</td>
+                                      <td>{o.status ?? '—'}</td>
+                                      <td>
+                                        {o.filled != null && o.remaining != null ? (
+                                          <>{Math.round(Number(o.filled))} / {Math.round(Number(o.remaining))}</>
+                                        ) : (
+                                          '—'
+                                        )}
+                                      </td>
+                                      <td>{submitTs != null ? fmtTs(submitTs) : '—'}</td>
+                                      <td>{submitTs != null ? `${fmtSince(submitTs)} ago` : '—'}</td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                        {stockOrders.length > 0 && (
+                          <div className="open-orders-section">
+                            <h3 className="open-orders-subtitle" style={{ fontSize: 'var(--text-caption)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Stock (STK)</h3>
+                            <table className="open-orders-table table-operations" role="grid" aria-label="Open orders Stock">
+                              <thead>
+                                <tr>
+                                  <th scope="col">Account ID</th>
+                                  <th scope="col">Symbol</th>
+                                  <th scope="col">Side</th>
+                                  <th scope="col">Qty</th>
+                                  <th scope="col">Limit</th>
+                                  <th scope="col">Status</th>
+                                  <th scope="col">Filled / Rem</th>
+                                  <th scope="col">Submit</th>
+                                  <th scope="col">Since</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {stockOrders.map((o, i) => {
+                                  const submitTs = o.updated_ts != null && Number.isFinite(Number(o.updated_ts)) ? Number(o.updated_ts) : null
+                                  return (
+                                    <tr key={o.order_id ?? o.perm_id ?? i}>
+                                      <td>{o.account_id ?? '—'}</td>
+                                      <td>{o.symbol ?? '—'}</td>
+                                      <td>{o.action ?? '—'}</td>
+                                      <td>{o.total_quantity != null ? fmtQtyWithMutedDecimal(o.total_quantity) : '—'}</td>
+                                      <td>{o.limit_price != null ? fmtUsd(Number(o.limit_price)) : '—'}</td>
+                                      <td>{o.status ?? '—'}</td>
+                                      <td>
+                                        {o.filled != null && o.remaining != null ? (
+                                          <>{fmtQtyWithMutedDecimal(o.filled)} / {fmtQtyWithMutedDecimal(o.remaining)}</>
+                                        ) : (
+                                          '—'
+                                        )}
+                                      </td>
+                                      <td>{submitTs != null ? fmtTs(submitTs) : '—'}</td>
+                                      <td>{submitTs != null ? `${fmtSince(submitTs)} ago` : '—'}</td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                        {optionOrders.length === 0 && stockOrders.length === 0 && (
+                          <p className="section-hint">No OPT or STK open orders (other sec types filtered)</p>
+                        )}
+                      </>
+                    )
+                  })()}
+                </>
+              )}
+            </div>
           </div>
-          <span className="section-hint" style={{ marginLeft: 8 }}>Source: DB table daemon_open_orders</span>
-        </div>
-        <div className="open-orders-table-wrap">
-          {openOrders.length === 0 ? (
-            <p className="section-hint">No open orders</p>
-          ) : (
-            <>
-              {(() => {
-                const optionOrders = openOrders.filter((o) => ((o.sec_type ?? '').toString().toUpperCase()) === 'OPT')
-                const stockOrders = openOrders.filter((o) => ((o.sec_type ?? '').toString().toUpperCase()) === 'STK')
-                return (
-                  <>
-                    {optionOrders.length > 0 && (
-                      <div className="open-orders-section" style={{ marginBottom: 'var(--space-3)' }}>
-                        <h3 className="open-orders-subtitle" style={{ fontSize: 'var(--text-caption)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Option (OPT)</h3>
-                        <table className="open-orders-table table-operations" role="grid" aria-label="Open orders Option">
-                          <thead>
-                            <tr>
-                              <th scope="col">Account ID</th>
-                              <th scope="col">Symbol</th>
-                              <th scope="col">Expiry</th>
-                              <th scope="col">Strike</th>
-                              <th scope="col">Opt side</th>
-                              <th scope="col">Side</th>
-                              <th scope="col">Qty</th>
-                              <th scope="col">Limit</th>
-                              <th scope="col">Status</th>
-                              <th scope="col">Filled / Rem</th>
-                              <th scope="col">Submit</th>
-                              <th scope="col">Since</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {optionOrders.map((o, i) => {
-                              const optParts = parseOptionContractKey(o.contract_key)
-                              const submitTs = o.updated_ts != null && Number.isFinite(Number(o.updated_ts)) ? Number(o.updated_ts) : null
-                              return (
-                                <tr key={o.order_id ?? o.perm_id ?? i}>
-                                  <td>{o.account_id ?? '—'}</td>
-                                  <td>{o.symbol ?? '—'}</td>
-                                  <td>{optParts.expiry}</td>
-                                  <td>{optParts.strike === '—' ? '—' : fmtUsd(Number(optParts.strike))}</td>
-                                  <td>{optParts.rightLabel}</td>
-                                  <td>{o.action ?? '—'}</td>
-                                  <td>{o.total_quantity != null ? Math.round(Number(o.total_quantity)) : '—'}</td>
-                                  <td>{o.limit_price != null ? fmtUsd(Number(o.limit_price)) : '—'}</td>
-                                  <td>{o.status ?? '—'}</td>
-                                  <td>
-                                    {o.filled != null && o.remaining != null ? (
-                                      <>{Math.round(Number(o.filled))} / {Math.round(Number(o.remaining))}</>
-                                    ) : (
-                                      '—'
-                                    )}
-                                  </td>
-                                  <td>{submitTs != null ? fmtTs(submitTs) : '—'}</td>
-                                  <td>{submitTs != null ? `${fmtSince(submitTs)} ago` : '—'}</td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                    {stockOrders.length > 0 && (
-                      <div className="open-orders-section">
-                        <h3 className="open-orders-subtitle" style={{ fontSize: 'var(--text-caption)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Stock (STK)</h3>
-                        <table className="open-orders-table table-operations" role="grid" aria-label="Open orders Stock">
-                          <thead>
-                            <tr>
-                              <th scope="col">Account ID</th>
-                              <th scope="col">Symbol</th>
-                              <th scope="col">Side</th>
-                              <th scope="col">Qty</th>
-                              <th scope="col">Limit</th>
-                              <th scope="col">Status</th>
-                              <th scope="col">Filled / Rem</th>
-                              <th scope="col">Submit</th>
-                              <th scope="col">Since</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {stockOrders.map((o, i) => {
-                              const submitTs = o.updated_ts != null && Number.isFinite(Number(o.updated_ts)) ? Number(o.updated_ts) : null
-                              return (
-                                <tr key={o.order_id ?? o.perm_id ?? i}>
-                                  <td>{o.account_id ?? '—'}</td>
-                                  <td>{o.symbol ?? '—'}</td>
-                                  <td>{o.action ?? '—'}</td>
-                                  <td>{o.total_quantity != null ? fmtQtyWithMutedDecimal(o.total_quantity) : '—'}</td>
-                                  <td>{o.limit_price != null ? fmtUsd(Number(o.limit_price)) : '—'}</td>
-                                  <td>{o.status ?? '—'}</td>
-                                  <td>
-                                    {o.filled != null && o.remaining != null ? (
-                                      <>{fmtQtyWithMutedDecimal(o.filled)} / {fmtQtyWithMutedDecimal(o.remaining)}</>
-                                    ) : (
-                                      '—'
-                                    )}
-                                  </td>
-                                  <td>{submitTs != null ? fmtTs(submitTs) : '—'}</td>
-                                  <td>{submitTs != null ? `${fmtSince(submitTs)} ago` : '—'}</td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                    {optionOrders.length === 0 && stockOrders.length === 0 && (
-                      <p className="section-hint">No OPT or STK open orders (other sec types filtered)</p>
-                    )}
-                  </>
-                )
-              })()}
-            </>
-          )}
+
+          <div className="live-watchlist-options-pane">
+            <h2 className="daemon-card-title page-title-with-tooltip" style={{ marginBottom: '0.5rem' }}>
+              Watchlist Options
+              <InfoTooltip text="Option contracts from Watchlist; quotes from daemon (contract_quote_live). Updates every few seconds." />
+            </h2>
+            <div className="realtime-quotes-table-wrap">
+              {watchlistOptionItems.length === 0 ? (
+                <p className="section-hint">No option contracts on Watchlist</p>
+              ) : (
+                <table className="table-operations realtime-quotes-table" aria-label="Watchlist option quotes">
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th title="Last price; Bid and Ask shown as spread vs Last">Last (Bid / Ask)</th>
+                      <th>Expiry</th>
+                      <th>Right</th>
+                      <th>Strike</th>
+                      <th>Category</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {watchlistOptionItems.map((item) => {
+                      const q = quotesByContractKey[item.contract_key]
+                      const categoryName = (item.category ?? '').trim() || 'Uncategorized'
+                      return (
+                        <tr key={item.contract_key}>
+                          <td title={item.contract_key} style={{ fontWeight: 'bold' }}>{watchlistOptionLabel(item)}</td>
+                          <td className="realtime-quote-num realtime-quote-last-bid-ask">{renderLastBidAskOption(q)}</td>
+                          <td>{formatExpiry(item.expiry)}</td>
+                          <td>{formatOptionRight(item.option_right)}</td>
+                          <td>{item.strike != null ? formatStrike(item.strike) : '—'}</td>
+                          <td>{categoryName}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -999,8 +1177,11 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                         secondaryQty,
                         secondaryAvgCost,
                         secondaryPnlCost,
+                        positionDailyPrevClose,
                       } = row
                       const symbolFreshness = getQuoteFreshness(q?.ts)
+                      const symBench = benchmarks[(symbol || '').trim().toUpperCase()]
+                      const dailyLast = quoteDisplayLast(q)
                       return (
                         <tr
                           key={row.symbol}
@@ -1097,7 +1278,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                           )
                         })() : '—'}
                       </td>
-                      <td className="realtime-quote-num realtime-quote-pnl-stacked">
+                      <td className="realtime-quote-num realtime-quote-pnl-stacked market-streams-daily-calc-cell">
                         <span className="realtime-quote-pnl-stacked-line">
                           {changePct != null && Number.isFinite(changePct) ? (
                             <span className={changePct > 0 ? 'pnl-positive' : changePct < 0 ? 'pnl-negative' : ''}>
@@ -1116,6 +1297,15 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                             '—'
                           )}
                         </span>
+                        <div className="market-streams-daily-calc-popup" role="tooltip">
+                          <MarketStreamsDailyCalcBreakdown
+                            symbol={(symbol || '').trim() || '—'}
+                            bench={symBench}
+                            positionDailyPrevClose={positionDailyPrevClose}
+                            last={dailyLast}
+                            qty={qty}
+                          />
+                        </div>
                       </td>
                       <td className="realtime-quote-num realtime-quote-pnl-stacked">
                         <span className="realtime-quote-pnl-stacked-line">
@@ -1165,14 +1355,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                   return a + q * c
                 }, 0)
                 const totalCostPnl = filteredRows.reduce((a, r) => a + (r.pnlCost != null && Number.isFinite(r.pnlCost) ? r.pnlCost : 0), 0)
-                const totalDailyDollar = filteredRows.reduce((a, r) => a + (r.pnlVsBench != null && Number.isFinite(r.pnlVsBench) ? r.pnlVsBench : 0), 0)
-                const sumLastQty = filteredRows.reduce((a, r) => {
-                  const q = r.qty != null && Number.isFinite(r.qty) ? r.qty : 0
-                  const last = quoteDisplayLast(r.quote) ?? 0
-                  return a + last * q
-                }, 0)
-                const totalDailyDenom = sumLastQty - totalDailyDollar
-                const totalDailyPct = totalDailyDenom > 0 && Number.isFinite(totalDailyDollar) ? (totalDailyDollar / totalDailyDenom) * 100 : null
+                const { totalDailyDollar, totalDailyPct } = marketStreamsDailyTotals
                 const totalPct = totalCost > 0 && Number.isFinite(totalCostPnl) ? (totalCostPnl / totalCost) * 100 : null
                 return (
                   <tr className="realtime-quotes-sum-row">
@@ -1210,7 +1393,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                       </span>
                       <span className="realtime-quote-pnl-stacked-line">
                         <span className={totalDailyDollar > 0 ? 'pnl-positive' : totalDailyDollar < 0 ? 'pnl-negative' : ''}>
-                          {totalDailyDollar !== 0 ? fmtUsdRound0(totalDailyDollar) : '—'}
+                          {totalDailyPct != null || totalDailyDollar !== 0 ? fmtUsdRound0(totalDailyDollar) : '—'}
                         </span>
                       </span>
                     </td>
@@ -1248,20 +1431,8 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
               return acc + qty * cost
             }, 0)
             const totalPct = totalCost > 0 && Number.isFinite(totalCostPnl) ? (totalCostPnl / totalCost) * 100 : null
-            const totalDailyDollar = filteredRows.reduce((acc, row) => {
-              const v = row.pnlVsBench
-              return acc + (v != null && Number.isFinite(v) ? v : 0)
-            }, 0)
-            const sumLastQty = filteredRows.reduce((acc, row) => {
-              const qty = row.qty != null && Number.isFinite(row.qty) ? row.qty : 0
-              const last = quoteDisplayLast(row.quote) ?? 0
-              return acc + last * qty
-            }, 0)
-            const totalDailyDenom = sumLastQty - totalDailyDollar
-            const totalDailyPct =
-              totalDailyDenom > 0 && Number.isFinite(totalDailyDollar)
-                ? (totalDailyDollar / totalDailyDenom) * 100
-                : null
+            const { totalDailyDollar, totalDailyPct } = marketStreamsDailyTotals
+            const showDailySummary = totalDailyPct != null || totalDailyDollar !== 0
             return (
               <div className="watchlist-summary-row" style={{ marginTop: 'var(--space-3)' }}>
                 <span className="watchlist-summary-segment">
@@ -1278,7 +1449,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                     </span>
                   </span>
                 )}
-                {(Number.isFinite(totalDailyDollar) || (totalDailyPct != null && Number.isFinite(totalDailyPct))) && (
+                {showDailySummary && (
                   <>
                     <span className="watchlist-summary-segment">
                       DAILY $
@@ -1300,45 +1471,6 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
             )
           })()}
       </div>
-
-      {watchlistOptionItems.length > 0 && (
-        <div className="card card-operations watchlist-options-live-card" style={{ marginTop: 'var(--space-3)' }}>
-          <h2 className="daemon-card-title" style={{ marginBottom: '0.5rem' }}>
-            Watchlist Options
-            <InfoTooltip text="Option contracts from Watchlist; quotes from daemon (contract_quote_live). Updates every few seconds." />
-          </h2>
-          <div className="realtime-quotes-table-wrap">
-            <table className="table-operations realtime-quotes-table" aria-label="Watchlist option quotes">
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th title="Last price; Bid and Ask shown as spread vs Last">Last (Bid / Ask)</th>
-                  <th>Expiry</th>
-                  <th>Right</th>
-                  <th>Strike</th>
-                  <th>Category</th>
-                </tr>
-              </thead>
-              <tbody>
-                {watchlistOptionItems.map((item) => {
-                  const q = quotesByContractKey[item.contract_key]
-                  const categoryName = (item.category ?? '').trim() || 'Uncategorized'
-                  return (
-                    <tr key={item.contract_key}>
-                      <td title={item.contract_key} style={{ fontWeight: 'bold' }}>{watchlistOptionLabel(item)}</td>
-                      <td className="realtime-quote-num realtime-quote-last-bid-ask">{renderLastBidAskOption(q)}</td>
-                      <td>{formatExpiry(item.expiry)}</td>
-                      <td>{formatOptionRight(item.option_right)}</td>
-                      <td>{item.strike != null ? formatStrike(item.strike) : '—'}</td>
-                      <td>{categoryName}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       <div className="card card-operations strategy-active-live-card strategy-section" style={{ marginTop: 'var(--space-3)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>

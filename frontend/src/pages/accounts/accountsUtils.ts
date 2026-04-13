@@ -95,6 +95,28 @@ export function optionMoneyness(isCall: boolean, k: number, s: number): string {
   return s < k ? 'ITM' : 'OTM'
 }
 
+/**
+ * Prior close for Daily % / Daily $ (same precedence as Accounts STK rows):
+ * position daily_prev_close from IB when present, else stock_day benchmark bar.
+ */
+export function resolveDailyBasePrice(
+  bench: DailyBenchmark | undefined,
+  dailyPrevCloseFromPosition?: number | null,
+): number | null {
+  if (dailyPrevCloseFromPosition != null && Number.isFinite(dailyPrevCloseFromPosition) && dailyPrevCloseFromPosition > 0) {
+    return dailyPrevCloseFromPosition
+  }
+  if (bench && Number.isFinite(bench.close) && bench.close > 0) {
+    const prevClose =
+      bench.prev_close != null && Number.isFinite(bench.prev_close) && bench.prev_close > 0
+        ? bench.prev_close
+        : null
+    const base = bench.is_today && prevClose != null ? prevClose : bench.close
+    return Number.isFinite(base) && base > 0 ? base : null
+  }
+  return null
+}
+
 export function computeDailyChange(
   bench: DailyBenchmark | undefined,
   currPrice: number | null,
@@ -104,17 +126,8 @@ export function computeDailyChange(
   if (currPrice == null || !Number.isFinite(currPrice)) {
     return { changePct: null, pnlVsBench: null }
   }
-  let basePrice: number | null = null
-  if (dailyPrevClose != null && Number.isFinite(dailyPrevClose) && dailyPrevClose > 0) {
-    basePrice = dailyPrevClose
-  } else if (bench && Number.isFinite(bench.close) && bench.close > 0) {
-    const prevClose =
-      bench.prev_close != null && Number.isFinite(bench.prev_close) && bench.prev_close > 0
-        ? bench.prev_close
-        : null
-    basePrice = bench.is_today && prevClose != null ? prevClose : bench.close
-  }
-  if (basePrice == null || !Number.isFinite(basePrice) || basePrice <= 0) {
+  const basePrice = resolveDailyBasePrice(bench, dailyPrevClose)
+  if (basePrice == null) {
     return { changePct: null, pnlVsBench: null }
   }
   return {

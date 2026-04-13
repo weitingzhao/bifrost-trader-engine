@@ -437,6 +437,59 @@ function buildOpenStockPositionRows(positions: LivePositionRow[], rowKeyPrefix: 
   return rows
 }
 
+function renderIndependentHoldingRow(position: LivePositionRow, keyPrefix: string): JSX.Element {
+  const accId = (position.account_id ?? '').trim() || '—'
+  const qty = Number(position.position)
+  const lastPrice =
+    position.price != null && Number.isFinite(Number(position.price)) ? Number(position.price) : null
+  const dailyPrev =
+    position.daily_prev_close != null && Number.isFinite(Number(position.daily_prev_close))
+      ? Number(position.daily_prev_close)
+      : null
+  let dailyPnl: number | null = null
+  let dailyPct: number | null = null
+  if (lastPrice != null && dailyPrev != null && Number.isFinite(qty) && qty !== 0) {
+    dailyPnl = (lastPrice - dailyPrev) * qty
+    const dBase = Math.abs(dailyPrev * qty)
+    dailyPct = dBase > 0 ? (dailyPnl / dBase) * 100 : null
+  }
+  const totalPnl =
+    position.unrealized_pnl != null && Number.isFinite(Number(position.unrealized_pnl))
+      ? Number(position.unrealized_pnl)
+      : null
+  const avgCost =
+    position.avgCost != null && Number.isFinite(Number(position.avgCost)) ? Number(position.avgCost) : null
+  const costBasis =
+    avgCost != null && Number.isFinite(qty) && qty !== 0 ? Math.abs(qty) * avgCost : null
+  const totalPct =
+    costBasis != null && costBasis > 0 && totalPnl != null && Number.isFinite(totalPnl)
+      ? (totalPnl / costBasis) * 100
+      : null
+  const ck = (position.contract_key ?? '').trim()
+  return (
+    <tr key={`${keyPrefix}-${accId}-${position.symbol ?? ''}-${ck || 'stk'}`}>
+      <td>{accId}</td>
+      <td>
+        <strong>{position.symbol ?? '—'}</strong>
+      </td>
+      <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
+      <td>{Number.isFinite(qty) ? qty : '—'}</td>
+      <td>{fmtUsd(position.avgCost)}</td>
+      <td>{fmtUsd(lastPrice)}</td>
+      <td>
+        <span className={((dailyPnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>{fmtUsd(dailyPnl)}</span>
+        {' / '}
+        <span className={((dailyPct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>{fmtSignedPct(dailyPct)}</span>
+      </td>
+      <td>
+        <span className={((totalPnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>{fmtUsd(totalPnl)}</span>
+        {' / '}
+        <span className={((totalPct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>{fmtSignedPct(totalPct)}</span>
+      </td>
+    </tr>
+  )
+}
+
 /** Stock metrics for exactly one (symbol, account); never mixes other accounts. */
 function underlyingCoverageStockMetrics(
   stocks: LivePositionRow[],
@@ -2011,13 +2064,14 @@ export function PositionsPage({
     }
   }, [status?.portfolio?.accounts, liveStockPositions, stockCoverageSectionAccount, coverageAssetPieIncludeBp])
 
-  const independentStocks = useMemo(
-    () => liveStockPositions.filter(s => {
-      const opt = s.optionable
-      return opt !== true
-    }),
-    [liveStockPositions],
-  )
+  const independentStockSections = useMemo(() => {
+    const isIndep = (s: LivePositionRow) => s.optionable !== true
+    return [
+      { title: 'Stocks', key: 'ind-stk', rows: coreStockPositions.filter(isIndep) },
+      { title: 'Fixed income', key: 'ind-fi', rows: fixedIncomeStockPositions.filter(isIndep) },
+      { title: 'Cash-like', key: 'ind-cash', rows: cashLikeStockPositions.filter(isIndep) },
+    ] as const
+  }, [coreStockPositions, fixedIncomeStockPositions, cashLikeStockPositions])
 
   const filteredInstanceAllGroups = useMemo((): InstanceAllGroup[] => {
     let list = instanceAllGroups
@@ -3575,10 +3629,10 @@ export function PositionsPage({
                       </p>
                     </div>
                   )}
-                  {independentStocks.length > 0 && (
+                  {independentStockSections.some(s => s.rows.length > 0) && (
                     <div className="instance-sheet-stock-section">
                       <h5 className="replay-sub instance-sheet-section-heading">Independent Holdings</h5>
-                      <p className="section-hint">Positions without tradeable options (Index, ETF, etc.); not part of any option strategy.</p>
+                      <p className="section-hint">Positions without tradeable options (Index, ETF, etc.); not part of any option strategy. Grouped by position category (Stocks, Fixed income, Cash-like).</p>
                       <div className="replay-portfolio-table-wrap">
                         <table className="table-operations instance-sheet-sub-table">
                           <thead>
@@ -3594,79 +3648,16 @@ export function PositionsPage({
                             </tr>
                           </thead>
                           <tbody>
-                            {independentStocks.map(position => {
-                              const accId = (position.account_id ?? '').trim() || '—'
-                              const qty = Number(position.position)
-                              const lastPrice =
-                                position.price != null && Number.isFinite(Number(position.price))
-                                  ? Number(position.price)
-                                  : null
-                              const dailyPrev =
-                                position.daily_prev_close != null &&
-                                Number.isFinite(Number(position.daily_prev_close))
-                                  ? Number(position.daily_prev_close)
-                                  : null
-                              let dailyPnl: number | null = null
-                              let dailyPct: number | null = null
-                              if (
-                                lastPrice != null &&
-                                dailyPrev != null &&
-                                Number.isFinite(qty) &&
-                                qty !== 0
-                              ) {
-                                dailyPnl = (lastPrice - dailyPrev) * qty
-                                const dBase = Math.abs(dailyPrev * qty)
-                                dailyPct = dBase > 0 ? (dailyPnl / dBase) * 100 : null
-                              }
-                              const totalPnl =
-                                position.unrealized_pnl != null &&
-                                Number.isFinite(Number(position.unrealized_pnl))
-                                  ? Number(position.unrealized_pnl)
-                                  : null
-                              const avgCost =
-                                position.avgCost != null && Number.isFinite(Number(position.avgCost))
-                                  ? Number(position.avgCost)
-                                  : null
-                              const costBasis =
-                                avgCost != null && Number.isFinite(qty) && qty !== 0
-                                  ? Math.abs(qty) * avgCost
-                                  : null
-                              const totalPct =
-                                costBasis != null &&
-                                costBasis > 0 &&
-                                totalPnl != null &&
-                                Number.isFinite(totalPnl)
-                                  ? (totalPnl / costBasis) * 100
-                                  : null
-                              return (
-                                <tr key={`independent-${accId}-${position.symbol ?? ''}`}>
-                                  <td>{accId}</td>
-                                  <td><strong>{position.symbol ?? '—'}</strong></td>
-                                  <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
-                                  <td>{Number.isFinite(qty) ? qty : '—'}</td>
-                                  <td>{fmtUsd(position.avgCost)}</td>
-                                  <td>{fmtUsd(lastPrice)}</td>
-                                  <td>
-                                    <span className={((dailyPnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                                      {fmtUsd(dailyPnl)}
-                                    </span>
-                                    {' / '}
-                                    <span className={((dailyPct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                                      {fmtSignedPct(dailyPct)}
-                                    </span>
+                            {independentStockSections
+                              .filter(s => s.rows.length > 0)
+                              .flatMap(section => [
+                                <tr key={`${section.key}-section`} className="replay-portfolio-group-header">
+                                  <td colSpan={8}>
+                                    <strong>{section.title}</strong>
                                   </td>
-                                  <td>
-                                    <span className={((totalPnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                                      {fmtUsd(totalPnl)}
-                                    </span>
-                                    {' / '}
-                                    <span className={((totalPct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                                      {fmtSignedPct(totalPct)}
-                                    </span>
-                                  </td>
-                                </tr>
-                              )
-                            })}
+                                </tr>,
+                                ...section.rows.map(p => renderIndependentHoldingRow(p, section.key)),
+                              ])}
                           </tbody>
                         </table>
                       </div>
@@ -3910,9 +3901,9 @@ export function PositionsPage({
                         <tbody>
                           {(
                             [
+                              { title: 'Stocks', key: 'stk', rows: coreStockPositions },
                               { title: 'Fixed income', key: 'fi', rows: fixedIncomeStockPositions },
                               { title: 'Cash-like', key: 'cash', rows: cashLikeStockPositions },
-                              { title: 'Stocks', key: 'stk', rows: coreStockPositions },
                             ] as const
                           )
                             .filter((s) => s.rows.length > 0)

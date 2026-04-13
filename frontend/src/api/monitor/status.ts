@@ -3,6 +3,39 @@ import { opsAuthHeaders, opsControlFailureMessage, type OpsCapabilities } from '
 import { apiBase } from '../shared/constants'
 import { fetchWithTimeout } from '../shared/fetchTimeout'
 
+/** GET /health JSON body (shared by single-flight dedupe). */
+export type MonitorHealthPayload = {
+  status: string
+  service: string
+  ts: number
+  config_profile?: 'dev' | 'prod'
+  frontend_public_origin?: string
+  frontend_dev_path?: string
+  frontend_prod_path?: string
+  monitor_port?: number
+  massive_port?: number
+  docs_port?: number
+  ops_port?: number
+  trading_port?: number
+  strategy_port?: number
+  portfolio_port?: number
+  market_port?: number
+  research_port?: number
+  utilized_services?: Array<{ service: string; env: string }>
+}
+
+let healthInFlight: Promise<MonitorHealthPayload> | null = null
+
+async function fetchHealthInner(options?: { timeoutMs?: number }): Promise<MonitorHealthPayload> {
+  const url = `${apiBase()}/health`
+  const r =
+    options?.timeoutMs != null
+      ? await fetchWithTimeout(url, {}, options.timeoutMs)
+      : await fetch(url)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json() as Promise<MonitorHealthPayload>
+}
+
 export async function fetchStatus(): Promise<StatusResponse | null> {
   const r = await fetch(`${apiBase()}/status`)
   if (!r.ok) throw new Error(r.statusText)
@@ -16,41 +49,19 @@ export async function fetchOpenOrders(): Promise<{ open_orders: OpenOrder[] }> {
   return r.json()
 }
 
-/** Health check: GET /health, 200 means process alive; returns ts as server response Unix seconds. */
-export async function fetchHealth(options?: { timeoutMs?: number }): Promise<{
-  status: string
-  service: string
-  ts: number
-  /** Present when server was started with config.dev.yaml or config.prod.yaml (merged overlay file name). */
-  config_profile?: 'dev' | 'prod'
-  /** From YAML frontend.public_origin (e.g. Prod canonical URL); optional. */
-  frontend_public_origin?: string
-  /** From YAML frontend.dev_path — base URL for API Health Development column. */
-  frontend_dev_path?: string
-  /** From YAML frontend.prod_path — base URL for API Health Production column. */
-  frontend_prod_path?: string
-  /** From YAML server.architecture.monitor_port (flattened as server.monitor_port) — Monitor API listen port. */
-  monitor_port?: number
-  /** From YAML server.massive_port — Massive FastAPI port. */
-  massive_port?: number
-  docs_port?: number
-  ops_port?: number
-  trading_port?: number
-  strategy_port?: number
-  portfolio_port?: number
-  market_port?: number
-  /** From YAML server.research_port — Research API (option discovery, max pain). */
-  research_port?: number
-  /** From YAML utilized.services — which sidecar stack each service uses (e.g. dev vs prod). */
-  utilized_services?: Array<{ service: string; env: string }>
-}> {
-  const url = `${apiBase()}/health`
-  const r =
-    options?.timeoutMs != null
-      ? await fetchWithTimeout(url, {}, options.timeoutMs)
-      : await fetch(url)
-  if (!r.ok) throw new Error(r.statusText)
-  return r.json()
+/**
+ * Health check: GET /health, 200 means process alive; returns ts as server response Unix seconds.
+ * Concurrent callers share one in-flight request to avoid a burst of parallel /health calls
+ * (Vite proxy + 8s timeout) aborting each other with "signal is aborted without reason".
+ */
+export async function fetchHealth(options?: { timeoutMs?: number }): Promise<MonitorHealthPayload> {
+  if (healthInFlight) {
+    return healthInFlight
+  }
+  healthInFlight = fetchHealthInner(options).finally(() => {
+    healthInFlight = null
+  })
+  return healthInFlight
 }
 
 export async function fetchOperations(limit = 20): Promise<OperationsResponse> {
