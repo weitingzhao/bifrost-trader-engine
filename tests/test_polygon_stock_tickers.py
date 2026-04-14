@@ -9,6 +9,7 @@ def test_polygon_ticker_maps_reference_indices() -> None:
     assert polygon_ticker_for_massive_aggs("^GSPC") == "I:SPX"
     assert polygon_ticker_for_massive_aggs("^DJI") == "I:DJI"
     assert polygon_ticker_for_massive_aggs("^IXIC") == "I:COMP"
+    assert polygon_ticker_for_massive_aggs("^VIX") == "I:VIX"
 
 
 def test_polygon_ticker_passes_through_equities() -> None:

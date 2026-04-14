@@ -290,6 +290,14 @@ class StatusReader:
         self._end_read_txn()
         return result
 
+    def get_distinct_caret_bar_symbols(self) -> List[str]:
+        """Symbols starting with ``^`` present in ``stock_day`` / ``stock_min`` (for coverage when config lags DB)."""
+        if not self._connect():
+            return []
+        result = market_module.distinct_caret_symbols_in_stock_bars_tables(self._conn)
+        self._end_read_txn()
+        return result
+
     # --- Settings domain (delegate to settings module) ---
     def get_ib_config(self) -> Optional[Dict[str, Any]]:
         """Return merged IB config: host/port/client IDs from config.yaml; DB supplies ib_host_account_id, flex_*, stream_*."""

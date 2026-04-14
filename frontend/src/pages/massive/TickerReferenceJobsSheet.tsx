@@ -4,7 +4,7 @@ import {
   countActiveRefJobs,
   formatRefJobIdShort,
   isRefJobTerminal,
-  refJobKindShortLabel,
+  refJobKindDisplayLabel,
   summarizeRefJobResult,
 } from './stockReferenceJobHelpers'
 
@@ -127,7 +127,7 @@ export function TickerReferenceJobsSheet({
                   return (
                     <tr key={item.jobId} className="ref-jobs-table-row">
                       <td className="ref-jobs-table-time">{formatEnqueueTime(item.enqueuedAt)}</td>
-                      <td className="ref-jobs-table-kind">{refJobKindShortLabel(item.kind)}</td>
+                      <td className="ref-jobs-table-kind">{refJobKindDisplayLabel(item)}</td>
                       <td>
                         <span
                           className={`ref-jobs-sheet-status ref-jobs-sheet-status--${tone}`}

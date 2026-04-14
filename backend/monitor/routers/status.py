@@ -9,6 +9,10 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Query, Request
 
 from src.monitor.reader import get_job_bars_backfill_last_updated
+from src.monitor.reader.reference_indices_merge import (
+    augment_reference_indices_with_caret_symbols,
+    merge_reference_indices,
+)
 from src.monitor.reader.ib_config_public import (
     ib_client_for_api,
     ib_client_public_defaults,
@@ -320,7 +324,16 @@ def get_status(request: Request) -> Dict[str, Any]:
         else:
             subscribed_tickers = sorted(s for s in symbols_set if s)
 
-        reference_indices = (control_via_db or {}).get("reference_indices") or []
+        merged_cfg = getattr(app.state, "bifrost_merged_config", None) or {}
+        reference_indices = merge_reference_indices(
+            (control_via_db or {}).get("reference_indices"),
+            merged_cfg.get("reference_indices"),
+        )
+        try:
+            caret_syms = reader.get_distinct_caret_bar_symbols()
+        except Exception:
+            caret_syms = []
+        reference_indices = augment_reference_indices_with_caret_symbols(reference_indices, caret_syms)
         accounts = reader.get_accounts_from_tables()
         if accounts is None:
             accounts = []

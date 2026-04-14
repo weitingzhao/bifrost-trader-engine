@@ -6,6 +6,23 @@ import type { PositionCategory } from '../types'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtExpiry, fmtUsd, fmtUsdRound0 } from '../utils/format'
 import { computeDailyChange, formatLastUpdate, getNetLiq, optionIntrinsic, optionMoneyness, resolvePreferredPrice, rightLabel, type DailyBenchmark } from './accounts/accountsUtils'
+import { isLedgerCashLikeCategory, isLedgerFixedIncomeCategory } from './portfolio/ledgerStockCategoryBuckets'
+
+function ibPositionMarketValue(pos: {
+  position?: number | string | null
+  price?: number | null
+  avgCost?: number | null
+}): number {
+  const qty = Number(pos.position)
+  if (!Number.isFinite(qty) || qty === 0) return 0
+  const price =
+    pos.price != null && Number.isFinite(Number(pos.price))
+      ? Number(pos.price)
+      : pos.avgCost != null && Number.isFinite(Number(pos.avgCost))
+        ? Number(pos.avgCost)
+        : 0
+  return Math.abs(qty) * (Number.isFinite(price) ? price : 0)
+}
 
 /** Tag icon for header Categories (stroke follows currentColor). */
 function AccountsCategoriesIcon({ size = 16 }: { size?: number }) {
@@ -95,6 +112,11 @@ export function AccountsPage({
   // const [flexRangePreset, setFlexRangePreset] = useState<null | string>(null)
   const [positionCategories, setPositionCategories] = useState<PositionCategory[]>([])
   const [categoryModalOpen, setCategoryModalOpen] = useState(false)
+  /** In Position categories modal: assign tags for Host vs Secondary (when Secondary is configured). */
+  const [categoryAssignTab, setCategoryAssignTab] = useState<'host' | 'secondary'>('host')
+  /** Portfolio by category ring (Accounts): same semantics as Positions Asset mix ledger buckets. */
+  const [portfolioPieIncludeFi, setPortfolioPieIncludeFi] = useState(false)
+  const [portfolioPieIncludeOpt, setPortfolioPieIncludeOpt] = useState(true)
   const [categoryError, setCategoryError] = useState<string | null>(null)
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null)
   const [editingCategoryName, setEditingCategoryName] = useState('')
@@ -111,6 +133,45 @@ export function AccountsPage({
       })
     return () => { cancelled = true }
   }, [hasAccounts])
+
+  /** Settings → IB: Event account IDs (same as Model Analysis / Live streams). */
+  const ibAccountCfg = j?.config?.ib_client?.account
+  const hostAssignId = (ibAccountCfg?.event_host ?? ibAccountCfg?.trading ?? '').trim()
+  const secondaryAssignId = (ibAccountCfg?.event_secondary ?? '').trim()
+  const showCategoryAssignHostSecondaryTabs = Boolean(secondaryAssignId)
+
+  const accountSnapshotById = useMemo(() => {
+    const list = (rawAccounts ?? []) as IbAccountSnapshot[]
+    const m = new Map<string, IbAccountSnapshot>()
+    for (const a of list) {
+      const id = (a.account_id ?? '').trim()
+      if (id) m.set(id.toLowerCase(), a)
+    }
+    return m
+  }, [rawAccounts])
+
+  const hostAccForCategories = hostAssignId
+    ? accountSnapshotById.get(hostAssignId.toLowerCase()) ?? null
+    : null
+  const secondaryAccForCategories = secondaryAssignId
+    ? accountSnapshotById.get(secondaryAssignId.toLowerCase()) ?? null
+    : null
+
+  /** Snapshot used in "Assign category to positions" (modal); Host/Secondary tabs when Secondary ID is set. */
+  const accForCategoryAssign = useMemo(() => {
+    if (showCategoryAssignHostSecondaryTabs) {
+      return categoryAssignTab === 'secondary' ? secondaryAccForCategories : hostAccForCategories
+    }
+    if (hostAssignId) return hostAccForCategories
+    return acc ?? null
+  }, [
+    showCategoryAssignHostSecondaryTabs,
+    categoryAssignTab,
+    secondaryAccForCategories,
+    hostAccForCategories,
+    hostAssignId,
+    acc,
+  ])
 
   const overviewTotals = useMemo(() => {
     const list = rawAccounts ?? []
@@ -156,34 +217,83 @@ export function AccountsPage({
     return { totalNetLiq, totalCash, totalBuyingPower }
   }, [accounts])
 
-  /** Pie chart: composition by Cash + stock categories + Options (market value). */
-  const portfolioPieData = useMemo(() => {
-    const slices: { name: string; value: number }[] = []
-    const cash = aggregatedTotals.totalCash
-    if (cash > 0) slices.push({ name: 'Cash', value: cash })
-
-    const categoryValue: Record<string, number> = {}
-    let optionsValue = 0
+  /**
+   * Portfolio by category: Stocks (core STK incl. SEPA / Option Pool / Uncategorized), Fixed income,
+   * Cash + Cash-like (IB cash + cash-like STK MV), Options. Ring styled like Positions Asset mix.
+   */
+  const portfolioCategoryPie = useMemo(() => {
+    let coreStockMV = 0
+    let fixedIncomeMV = 0
+    let cashLikeMV = 0
+    let optionsMV = 0
     for (const account of accounts) {
       for (const pos of account.positions ?? []) {
-        const qty = Number(pos.position)
-        if (!Number.isFinite(qty) || qty === 0) continue
-        const price = pos.price != null && Number.isFinite(pos.price) ? pos.price : (pos.avgCost ?? 0)
-        const mv = Math.abs(qty) * (Number.isFinite(price) ? price : 0)
-        if ((pos.secType ?? '').toUpperCase() === 'OPT') {
-          optionsValue += mv
-        } else {
-          const cat = (pos.category && String(pos.category).trim()) || 'Uncategorized'
-          categoryValue[cat] = (categoryValue[cat] ?? 0) + mv
+        const st = (pos.secType ?? '').toUpperCase()
+        const mv = ibPositionMarketValue(pos)
+        if (st === 'OPT') {
+          optionsMV += mv
+          continue
         }
+        const cat = String(pos.category ?? '').trim()
+        if (isLedgerFixedIncomeCategory(cat)) fixedIncomeMV += mv
+        else if (isLedgerCashLikeCategory(cat)) cashLikeMV += mv
+        else coreStockMV += mv
       }
     }
-    Object.entries(categoryValue).sort((a, b) => b[1] - a[1]).forEach(([name, value]) => {
-      if (value > 0) slices.push({ name, value })
-    })
-    if (optionsValue > 0) slices.push({ name: 'Options', value: optionsValue })
-    return slices
-  }, [accounts, aggregatedTotals.totalCash])
+    const cashIb = aggregatedTotals.totalCash
+    const wCash = cashIb != null && Number.isFinite(cashIb) ? Math.max(0, cashIb) : 0
+    const wCashLikeStk = Math.max(0, cashLikeMV)
+    const wCashMerged = wCash + wCashLikeStk
+    const wCore = Math.max(0, coreStockMV)
+    const wFi = Math.max(0, fixedIncomeMV)
+    const wOpt = Math.max(0, optionsMV)
+
+    const wFiIn = portfolioPieIncludeFi ? wFi : 0
+    const wOptIn = portfolioPieIncludeOpt ? wOpt : 0
+    const denom = wCore + wFiIn + wCashMerged + wOptIn
+
+    const pStock = denom > 0 ? wCore / denom : 0
+    const pFixedIncome = denom > 0 && portfolioPieIncludeFi ? wFi / denom : 0
+    const pCashMerged = denom > 0 && wCashMerged > 0 ? wCashMerged / denom : 0
+    const pOpt = denom > 0 && portfolioPieIncludeOpt ? wOpt / denom : 0
+
+    const netLiq =
+      aggregatedTotals.totalNetLiq != null &&
+      Number.isFinite(aggregatedTotals.totalNetLiq) &&
+      aggregatedTotals.totalNetLiq > 0
+        ? aggregatedTotals.totalNetLiq
+        : null
+
+    const simpleCenterPct =
+      !portfolioPieIncludeFi && !portfolioPieIncludeOpt && denom > 0
+
+    const ringHasData = wCore + wFi + wCashMerged + wOpt > 0
+
+    return {
+      coreStockMV: wCore,
+      fixedIncomeMV: wFi,
+      cashLikeMV: wCashLikeStk,
+      cashIb,
+      cashMergedMV: wCashMerged,
+      optionsMV: wOpt,
+      denom,
+      pStock,
+      pFixedIncome,
+      pCashMerged,
+      pOpt,
+      netLiq,
+      simpleCenterPct,
+      includeFiInChart: portfolioPieIncludeFi,
+      includeOptInChart: portfolioPieIncludeOpt,
+      ringHasData,
+    }
+  }, [
+    accounts,
+    aggregatedTotals.totalCash,
+    aggregatedTotals.totalNetLiq,
+    portfolioPieIncludeFi,
+    portfolioPieIncludeOpt,
+  ])
 
   const [benchmarks, setBenchmarks] = useState<Record<string, DailyBenchmark>>({})
   const stockSymbols = useMemo(() => {
@@ -335,7 +445,11 @@ export function AccountsPage({
               <button
                 type="button"
                 className="section-header-icon-btn"
-                onClick={() => { setCategoryModalOpen(true); setCategoryError(null); }}
+                onClick={() => {
+                  setCategoryModalOpen(true)
+                  setCategoryError(null)
+                  setCategoryAssignTab('host')
+                }}
                 aria-label="Manage position categories"
               >
                 <AccountsCategoriesIcon size={16} />
@@ -632,7 +746,11 @@ export function AccountsPage({
             <button
               type="button"
               className="section-header-icon-btn"
-              onClick={() => { setCategoryModalOpen(true); setCategoryError(null); }}
+              onClick={() => {
+                setCategoryModalOpen(true)
+                setCategoryError(null)
+                setCategoryAssignTab('host')
+              }}
               aria-label="Manage position categories"
             >
               <AccountsCategoriesIcon size={16} />
@@ -951,46 +1069,240 @@ export function AccountsPage({
         </div>
       </div>
       <div className="ib-portfolio-charts-row">
-        {portfolioPieData.length > 0 && (
+        {portfolioCategoryPie.ringHasData && (
         <div className="ib-portfolio-overview-row-pie">
-          <span className="ib-portfolio-pie-title">Portfolio by category</span>
-          <div className="ib-portfolio-pie-inner">
-            <svg className="ib-portfolio-pie-svg" viewBox="0 0 100 100" aria-label="Portfolio composition by category">
-              {(() => {
-                const total = portfolioPieData.reduce((s, d) => s + d.value, 0)
-                if (total <= 0) return null
-                const colors = ['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#64748b']
-                let start = -0.25
-                return portfolioPieData.map((d, i) => {
-                  const ratio = d.value / total
-                  const angle = ratio * 2 * Math.PI
-                  const end = start + angle
-                  const x1 = 50 + 45 * Math.cos(start)
-                  const y1 = 50 + 45 * Math.sin(start)
-                  const x2 = 50 + 45 * Math.cos(end)
-                  const y2 = 50 + 45 * Math.sin(end)
-                  const large = ratio > 0.5 ? 1 : 0
-                  const path = `M 50 50 L ${x1} ${y1} A 45 45 0 ${large} 1 ${x2} ${y2} Z`
-                  start = end
-                  return <path key={d.name} d={path} fill={colors[i % colors.length]} aria-label={`${d.name}: ${fmtUsd(d.value)}`} />
-                })
-              })()}
-            </svg>
-            <ul className="ib-portfolio-pie-legend">
-              {portfolioPieData.map((d, i) => {
-                const total = portfolioPieData.reduce((s, x) => s + x.value, 0)
-                const pct = total > 0 ? (d.value / total) * 100 : 0
-                const colors = ['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#64748b']
-                return (
-                  <li key={d.name} className="ib-portfolio-pie-legend-item">
-                    <span className="ib-portfolio-pie-legend-dot" style={{ backgroundColor: colors[i % colors.length] }} />
-                    <span className="ib-portfolio-pie-legend-label">{d.name}</span>
-                    <span className="ib-portfolio-pie-legend-value">{fmtUsd(d.value)}</span>
-                    <span className="ib-portfolio-pie-legend-pct">({pct.toFixed(1)}%)</span>
-                  </li>
+          <div className="coverage-asset-pie-section accounts-portfolio-by-category-pie">
+            <div className="coverage-asset-pie-header">
+              <span className="coverage-asset-pie-title">Portfolio by category</span>
+              <InfoTooltip text="Stock = core STK (same ledger rules as Positions: not Fixed income or Cash-like), including SEPA, Option Pool, and other equity categories. Cash + Cash-like = IB TotalCashValue plus cash-like STK market value. Fixed income and Options can be excluded from the ring via Include/Exclude; dollar amounts stay in the legend. Center shows total net liquidation when available." />
+            </div>
+            {(() => {
+              const {
+                coreStockMV,
+                fixedIncomeMV,
+                cashMergedMV,
+                optionsMV,
+                denom,
+                pStock,
+                pFixedIncome,
+                pCashMerged,
+                pOpt,
+                netLiq,
+                simpleCenterPct,
+                includeFiInChart,
+                includeOptInChart,
+              } = portfolioCategoryPie
+              const cx = 66
+              const cy = 66
+              const rO = 56
+              const rI = 36
+              const rMid = (rO + rI) / 2
+              const ringStroke = rO - rI
+              const circ = 2 * Math.PI * rMid
+              let ringOff = 0
+              const ringSeg = (frac: number, className: string, key: string) => {
+                const len = Math.max(0, frac) * circ
+                if (len < 0.5) return null
+                const el = (
+                  <circle
+                    key={key}
+                    cx={cx}
+                    cy={cy}
+                    r={rMid}
+                    fill="none"
+                    className={className}
+                    strokeWidth={ringStroke}
+                    strokeLinecap="butt"
+                    strokeDasharray={`${len} ${circ}`}
+                    strokeDashoffset={-ringOff}
+                    transform={`rotate(-90 ${cx} ${cy})`}
+                  />
                 )
-              })}
-            </ul>
+                ringOff += len
+                return el
+              }
+              const centerMain =
+                netLiq != null
+                  ? fmtUsd(netLiq)
+                  : denom > 0
+                    ? simpleCenterPct
+                      ? `${(pStock * 100).toFixed(1)} · ${(pCashMerged * 100).toFixed(1)}`
+                      : fmtUsd(denom)
+                    : '—'
+              const centerSub =
+                netLiq != null
+                  ? 'Net liq.'
+                  : denom > 0
+                    ? simpleCenterPct
+                      ? '% of sum'
+                      : 'Chart basis'
+                    : ''
+              const ringAriaParts = [
+                'Stock',
+                includeFiInChart ? 'Fixed income' : null,
+                'Cash and cash-like',
+                includeOptInChart ? 'Options' : null,
+              ].filter(Boolean) as string[]
+              return (
+                <div className="coverage-asset-pie-body">
+                  <div className="coverage-asset-pie-chart-block">
+                    <svg
+                      width={132}
+                      height={132}
+                      viewBox="0 0 132 132"
+                      className="coverage-asset-pie-svg"
+                      role="img"
+                      aria-label={`Ring chart: ${ringAriaParts.join(', ')} as shares of their sum`}
+                    >
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={rMid}
+                        fill="none"
+                        className="coverage-asset-pie-ring-track"
+                        strokeWidth={ringStroke}
+                      />
+                      {denom > 0 ? (
+                        <>
+                          {ringSeg(pStock, 'coverage-asset-pie-ring-seg-stock', 'seg-stock')}
+                          {includeFiInChart
+                            ? ringSeg(pFixedIncome, 'coverage-asset-pie-ring-seg-fi', 'seg-fi')
+                            : null}
+                          {ringSeg(pCashMerged, 'coverage-asset-pie-ring-seg-cash', 'seg-cash-merged')}
+                          {includeOptInChart
+                            ? ringSeg(pOpt, 'coverage-asset-pie-ring-seg-opt', 'seg-opt')
+                            : null}
+                        </>
+                      ) : null}
+                      <text
+                        x={cx}
+                        y={cy - 4}
+                        className={`coverage-asset-pie-center-val${
+                          netLiq != null
+                            ? ' coverage-asset-pie-center-val--netliq'
+                            : simpleCenterPct
+                              ? ''
+                              : ' coverage-asset-pie-center-val--basis'
+                        }`}
+                        textAnchor="middle"
+                        dominantBaseline="auto"
+                      >
+                        {centerMain}
+                      </text>
+                      <text
+                        x={cx}
+                        y={cy + 11}
+                        className="coverage-asset-pie-center-sub"
+                        textAnchor="middle"
+                        dominantBaseline="auto"
+                      >
+                        {centerSub}
+                      </text>
+                    </svg>
+                    <div className="coverage-asset-pie-bp-side">
+                      <div className="coverage-asset-pie-chart-toggle-row">
+                        <span className="coverage-asset-pie-bp-label">Fixed income in chart</span>
+                        <div
+                          className="coverage-asset-pie-bubble-switch"
+                          role="group"
+                          aria-label="Include fixed income in ring denominator"
+                        >
+                          <button
+                            type="button"
+                            className={`coverage-asset-pie-bubble-btn${!portfolioPieIncludeFi ? ' active' : ''}`}
+                            aria-pressed={!portfolioPieIncludeFi}
+                            onClick={() => setPortfolioPieIncludeFi(false)}
+                          >
+                            Exclude
+                          </button>
+                          <button
+                            type="button"
+                            className={`coverage-asset-pie-bubble-btn${portfolioPieIncludeFi ? ' active' : ''}`}
+                            aria-pressed={portfolioPieIncludeFi}
+                            onClick={() => setPortfolioPieIncludeFi(true)}
+                          >
+                            Include
+                          </button>
+                        </div>
+                      </div>
+                      <div className="coverage-asset-pie-chart-toggle-row">
+                        <span className="coverage-asset-pie-bp-label">Options in chart</span>
+                        <div
+                          className="coverage-asset-pie-bubble-switch"
+                          role="group"
+                          aria-label="Include options in ring denominator"
+                        >
+                          <button
+                            type="button"
+                            className={`coverage-asset-pie-bubble-btn${!portfolioPieIncludeOpt ? ' active' : ''}`}
+                            aria-pressed={!portfolioPieIncludeOpt}
+                            onClick={() => setPortfolioPieIncludeOpt(false)}
+                          >
+                            Exclude
+                          </button>
+                          <button
+                            type="button"
+                            className={`coverage-asset-pie-bubble-btn${portfolioPieIncludeOpt ? ' active' : ''}`}
+                            aria-pressed={portfolioPieIncludeOpt}
+                            onClick={() => setPortfolioPieIncludeOpt(true)}
+                          >
+                            Include
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="coverage-asset-pie-legend">
+                    <div className="coverage-asset-pie-legend-item">
+                      <span className="coverage-asset-pie-dot coverage-asset-pie-dot--stock" />
+                      <span className="coverage-asset-pie-legend-label">Stock</span>
+                      <span className="coverage-asset-pie-legend-pct">
+                        {denom > 0 ? `${(pStock * 100).toFixed(1)}%` : '—'}
+                      </span>
+                      <span className="coverage-asset-pie-legend-value">{fmtUsd(coreStockMV)}</span>
+                    </div>
+                    <div
+                      className={`coverage-asset-pie-legend-item${!includeFiInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
+                      title={
+                        !includeFiInChart
+                          ? 'Fixed income MV is listed; not included in ring denominator.'
+                          : undefined
+                      }
+                    >
+                      <span className="coverage-asset-pie-dot coverage-asset-pie-dot--fi" />
+                      <span className="coverage-asset-pie-legend-label">Fixed income</span>
+                      <span className="coverage-asset-pie-legend-pct">
+                        {includeFiInChart && denom > 0 ? `${(pFixedIncome * 100).toFixed(1)}%` : '—'}
+                      </span>
+                      <span className="coverage-asset-pie-legend-value">{fmtUsd(fixedIncomeMV)}</span>
+                    </div>
+                    <div className="coverage-asset-pie-legend-item">
+                      <span className="coverage-asset-pie-dot coverage-asset-pie-dot--cash" />
+                      <span className="coverage-asset-pie-legend-label">Cash + Cash-like</span>
+                      <span className="coverage-asset-pie-legend-pct">
+                        {denom > 0 && cashMergedMV > 0 ? `${(pCashMerged * 100).toFixed(1)}%` : '—'}
+                      </span>
+                      <span className="coverage-asset-pie-legend-value">{fmtUsd(cashMergedMV)}</span>
+                    </div>
+                    <div
+                      className={`coverage-asset-pie-legend-item${!includeOptInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
+                      title={
+                        !includeOptInChart
+                          ? 'Options MV is listed; not included in ring denominator.'
+                          : undefined
+                      }
+                    >
+                      <span className="coverage-asset-pie-dot coverage-asset-pie-dot--opt" />
+                      <span className="coverage-asset-pie-legend-label">Options</span>
+                      <span className="coverage-asset-pie-legend-pct">
+                        {includeOptInChart && denom > 0 ? `${(pOpt * 100).toFixed(1)}%` : '—'}
+                      </span>
+                      <span className="coverage-asset-pie-legend-value">{fmtUsd(optionsMV)}</span>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         </div>
         )}
@@ -1162,7 +1474,10 @@ export function AccountsPage({
                         <button
                           type="button"
                           className="ib-stock-group-header-btn"
-                          onClick={() => setCategoryModalOpen(true)}
+                          onClick={() => {
+                            setCategoryModalOpen(true)
+                            setCategoryAssignTab('host')
+                          }}
                           title="Manage categories and assign to positions"
                         >
                           {catLabel}
@@ -1679,11 +1994,74 @@ export function AccountsPage({
             </form>
             <div style={{ marginTop: '1rem', marginBottom: '1rem' }}>
               <strong style={{ display: 'block', marginBottom: '0.5rem' }}>Assign category to positions</strong>
+              {showCategoryAssignHostSecondaryTabs && (
+                <div
+                  className="system-tabs ib-accounts-tab-row"
+                  style={{ marginBottom: '0.65rem' }}
+                  role="tablist"
+                  aria-label="Host or Secondary account for category tags"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={categoryAssignTab === 'host'}
+                    className={`system-tab ${categoryAssignTab === 'host' ? 'active' : ''}`}
+                    onClick={() => setCategoryAssignTab('host')}
+                  >
+                    Host
+                    {hostAssignId ? (
+                      <span className="ib-accounts-tab-count" title={hostAssignId}>
+                        ({hostAssignId})
+                      </span>
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={categoryAssignTab === 'secondary'}
+                    className={`system-tab ${categoryAssignTab === 'secondary' ? 'active' : ''}`}
+                    onClick={() => setCategoryAssignTab('secondary')}
+                  >
+                    Secondary
+                    {secondaryAssignId ? (
+                      <span className="ib-accounts-tab-count" title={secondaryAssignId}>
+                        ({secondaryAssignId})
+                      </span>
+                    ) : null}
+                  </button>
+                </div>
+              )}
               <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem', fontSize: '0.85rem' }}>
-                {acc?.account_id ? `Current account: ${acc.account_id}. Select a category per symbol.` : 'Select an account on the page first.'}
+                {(() => {
+                  if (showCategoryAssignHostSecondaryTabs) {
+                    return categoryAssignTab === 'host'
+                      ? `Host account${hostAssignId ? `: ${hostAssignId}` : ''}. Select a category per STK symbol.`
+                      : `Secondary account${secondaryAssignId ? `: ${secondaryAssignId}` : ''}. Select a category per STK symbol.`
+                  }
+                  if (hostAssignId) {
+                    return `Host account: ${hostAssignId}. Select a category per STK symbol.`
+                  }
+                  return acc?.account_id
+                    ? `Current account (page tab): ${acc.account_id}. Select a category per symbol.`
+                    : 'Select an account on the page first, or set Event account IDs under Settings → IB Connection.'
+                })()}
               </p>
               {(() => {
-                const stkPositions = (acc?.positions ?? []).filter(
+                const assignAcc = accForCategoryAssign
+                const aid = (assignAcc?.account_id ?? '').trim()
+                if (!aid) {
+                  const wantId = showCategoryAssignHostSecondaryTabs
+                    ? (categoryAssignTab === 'secondary' ? secondaryAssignId : hostAssignId)
+                    : (hostAssignId || acc?.account_id || '')
+                  return (
+                    <p className="section-hint" style={{ margin: 0, fontSize: '0.85rem' }}>
+                      {wantId
+                        ? `Account ${wantId} is not in the current portfolio snapshot. Refresh accounts from IB, or verify Settings → Event account IDs.`
+                        : 'Configure Host account under Settings → IB Connection, or pick an account tab on this page when no Host ID is set.'}
+                    </p>
+                  )
+                }
+                const stkPositions = (assignAcc?.positions ?? []).filter(
                   (p) => (p.secType ?? '').toUpperCase() === 'STK',
                 )
                 if (stkPositions.length === 0) {
@@ -1701,7 +2079,7 @@ export function AccountsPage({
                             value={pos.category_id ?? ''}
                             onChange={async (e) => {
                               const v = e.target.value
-                              await putPositionCategoryTag(acc!.account_id!, ck, v ? Number(v) : null)
+                              await putPositionCategoryTag(aid, ck, v ? Number(v) : null)
                               onRefreshAccounts()
                             }}
                             aria-label={`Category for ${pos.symbol ?? 'position'}`}

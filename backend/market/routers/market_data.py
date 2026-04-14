@@ -14,6 +14,8 @@ from src.monitor.reader import (
     delete_stock_bars_for_symbol,
     trim_job_bars_backfill,
 )
+from src.monitor.reader.reference_indices_merge import merge_reference_indices
+from src.monitor.reader.symbol_normalize import norm_bars_symbol
 from src.monitor.services.market_jobs import (
     TOLERANCE_END_SEC_NON_TRADING,
     TOLERANCE_END_SEC_TRADING_DAY,
@@ -243,10 +245,29 @@ def get_bars_coverage(
         sym_list = [s.strip() for s in str(symbols).split(",") if s and s.strip()]
     else:
         sym_list = list(get_watchlist_stock_symbols(reader))
-        for ref in (control_via_db or {}).get("reference_indices") or []:
+        seen_norms = {norm_bars_symbol(x) for x in sym_list}
+        refs = merge_reference_indices(
+            (control_via_db or {}).get("reference_indices"),
+            (reader._config or {}).get("reference_indices"),
+        )
+        for ref in refs:
             s = (ref.get("symbol") or "").strip()
-            if s and s not in sym_list:
+            if not s:
+                continue
+            nk = norm_bars_symbol(s)
+            if nk not in seen_norms:
+                seen_norms.add(nk)
                 sym_list.append(s)
+        try:
+            for s in reader.get_distinct_caret_bar_symbols():
+                if not s:
+                    continue
+                nk = norm_bars_symbol(s)
+                if nk not in seen_norms:
+                    seen_norms.add(nk)
+                    sym_list.append(s)
+        except Exception:
+            pass
     coverage = reader.get_bars_coverage(symbols=sym_list)
     try:
         from src.app.config import read_config

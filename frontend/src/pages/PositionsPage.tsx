@@ -20,6 +20,8 @@ import {
 } from '../utils/format'
 import { executionMatchesInstanceGroup, sliceExecutionForInstanceOptView } from './portfolio/ledgerOptHelpers'
 
+type OpenPositionsTab = 'instance' | 'options' | 'stocks' | 'fixed_income' | 'cash_like'
+
 /** Align position vs execution contract_key: OCC local differs in segment 1; OPT|expiry|strike|right match. */
 function optExecutionMatchKey(accountId: string, contractKey: string): string {
   const acc = (accountId ?? '').trim()
@@ -236,6 +238,14 @@ function sumStockMarketValueForAccountFilter(rows: LivePositionRow[], accountFil
   return sum
 }
 
+/** Single-row market value: qty × last (STK snapshot). */
+function fmtLivePositionMarketValueQtyTimesLast(position: LivePositionRow): string {
+  const q = Number(position.position)
+  const px = position.price != null ? Number(position.price) : NaN
+  if (!Number.isFinite(q) || !Number.isFinite(px)) return '—'
+  return fmtUsd(q * px)
+}
+
 /** Surplus / gap in shares: 3 decimal places. */
 function fmtSurplusShares(n: number): string {
   if (!Number.isFinite(n)) return '—'
@@ -382,7 +392,7 @@ function buildOpenStockPositionRows(positions: LivePositionRow[], rowKeyPrefix: 
   for (const accId of accountIds) {
     rows.push(
       <tr key={`${rowKeyPrefix}-acc-${accId}`} className="replay-portfolio-group-header">
-        <td colSpan={8}>
+        <td colSpan={9}>
           <strong>{accId}</strong>
         </td>
       </tr>,
@@ -416,6 +426,7 @@ function buildOpenStockPositionRows(positions: LivePositionRow[], rowKeyPrefix: 
           <td>{Number.isFinite(qty) ? qty : '—'}</td>
           <td>{fmtUsd(position.avgCost)}</td>
           <td>{fmtUsd(position.price)}</td>
+          <td>{fmtLivePositionMarketValueQtyTimesLast(position)}</td>
           <td className="coverage-pnl-stacked-cell">
             <div className={(dailyPnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}>
               {dailyPnl != null ? fmtUsd(dailyPnl) : '—'}
@@ -476,6 +487,7 @@ function renderIndependentHoldingRow(position: LivePositionRow, keyPrefix: strin
       <td>{Number.isFinite(qty) ? qty : '—'}</td>
       <td>{fmtUsd(position.avgCost)}</td>
       <td>{fmtUsd(lastPrice)}</td>
+      <td>{fmtLivePositionMarketValueQtyTimesLast(position)}</td>
       <td>
         <span className={((dailyPnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>{fmtUsd(dailyPnl)}</span>
         {' / '}
@@ -567,12 +579,12 @@ function StrategyAttributionCells({ ex }: { ex: Execution | null }) {
   const oppName = ex.strategy_opportunity_name?.trim()
   const instanceId = ex.strategy_instance_id
   const instanceLabel = ex.strategy_instance_label?.trim()
-  const instanceTitle = instanceLabel ? `Instance: ${instanceLabel}` : instanceId != null ? `View instance #${instanceId}` : ''
+  const instanceTitle = instanceLabel ? `Strategy: ${instanceLabel}` : instanceId != null ? `View strategy #${instanceId}` : ''
   return (
     <td className="replay-strategy-opp-cell" title={[instanceTitle, oppName].filter(Boolean).join(' · ') || undefined}>
       <span className="replay-strategy-opp-cell-inner">
         {instanceId != null ? (
-          <a href={`#/strategies/instances/${instanceId}`} className="ledger-instance-icon-link" target="_blank" rel="noopener noreferrer" title={instanceTitle} aria-label={instanceTitle || 'View strategy instance'} onClick={e => e.stopPropagation()}>
+          <a href={`#/strategies/instances/${instanceId}`} className="ledger-instance-icon-link" target="_blank" rel="noopener noreferrer" title={instanceTitle} aria-label={instanceTitle || 'View strategy'} onClick={e => e.stopPropagation()}>
             <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="5" y="5" width="14" height="14" rx="1" /></svg>
           </a>
         ) : null}
@@ -710,7 +722,7 @@ export function PositionsPage({
   const [openFilterSymbol, setOpenFilterSymbol] = useState('')
   const [openFilterExpiryStart, setOpenFilterExpiryStart] = useState('')
   const [openFilterAccountId, setOpenFilterAccountId] = useState<string>('all')
-  const [openTab, setOpenTab] = useState<'instance' | 'options' | 'stocks'>('instance')
+  const [openTab, setOpenTab] = useState<OpenPositionsTab>('instance')
   const [instanceFilterStructureType, setInstanceFilterStructureType] = useState<string>('all')
   const [instanceFilterScopeType, setInstanceFilterScopeType] = useState<string>('all')
   const [instanceFilterOppName, setInstanceFilterOppName] = useState<string>('all')
@@ -830,10 +842,10 @@ export function PositionsPage({
                       target="_blank"
                       rel="noopener noreferrer"
                       title={`strategy_instance_id ${execInstanceId}`}
-                      aria-label={`View instance #${execInstanceId}`}
+                      aria-label={`View strategy #${execInstanceId}`}
                       onClick={e => e.stopPropagation()}
                     >
-                      instance #{execInstanceId}
+                      strategy #{execInstanceId}
                     </a>
                   </>
                 ) : null}
@@ -843,7 +855,7 @@ export function PositionsPage({
                   <button
                     type="button"
                     className="btn btn-icon-small detail-exec-sync-btn"
-                    title="Apply strategy opportunity and instance from the final book row"
+                    title="Apply opportunity and strategy from the final book row"
                     aria-label="Sync strategy attribution from final book"
                     disabled={syncBusyTws}
                     onClick={e => {
@@ -862,7 +874,7 @@ export function PositionsPage({
                   <button
                     type="button"
                     className="btn btn-icon-small detail-exec-sync-btn"
-                    title="Apply strategy opportunity and instance from the TWS client row"
+                    title="Apply opportunity and strategy from the TWS client row"
                     aria-label="Sync strategy attribution from TWS client book"
                     disabled={syncBusyFinal}
                     onClick={e => {
@@ -922,7 +934,7 @@ export function PositionsPage({
               </button>
               {ex.account_executions_id != null ? (
                 <LinkStrategyIconButton
-                  title="Assign strategy opportunity and instance"
+                  title="Assign opportunity and strategy"
                   onClick={() => {
                     setLinkContext({ account_executions_id: ex.account_executions_id!, execution: ex })
                     setLinkModalOpen(true)
@@ -1970,6 +1982,9 @@ export function PositionsPage({
 
   /** When false (default), donut compares stock vs net cash only; buying power still listed below. */
   const [coverageAssetPieIncludeBp, setCoverageAssetPieIncludeBp] = useState(false)
+  /** Fixed income / cash-like STK positions: exclude from ring denominator when false (values still in legend). */
+  const [coverageAssetPieIncludeFi, setCoverageAssetPieIncludeFi] = useState(false)
+  const [coverageAssetPieIncludeCashLike, setCoverageAssetPieIncludeCashLike] = useState(true)
 
   const backingPoolChartData = useMemo(() => {
     const matchAcct = (acct: string) =>
@@ -2012,12 +2027,17 @@ export function PositionsPage({
       return { cash, bp }
     }
 
-    let stockMV = 0
+    let coreStockMV = 0
+    let fixedIncomeMV = 0
+    let cashLikeMV = 0
     let cash: number | null = null
     let bp: number | null = null
 
-    if (stockCoverageSectionAccount === 'all') {
-      stockMV = sumStockMarketValueForAccountFilter(liveStockPositions, 'all')
+    const acct: 'all' | string = stockCoverageSectionAccount
+    if (acct === 'all') {
+      coreStockMV = sumStockMarketValueForAccountFilter(coreStockPositions, 'all')
+      fixedIncomeMV = sumStockMarketValueForAccountFilter(fixedIncomeStockPositions, 'all')
+      cashLikeMV = sumStockMarketValueForAccountFilter(cashLikeStockPositions, 'all')
       const ids = new Set<string>()
       for (const a of accounts) {
         const id = (a.account_id ?? '').trim()
@@ -2029,19 +2049,28 @@ export function PositionsPage({
         bp = ag.bp
       }
     } else {
-      stockMV = sumStockMarketValueForAccountFilter(liveStockPositions, stockCoverageSectionAccount)
-      const ag = aggregateForAccounts([stockCoverageSectionAccount])
+      coreStockMV = sumStockMarketValueForAccountFilter(coreStockPositions, acct)
+      fixedIncomeMV = sumStockMarketValueForAccountFilter(fixedIncomeStockPositions, acct)
+      cashLikeMV = sumStockMarketValueForAccountFilter(cashLikeStockPositions, acct)
+      const ag = aggregateForAccounts([acct])
       cash = ag.cash
       bp = ag.bp
     }
 
-    const wStock = Math.max(0, stockMV)
+    const wCore = Math.max(0, coreStockMV)
+    const wFi = Math.max(0, fixedIncomeMV)
+    const wCl = Math.max(0, cashLikeMV)
     const wCash = cash != null && Number.isFinite(cash) ? Math.max(0, cash) : 0
     const wBp = bp != null && Number.isFinite(bp) ? Math.max(0, bp) : 0
-    const denom = coverageAssetPieIncludeBp ? wStock + wCash + wBp : wStock + wCash
-    const pStock = denom > 0 ? wStock / denom : 0
+    const wFiIn = coverageAssetPieIncludeFi ? wFi : 0
+    const wClIn = coverageAssetPieIncludeCashLike ? wCl : 0
+    const wBpIn = coverageAssetPieIncludeBp ? wBp : 0
+    const denom = wCore + wFiIn + wClIn + wCash + wBpIn
+    const pStock = denom > 0 ? wCore / denom : 0
+    const pFixedIncome = denom > 0 && coverageAssetPieIncludeFi ? wFi / denom : 0
+    const pCashLike = denom > 0 && coverageAssetPieIncludeCashLike ? wCl / denom : 0
     const pCash = denom > 0 ? wCash / denom : 0
-    const pBp = coverageAssetPieIncludeBp && denom > 0 ? wBp / denom : 0
+    const pBp = denom > 0 && coverageAssetPieIncludeBp ? wBp / denom : 0
 
     const netLiq =
       stockCoverageSectionAccount === 'all'
@@ -2051,18 +2080,39 @@ export function PositionsPage({
           }, 0)
         : parseIbSummaryNumber(snap(stockCoverageSectionAccount), 'NetLiquidation')
 
+    const simpleCenterPct =
+      !coverageAssetPieIncludeBp &&
+      !coverageAssetPieIncludeFi &&
+      !coverageAssetPieIncludeCashLike
+
     return {
-      stockMV,
+      coreStockMV,
+      fixedIncomeMV,
+      cashLikeMV,
       cash,
       bp,
       denom,
       pStock,
+      pFixedIncome,
+      pCashLike,
       pCash,
       pBp,
       includeBpInChart: coverageAssetPieIncludeBp,
+      includeFiInChart: coverageAssetPieIncludeFi,
+      includeCashLikeInChart: coverageAssetPieIncludeCashLike,
+      simpleCenterPct,
       netLiq: netLiq != null && Number.isFinite(netLiq) && netLiq > 0 ? netLiq : null,
     }
-  }, [status?.portfolio?.accounts, liveStockPositions, stockCoverageSectionAccount, coverageAssetPieIncludeBp])
+  }, [
+    status?.portfolio?.accounts,
+    coreStockPositions,
+    fixedIncomeStockPositions,
+    cashLikeStockPositions,
+    stockCoverageSectionAccount,
+    coverageAssetPieIncludeBp,
+    coverageAssetPieIncludeFi,
+    coverageAssetPieIncludeCashLike,
+  ])
 
   const independentStockSections = useMemo(() => {
     const isIndep = (s: LivePositionRow) => s.optionable !== true
@@ -2181,31 +2231,51 @@ export function PositionsPage({
     })
   }
 
-  /** Accordion: keep at most one expanded opportunity/instance row. */
+  /** Accordion: keep at most one expanded strategy row. */
   useEffect(() => {
     if (!openAccordionMode) return
     setExpandedInstanceKeys(prev => (prev.length <= 1 ? prev : [prev[prev.length - 1]!]))
   }, [openAccordionMode])
 
   const hasOpenOptions = optionsTabPositions.length > 0
-  const hasOpenStocks = liveStockPositions.length > 0
+  const hasCoreStocks = coreStockPositions.length > 0
+  const hasFixedIncomeStocks = fixedIncomeStockPositions.length > 0
+  const hasCashLikeStocks = cashLikeStockPositions.length > 0
   const hasInstances = instanceAllGroups.length > 0
+
   useEffect(() => {
-    if (openTab === 'instance' && !hasInstances) {
-      if (hasOpenOptions) setOpenTab('options')
-      else if (hasOpenStocks) setOpenTab('stocks')
-      return
+    const order: OpenPositionsTab[] = ['instance', 'options', 'stocks', 'fixed_income', 'cash_like']
+    const isAvailable = (t: OpenPositionsTab): boolean => {
+      switch (t) {
+        case 'instance':
+          return hasInstances
+        case 'options':
+          return hasOpenOptions
+        case 'stocks':
+          return hasCoreStocks
+        case 'fixed_income':
+          return hasFixedIncomeStocks
+        case 'cash_like':
+          return hasCashLikeStocks
+        default:
+          return false
+      }
     }
-    if (openTab === 'options' && !hasOpenOptions) {
-      if (hasInstances) setOpenTab('instance')
-      else if (hasOpenStocks) setOpenTab('stocks')
-      return
+    if (isAvailable(openTab)) return
+    for (const t of order) {
+      if (isAvailable(t)) {
+        setOpenTab(t)
+        return
+      }
     }
-    if (openTab === 'stocks' && !hasOpenStocks) {
-      if (hasInstances) setOpenTab('instance')
-      else if (hasOpenOptions) setOpenTab('options')
-    }
-  }, [openTab, hasInstances, hasOpenOptions, hasOpenStocks])
+  }, [
+    openTab,
+    hasInstances,
+    hasOpenOptions,
+    hasCoreStocks,
+    hasFixedIncomeStocks,
+    hasCashLikeStocks,
+  ])
 
   useEffect(() => {
     loadReplayData()
@@ -2337,7 +2407,7 @@ export function PositionsPage({
                     : Math.floor(Math.max(0, ci.held_shares) / 100)}
                 </span>
                 {backingLayout && ci.instances_needing > 1 && (
-                  <span className="coverage-shared-hint"> ({ci.instances_needing} inst.)</span>
+                  <span className="coverage-shared-hint"> ({ci.instances_needing} strat.)</span>
                 )}
               </td>
             ) : (
@@ -2355,7 +2425,7 @@ export function PositionsPage({
             <td>
               {ci.required_shares}
               {ci.instances_needing > 1 && (
-                <span className="coverage-shared-hint"> ({ci.instances_needing} inst.)</span>
+                <span className="coverage-shared-hint"> ({ci.instances_needing} strat.)</span>
               )}
             </td>
           )}
@@ -2539,6 +2609,56 @@ export function PositionsPage({
     )
   }
 
+  const openPositionsTabHint = (tab: OpenPositionsTab): string => {
+    if (tab === 'instance') {
+      return `Grouped by strategy (opportunity). Detail view ${openAccordionMode ? 'Accordion' : 'Multi'}: ${openAccordionMode ? 'only one strategy row expanded at a time' : 'several strategy rows may stay open'}.`
+    }
+    if (tab === 'options') {
+      return `By contract; expand for executions. Same Detail view mode (${openAccordionMode ? 'Accordion' : 'Multi'}) controls how many contract rows show execution detail.`
+    }
+    return 'Open positions from account snapshots (Live only). Tag stock fills with strategy from Ledger / Executions if needed.'
+  }
+
+  const renderLiveStockBucketPanel = (
+    panelId: string,
+    tabButtonId: string,
+    heading: string,
+    rows: LivePositionRow[],
+    rowKeyPrefix: string,
+    emptyHint: string,
+  ) => (
+    <div
+      id={panelId}
+      role="tabpanel"
+      aria-labelledby={tabButtonId}
+      className="system-tab-panel"
+    >
+      <h5 className="replay-sub">{heading}</h5>
+      {rows.length === 0 ? (
+        <p className="section-hint">{emptyHint}</p>
+      ) : (
+        <div className="replay-portfolio-table-wrap">
+          <table className="table-operations">
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Qty</th>
+                <th>Avg Cost</th>
+                <th>Last</th>
+                <th>Market Value</th>
+                <th className="coverage-pnl-stacked-th">Daily $/&nbsp;%</th>
+                <th className="coverage-pnl-stacked-th">Since $/&nbsp;%</th>
+              </tr>
+            </thead>
+            <tbody>{buildOpenStockPositionRows(rows, rowKeyPrefix)}</tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+
   return (
     <div className="card process-section replay-page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -2604,7 +2724,7 @@ export function PositionsPage({
             <div
               className="replay-fetch-range-group"
               role="radiogroup"
-              aria-label="Detail view: accordion for Instance opportunity rows and option execution rows"
+              aria-label="Detail view: accordion for Strategy rows and option execution rows"
             >
               <span className="replay-fetch-days-label">Detail view</span>
               <label className="replay-fetch-radio">
@@ -2623,58 +2743,92 @@ export function PositionsPage({
             <div className="replay-portfolio-block">
               <div className="replay-portfolio-header">
                 <div className="replay-portfolio-tabs-wrap">
-                  <div className="system-tabs replay-portfolio-tabs" role="tablist" aria-label="Open position asset sections">
-                    <button
-                      type="button"
-                      role="tab"
-                      id="open-tab-instance"
-                      aria-selected={openTab === 'instance'}
-                      aria-controls="open-panel-instance"
-                      className={`system-tab ${openTab === 'instance' ? 'active' : ''}`}
-                      onClick={() => setOpenTab('instance')}
-                      disabled={!hasInstances}
+                  <div className="replay-ledger-tab-matrix replay-ledger-tab-matrix--aligned replay-ledger-tab-matrix--open-positions">
+                    <div className="replay-ledger-tab-matrix-labels" aria-hidden="true">
+                      <span className="replay-ledger-tab-group-caption replay-ledger-tab-group-caption--positions-attr">
+                        Attribution
+                      </span>
+                      <span className="replay-ledger-tab-group-caption replay-ledger-tab-group-caption--positions-inst">
+                        Instruments
+                      </span>
+                    </div>
+                    <div
+                      className="system-tabs replay-portfolio-tabs replay-ledger-tab-button-row"
+                      role="tablist"
+                      aria-label="Open positions: attribution and instruments"
                     >
-                      Instance
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      id="open-tab-options"
-                      aria-selected={openTab === 'options'}
-                      aria-controls="open-panel-options"
-                      className={`system-tab ${openTab === 'options' ? 'active' : ''}`}
-                      onClick={() => setOpenTab('options')}
-                      disabled={!hasOpenOptions}
-                    >
-                      Options
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      id="open-tab-stocks"
-                      aria-selected={openTab === 'stocks'}
-                      aria-controls="open-panel-stocks"
-                      className={`system-tab ${openTab === 'stocks' ? 'active' : ''}`}
-                      onClick={() => setOpenTab('stocks')}
-                      disabled={!hasOpenStocks}
-                    >
-                      Stocks
-                    </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        id="open-tab-strategy"
+                        aria-selected={openTab === 'instance'}
+                        aria-controls="open-panel-strategy"
+                        className={`system-tab ${openTab === 'instance' ? 'active' : ''}`}
+                        onClick={() => setOpenTab('instance')}
+                        disabled={!hasInstances}
+                      >
+                        Strategy
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        id="open-tab-options"
+                        aria-selected={openTab === 'options'}
+                        aria-controls="open-panel-options"
+                        className={`system-tab replay-ledger-tab-at-instruments ${openTab === 'options' ? 'active' : ''}`}
+                        onClick={() => setOpenTab('options')}
+                        disabled={!hasOpenOptions}
+                      >
+                        Options
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        id="open-tab-stocks"
+                        aria-selected={openTab === 'stocks'}
+                        aria-controls="open-panel-stocks"
+                        className={`system-tab ${openTab === 'stocks' ? 'active' : ''}`}
+                        onClick={() => setOpenTab('stocks')}
+                        disabled={!hasCoreStocks}
+                      >
+                        Stocks
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        id="open-tab-fixed-income"
+                        aria-selected={openTab === 'fixed_income'}
+                        aria-controls="open-panel-fixed-income"
+                        className={`system-tab ${openTab === 'fixed_income' ? 'active' : ''}`}
+                        onClick={() => setOpenTab('fixed_income')}
+                        disabled={!hasFixedIncomeStocks}
+                      >
+                        Fixed income
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        id="open-tab-cash-like"
+                        aria-selected={openTab === 'cash_like'}
+                        aria-controls="open-panel-cash-like"
+                        className={`system-tab ${openTab === 'cash_like' ? 'active' : ''}`}
+                        onClick={() => setOpenTab('cash_like')}
+                        disabled={!hasCashLikeStocks}
+                      >
+                        Cash-like
+                      </button>
+                    </div>
                   </div>
                   <p className="section-hint replay-portfolio-tab-hint">
-                    {openTab === 'instance'
-                      ? `Grouped by strategy instance (Opportunity). Detail view ${openAccordionMode ? 'Accordion' : 'Multi'}: ${openAccordionMode ? 'only one opportunity row expanded at a time' : 'several opportunity rows may stay open'}.`
-                      : openTab === 'options'
-                        ? `By contract; expand for executions. Same Detail view mode (${openAccordionMode ? 'Accordion' : 'Multi'}) controls how many contract rows show execution detail.`
-                        : 'Open stock positions from account snapshots (Live only). Tag stock fills with strategy from Ledger / Executions if needed.'}
+                    {openPositionsTabHint(openTab)}
                   </p>
                 </div>
               </div>
               {openTab === 'instance' ? (
                 <div
-                  id="open-panel-instance"
+                  id="open-panel-strategy"
                   role="tabpanel"
-                  aria-labelledby="open-tab-instance"
+                  aria-labelledby="open-tab-strategy"
                   className="system-tab-panel"
                 >
                   <div className="instance-sheet-filters">
@@ -2775,7 +2929,7 @@ export function PositionsPage({
                     )}
                   </div>
                   {sortedInstanceAllGroups.length === 0 ? (
-                    <p className="section-hint">No instances match the current filters.</p>
+                    <p className="section-hint">No strategies match the current filters.</p>
                   ) : (
                     <div className="replay-portfolio-table-wrap">
                       <table className="table-operations instance-sheet-table">
@@ -2799,7 +2953,7 @@ export function PositionsPage({
                         <tbody>
                           {sortedInstanceAllGroups.map(allGroup => {
                             const instKey = allGroup.strategy_instance_id != null ? String(allGroup.strategy_instance_id) : '__unassigned__'
-                            const instLabel = allGroup.strategy_instance_label ?? (allGroup.strategy_instance_id != null ? `Instance #${allGroup.strategy_instance_id}` : 'Uncategorized')
+                            const instLabel = allGroup.strategy_instance_label ?? (allGroup.strategy_instance_id != null ? `Strategy #${allGroup.strategy_instance_id}` : 'Uncategorized')
                             const oppName = allGroup.strategy_opportunity_name?.trim() || null
                             const openedAt = allGroup.strategy_instance_opened_at_epoch
                             const optN = allGroup.options.length
@@ -2846,7 +3000,7 @@ export function PositionsPage({
                                         className="instance-sheet-inst-link instance-sheet-inst-sublabel"
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        title={`View instance: ${instLabel}`}
+                                        title={`View strategy: ${instLabel}`}
                                         onClick={e => e.stopPropagation()}
                                       >
                                         {instLabel}
@@ -3192,7 +3346,8 @@ export function PositionsPage({
                         <tfoot>
                           <tr className="replay-opt-tfoot-total">
                             <td colSpan={7} className="replay-opt-tfoot-label">
-                              Total ({sortedInstanceAllGroups.length} instance{sortedInstanceAllGroups.length !== 1 ? 's' : ''})
+                              Total ({sortedInstanceAllGroups.length}{' '}
+                              {sortedInstanceAllGroups.length !== 1 ? 'strategies' : 'strategy'})
                             </td>
                             <td>
                               <strong>
@@ -3245,8 +3400,24 @@ export function PositionsPage({
                         </div>
                         <div className="coverage-charts-grid">
                       {(() => {
-                        const { stockMV, cash, bp, denom, pStock, pCash, pBp, netLiq, includeBpInChart } =
-                          coverageAssetPieData
+                        const {
+                          coreStockMV,
+                          fixedIncomeMV,
+                          cashLikeMV,
+                          cash,
+                          bp,
+                          denom,
+                          pStock,
+                          pFixedIncome,
+                          pCashLike,
+                          pCash,
+                          pBp,
+                          netLiq,
+                          includeBpInChart,
+                          includeFiInChart,
+                          includeCashLikeInChart,
+                          simpleCenterPct,
+                        } = coverageAssetPieData
                         const cx = 66
                         const cy = 66
                         const rO = 56
@@ -3280,21 +3451,30 @@ export function PositionsPage({
                           netLiq != null
                             ? fmtUsd(netLiq)
                             : denom > 0
-                              ? includeBpInChart
-                                ? `${(pStock * 100).toFixed(0)} / ${(pCash * 100).toFixed(0)} / ${(pBp * 100).toFixed(0)}`
-                                : `${(pStock * 100).toFixed(1)} · ${(pCash * 100).toFixed(1)}`
+                              ? simpleCenterPct
+                                ? `${(pStock * 100).toFixed(1)} · ${(pCash * 100).toFixed(1)}`
+                                : fmtUsd(denom)
                               : '—'
                         const centerSub =
                           netLiq != null
                             ? 'Net liq.'
                             : denom > 0
-                              ? '% of sum'
+                              ? simpleCenterPct
+                                ? '% of sum'
+                                : 'Chart basis'
                               : ''
+                        const ringAriaParts = [
+                          'Stock (core equities)',
+                          includeFiInChart ? 'Fixed income' : null,
+                          includeCashLikeInChart ? 'Cash-like' : null,
+                          'Net cash',
+                          includeBpInChart ? 'Buying power' : null,
+                        ].filter(Boolean)
                         return (
                           <div className="coverage-charts-cell coverage-asset-pie-section">
                             <div className="coverage-asset-pie-header">
                               <span className="coverage-asset-pie-title">Asset mix</span>
-                              <InfoTooltip text="Stock = sum of market value (qty × last) for non-option positions. Net cash = IB TotalCashValue. Buying power = IB BuyingPower. By default the ring compares stock vs net cash only; turn Include on to add buying power to the same denominator. Center shows net liquidation when available, otherwise the percentage split. Uses the account filter for this charts section." />
+                              <InfoTooltip text="Stock = market value of non-option positions classified as core equities (same as Stocks tab; excludes ledger Fixed income and Cash-like). Fixed income / Cash-like use position category labels. Net cash = IB TotalCashValue. Buying power = IB BuyingPower. Use Include to add a slice to the ring denominator; excluded categories stay in the legend. Center shows net liquidation when available; otherwise stock vs net cash percentages when only those two are in the ring, else the chart-basis total." />
                             </div>
                             <div className="coverage-asset-pie-body">
                               <div className="coverage-asset-pie-chart-block">
@@ -3304,11 +3484,7 @@ export function PositionsPage({
                                   viewBox="0 0 132 132"
                                   className="coverage-asset-pie-svg"
                                   role="img"
-                                  aria-label={
-                                    includeBpInChart
-                                      ? 'Ring chart: stock, net cash, and buying power as shares of their sum'
-                                      : 'Ring chart: stock and net cash as shares of stock plus cash'
-                                  }
+                                  aria-label={`Ring chart: ${ringAriaParts.join(', ')} as shares of their sum`}
                                 >
                                   <circle
                                     cx={cx}
@@ -3321,6 +3497,12 @@ export function PositionsPage({
                                   {denom > 0 ? (
                                     <>
                                       {ringSeg(pStock, 'coverage-asset-pie-ring-seg-stock', 'seg-stock')}
+                                      {includeFiInChart
+                                        ? ringSeg(pFixedIncome, 'coverage-asset-pie-ring-seg-fi', 'seg-fi')
+                                        : null}
+                                      {includeCashLikeInChart
+                                        ? ringSeg(pCashLike, 'coverage-asset-pie-ring-seg-cashlike', 'seg-cashlike')
+                                        : null}
                                       {ringSeg(pCash, 'coverage-asset-pie-ring-seg-cash', 'seg-cash')}
                                       {includeBpInChart
                                         ? ringSeg(pBp, 'coverage-asset-pie-ring-seg-bp', 'seg-bp')
@@ -3333,9 +3515,9 @@ export function PositionsPage({
                                     className={`coverage-asset-pie-center-val${
                                       netLiq != null
                                         ? ' coverage-asset-pie-center-val--netliq'
-                                        : includeBpInChart
-                                          ? ' coverage-asset-pie-center-val--triplet'
-                                          : ''
+                                        : simpleCenterPct
+                                          ? ''
+                                          : ' coverage-asset-pie-center-val--basis'
                                     }`}
                                     textAnchor="middle"
                                     dominantBaseline="auto"
@@ -3353,28 +3535,80 @@ export function PositionsPage({
                                   </text>
                                 </svg>
                                 <div className="coverage-asset-pie-bp-side">
-                                  <span className="coverage-asset-pie-bp-label">Buying power in chart</span>
-                                  <div
-                                    className="coverage-asset-pie-bubble-switch"
-                                    role="group"
-                                    aria-label="Include buying power in ring denominator"
-                                  >
-                                    <button
-                                      type="button"
-                                      className={`coverage-asset-pie-bubble-btn${!coverageAssetPieIncludeBp ? ' active' : ''}`}
-                                      aria-pressed={!coverageAssetPieIncludeBp}
-                                      onClick={() => setCoverageAssetPieIncludeBp(false)}
+                                  <div className="coverage-asset-pie-chart-toggle-row">
+                                    <span className="coverage-asset-pie-bp-label">Fixed income in chart</span>
+                                    <div
+                                      className="coverage-asset-pie-bubble-switch"
+                                      role="group"
+                                      aria-label="Include fixed income in ring denominator"
                                     >
-                                      Exclude
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className={`coverage-asset-pie-bubble-btn${coverageAssetPieIncludeBp ? ' active' : ''}`}
-                                      aria-pressed={coverageAssetPieIncludeBp}
-                                      onClick={() => setCoverageAssetPieIncludeBp(true)}
+                                      <button
+                                        type="button"
+                                        className={`coverage-asset-pie-bubble-btn${!coverageAssetPieIncludeFi ? ' active' : ''}`}
+                                        aria-pressed={!coverageAssetPieIncludeFi}
+                                        onClick={() => setCoverageAssetPieIncludeFi(false)}
+                                      >
+                                        Exclude
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={`coverage-asset-pie-bubble-btn${coverageAssetPieIncludeFi ? ' active' : ''}`}
+                                        aria-pressed={coverageAssetPieIncludeFi}
+                                        onClick={() => setCoverageAssetPieIncludeFi(true)}
+                                      >
+                                        Include
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="coverage-asset-pie-chart-toggle-row">
+                                    <span className="coverage-asset-pie-bp-label">Cash-like in chart</span>
+                                    <div
+                                      className="coverage-asset-pie-bubble-switch"
+                                      role="group"
+                                      aria-label="Include cash-like in ring denominator"
                                     >
-                                      Include
-                                    </button>
+                                      <button
+                                        type="button"
+                                        className={`coverage-asset-pie-bubble-btn${!coverageAssetPieIncludeCashLike ? ' active' : ''}`}
+                                        aria-pressed={!coverageAssetPieIncludeCashLike}
+                                        onClick={() => setCoverageAssetPieIncludeCashLike(false)}
+                                      >
+                                        Exclude
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={`coverage-asset-pie-bubble-btn${coverageAssetPieIncludeCashLike ? ' active' : ''}`}
+                                        aria-pressed={coverageAssetPieIncludeCashLike}
+                                        onClick={() => setCoverageAssetPieIncludeCashLike(true)}
+                                      >
+                                        Include
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="coverage-asset-pie-chart-toggle-row">
+                                    <span className="coverage-asset-pie-bp-label">Buying power in chart</span>
+                                    <div
+                                      className="coverage-asset-pie-bubble-switch"
+                                      role="group"
+                                      aria-label="Include buying power in ring denominator"
+                                    >
+                                      <button
+                                        type="button"
+                                        className={`coverage-asset-pie-bubble-btn${!coverageAssetPieIncludeBp ? ' active' : ''}`}
+                                        aria-pressed={!coverageAssetPieIncludeBp}
+                                        onClick={() => setCoverageAssetPieIncludeBp(false)}
+                                      >
+                                        Exclude
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={`coverage-asset-pie-bubble-btn${coverageAssetPieIncludeBp ? ' active' : ''}`}
+                                        aria-pressed={coverageAssetPieIncludeBp}
+                                        onClick={() => setCoverageAssetPieIncludeBp(true)}
+                                      >
+                                        Include
+                                      </button>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
@@ -3385,7 +3619,37 @@ export function PositionsPage({
                                   <span className="coverage-asset-pie-legend-pct">
                                     {denom > 0 ? `${(pStock * 100).toFixed(1)}%` : '—'}
                                   </span>
-                                  <span className="coverage-asset-pie-legend-value">{fmtUsd(stockMV)}</span>
+                                  <span className="coverage-asset-pie-legend-value">{fmtUsd(coreStockMV)}</span>
+                                </div>
+                                <div
+                                  className={`coverage-asset-pie-legend-item${!includeFiInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
+                                  title={
+                                    !includeFiInChart
+                                      ? 'Fixed income MV is listed; not included in ring denominator.'
+                                      : undefined
+                                  }
+                                >
+                                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--fi" />
+                                  <span className="coverage-asset-pie-legend-label">Fixed income</span>
+                                  <span className="coverage-asset-pie-legend-pct">
+                                    {includeFiInChart && denom > 0 ? `${(pFixedIncome * 100).toFixed(1)}%` : '—'}
+                                  </span>
+                                  <span className="coverage-asset-pie-legend-value">{fmtUsd(fixedIncomeMV)}</span>
+                                </div>
+                                <div
+                                  className={`coverage-asset-pie-legend-item${!includeCashLikeInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
+                                  title={
+                                    !includeCashLikeInChart
+                                      ? 'Cash-like MV is listed; not included in ring denominator.'
+                                      : undefined
+                                  }
+                                >
+                                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--cashlike" />
+                                  <span className="coverage-asset-pie-legend-label">Cash-like</span>
+                                  <span className="coverage-asset-pie-legend-pct">
+                                    {includeCashLikeInChart && denom > 0 ? `${(pCashLike * 100).toFixed(1)}%` : '—'}
+                                  </span>
+                                  <span className="coverage-asset-pie-legend-value">{fmtUsd(cashLikeMV)}</span>
                                 </div>
                                 <div className="coverage-asset-pie-legend-item">
                                   <span className="coverage-asset-pie-dot coverage-asset-pie-dot--cash" />
@@ -3396,10 +3660,10 @@ export function PositionsPage({
                                   <span className="coverage-asset-pie-legend-value">{fmtUsd(cash)}</span>
                                 </div>
                                 <div
-                                  className={`coverage-asset-pie-legend-item${!includeBpInChart ? ' coverage-asset-pie-legend-item--bp-excluded' : ''}`}
+                                  className={`coverage-asset-pie-legend-item${!includeBpInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
                                   title={
                                     !includeBpInChart
-                                      ? 'Buying power is listed for reference; ring uses stock + net cash only.'
+                                      ? 'Buying power is listed for reference; not included in ring denominator.'
                                       : undefined
                                   }
                                 >
@@ -3643,6 +3907,7 @@ export function PositionsPage({
                               <th>Qty</th>
                               <th>Avg Cost</th>
                               <th>Last</th>
+                              <th>Market Value</th>
                               <th>Daily ($ / %)</th>
                               <th>Total ($ / %)</th>
                             </tr>
@@ -3652,7 +3917,7 @@ export function PositionsPage({
                               .filter(s => s.rows.length > 0)
                               .flatMap(section => [
                                 <tr key={`${section.key}-section`} className="replay-portfolio-group-header">
-                                  <td colSpan={8}>
+                                  <td colSpan={9}>
                                     <strong>{section.title}</strong>
                                   </td>
                                 </tr>,
@@ -3873,53 +4138,33 @@ export function PositionsPage({
                 </div>
               )}
                 </div>
+              ) : openTab === 'stocks' ? (
+                renderLiveStockBucketPanel(
+                  'open-panel-stocks',
+                  'open-tab-stocks',
+                  'Stock positions',
+                  coreStockPositions,
+                  'stk',
+                  'No open stock positions under the current filters.',
+                )
+              ) : openTab === 'fixed_income' ? (
+                renderLiveStockBucketPanel(
+                  'open-panel-fixed-income',
+                  'open-tab-fixed-income',
+                  'Fixed income positions',
+                  fixedIncomeStockPositions,
+                  'fi',
+                  'No open fixed income positions under the current filters.',
+                )
               ) : (
-                <div
-                  id="open-panel-stocks"
-                  role="tabpanel"
-                  aria-labelledby="open-tab-stocks"
-                  className="system-tab-panel"
-                >
-                  <h5 className="replay-sub">Stock positions</h5>
-                  {liveStockPositions.length === 0 ? (
-                    <p className="section-hint">No open stock positions under the current filters.</p>
-                  ) : (
-                    <div className="replay-portfolio-table-wrap">
-                      <table className="table-operations">
-                        <thead>
-                          <tr>
-                            <th>Account</th>
-                            <th>Symbol</th>
-                            <th>Side</th>
-                            <th>Qty</th>
-                            <th>Avg Cost</th>
-                            <th>Last</th>
-                            <th className="coverage-pnl-stacked-th">Daily $/&nbsp;%</th>
-                            <th className="coverage-pnl-stacked-th">Since $/&nbsp;%</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(
-                            [
-                              { title: 'Stocks', key: 'stk', rows: coreStockPositions },
-                              { title: 'Fixed income', key: 'fi', rows: fixedIncomeStockPositions },
-                              { title: 'Cash-like', key: 'cash', rows: cashLikeStockPositions },
-                            ] as const
-                          )
-                            .filter((s) => s.rows.length > 0)
-                            .flatMap((section) => [
-                              <tr key={`${section.key}-section`} className="replay-portfolio-group-header">
-                                <td colSpan={8}>
-                                  <strong>{section.title}</strong>
-                                </td>
-                              </tr>,
-                              ...buildOpenStockPositionRows(section.rows, section.key),
-                            ])}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
+                renderLiveStockBucketPanel(
+                  'open-panel-cash-like',
+                  'open-tab-cash-like',
+                  'Cash-like positions',
+                  cashLikeStockPositions,
+                  'cash',
+                  'No open cash-like positions under the current filters.',
+                )
               )}
             </div>
           )}

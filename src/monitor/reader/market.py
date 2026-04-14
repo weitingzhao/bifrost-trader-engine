@@ -10,6 +10,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from src.persistence.postgres.connection import _get_conn_params
+from src.monitor.reader.symbol_normalize import norm_bars_symbol as _norm_bars_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -451,59 +452,126 @@ def get_bars_stats(conn: Any, symbol: Optional[str] = None) -> Dict[str, Any]:
         return {"stock_day": 0, "stock_min": {}}
 
 
+def _coverage_day_iso(v: Any) -> Optional[str]:
+    """Normalize MIN/MAX(bar_time) for JSON: always YYYY-MM-DD string."""
+    if v is None:
+        return None
+    if hasattr(v, "isoformat") and callable(getattr(v, "isoformat")):
+        try:
+            s = v.isoformat()
+            return s[:10] if len(s) >= 10 else str(v).strip() or None
+        except Exception:
+            pass
+    s = str(v).strip()
+    return s[:10] if len(s) >= 10 else (s or None)
+
+
+def _ordered_unique_symbols(symbols: Optional[List[str]]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for s in symbols or []:
+        t = (s or "").strip()
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+    return out
+
+
+def distinct_caret_symbols_in_stock_bars_tables(conn: Any) -> List[str]:
+    """Symbols starting with ``^`` that appear in ``stock_day`` or ``stock_min`` (e.g. ``^VIX``) for coverage lists."""
+    out: set[str] = set()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT symbol FROM stock_day
+                WHERE replace(symbol, U&'\\FF3E', '^') LIKE '^%'
+                UNION
+                SELECT DISTINCT symbol FROM stock_min
+                WHERE replace(symbol, U&'\\FF3E', '^') LIKE '^%'
+                """,
+            )
+            for row in cur.fetchall() or []:
+                s = (row[0] or "").strip()
+                if s:
+                    out.add(s)
+        return sorted(out)
+    except Exception as e:
+        logger.debug("distinct_caret_symbols_in_stock_bars_tables failed: %s", e)
+        return []
+
+
 def get_bars_coverage(conn: Any, symbols: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-    """Return per-symbol coverage (count, min_ts, max_ts) for stock_day and stock_min."""
-    sym_list = list({s.strip() for s in (symbols or []) if s and str(s).strip()})
+    """Return per-symbol coverage (count, min_ts, max_ts) for stock_day and stock_min.
+
+    Matches ``stock_* .symbol`` using ``upper(trim(symbol))`` so config ``^VIX`` aligns with DB
+    even when casing or surrounding whitespace differs.
+    """
+    sym_list = _ordered_unique_symbols(list(symbols) if symbols else None)
     if not sym_list:
         return []
+    norm_list = list(dict.fromkeys(_norm_bars_symbol(s) for s in sym_list))
+    empty_day = {"count": 0, "min_day": None, "max_day": None, "min_ts": None, "max_ts": None}
     out: List[Dict[str, Any]] = []
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT symbol,
+                SELECT upper(trim(replace(symbol, U&'\\FF3E', '^'))) AS sym_norm,
                        COUNT(*) AS cnt,
+                       MIN(bar_time)::text AS min_day,
+                       MAX(bar_time)::text AS max_day,
                        extract(epoch from MIN(bar_time)) AS min_ts,
                        extract(epoch from MAX(bar_time)) AS max_ts
                 FROM stock_day
-                WHERE symbol = ANY(%s)
-                GROUP BY symbol
+                WHERE upper(trim(replace(symbol, U&'\\FF3E', '^'))) = ANY(%s)
+                GROUP BY upper(trim(replace(symbol, U&'\\FF3E', '^')))
                 """,
-                (sym_list,),
+                (norm_list,),
             )
-            day_rows = {
-                row[0]: {
+            day_rows: Dict[str, Dict[str, Any]] = {}
+            for row in cur.fetchall():
+                sn = _norm_bars_symbol(row[0] or "")
+                if not sn:
+                    continue
+                day_rows[sn] = {
                     "count": int(row[1]),
-                    "min_ts": float(row[2]) if row[2] is not None else None,
-                    "max_ts": float(row[3]) if row[3] is not None else None,
+                    "min_day": _coverage_day_iso(row[2]),
+                    "max_day": _coverage_day_iso(row[3]),
+                    "min_ts": float(row[4]) if row[4] is not None else None,
+                    "max_ts": float(row[5]) if row[5] is not None else None,
                 }
-                for row in cur.fetchall()
-            }
             cur.execute(
                 """
-                SELECT symbol, period,
+                SELECT upper(trim(replace(symbol, U&'\\FF3E', '^'))) AS sym_norm, period,
                        COUNT(*) AS cnt,
                        extract(epoch from MIN(bar_time)) AS min_ts,
                        extract(epoch from MAX(bar_time)) AS max_ts
                 FROM stock_min
-                WHERE symbol = ANY(%s) AND period IN ('1 min', '5 mins', '1 hour')
-                GROUP BY symbol, period
+                WHERE upper(trim(replace(symbol, U&'\\FF3E', '^'))) = ANY(%s) AND period IN ('1 min', '5 mins', '1 hour')
+                GROUP BY upper(trim(replace(symbol, U&'\\FF3E', '^'))), period
                 """,
-                (sym_list,),
+                (norm_list,),
             )
             min_rows: Dict[str, Dict[str, Dict[str, Any]]] = {}
             for row in cur.fetchall():
-                sym, per, cnt, min_ts, max_ts = row[0], row[1], int(row[2]), row[3], row[4]
-                if sym not in min_rows:
-                    min_rows[sym] = {}
-                min_rows[sym][per] = {
+                sn = _norm_bars_symbol(row[0] or "")
+                per = row[1]
+                cnt, min_ts, max_ts = int(row[2]), row[3], row[4]
+                if not sn:
+                    continue
+                if sn not in min_rows:
+                    min_rows[sn] = {}
+                min_rows[sn][per] = {
                     "count": cnt,
                     "min_ts": float(min_ts) if min_ts is not None else None,
                     "max_ts": float(max_ts) if max_ts is not None else None,
                 }
             for sym in sym_list:
-                day = day_rows.get(sym, {"count": 0, "min_ts": None, "max_ts": None})
-                mins = min_rows.get(sym, {})
+                n = _norm_bars_symbol(sym)
+                day = day_rows.get(n, dict(empty_day))
+                mins = min_rows.get(n, {})
                 out.append({
                     "symbol": sym,
                     "stock_day": day,

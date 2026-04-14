@@ -776,6 +776,9 @@ export interface BarCoveragePeriod {
   count: number
   min_ts: number | null
   max_ts: number | null
+  /** stock_day only: trading calendar YYYY-MM-DD from PostgreSQL `date` (use for display; avoids TZ shift from epoch). */
+  min_day?: string | null
+  max_day?: string | null
   target_start_ts?: number
   target_end_ts?: number
   /** ok | gap_start | gap_end | gap | missing */

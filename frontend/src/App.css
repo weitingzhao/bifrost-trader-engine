@@ -7843,6 +7843,14 @@ th {
   padding-top: 0.15rem;
 }
 
+.data-coverage-ref-polygon {
+  margin-left: 0.15rem;
+  color: var(--color-text-muted);
+  font-weight: normal;
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+
 .data-coverage-status {
   margin-left: 0.35rem;
   font-size: 0.85em;
@@ -7853,6 +7861,53 @@ th {
   display: flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+.data-coverage-actions-sub {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.data-coverage-actions-sync-split {
+  text-align: center;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+/* Merged 1 D + Intraday Sync columns: both buttons stay on one row */
+.data-coverage-sync-cells-pair {
+  vertical-align: middle;
+  text-align: center;
+  white-space: nowrap;
+  padding-left: var(--space-2);
+  padding-right: var(--space-2);
+}
+
+.data-coverage-sync-pair-row {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-width: max-content;
+}
+
+.data-coverage-sync-pair-row .btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.market-data-page--settings-embed .data-coverage-table .data-coverage-actions-sub {
+  white-space: nowrap;
+}
+
+.ref-jobs-md-enqueue-actions--stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: stretch;
 }
 
 .data-coverage-group-bar .data-coverage-group-label {
@@ -8734,6 +8789,73 @@ th {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* Massive Delay (DB) — Reference section header + Aggregate Bars queue */
+.massive-delay-ref-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: 0;
+}
+
+.massive-delay-ref-heading-title {
+  margin-bottom: 0;
+}
+
+.massive-delay-ref-heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.massive-delay-db-main-tabs {
+  margin-top: 0;
+}
+
+.massive-delay-ohlc-queue-topline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.massive-delay-ohlc-queue-topline-doc {
+  flex: 1 1 16rem;
+  min-width: 0;
+  max-width: 42rem;
+  margin-bottom: 0;
+}
+
+.massive-delay-ohlc-queue-switch-wrap {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.massive-delay-ohlc-queue-label {
+  margin-bottom: 0;
+}
+
+/* Custom Bars toolbar: keep both Sync-all actions on one row */
+.massive-delay-custom-bars-sync-all-group {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.massive-delay-custom-bars-sync-all-group .btn {
+  white-space: nowrap;
 }
 
 .ref-jobs-active-pill {
@@ -13907,6 +14029,24 @@ th {
   align-items: stretch;
 }
 
+/* Positions: Instance + Options + Stocks + Fixed income + Cash-like (5 columns; Trade ledger stays 6) */
+.replay-ledger-tab-matrix--aligned.replay-ledger-tab-matrix--open-positions .replay-ledger-tab-matrix-labels {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.replay-ledger-tab-matrix-labels .replay-ledger-tab-group-caption--positions-attr {
+  grid-column: 1 / 2;
+}
+
+.replay-ledger-tab-matrix-labels .replay-ledger-tab-group-caption--positions-inst {
+  grid-column: 2 / 6;
+}
+
+.replay-ledger-tab-matrix--aligned.replay-ledger-tab-matrix--open-positions
+  .replay-ledger-tab-button-row.replay-portfolio-tabs.system-tabs {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .replay-ledger-tab-matrix--aligned .replay-ledger-tab-button-row .system-tab {
   min-width: 0;
   justify-content: center;
@@ -15950,8 +16090,11 @@ th:has(> .coverage-pool-th-held-amt) {
 /* High-contrast triad on dark bg: cool blue / warm amber / magenta (hue spread ~120° each). */
 .coverage-asset-pie-section {
   --coverage-pie-stock: #38bdf8;
+  --coverage-pie-fi: #4ade80;
+  --coverage-pie-cashlike: #2dd4bf;
   --coverage-pie-cash: #fbbf24;
   --coverage-pie-bp: #e879f9;
+  --coverage-pie-opt: #c084fc;
   --coverage-pie-empty: rgba(255, 255, 255, 0.14);
 }
 
@@ -16029,9 +16172,17 @@ th:has(> .coverage-pool-th-held-amt) {
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
   max-width: 11rem;
-  min-height: 5.5rem;
+  min-height: 8.5rem;
+}
+
+.coverage-asset-pie-chart-toggle-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  width: 100%;
 }
 
 .coverage-asset-pie-bp-label {
@@ -16117,6 +16268,18 @@ th:has(> .coverage-pool-th-held-amt) {
   stroke: var(--coverage-pie-bp);
 }
 
+.coverage-asset-pie-ring-seg-fi {
+  stroke: var(--coverage-pie-fi);
+}
+
+.coverage-asset-pie-ring-seg-cashlike {
+  stroke: var(--coverage-pie-cashlike);
+}
+
+.coverage-asset-pie-ring-seg-opt {
+  stroke: var(--coverage-pie-opt);
+}
+
 .coverage-asset-pie-center-val {
   font-size: 0.62rem;
   font-weight: 700;
@@ -16132,6 +16295,11 @@ th:has(> .coverage-pool-th-held-amt) {
 .coverage-asset-pie-center-val--netliq {
   font-size: 0.72rem;
   letter-spacing: 0;
+}
+
+.coverage-asset-pie-center-val--basis {
+  font-size: 0.58rem;
+  letter-spacing: -0.01em;
 }
 
 .coverage-asset-pie-center-sub {
@@ -16171,6 +16339,15 @@ th:has(> .coverage-pool-th-held-amt) {
   opacity: 0.65;
 }
 
+.coverage-asset-pie-legend-item--ring-excluded .coverage-asset-pie-legend-pct {
+  color: var(--color-text-dim, #5c6572);
+  font-weight: 500;
+}
+
+.coverage-asset-pie-legend-item--ring-excluded .coverage-asset-pie-dot {
+  opacity: 0.65;
+}
+
 .coverage-asset-pie-dot {
   width: 8px;
   height: 8px;
@@ -16189,6 +16366,21 @@ th:has(> .coverage-pool-th-held-amt) {
 
 .coverage-asset-pie-dot--bp {
   background: var(--coverage-pie-bp);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.coverage-asset-pie-dot--fi {
+  background: var(--coverage-pie-fi);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.coverage-asset-pie-dot--cashlike {
+  background: var(--coverage-pie-cashlike);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.coverage-asset-pie-dot--opt {
+  background: var(--coverage-pie-opt);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
 }
 
@@ -19503,6 +19695,10 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   letter-spacing: 0.05em;
   color: var(--color-text-muted);
   margin-bottom: var(--space-3);
+}
+
+.ib-portfolio-overview-row-pie .coverage-asset-pie-bp-side {
+  min-height: auto;
 }
 
 .ib-portfolio-pie-inner {

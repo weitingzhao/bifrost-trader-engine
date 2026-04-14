@@ -404,16 +404,20 @@ export interface MassiveStatusResponse {
   tier: string
   delay_notice: string
   trades_enabled: boolean
+  /** Empty-DB daily_smart backfill window (years), from server massive config */
+  daily_full_backfill_years: number
 }
 
 export async function fetchMassiveStatus(): Promise<MassiveStatusResponse> {
   const r = await fetch(massiveUrl('/research/massive/status'))
   const j = await r.json().catch(() => ({}))
+  const years = Number(j.daily_full_backfill_years)
   return {
     configured: Boolean(j.configured),
     tier: typeof j.tier === 'string' ? j.tier : 'starter',
     delay_notice: typeof j.delay_notice === 'string' ? j.delay_notice : '',
     trades_enabled: Boolean(j.trades_enabled),
+    daily_full_backfill_years: Number.isFinite(years) && years > 0 ? years : 5,
   }
 }
 

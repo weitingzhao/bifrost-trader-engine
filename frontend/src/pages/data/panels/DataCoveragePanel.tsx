@@ -2,6 +2,8 @@ import { Fragment } from 'react'
 import type { BarCoverageItem, BarsCoverageResponse, StatusResponse } from '../../../types'
 import { InfoTooltip } from '../../../components/InfoTooltip'
 import { coverageCell, coverageCompact, coverageRange, coverageStatusDisplay } from '../dataCoverageUtils'
+import { normCoverageSymbol } from '../coverageSymbolGroups'
+import { ReferenceIndexCoverageSymbolCell } from '../ReferenceIndexCoverageSymbolCell'
 
 export interface DataCoveragePanelProps {
   coverage: BarCoverageItem[] | null
@@ -168,7 +170,7 @@ export function DataCoveragePanel({
         >
           {indicesRefreshLoading ? 'Refreshing…' : 'Refresh Index'}
         </button>
-        <InfoTooltip text="Refresh reference indices (^GSPC, ^DJI, ^IXIC) via Massive/Polygon daily aggs. Writes source=massive." />
+        <InfoTooltip text="Refresh reference indices (^GSPC, ^DJI, ^IXIC, ^VIX, …) via Massive/Polygon daily aggs. Writes source=massive." />
       </div>
       {indicesRefreshMessage && (
         <div className="replay-placeholder" role="status" style={{ marginBottom: '0.5rem' }}>
@@ -230,7 +232,9 @@ export function DataCoveragePanel({
                       </tr>
                     ) : null}
                     {group.rows.map((row) => {
-                      const isIndex = status?.live_ui?.reference_indices?.some((r) => r.symbol === row.symbol)
+                      const isIndex = status?.live_ui?.reference_indices?.some(
+                        (r) => normCoverageSymbol(r.symbol) === normCoverageSymbol(row.symbol),
+                      )
                       const dayStatus = coverageStatusDisplay(row.stock_day.status)
                       const min1Status = coverageStatusDisplay(row.stock_min['1 min']?.status)
                       const min5Status = coverageStatusDisplay(row.stock_min['5 mins']?.status)
@@ -263,25 +267,21 @@ export function DataCoveragePanel({
                       return (
                         <tr key={row.symbol}>
                           <td>
-                            {isIndex ? (() => {
-                              const ref = status?.live_ui?.reference_indices?.find((r) => r.symbol === row.symbol)
-                              const label = ref?.label || row.symbol
-                              return (
-                                <>
-                                  <strong>{label}</strong>
-                                  <span className="data-coverage-status" style={{ marginLeft: '0.35rem', color: 'var(--color-text-muted)', fontWeight: 'normal', fontSize: '0.9em' }} title="Reference index symbol">
-                                    {row.symbol}
-                                  </span>
-                                </>
-                              )
-                            })() : (
+                            {isIndex ? (
+                              <ReferenceIndexCoverageSymbolCell
+                                symbol={row.symbol}
+                                reference={status?.live_ui?.reference_indices?.find(
+                                  (r) => r.symbol.trim().toUpperCase() === row.symbol.trim().toUpperCase(),
+                                )}
+                              />
+                            ) : (
                               <strong>{row.symbol}</strong>
                             )}
                           </td>
-                          <td className="data-coverage-bars" title={coverageCell(row.stock_day)}>
-                            {renderBarsCell(row.stock_day, dayStatus.needBackfill, '1 D', coverageCell(row.stock_day))}
+                          <td className="data-coverage-bars" title={coverageCell(row.stock_day, { dailySessionDates: true })}>
+                            {renderBarsCell(row.stock_day, dayStatus.needBackfill, '1 D', coverageCell(row.stock_day, { dailySessionDates: true }))}
                           </td>
-                          <td className="data-coverage-range">{coverageRange(row.stock_day)}</td>
+                          <td className="data-coverage-range">{coverageRange(row.stock_day, { dailySessionDates: true })}</td>
                           <td className="data-coverage-bars" title={coverageCell(row.stock_min['1 min'] || emptyPeriod)}>
                             {renderBarsCell(row.stock_min['1 min'] || emptyPeriod, min1Status.needBackfill, '1 min', coverageCell(row.stock_min['1 min'] || emptyPeriod))}
                           </td>

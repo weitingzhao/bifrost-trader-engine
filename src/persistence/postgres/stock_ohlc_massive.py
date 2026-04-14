@@ -9,6 +9,29 @@ from typing import Any, Dict, Optional
 SOURCE_MASSIVE = "massive"
 
 
+def get_massive_stock_day_max_date(cur: Any, symbol: str) -> Optional[date]:
+    """Latest daily bar date in stock_day for symbol (Massive source only)."""
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return None
+    cur.execute(
+        """
+        SELECT MAX(bar_time) FROM stock_day
+        WHERE symbol = %s AND source = %s
+        """,
+        (sym, SOURCE_MASSIVE),
+    )
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    v = row[0]
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    return None
+
+
 def timespan_to_stock_period(timespan: str, multiplier: int = 1) -> str:
     """Map Massive timespan + multiplier to stock_min.period label."""
     ts = (timespan or "minute").strip().lower()
@@ -330,6 +353,7 @@ def apply_stock_previous_day_bar(
 
 __all__ = [
     "SOURCE_MASSIVE",
+    "get_massive_stock_day_max_date",
     "apply_stock_custom_bars",
     "apply_stock_daily_ticker_summary",
     "apply_stock_grouped_daily",

@@ -52,8 +52,7 @@ export function useBarsCoverage(status: StatusResponse | null) {
   }, [])
 
   const coverageGroups = useMemo((): { label: string; rows: BarCoverageItem[] }[] => {
-    if (!coverage || coverage.length === 0) return []
-    return splitCoverageByReferenceIndices(coverage, status?.live_ui?.reference_indices)
+    return splitCoverageByReferenceIndices(coverage ?? [], status?.live_ui?.reference_indices)
   }, [coverage, status?.live_ui?.reference_indices])
 
   const loadCoverage = useCallback(async () => {

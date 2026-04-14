@@ -8,22 +8,57 @@ import {
   coverageRange,
   coverageStatusDisplay,
 } from '../data/dataCoverageUtils'
-import { splitCoverageByReferenceIndices } from '../data/coverageSymbolGroups'
+import { ReferenceIndexCoverageSymbolCell } from '../data/ReferenceIndexCoverageSymbolCell'
+import { normCoverageSymbol, splitCoverageByReferenceIndices } from '../data/coverageSymbolGroups'
 import { useMassiveRefJobSession } from './MassiveRefJobSessionContext'
 import {
   addCalendarDaysNy,
   nyCalendarDateIso,
   presetNyRegularSessionForDate,
-  presetNyRegularSessionRange,
-  presetRegularSessionDemo,
 } from './customBarsTimePresets'
 
-/** Default Custom Bars window: one regular session (09:30–16:00 ET) on 2024-06-03 — works with multiplier 1 × timespan minute. */
+/** Fallback until the latest US regular session window is resolved (see intraday init effect). */
 const STOCK_CUSTOM_BARS_DEFAULT_START_MS = 1717421400000
 const STOCK_CUSTOM_BARS_DEFAULT_END_MS = 1717444800000
 
 /** Matches POST /research/massive/sync validation for payload.symbols (stock_ohlc_sync custom_bars). */
 const CUSTOM_BARS_SYMBOL_BATCH = 50
+
+/** Backend: sync_all_periods with custom_bars_period_group — daily (1 D) vs intraday (1m, 5m, 1h). */
+type CustomBarsPeriodGroup = 'daily' | 'intraday'
+
+type CustomBarsSyncMode = 'window' | 'daily_smart'
+
+function buildCustomBarsMultiPayload(
+  startMs: number,
+  endMs: number,
+  group: CustomBarsPeriodGroup,
+  extra: Record<string, unknown> = {},
+  dailySyncMode: CustomBarsSyncMode = 'window',
+): Record<string, unknown> {
+  if (group === 'daily' && dailySyncMode === 'daily_smart') {
+    // end_ms > 0 caps the NY calendar end date on the server; 0 = use today (see stock_ohlc_daily_smart).
+    const cap = Number.isFinite(endMs) && endMs > 0 ? endMs : 0
+    return {
+      mode: 'custom_bars',
+      sync_all_periods: true,
+      custom_bars_period_group: 'daily',
+      custom_bars_sync_mode: 'daily_smart',
+      start_ms: 0,
+      end_ms: cap,
+      ...extra,
+    }
+  }
+  return {
+    mode: 'custom_bars',
+    start_ms: startMs,
+    end_ms: endMs,
+    sync_all_periods: true,
+    custom_bars_period_group: group,
+    custom_bars_sync_mode: 'window',
+    ...extra,
+  }
+}
 
 function chunkStrings(list: string[], size: number): string[][] {
   const out: string[][] = []
@@ -55,6 +90,8 @@ export interface MassiveStockOhlcDbEnqueueBlockProps {
   coverageLoading: boolean
   coverageError: string | null
   onRefreshCoverage: () => void
+  /** From GET /research/massive/status — empty-DB daily_smart window in calendar years */
+  dailyFullBackfillYears: number
 }
 
 /**
@@ -67,6 +104,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
   coverageLoading,
   coverageError,
   onRefreshCoverage,
+  dailyFullBackfillYears,
 }: MassiveStockOhlcDbEnqueueBlockProps) {
   const refJobSession = useMassiveRefJobSession()
   const [priorityHigh, setPriorityHigh] = useState(false)
@@ -78,9 +116,8 @@ export function MassiveStockOhlcDbEnqueueBlock({
   const [dbOhlcEndMs, setDbOhlcEndMs] = useState(String(STOCK_CUSTOM_BARS_DEFAULT_END_MS))
   const [dbOhlcTs, setDbOhlcTs] = useState('minute')
   const [dbOhlcMult, setDbOhlcMult] = useState('1')
-  /** When false (default), custom_bars enqueue matches table Sync: 1 D, 1 min, 5 min, 1 hour for the window. */
+  /** When false, Advanced multi-period enqueue uses separate Daily vs Intraday actions (not one combined job). */
   const [customBarsSingleTimespanOnly, setCustomBarsSingleTimespanOnly] = useState(false)
-  const [presetBusy, setPresetBusy] = useState(false)
   const [dbGdDate, setDbGdDate] = useState('2024-06-03')
   const [dbOcTicker, setDbOcTicker] = useState('AAPL')
   const [dbOcDate, setDbOcDate] = useState('2024-06-03')
@@ -93,15 +130,49 @@ export function MassiveStockOhlcDbEnqueueBlock({
       .catch(() => setIsTradingDay(true))
   }, [])
 
+  /** Intraday sync uses a fixed policy: latest resolved US regular session (09:30–16:00 ET), not user “test” presets. */
+  useEffect(() => {
+    if (!configured) return
+    let cancelled = false
+    void (async () => {
+      const ymd = (await findLastNyTradingDay()) ?? nyCalendarDateIso()
+      const w = presetNyRegularSessionForDate(ymd)
+      if (cancelled || !w) return
+      setDbOhlcStartMs(String(w.startMs))
+      setDbOhlcEndMs(String(w.endMs))
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [configured])
+
   const coverageGroups = useMemo(
     () => splitCoverageByReferenceIndices(coverage ?? [], status?.live_ui?.reference_indices),
     [coverage, status?.live_ui?.reference_indices],
   )
 
+  const hasCustomBarsTableRows = useMemo(
+    () => coverageGroups.some((g) => g.rows.length > 0),
+    [coverageGroups],
+  )
+
+  /** Avoid flashing the indices placeholder table while the first coverage request is in flight. */
+  const showCustomBarsTable =
+    hasCustomBarsTableRows && (!coverageLoading || coverage != null)
+
   const allCoverageSymbols = useMemo(() => {
     const rows = coverage ?? []
-    return [...new Set(rows.map(r => (r.symbol || '').trim().toUpperCase()).filter(Boolean))]
-  }, [coverage])
+    const fromCov = [...new Set(rows.map((r) => (r.symbol || '').trim().toUpperCase()).filter(Boolean))]
+    const refSyms = (status?.live_ui?.reference_indices ?? [])
+      .map((r) => (r.symbol || '').trim().toUpperCase())
+      .filter(Boolean)
+    return [...new Set([...refSyms, ...fromCov])]
+  }, [coverage, status?.live_ui?.reference_indices])
+
+  const backfillYears =
+    Number.isFinite(dailyFullBackfillYears) && dailyFullBackfillYears > 0
+      ? dailyFullBackfillYears
+      : 5
 
   const runOhlcEnqueue = useCallback(
     async (payload: Record<string, unknown>) => {
@@ -135,87 +206,48 @@ export function MassiveStockOhlcDbEnqueueBlock({
     [priorityHigh, refJobSession],
   )
 
-  const applyCustomBarsWindow = useCallback((startMs: number, endMs: number) => {
-    setDbOhlcStartMs(String(startMs))
-    setDbOhlcEndMs(String(endMs))
-  }, [])
-
-  const onPresetRegularDemo = useCallback(() => {
-    const w = presetRegularSessionDemo()
-    applyCustomBarsWindow(w.startMs, w.endMs)
-    setOhlcMsg(null)
-  }, [applyCustomBarsWindow])
-
-  const onPresetLastTradingDay = useCallback(async () => {
-    setPresetBusy(true)
-    setOhlcMsg(null)
-    try {
-      const ymd = await findLastNyTradingDay()
-      if (!ymd) {
-        setOhlcMsg('Could not resolve a recent US trading day (check Market API /market/trading-day).')
-        return
-      }
-      const w = presetNyRegularSessionForDate(ymd)
-      if (!w) {
-        setOhlcMsg('Could not compute regular session bounds for that date.')
-        return
-      }
-      applyCustomBarsWindow(w.startMs, w.endMs)
-    } finally {
-      setPresetBusy(false)
-    }
-  }, [applyCustomBarsWindow])
-
-  const onPresetLastFiveCalendarDaysEt = useCallback(() => {
-    const endYmd = nyCalendarDateIso()
-    const startYmd = addCalendarDaysNy(endYmd, -4)
-    const w = presetNyRegularSessionRange(startYmd, endYmd)
-    if (!w) {
-      setOhlcMsg('Could not compute a 5-day ET window.')
-      return
-    }
-    applyCustomBarsWindow(w.startMs, w.endMs)
-    setOhlcMsg(null)
-  }, [applyCustomBarsWindow])
-
   const enqueueCustomBarsRow = useCallback(
-    async (symbol: string) => {
+    async (symbol: string, group: CustomBarsPeriodGroup) => {
       const startMs = parseInt(dbOhlcStartMs.trim(), 10)
       const endMs = parseInt(dbOhlcEndMs.trim(), 10)
       const t = symbol.trim().toUpperCase()
-      if (!t || !Number.isFinite(startMs) || !Number.isFinite(endMs)) {
-        setOhlcMsg('Custom bars: ticker and Unix ms start/end are required.')
+      if (!t) {
+        setOhlcMsg('Custom bars: ticker is required.')
         return
       }
-      await runOhlcEnqueue({
-        mode: 'custom_bars',
-        ticker: t,
-        start_ms: startMs,
-        end_ms: endMs,
-        sync_all_periods: true,
-      })
+      if (group === 'daily') {
+        await runOhlcEnqueue(
+          buildCustomBarsMultiPayload(0, 0, 'daily', { ticker: t }, 'daily_smart'),
+        )
+        return
+      }
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+        setOhlcMsg('Custom bars: Unix ms start/end are required for intraday.')
+        return
+      }
+      await runOhlcEnqueue(
+        buildCustomBarsMultiPayload(startMs, endMs, 'intraday', { ticker: t }, 'window'),
+      )
     },
     [dbOhlcStartMs, dbOhlcEndMs, runOhlcEnqueue],
   )
 
   /** One job per chunk (max 50 symbols); fills PostgreSQL from Massive for the active time window. */
-  const enqueueCustomBarsAllSymbols = useCallback(async () => {
+  const enqueueCustomBarsAllSymbols = useCallback(async (group: CustomBarsPeriodGroup) => {
     if (allCoverageSymbols.length === 0) {
       setOhlcMsg('No symbols in coverage. Refresh coverage after configuring watchlist / indices.')
       return
     }
     const startMs = parseInt(dbOhlcStartMs.trim(), 10)
     const endMs = parseInt(dbOhlcEndMs.trim(), 10)
-    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
-      setOhlcMsg('Custom bars: Unix ms start/end are required.')
+    if (group === 'intraday' && (!Number.isFinite(startMs) || !Number.isFinite(endMs))) {
+      setOhlcMsg('Custom bars: Unix ms start/end are required for intraday.')
       return
     }
-    const basePayload: Record<string, unknown> = {
-      mode: 'custom_bars',
-      start_ms: startMs,
-      end_ms: endMs,
-      sync_all_periods: true,
-    }
+    const basePayload: Record<string, unknown> =
+      group === 'daily'
+        ? buildCustomBarsMultiPayload(0, 0, 'daily', {}, 'daily_smart')
+        : buildCustomBarsMultiPayload(startMs, endMs, 'intraday', {}, 'window')
     setOhlcMsg(null)
     await refJobSession.withStockOhlcHttp(async () => {
       const chunks = chunkStrings(allCoverageSymbols, CUSTOM_BARS_SYMBOL_BATCH)
@@ -251,51 +283,80 @@ export function MassiveStockOhlcDbEnqueueBlock({
       } else if (errors.length > 0) {
         setOhlcMsg(`${errors.join(' ')} (${jobs} job(s) enqueued). Open Jobs for details.`)
       } else {
+        const scope =
+          group === 'daily'
+            ? `daily smart (~${backfillYears}y full if empty, else gap-fill)`
+            : 'intraday (1m / 5m / 1h)'
         setOhlcMsg(
-          `Enqueued ${jobs} stock_ohlc_sync job(s) for ${allCoverageSymbols.length} symbol(s) (watchlist + indices). Open Jobs for details.`,
+          `Enqueued ${jobs} stock_ohlc_sync job(s) (${scope}) for ${allCoverageSymbols.length} symbol(s). Open Jobs for details.`,
         )
       }
     })
-  }, [
-    allCoverageSymbols,
-    dbOhlcStartMs,
-    dbOhlcEndMs,
-    dbOhlcMult,
-    dbOhlcTs,
-    priorityHigh,
-    refJobSession,
-  ])
+  }, [allCoverageSymbols, backfillYears, dbOhlcStartMs, dbOhlcEndMs, priorityHigh, refJobSession])
 
-  const enqueueStockOhlcSync = useCallback(async () => {
-    if (delayDbOhlcTab === 'custom_bars') {
+  const enqueueStockOhlcSyncAdvanced = useCallback(
+    async (group: CustomBarsPeriodGroup, dailyMode: 'daily_smart' | 'window' = 'daily_smart') => {
+      if (delayDbOhlcTab !== 'custom_bars') return
       const startMs = parseInt(dbOhlcStartMs.trim(), 10)
       const endMs = parseInt(dbOhlcEndMs.trim(), 10)
       const t = dbOhlcTicker.trim().toUpperCase()
-      if (!t || !Number.isFinite(startMs) || !Number.isFinite(endMs)) {
-        setOhlcMsg('Custom bars: ticker and Unix ms start/end are required.')
+      if (!t) {
+        setOhlcMsg('Custom bars: ticker is required.')
+        return
+      }
+      if (customBarsSingleTimespanOnly) {
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+          setOhlcMsg('Custom bars: Unix ms start/end are required.')
+          return
+        }
+        await runOhlcEnqueue({
+          mode: 'custom_bars',
+          ticker: t,
+          multiplier: parseInt(dbOhlcMult.trim(), 10) || 1,
+          timespan: dbOhlcTs.trim() || 'minute',
+          start_ms: startMs,
+          end_ms: endMs,
+          sync_all_periods: false,
+        })
+        return
+      }
+      if (group === 'daily' && dailyMode === 'daily_smart') {
+        await runOhlcEnqueue(
+          buildCustomBarsMultiPayload(0, 0, 'daily', { ticker: t }, 'daily_smart'),
+        )
+        return
+      }
+      if (group === 'daily' && dailyMode === 'window') {
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+          setOhlcMsg('Custom bars: Unix ms start/end are required for manual daily window.')
+          return
+        }
+        await runOhlcEnqueue(
+          buildCustomBarsMultiPayload(startMs, endMs, 'daily', { ticker: t }, 'window'),
+        )
+        return
+      }
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+        setOhlcMsg('Custom bars: Unix ms start/end are required for intraday.')
         return
       }
       await runOhlcEnqueue(
-        customBarsSingleTimespanOnly
-          ? {
-              mode: 'custom_bars',
-              ticker: t,
-              multiplier: parseInt(dbOhlcMult.trim(), 10) || 1,
-              timespan: dbOhlcTs.trim() || 'minute',
-              start_ms: startMs,
-              end_ms: endMs,
-              sync_all_periods: false,
-            }
-          : {
-              mode: 'custom_bars',
-              ticker: t,
-              start_ms: startMs,
-              end_ms: endMs,
-              sync_all_periods: true,
-            },
+        buildCustomBarsMultiPayload(startMs, endMs, 'intraday', { ticker: t }, 'window'),
       )
-      return
-    }
+    },
+    [
+      delayDbOhlcTab,
+      dbOhlcStartMs,
+      dbOhlcEndMs,
+      dbOhlcTicker,
+      customBarsSingleTimespanOnly,
+      dbOhlcMult,
+      dbOhlcTs,
+      runOhlcEnqueue,
+    ],
+  )
+
+  const enqueueStockOhlcSync = useCallback(async () => {
     if (delayDbOhlcTab === 'daily_market_summary') {
       const d = dbGdDate.trim()
       if (!d) {
@@ -321,25 +382,13 @@ export function MassiveStockOhlcDbEnqueueBlock({
       return
     }
     await runOhlcEnqueue({ mode: 'previous_day_bar', ticker: t })
-  }, [
-    delayDbOhlcTab,
-    dbOhlcStartMs,
-    dbOhlcEndMs,
-    dbOhlcTicker,
-    customBarsSingleTimespanOnly,
-    dbOhlcMult,
-    dbOhlcTs,
-    dbGdDate,
-    dbOcTicker,
-    dbOcDate,
-    dbPrevTicker,
-    runOhlcEnqueue,
-  ])
+  }, [delayDbOhlcTab, dbGdDate, dbOcTicker, dbOcDate, dbPrevTicker, runOhlcEnqueue])
 
   const ohlcHttpBusy = refJobSession.jobBusyKind === 'stock_ohlc_sync'
   const disabled = !configured || refJobSession.jobBusyKind != null
 
   const modeMeta = OHLC_MODES.find(m => m.id === delayDbOhlcTab)
+  const queueCode = priorityHigh ? 'massive_stocks_high' : 'massive_stocks'
 
   return (
     <div
@@ -348,18 +397,41 @@ export function MassiveStockOhlcDbEnqueueBlock({
       role="region"
       aria-label="Stock OHLC PostgreSQL sync"
     >
-      <p className="feed-massive-agg-sub-doc" style={{ marginBottom: 'var(--space-2)', maxWidth: '42rem' }}>
-        Celery job <code>stock_ohlc_sync</code> upserts into <code>stock_day</code> / <code>stock_min</code> (source &quot;massive&quot;). Modes align with Settings → Feed → Massive Stock → Aggregate Bars (OHLC). Enqueued jobs appear in the same <strong>Jobs</strong> sheet as ticker reference tasks.
-      </p>
-      <label className="feed-massive-field" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
-        <input
-          type="checkbox"
-          checked={priorityHigh}
-          onChange={e => setPriorityHigh(e.target.checked)}
-          disabled={disabled}
-        />
-        <span className="form-label" style={{ marginBottom: 0 }}>High priority queue (massive_stocks_high)</span>
-      </label>
+      <div className="massive-delay-ohlc-queue-topline">
+        <p className="feed-massive-agg-sub-doc massive-delay-ohlc-queue-topline-doc">
+          Celery job <code>stock_ohlc_sync</code> upserts into <code>stock_day</code> / <code>stock_min</code> (source &quot;massive&quot;). Modes align with Settings → Feed → Massive Stock → Aggregate Bars (OHLC). Enqueued jobs appear in the same <strong>Jobs</strong> sheet as ticker reference tasks.
+        </p>
+        <div className="massive-delay-ohlc-queue-switch-wrap">
+          <span className="form-label massive-delay-ohlc-queue-label" id="massive-delay-ohlc-queue-label">
+            Queue
+          </span>
+          <div
+            className="replay-bubble-switch massive-delay-ohlc-queue-bubbles"
+            role="group"
+            aria-labelledby="massive-delay-ohlc-queue-label"
+          >
+            <button
+              type="button"
+              className={`replay-bubble-switch-btn${!priorityHigh ? ' active' : ''}`}
+              disabled={disabled}
+              onClick={() => setPriorityHigh(false)}
+              aria-pressed={!priorityHigh}
+            >
+              Standard
+            </button>
+            <button
+              type="button"
+              className={`replay-bubble-switch-btn${priorityHigh ? ' active' : ''}`}
+              disabled={disabled}
+              onClick={() => setPriorityHigh(true)}
+              aria-pressed={priorityHigh}
+            >
+              High
+            </button>
+          </div>
+          <InfoTooltip text="Standard uses Celery queue massive_stocks. High uses massive_stocks_high for stock_ohlc_sync." />
+        </div>
+      </div>
 
       <div className="ref-jobs-md ref-jobs-md--tabs">
         <ul className="ref-jobs-md-nav" role="tablist" aria-label="Stock OHLC sync mode">
@@ -402,7 +474,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
             </div>
             <div className="ref-jobs-md-meta-row">
               <span className="ref-jobs-md-meta-label">Queue</span>
-              <span><code className="ref-jobs-catalog-code">massive_stocks</code></span>
+              <span><code className="ref-jobs-catalog-code">{queueCode}</code></span>
             </div>
           </div>
 
@@ -411,37 +483,18 @@ export function MassiveStockOhlcDbEnqueueBlock({
           {delayDbOhlcTab === 'custom_bars' ? (
             <div>
               <p className="ref-jobs-md-enqueue-hint" style={{ marginBottom: 'var(--space-2)' }}>
-                Data source is <strong>Massive (delayed) → PostgreSQL</strong>, not IB Live bars in Redis. The table mirrors <strong>Stock Coverage (IB Live)</strong> (bars + range). Click a bars cell to open IB Live coverage for inspection. <strong>Sync</strong> / <strong>Sync all symbols</strong> / default <strong>Advanced → Enqueue sync</strong> enqueue one job that pulls <strong>all four periods</strong> for the active time window: Daily (1 D), 1 min, 5 mins, and 1 hour (Polygon/Massive v2 aggs). Reference indices use Yahoo-style symbols in the app (e.g. <code>^GSPC</code>); Massive requests use Polygon index tickers (<code>I:SPX</code> S&amp;P 500, <code>I:DJI</code> Dow, <code>I:COMP</code> Nasdaq Composite) while rows stay keyed by your configured symbol. In <strong>Advanced</strong>, enable <em>Single timespan only</em> to fetch one multiplier × timespan instead of all four.
+                <strong>Massive (delayed) → PostgreSQL</strong> — not IB Live in Redis. Rows align with <strong>Stock Coverage (IB Live)</strong>; click <strong>Bars</strong> to open IB Live.
               </p>
-              <div className="replay-toolbar" style={{ flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-3)', alignItems: 'center' }}>
-                <span className="form-label" style={{ marginBottom: 0 }}>Time window</span>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  disabled={disabled || presetBusy}
-                  onClick={() => onPresetRegularDemo()}
-                >
-                  Regular session (demo)
-                </button>
-                <InfoTooltip text="Same Unix window as Feed → Massive Stock → Custom Bars default: 2024-06-03, 09:30–16:00 America/New_York, 1×minute." />
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  disabled={disabled || presetBusy}
-                  onClick={() => void onPresetLastTradingDay()}
-                >
-                  {presetBusy ? '…' : 'Last US session (ET)'}
-                </button>
-                <InfoTooltip text="Uses GET /market/trading-day to find the latest US trading day (America/New_York calendar), then sets 09:30–16:00 ET that day." />
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  disabled={disabled || presetBusy}
-                  onClick={() => onPresetLastFiveCalendarDaysEt()}
-                >
-                  Last 5 calendar days (ET)
-                </button>
-                <InfoTooltip text="America/New_York: regular session from five calendar days ago 09:30 through today 16:00 (inclusive span). Not the same as five full trading sessions." />
+              <p className="ref-jobs-md-enqueue-hint" style={{ marginBottom: 'var(--space-2)' }}>
+                <strong>Daily:</strong> through NY <strong>today</strong>; ~<strong>{backfillYears}y</strong> when empty (<code>massive.daily_full_backfill_years</code>), else gap-fill + <strong>2</strong> US trading-day overlap. <strong>Intraday:</strong> latest regular session (09:30–16:00 ET), 1m / 5m / 1h. <strong>Advanced:</strong> manual daily or intraday overrides (Start/End ms); <em>Single timespan only</em> = one multiplier × timespan.
+              </p>
+              <p className="ref-jobs-md-enqueue-hint" style={{ marginBottom: 'var(--space-2)' }}>
+                Indices: config maps symbols to Polygon tickers (e.g. <code>^GSPC</code> → <code>SPY</code>, <code>^DJI</code> → <code>DIA</code>, <code>^VIX</code> → <code>VIXY</code> on Stocks Basic; <code>I:VIX</code> needs Indices).
+              </p>
+              <div
+                className="replay-toolbar massive-delay-custom-bars-toolbar"
+                style={{ flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-3)', alignItems: 'center' }}
+              >
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -452,16 +505,28 @@ export function MassiveStockOhlcDbEnqueueBlock({
                   {coverageLoading ? '…' : 'Refresh coverage'}
                 </button>
                 <InfoTooltip text="Same GET /bars/coverage list as Data Coverage → Stock → IB Live. Used for grouping and display only." />
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  disabled={disabled || ohlcHttpBusy || allCoverageSymbols.length === 0}
-                  onClick={() => void enqueueCustomBarsAllSymbols()}
-                  aria-label="Enqueue Massive custom bars for all watchlist symbols and reference indices"
-                >
-                  {ohlcHttpBusy ? '…' : 'Sync all symbols'}
-                </button>
-                <InfoTooltip text={`Enqueues one stock_ohlc_sync job per batch (up to ${CUSTOM_BARS_SYMBOL_BATCH} symbols) for every row below, using the active time window and timespan. Same coverage list as IB Live Stock Coverage.`} />
+                <span className="massive-delay-custom-bars-sync-all-group">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={disabled || ohlcHttpBusy || allCoverageSymbols.length === 0}
+                    onClick={() => void enqueueCustomBarsAllSymbols('daily')}
+                    aria-label="Enqueue Massive daily smart sync for all coverage symbols"
+                  >
+                    {ohlcHttpBusy ? '…' : 'Sync all (daily, smart)'}
+                  </button>
+                  <InfoTooltip text={`Daily smart: through NY today, ~${backfillYears}y back if empty, else gap-fill + 2-session overlap. One job per batch (up to ${CUSTOM_BARS_SYMBOL_BATCH} symbols).`} />
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={disabled || ohlcHttpBusy || allCoverageSymbols.length === 0}
+                    onClick={() => void enqueueCustomBarsAllSymbols('intraday')}
+                    aria-label="Enqueue Massive intraday (1m, 5m, 1h) custom bars for all coverage symbols"
+                  >
+                    {ohlcHttpBusy ? '…' : 'Sync all (intraday)'}
+                  </button>
+                  <InfoTooltip text="1m, 5m, 1h for the latest resolved US regular session (09:30–16:00 ET). One job per batch; same window as table Intraday Sync." />
+                </span>
               </div>
 
               {coverageError ? (
@@ -476,39 +541,11 @@ export function MassiveStockOhlcDbEnqueueBlock({
                 </p>
               ) : null}
 
-              <p className="feed-massive-agg-sub-doc" style={{ marginBottom: 'var(--space-2)', fontSize: '0.9em' }}>
-                Active window: <code>{dbOhlcStartMs}</code> → <code>{dbOhlcEndMs}</code>
-                {' · '}
-                <span className="form-label" style={{ marginBottom: 0 }}>Timespan</span>{' '}
-                <input
-                  className="form-input"
-                  style={{ display: 'inline-block', width: '6rem', marginLeft: '0.25rem' }}
-                  value={dbOhlcTs}
-                  onChange={e => setDbOhlcTs(e.target.value)}
-                  disabled={disabled}
-                  placeholder="minute"
-                  autoComplete="off"
-                  aria-label="Aggregate timespan"
-                />
-                {' '}
-                <span className="form-label" style={{ marginBottom: 0 }}>Multiplier</span>{' '}
-                <input
-                  className="form-input"
-                  style={{ display: 'inline-block', width: '3.5rem', marginLeft: '0.25rem' }}
-                  value={dbOhlcMult}
-                  onChange={e => setDbOhlcMult(e.target.value)}
-                  disabled={disabled}
-                  placeholder="1"
-                  autoComplete="off"
-                  aria-label="Aggregate multiplier"
-                />
-              </p>
-
-              {coverage && coverage.length === 0 && !coverageLoading ? (
+              {!coverageLoading && !hasCustomBarsTableRows ? (
                 <p className="replay-placeholder" role="status">No coverage rows (empty watchlist / indices). Configure reference indices or add watchlist symbols, then refresh.</p>
               ) : null}
 
-              {coverage && coverage.length > 0 ? (
+              {showCustomBarsTable ? (
                 <div className="data-coverage-table-wrap" style={{ marginBottom: 'var(--space-3)' }}>
                   <table className="table-operations data-coverage-table">
                     <thead>
@@ -518,7 +555,9 @@ export function MassiveStockOhlcDbEnqueueBlock({
                         <th colSpan={2}>1 min</th>
                         <th colSpan={2}>5 mins</th>
                         <th colSpan={2}>1 hour</th>
-                        <th className="data-coverage-actions">Actions</th>
+                        <th colSpan={2} className="data-coverage-actions data-coverage-actions-sync-split">
+                          PostgreSQL sync
+                        </th>
                       </tr>
                       <tr>
                         <th></th>
@@ -530,7 +569,8 @@ export function MassiveStockOhlcDbEnqueueBlock({
                         <th className="data-coverage-range">Range</th>
                         <th className="data-coverage-bars">Bars</th>
                         <th className="data-coverage-range">Range</th>
-                        <th></th>
+                        <th className="data-coverage-actions-sub">1 D</th>
+                        <th className="data-coverage-actions-sub">Intraday</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -538,7 +578,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
                         <Fragment key={group.label || 'all'}>
                           {group.label ? (
                             <tr className="data-coverage-group-header-row">
-                              <th colSpan={10} className="data-coverage-group-header">
+                              <th colSpan={11} className="data-coverage-group-header">
                                 {group.label}
                               </th>
                             </tr>
@@ -549,7 +589,9 @@ export function MassiveStockOhlcDbEnqueueBlock({
                             const min1Status = coverageStatusDisplay(row.stock_min['1 min']?.status)
                             const min5Status = coverageStatusDisplay(row.stock_min['5 mins']?.status)
                             const min1hStatus = coverageStatusDisplay(row.stock_min['1 hour']?.status)
-                            const isIndex = status?.live_ui?.reference_indices?.some((r) => r.symbol === row.symbol)
+                            const isIndex = status?.live_ui?.reference_indices?.some(
+                              (r) => normCoverageSymbol(r.symbol) === normCoverageSymbol(row.symbol),
+                            )
                             const renderBarsCell = (
                               p: { count: number; min_ts: number | null; max_ts: number | null },
                               needPull: boolean,
@@ -571,34 +613,22 @@ export function MassiveStockOhlcDbEnqueueBlock({
                             return (
                               <tr key={row.symbol}>
                                 <td>
-                                  {isIndex ? (() => {
-                                    const ref = status?.live_ui?.reference_indices?.find((r) => r.symbol === row.symbol)
-                                    const label = ref?.label || row.symbol
-                                    return (
-                                      <>
-                                        <strong>{label}</strong>
-                                        <span
-                                          className="data-coverage-status"
-                                          style={{
-                                            marginLeft: '0.35rem',
-                                            color: 'var(--color-text-muted)',
-                                            fontWeight: 'normal',
-                                            fontSize: '0.9em',
-                                          }}
-                                          title="Reference index symbol"
-                                        >
-                                          {row.symbol}
-                                        </span>
-                                      </>
-                                    )
-                                  })() : (
+                                  {isIndex ? (
+                                    <ReferenceIndexCoverageSymbolCell
+                                      symbol={row.symbol}
+                                      reference={status?.live_ui?.reference_indices?.find(
+                                        (r) =>
+                                          r.symbol.trim().toUpperCase() === row.symbol.trim().toUpperCase(),
+                                      )}
+                                    />
+                                  ) : (
                                     <strong>{row.symbol}</strong>
                                   )}
                                 </td>
-                                <td className="data-coverage-bars" title={coverageCell(row.stock_day)}>
-                                  {renderBarsCell(row.stock_day, dayStatus.needBackfill, '1 D', coverageCell(row.stock_day))}
+                                <td className="data-coverage-bars" title={coverageCell(row.stock_day, { dailySessionDates: true })}>
+                                  {renderBarsCell(row.stock_day, dayStatus.needBackfill, '1 D', coverageCell(row.stock_day, { dailySessionDates: true }))}
                                 </td>
-                                <td className="data-coverage-range">{coverageRange(row.stock_day)}</td>
+                                <td className="data-coverage-range">{coverageRange(row.stock_day, { dailySessionDates: true })}</td>
                                 <td className="data-coverage-bars" title={coverageCell(row.stock_min['1 min'] || emptyPeriod)}>
                                   {renderBarsCell(
                                     row.stock_min['1 min'] || emptyPeriod,
@@ -626,17 +656,32 @@ export function MassiveStockOhlcDbEnqueueBlock({
                                   )}
                                 </td>
                                 <td className="data-coverage-range">{coverageRange(row.stock_min['1 hour'] || emptyPeriod)}</td>
-                                <td className="data-coverage-actions data-coverage-actions-nowrap">
-                                  <button
-                                    type="button"
-                                    className="btn btn-secondary btn-sm"
-                                    disabled={disabled || ohlcHttpBusy}
-                                    title="Enqueue Massive custom bars for this symbol (active time window)"
-                                    aria-label={`Sync Massive custom bars for ${row.symbol}`}
-                                    onClick={() => void enqueueCustomBarsRow(row.symbol)}
-                                  >
-                                    {ohlcHttpBusy ? '…' : 'Sync'}
-                                  </button>
+                                <td
+                                  colSpan={2}
+                                  className="data-coverage-actions data-coverage-sync-cells-pair"
+                                >
+                                  <div className="data-coverage-sync-pair-row">
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      disabled={disabled || ohlcHttpBusy}
+                                      title="Daily smart: through NY today; gap-fill or full window when empty (see server backfill years)"
+                                      aria-label={`Sync Massive daily smart for ${row.symbol}`}
+                                      onClick={() => void enqueueCustomBarsRow(row.symbol, 'daily')}
+                                    >
+                                      {ohlcHttpBusy ? '…' : 'Sync'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      disabled={disabled || ohlcHttpBusy}
+                                      title="Intraday: latest US regular session window (1m, 5m, 1h); override in Advanced"
+                                      aria-label={`Sync Massive intraday custom bars for ${row.symbol}`}
+                                      onClick={() => void enqueueCustomBarsRow(row.symbol, 'intraday')}
+                                    >
+                                      {ohlcHttpBusy ? '…' : 'Sync'}
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             )
@@ -653,7 +698,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
                   Advanced — manual ticker and Unix ms
                 </summary>
                 <p className="ref-jobs-md-enqueue-hint">
-                  Custom-range aggregates for one ticker. By default, <strong>Enqueue sync</strong> pulls the same multi-period set as row <strong>Sync</strong> (1 day, 1 min, 5 mins, 1 hour) for the Unix window. Enable <em>Single timespan only</em> to fetch exactly one timespan and multiplier.
+                  One ticker. <strong>Daily smart</strong> matches the table 1 D column. <strong>Daily (manual window)</strong> uses Start/End ms for 1 D only. <strong>Intraday</strong> uses Start/End ms for 1m / 5m / 1h (defaults to the latest US regular session; edit below to override). <em>Single timespan only</em> fetches exactly one multiplier × timespan.
                 </p>
                 <label className="feed-massive-field" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
                   <input
@@ -724,15 +769,44 @@ export function MassiveStockOhlcDbEnqueueBlock({
                       </label>
                     </div>
                   </div>
-                  <div className="ref-jobs-md-enqueue-actions">
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      disabled={disabled}
-                      onClick={() => void enqueueStockOhlcSync()}
-                    >
-                      {ohlcHttpBusy ? 'Enqueueing…' : 'Enqueue sync'}
-                    </button>
+                  <div className="ref-jobs-md-enqueue-actions ref-jobs-md-enqueue-actions--stack">
+                    {customBarsSingleTimespanOnly ? (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={disabled}
+                        onClick={() => void enqueueStockOhlcSyncAdvanced('daily')}
+                      >
+                        {ohlcHttpBusy ? 'Enqueueing…' : 'Enqueue sync'}
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          disabled={disabled}
+                          onClick={() => void enqueueStockOhlcSyncAdvanced('daily', 'daily_smart')}
+                        >
+                          {ohlcHttpBusy ? 'Enqueueing…' : 'Enqueue daily (smart)'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          disabled={disabled}
+                          onClick={() => void enqueueStockOhlcSyncAdvanced('daily', 'window')}
+                        >
+                          {ohlcHttpBusy ? 'Enqueueing…' : 'Enqueue daily (manual window)'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          disabled={disabled}
+                          onClick={() => void enqueueStockOhlcSyncAdvanced('intraday')}
+                        >
+                          {ohlcHttpBusy ? 'Enqueueing…' : 'Enqueue intraday (1m · 5m · 1h)'}
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               </details>

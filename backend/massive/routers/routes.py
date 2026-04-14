@@ -86,6 +86,7 @@ def get_massive_status(request: Request) -> Dict[str, Any]:
         "tier": ms["tier"],
         "delay_notice": massive_delay_notice_english(),
         "trades_enabled": ms["trades_enabled"],
+        "daily_full_backfill_years": ms["daily_full_backfill_years"],
     }
 
 

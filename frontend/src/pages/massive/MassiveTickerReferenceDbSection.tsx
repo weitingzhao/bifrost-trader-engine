@@ -38,6 +38,10 @@ export interface MassiveTickerReferenceDbSectionProps {
   panelId?: string
   ariaLabelledBy?: string
   showInitControls?: boolean
+  /** When false, hide the Jobs control (use section-level Jobs for Massive Delay DB). */
+  showJobsToolbar?: boolean
+  /** Use `region` when this block sits inside another tab panel (Massive Delay DB). */
+  rootRole?: 'tabpanel' | 'region'
 }
 
 /**
@@ -48,6 +52,8 @@ export function MassiveTickerReferenceDbSection({
   panelId = 'massive-stock-refdb-panel',
   ariaLabelledBy = 'massive-stock-refdb-heading',
   showInitControls = true,
+  showJobsToolbar = true,
+  rootRole = 'tabpanel',
 }: MassiveTickerReferenceDbSectionProps) {
   const [selectedRefJobKind, setSelectedRefJobKind] = useState<TickerReferenceJobKind>(REF_TICKER_JOB_ROWS[0].kind)
 
@@ -613,7 +619,7 @@ export function MassiveTickerReferenceDbSection({
   const catalogRow = getRefCatalogRow(selectedRefJobKind)
 
   return (
-    <div className="feed-massive-agg-tab-panel" role="tabpanel" id={panelId} aria-labelledby={ariaLabelledBy}>
+    <div className="feed-massive-agg-tab-panel" role={rootRole} id={panelId} aria-labelledby={ariaLabelledBy}>
       {showInitControls ? (
         <div
           className="feed-massive-refdb-jobs"
@@ -625,16 +631,18 @@ export function MassiveTickerReferenceDbSection({
             <div className="form-label" style={{ marginBottom: 0 }}>
               Enqueue reference jobs
             </div>
-            <div className="feed-massive-refdb-jobs-toolbar-actions">
-              {activeJobCount > 0 ? (
-                <span className="ref-jobs-active-pill" aria-live="polite">
-                  {activeJobCount} active
-                </span>
-              ) : null}
-              <button type="button" className="btn btn-secondary" onClick={() => refJobSession.openJobsSheet()}>
-                Jobs
-              </button>
-            </div>
+            {showJobsToolbar ? (
+              <div className="feed-massive-refdb-jobs-toolbar-actions">
+                {activeJobCount > 0 ? (
+                  <span className="ref-jobs-active-pill" aria-live="polite">
+                    {activeJobCount} active
+                  </span>
+                ) : null}
+                <button type="button" className="btn btn-secondary" onClick={() => refJobSession.openJobsSheet()}>
+                  Jobs
+                </button>
+              </div>
+            ) : null}
           </div>
 
           <p className="feed-massive-agg-sub-doc" style={{ marginBottom: 'var(--space-2)', maxWidth: '42rem' }}>

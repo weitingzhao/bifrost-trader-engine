@@ -514,6 +514,20 @@ class MassiveClient:
             return {"results": [], "error": err}
         return data if isinstance(data, dict) else {"results": []}
 
+    @staticmethod
+    def _v2_range_aggs_query_params(ticker: str) -> Dict[str, Any]:
+        """Query params for GET /v2/aggs/ticker/.../range/...
+
+        Polygon **indices** (tickers like ``I:SPX``) use the same path as stocks but do not
+        document ``adjusted``; sending ``adjusted=true`` (stock default) can yield empty
+        ``results`` for some index tickers. Omit it for ``I:`` prefixes only.
+        """
+        t = (ticker or "").strip().upper()
+        base: Dict[str, Any] = {"sort": "asc", "limit": 50000}
+        if t.startswith("I:"):
+            return base
+        return {**base, "adjusted": "true"}
+
     def fetch_option_aggs(
         self,
         options_ticker: str,
@@ -528,10 +542,15 @@ class MassiveClient:
             return {"results": [], "error": "ticker or api key missing"}
         enc = quote(ot, safe="")
         path = f"/v2/aggs/ticker/{enc}/range/{multiplier}/{timespan}/{start_ms}/{end_ms}"
-        status, data = self._get(path, {"adjusted": "true", "sort": "asc", "limit": 50000})
+        params = self._v2_range_aggs_query_params(ot)
+        status, data = self._get(path, params)
         if status >= 400:
             err = data.get("error", data) if isinstance(data, dict) else str(data)
             return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
         return data if isinstance(data, dict) else {"results": []}
 
     def fetch_option_open_close(

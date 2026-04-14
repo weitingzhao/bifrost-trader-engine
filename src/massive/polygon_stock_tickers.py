@@ -22,6 +22,9 @@ _POLYGON_STOCK_AGG_ALIASES: dict[str, str] = {
     # Nasdaq-100 (optional)
     "^NDX": "I:NDX",
     "NDX": "I:NDX",
+    # CBOE Volatility Index (Yahoo ^VIX)
+    "^VIX": "I:VIX",
+    "VIX": "I:VIX",
 }
 
 

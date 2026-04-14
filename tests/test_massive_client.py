@@ -101,3 +101,38 @@ class TestFetchStockAggs:
             out = _client().fetch_stock_aggs("AAPL", 1, "minute", 1_000, 2_000)
         assert not out.get("error")
         assert paths[0].startswith("/v2/aggs/ticker/AAPL/range/1/minute/1000/2000")
+
+    def test_stock_ticker_sends_adjusted_true(self):
+        captured: list[dict | None] = []
+
+        def capture_get(self, path, params=None):
+            captured.append(params)
+            return (200, {"status": "OK", "results": []})
+
+        with patch.object(MassiveClient, "_get", capture_get):
+            _client().fetch_stock_aggs("AAPL", 1, "minute", 1_000, 2_000)
+        assert (captured[0] or {}).get("adjusted") == "true"
+
+    def test_index_ticker_omits_adjusted(self):
+        captured: list[dict | None] = []
+
+        def capture_get(self, path, params=None):
+            captured.append(params)
+            return (200, {"status": "OK", "results": [{"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 0}]})
+
+        with patch.object(MassiveClient, "_get", capture_get):
+            out = _client().fetch_stock_aggs("I:SPX", 1, "day", 1_000, 2_000)
+        assert not out.get("error")
+        assert "adjusted" not in (captured[0] or {})
+
+    def test_http_200_with_status_error_surfaces_error(self):
+        with patch.object(
+            MassiveClient,
+            "_get",
+            return_value=(
+                200,
+                {"status": "ERROR", "error": "bad range"},
+            ),
+        ):
+            out = _client().fetch_stock_aggs("I:DJI", 1, "day", 1_000, 2_000)
+        assert out.get("error")

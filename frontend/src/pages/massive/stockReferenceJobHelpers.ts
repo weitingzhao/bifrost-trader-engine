@@ -211,6 +211,22 @@ export function refJobKindShortLabel(kind: TrackedMassiveDbJobKind): string {
   }
 }
 
+export function refJobKindDisplayLabel(item: RefJobTrackItem): string {
+  if (item.kind !== 'stock_ohlc_sync') {
+    return refJobKindShortLabel(item.kind)
+  }
+  const r = item.job?.result as Record<string, unknown> | undefined
+  const summary = r?.summary as Record<string, unknown> | undefined
+  const mode =
+    typeof summary?.custom_bars_sync_mode === 'string'
+      ? summary.custom_bars_sync_mode
+      : undefined
+  if (mode === 'daily_smart') {
+    return 'Stock OHLC · smart'
+  }
+  return refJobKindShortLabel(item.kind)
+}
+
 export function summarizeRefJobResult(job: MassiveJobApiRow | undefined): string {
   const r = job?.result as Record<string, unknown> | undefined
   if (!r || typeof r !== 'object') return '—'
@@ -218,6 +234,29 @@ export function summarizeRefJobResult(job: MassiveJobApiRow | undefined): string
   const phase = typeof r.phase === 'string' ? r.phase.toLowerCase() : ''
   const summary = r.summary as Record<string, unknown> | undefined
   if (summary && typeof summary === 'object') {
+    const pd = summary.period_detail as Record<string, unknown> | undefined
+    if (
+      summary.custom_bars_sync_mode === 'daily_smart' &&
+      pd &&
+      typeof pd.resolved_start_date === 'string' &&
+      typeof pd.resolved_end_date === 'string'
+    ) {
+      const pol =
+        pd.daily_sync_policy === 'full_20y'
+          ? 'full'
+          : pd.daily_sync_policy === 'gapfill_overlap'
+            ? 'gapfill'
+            : String(pd.daily_sync_policy ?? '')
+      const rows = typeof r.rows_upserted === 'number' ? r.rows_upserted : null
+      return `${pol} ${pd.resolved_start_date}→${pd.resolved_end_date} · rows ${String(rows ?? '—')}`
+    }
+    if (
+      summary.custom_bars_sync_mode === 'daily_smart' &&
+      summary.symbols_requested != null
+    ) {
+      const rows = typeof r.rows_upserted === 'number' ? r.rows_upserted : null
+      return `daily smart · ${String(summary.symbols_ok ?? '—')}/${String(summary.symbols_requested)} sym · rows ${String(rows ?? '—')}`
+    }
     const total = summary.total_symbols
     const processed = summary.processed
     const remaining = summary.remaining
