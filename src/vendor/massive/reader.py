@@ -1553,7 +1553,7 @@ def upsert_option_contracts_from_reference_rows(
     contract_rows: List[Dict[str, Any]],
 ) -> int:
     """Upsert option_contracts from Polygon reference contract rows."""
-    from src.vendor.massive.client import contract_key_from_parts
+    from src.vendor.massive.client import contract_key_from_parts, normalize_primary_exchange
 
     underlying = (underlying or "").strip().upper()
     if not contract_rows or not underlying:
@@ -1583,14 +1583,52 @@ def upsert_option_contracts_from_reference_rows(
                     ort = _right_from_ref_contract_type(str(row.get("contract_type") or "call"))
                     ticker = (row.get("ticker") or "").strip() or None
                     ck = contract_key_from_parts(underlying, ed, strike, ort)
+                    es_raw = row.get("exercise_style")
+                    exercise_style = (
+                        es_raw.strip().lower()
+                        if isinstance(es_raw, str) and es_raw.strip()
+                        else None
+                    )
+                    spc_raw = row.get("shares_per_contract")
+                    try:
+                        shares_per_contract = int(spc_raw) if spc_raw is not None else None
+                    except (TypeError, ValueError):
+                        shares_per_contract = None
+                    if shares_per_contract is not None and shares_per_contract <= 0:
+                        shares_per_contract = None
+                    cfi_raw = row.get("cfi")
+                    cfi = cfi_raw.strip().upper() if isinstance(cfi_raw, str) and cfi_raw.strip() else None
+                    pe_raw = row.get("primary_exchange")
+                    if isinstance(pe_raw, str):
+                        primary_exchange = pe_raw.strip() or None
+                    else:
+                        primary_exchange = normalize_primary_exchange(pe_raw)
                     cur.execute(
                         """
-                        INSERT INTO option_contracts (contract_key, symbol, expiry, strike, option_right, massive_option_ticker, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, now())
+                        INSERT INTO option_contracts (
+                          contract_key, symbol, expiry, strike, option_right, massive_option_ticker,
+                          exercise_style, shares_per_contract, cfi, primary_exchange, created_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                         ON CONFLICT (contract_key) DO UPDATE SET
-                          massive_option_ticker = COALESCE(EXCLUDED.massive_option_ticker, option_contracts.massive_option_ticker)
+                          massive_option_ticker = COALESCE(EXCLUDED.massive_option_ticker, option_contracts.massive_option_ticker),
+                          exercise_style = COALESCE(EXCLUDED.exercise_style, option_contracts.exercise_style),
+                          shares_per_contract = COALESCE(EXCLUDED.shares_per_contract, option_contracts.shares_per_contract),
+                          cfi = COALESCE(EXCLUDED.cfi, option_contracts.cfi),
+                          primary_exchange = COALESCE(EXCLUDED.primary_exchange, option_contracts.primary_exchange)
                         """,
-                        (ck, underlying, ed, strike, ort, ticker),
+                        (
+                            ck,
+                            underlying,
+                            ed,
+                            strike,
+                            ort,
+                            ticker,
+                            exercise_style,
+                            shares_per_contract,
+                            cfi,
+                            primary_exchange,
+                        ),
                     )
                     n += 1
             conn.commit()

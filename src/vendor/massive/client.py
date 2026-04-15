@@ -79,6 +79,31 @@ def _right_from_contract_type(ct: str) -> str:
     return "C"
 
 
+def normalize_primary_exchange(val: Any) -> Optional[str]:
+    """Massive/Polygon may return primary_exchange as plain string or object (e.g. {\"String\": \"BATO\"})."""
+    if val is None:
+        return None
+    if isinstance(val, str):
+        s = val.strip()
+        return s or None
+    if isinstance(val, dict):
+        for k in ("String", "string", "mic", "MIC"):
+            v = val.get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    return None
+
+
+def _parse_shares_per_contract(val: Any) -> Optional[int]:
+    if val is None:
+        return None
+    try:
+        n = int(val)
+        return n if n > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def contract_key_from_parts(
     symbol: str, expiry: str, strike: float, option_right: str
 ) -> str:
@@ -253,14 +278,25 @@ class MassiveClient:
                         pass
                 if collect_contract_rows and ed and sp is not None:
                     try:
-                        contract_rows.append(
-                            {
-                                "ticker": (r.get("ticker") or "").strip(),
-                                "expiration_date": _norm_expiry(str(ed)[:10]),
-                                "strike_price": float(sp),
-                                "contract_type": (r.get("contract_type") or "").strip(),
-                            }
-                        )
+                        row_dict: Dict[str, Any] = {
+                            "ticker": (r.get("ticker") or "").strip(),
+                            "expiration_date": _norm_expiry(str(ed)[:10]),
+                            "strike_price": float(sp),
+                            "contract_type": (r.get("contract_type") or "").strip(),
+                        }
+                        es = r.get("exercise_style")
+                        if isinstance(es, str) and es.strip():
+                            row_dict["exercise_style"] = es.strip().lower()
+                        spc = _parse_shares_per_contract(r.get("shares_per_contract"))
+                        if spc is not None:
+                            row_dict["shares_per_contract"] = spc
+                        cfi = r.get("cfi")
+                        if isinstance(cfi, str) and cfi.strip():
+                            row_dict["cfi"] = cfi.strip().upper()
+                        pe = normalize_primary_exchange(r.get("primary_exchange"))
+                        if pe:
+                            row_dict["primary_exchange"] = pe
+                        contract_rows.append(row_dict)
                     except (TypeError, ValueError):
                         pass
             next_url = data.get("next_url") if isinstance(data, dict) else None

@@ -834,6 +834,10 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 strike double precision NOT NULL,
                 option_right text NOT NULL,
                 massive_option_ticker text,
+                exercise_style text,
+                shares_per_contract integer,
+                cfi text,
+                primary_exchange text,
                 created_at timestamptz DEFAULT now()
             )
             """
@@ -1132,6 +1136,30 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                   WHERE table_schema = 'public' AND table_name = 'option_contracts' AND column_name = 'massive_option_ticker'
                 ) THEN
                   ALTER TABLE option_contracts ADD COLUMN massive_option_ticker text;
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'option_contracts' AND column_name = 'exercise_style'
+                ) THEN
+                  ALTER TABLE option_contracts ADD COLUMN exercise_style text;
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'option_contracts' AND column_name = 'shares_per_contract'
+                ) THEN
+                  ALTER TABLE option_contracts ADD COLUMN shares_per_contract integer;
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'option_contracts' AND column_name = 'cfi'
+                ) THEN
+                  ALTER TABLE option_contracts ADD COLUMN cfi text;
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'option_contracts' AND column_name = 'primary_exchange'
+                ) THEN
+                  ALTER TABLE option_contracts ADD COLUMN primary_exchange text;
                 END IF;
               END IF;
 

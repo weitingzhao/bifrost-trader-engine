@@ -1074,6 +1074,16 @@ export interface ContractsCoverageResponse {
     mapping_mismatch?: number
     distinct_expirations?: number
     distinct_strikes?: number
+    with_cfi?: number
+    cfi_pct?: number
+    with_exercise_style?: number
+    exercise_style_pct?: number
+    with_shares_per_contract?: number
+    shares_per_contract_pct?: number
+    with_primary_exchange?: number
+    primary_exchange_pct?: number
+    with_full_reference_metadata?: number
+    full_reference_metadata_pct?: number
   }
   freshness?: {
     oldest_ts?: string | null

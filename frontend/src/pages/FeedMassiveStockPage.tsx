@@ -75,6 +75,12 @@ const REST_SECTION_LABELS: Record<string, string> = {
   'stock-news': 'News',
 }
 
+const STOCK_WS_SECTION_ORDER = stockChecklistRows.filter(r => r.group === 'ws').map(r => r.id)
+const STOCK_FLAT_SECTION_ORDER = stockChecklistRows.filter(r => r.group === 'flat').map(r => r.id)
+const STOCK_REST_ID_SET = new Set<string>(REST_SECTION_ORDER)
+const STOCK_WS_ID_SET = new Set<string>(STOCK_WS_SECTION_ORDER)
+const STOCK_FLAT_ID_SET = new Set<string>(STOCK_FLAT_SECTION_ORDER)
+
 // ── Capability Panel (mirrors FeedMassiveCapabilityPanel from Options page) ─
 
 interface StockCapabilityPanelProps {
@@ -162,6 +168,9 @@ export function FeedMassiveStockPage({
   )
   const [capExpanded, setCapExpanded] = useState<Record<string, boolean>>({})
   const [channelTab, setChannelTab] = useState<'rest' | 'ws' | 'flat'>('rest')
+  const [deliveryRestSubTab, setDeliveryRestSubTab] = useState<(typeof REST_SECTION_ORDER)[number]>(REST_SECTION_ORDER[0])
+  const [deliveryWsSubTab, setDeliveryWsSubTab] = useState<string>(STOCK_WS_SECTION_ORDER[0] ?? 'stock-ws-aggregates-s')
+  const [deliveryFlatSubTab, setDeliveryFlatSubTab] = useState<string>(STOCK_FLAT_SECTION_ORDER[0] ?? 'stock-flat-file-day-aggs')
 
   const [apiCoverageOpen, setApiCoverageOpen] = useState(false)
   const [apiCoverageSyncBusy, setApiCoverageSyncBusy] = useState(false)
@@ -464,6 +473,15 @@ export function FeedMassiveStockPage({
     if (g === 'rest' || g === 'ws' || g === 'flat') {
       setChannelTab(g)
     }
+    if (STOCK_REST_ID_SET.has(id)) {
+      setDeliveryRestSubTab(id as (typeof REST_SECTION_ORDER)[number])
+    }
+    if (STOCK_WS_ID_SET.has(id)) {
+      setDeliveryWsSubTab(id)
+    }
+    if (STOCK_FLAT_ID_SET.has(id)) {
+      setDeliveryFlatSubTab(id)
+    }
     if (g) setCapNavGroupExpanded(prev => prev[g] ? prev : { ...prev, [g]: true })
     setTimeout(() => {
       document.getElementById(feedMassiveStockSvcAnchorId(id))?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -502,6 +520,11 @@ export function FeedMassiveStockPage({
   }, [highlightedCapabilityId])
 
   const configured = Boolean(massiveStatus?.configured)
+
+  const stockWsRows = stockChecklistRows.filter(r => r.group === 'ws')
+  const stockFlatRows = stockChecklistRows.filter(r => r.group === 'flat')
+  const stockWsPanelRow = stockWsRows.find(r => r.id === deliveryWsSubTab) ?? stockWsRows[0]
+  const stockFlatPanelRow = stockFlatRows.find(r => r.id === deliveryFlatSubTab) ?? stockFlatRows[0]
 
   // ── Derive per-row effective status ──────────────────────────────────────
   function rowEff(row: ChecklistRow): EffectiveServiceStatus {
@@ -1697,12 +1720,26 @@ export function FeedMassiveStockPage({
               id="feed-massive-stock-group-rest"
               aria-labelledby="feed-massive-stock-delivery-tab-rest"
             >
+              <div className="feed-massive-delivery-tablist" role="tablist" aria-label="REST API sections">
+                {REST_SECTION_ORDER.map(id => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    id={`feed-massive-stock-rest-subtab-${id}`}
+                    className={`feed-massive-delivery-tab${deliveryRestSubTab === id ? ' feed-massive-delivery-tab--active' : ''}`}
+                    aria-selected={deliveryRestSubTab === id}
+                    tabIndex={deliveryRestSubTab === id ? 0 : -1}
+                    onClick={() => setDeliveryRestSubTab(id)}
+                  >
+                    {REST_SECTION_LABELS[id]}
+                  </button>
+                ))}
+              </div>
               {REST_SECTION_ORDER.map(id => {
-                const row = stockChecklistRows.find(r => r.id === id)
-                if (!row) return null
+                if (deliveryRestSubTab !== id) return null
                 return (
                   <div key={id}>
-                    <h4 className="feed-massive-section-header">{REST_SECTION_LABELS[id]}</h4>
                     {id === 'stock-tickers'
                       ? renderTickersCap()
                       : id === 'stock-aggregates'
@@ -1721,9 +1758,23 @@ export function FeedMassiveStockPage({
               id="feed-massive-stock-group-ws"
               aria-labelledby="feed-massive-stock-delivery-tab-ws"
             >
-              {stockChecklistRows
-                .filter(r => r.group === 'ws')
-                .map(row => renderCap(row.id))}
+              <div className="feed-massive-delivery-tablist" role="tablist" aria-label="WebSocket sections">
+                {stockWsRows.map(row => (
+                  <button
+                    key={row.id}
+                    type="button"
+                    role="tab"
+                    id={`feed-massive-stock-ws-subtab-${row.id}`}
+                    className={`feed-massive-delivery-tab${deliveryWsSubTab === row.id ? ' feed-massive-delivery-tab--active' : ''}`}
+                    aria-selected={deliveryWsSubTab === row.id}
+                    tabIndex={deliveryWsSubTab === row.id ? 0 : -1}
+                    onClick={() => setDeliveryWsSubTab(row.id)}
+                  >
+                    {row.service}
+                  </button>
+                ))}
+              </div>
+              {stockWsPanelRow ? renderCap(stockWsPanelRow.id) : null}
             </div>
           ) : null}
 
@@ -1734,9 +1785,23 @@ export function FeedMassiveStockPage({
               id="feed-massive-stock-group-flat"
               aria-labelledby="feed-massive-stock-delivery-tab-flat"
             >
-              {stockChecklistRows
-                .filter(r => r.group === 'flat')
-                .map(row => renderCap(row.id))}
+              <div className="feed-massive-delivery-tablist" role="tablist" aria-label="Flat Files sections">
+                {stockFlatRows.map(row => (
+                  <button
+                    key={row.id}
+                    type="button"
+                    role="tab"
+                    id={`feed-massive-stock-flat-subtab-${row.id}`}
+                    className={`feed-massive-delivery-tab${deliveryFlatSubTab === row.id ? ' feed-massive-delivery-tab--active' : ''}`}
+                    aria-selected={deliveryFlatSubTab === row.id}
+                    tabIndex={deliveryFlatSubTab === row.id ? 0 : -1}
+                    onClick={() => setDeliveryFlatSubTab(row.id)}
+                  >
+                    {row.service}
+                  </button>
+                ))}
+              </div>
+              {stockFlatPanelRow ? renderCap(stockFlatPanelRow.id) : null}
             </div>
           ) : null}
         </div>

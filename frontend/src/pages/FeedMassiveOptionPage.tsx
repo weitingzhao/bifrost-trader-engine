@@ -45,6 +45,36 @@ const MASSIVE_OPTION_COVERAGE_PLAN_URL = `${import.meta.env.BASE_URL}plans/massi
 
 const checklistRows = optionFeedChecklistRows()
 
+/** Second-level tabs inside REST API on Massive Option. */
+const OPTION_REST_SECTION_ORDER = ['contracts', 'aggregates', 'snapshot', 'trades-quotes'] as const
+const OPTION_REST_SECTION_LABELS: Record<(typeof OPTION_REST_SECTION_ORDER)[number], string> = {
+  contracts: 'Contracts',
+  aggregates: 'Aggregate Bars (OHLC)',
+  snapshot: 'Snapshots',
+  'trades-quotes': 'Trade & Quotes',
+}
+/** Second-level tabs inside WebSocket on Massive Option. */
+const OPTION_WS_SECTION_ORDER = [
+  'ws-aggregates-s',
+  'ws-aggregates-m',
+  'ws-quotes',
+  'ws-trades',
+  'fmv',
+  'websocket',
+] as const
+const OPTION_WS_SECTION_LABELS: Record<(typeof OPTION_WS_SECTION_ORDER)[number], string> = {
+  'ws-aggregates-s': 'Aggregates (Per Second)',
+  'ws-aggregates-m': 'Aggregates (Per Minute)',
+  'ws-quotes': 'Quotes',
+  'ws-trades': 'Trades',
+  fmv: 'Fair Market Value',
+  websocket: 'Connectivity Verification',
+}
+const OPTION_FLAT_IDS = checklistRows.filter(r => r.group === 'flat').map(r => r.id)
+const OPTION_REST_ID_SET = new Set<string>(OPTION_REST_SECTION_ORDER)
+const OPTION_WS_ID_SET = new Set<string>(OPTION_WS_SECTION_ORDER)
+const OPTION_FLAT_ID_SET = new Set<string>(OPTION_FLAT_IDS)
+
 function checklistRowById(id: string): ChecklistRow {
   const r = checklistRows.find(x => x.id === id)
   if (!r) throw new Error(`checklist row ${id}`)
@@ -254,6 +284,10 @@ export function FeedMassiveOptionPage({
   const [capExpanded, setCapExpanded] = useState<Record<string, boolean>>({})
   /** Top-level delivery channel: REST / WebSocket / Flat Files (Project stays below). */
   const [channelTab, setChannelTab] = useState<'rest' | 'ws' | 'flat'>('rest')
+  /** Second-level section within each channel (tabs). */
+  const [deliveryRestSubTab, setDeliveryRestSubTab] = useState<(typeof OPTION_REST_SECTION_ORDER)[number]>('contracts')
+  const [deliveryWsSubTab, setDeliveryWsSubTab] = useState<(typeof OPTION_WS_SECTION_ORDER)[number]>('ws-aggregates-s')
+  const [deliveryFlatSubTab, setDeliveryFlatSubTab] = useState<string>(OPTION_FLAT_IDS[0] ?? 'flat-file-day-aggs')
 
   const [snapType, setSnapType] = useState<'chain' | 'contract' | 'unified'>('contract')
   const [snapSymbol, setSnapSymbol] = useState('NVDA')
@@ -442,6 +476,15 @@ export function FeedMassiveOptionPage({
     const g = capabilityGroupForRowId(id)
     if (g === 'rest' || g === 'ws' || g === 'flat') {
       setChannelTab(g)
+    }
+    if (OPTION_REST_ID_SET.has(id)) {
+      setDeliveryRestSubTab(id as (typeof OPTION_REST_SECTION_ORDER)[number])
+    }
+    if (OPTION_WS_ID_SET.has(id)) {
+      setDeliveryWsSubTab(id as (typeof OPTION_WS_SECTION_ORDER)[number])
+    }
+    if (OPTION_FLAT_ID_SET.has(id)) {
+      setDeliveryFlatSubTab(id)
     }
     if (g) {
       setCapNavGroupExpanded(prev => (prev[g] ? prev : { ...prev, [g]: true }))
@@ -1104,6 +1147,7 @@ export function FeedMassiveOptionPage({
       tradesOkForRow(r, massiveStatus),
     )])
   )
+  const flatPanelRow = flatFileRows.find(r => r.id === deliveryFlatSubTab) ?? flatFileRows[0]
 
   const pendingJobCount = jobs.filter(j => {
     const s = (j.status || '').toLowerCase()
@@ -1373,8 +1417,25 @@ export function FeedMassiveOptionPage({
               id="feed-massive-group-rest"
               aria-labelledby="feed-massive-delivery-tab-rest"
             >
-        <h4 className="feed-massive-section-header" id="feed-massive-section-contracts">Contracts</h4>
+            <div className="feed-massive-delivery-tablist" role="tablist" aria-label="REST API sections">
+              {OPTION_REST_SECTION_ORDER.map(sid => (
+                <button
+                  key={sid}
+                  type="button"
+                  role="tab"
+                  id={`feed-massive-rest-subtab-${sid}`}
+                  className={`feed-massive-delivery-tab${deliveryRestSubTab === sid ? ' feed-massive-delivery-tab--active' : ''}`}
+                  aria-selected={deliveryRestSubTab === sid}
+                  tabIndex={deliveryRestSubTab === sid ? 0 : -1}
+                  onClick={() => setDeliveryRestSubTab(sid)}
+                >
+                  {OPTION_REST_SECTION_LABELS[sid]}
+                </button>
+              ))}
+            </div>
 
+        {deliveryRestSubTab === 'contracts' ? (
+        <>
         {/* Contracts */}
         <FeedMassiveCapabilityPanel
           capId="contracts"
@@ -1498,6 +1559,8 @@ export function FeedMassiveOptionPage({
                       <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val">{ctCoverage.coverage?.ticker_pct ?? 0}%</span><span className="gk-quality-summary-lbl">Ticker %</span></div>
                       <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val">{ctCoverage.coverage?.distinct_expirations ?? 0}</span><span className="gk-quality-summary-lbl">Expirations</span></div>
                       <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val">{ctCoverage.coverage?.distinct_strikes ?? 0}</span><span className="gk-quality-summary-lbl">Strikes</span></div>
+                      <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val">{ctCoverage.coverage?.with_full_reference_metadata ?? 0}</span><span className="gk-quality-summary-lbl">Full metadata</span></div>
+                      <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val">{ctCoverage.coverage?.full_reference_metadata_pct ?? 0}%</span><span className="gk-quality-summary-lbl">Full metadata %</span></div>
                       {ctCoverage.coverage?.mapping_mismatch != null && ctCoverage.coverage.mapping_mismatch > 0 ? (
                         <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val" style={{ color: 'var(--clr-warning)' }}>{ctCoverage.coverage.mapping_mismatch}</span><span className="gk-quality-summary-lbl">Mismatches</span></div>
                       ) : null}
@@ -1549,7 +1612,7 @@ export function FeedMassiveOptionPage({
               {ctSubTab === 'db_verify' ? (
                 <div className="feed-massive-agg-tab-panel" role="tabpanel" id="feed-massive-ct-panel-verify" aria-labelledby="feed-massive-ct-tab-verify">
                   <div className="feed-massive-agg-sub-doc">
-                    <p><strong>Use case:</strong> Verify local <code>option_contracts</code> table coverage and mapping consistency against the Massive API. Shows how many contracts have a Polygon ticker mapped, identity completeness, and freshness.</p>
+                    <p><strong>Use case:</strong> Verify local <code>option_contracts</code> table coverage and mapping consistency against the Massive API. Shows ticker mapping, identity completeness, stored reference fields (CFI, exercise style, shares per contract, primary exchange), and freshness.</p>
                     <p><strong>When to use:</strong> After running chain snapshots (which populate <code>option_contracts</code>), use this to audit data quality and identify gaps before downstream analysis.</p>
                   </div>
                   <div className="feed-massive-form-grid">
@@ -1579,6 +1642,11 @@ export function FeedMassiveOptionPage({
                           <tr><td>Mapping mismatches</td><td>{ctCoverage.coverage?.mapping_mismatch ?? 0}</td></tr>
                           <tr><td>Distinct expirations</td><td>{ctCoverage.coverage?.distinct_expirations ?? 0}</td></tr>
                           <tr><td>Distinct strikes</td><td>{ctCoverage.coverage?.distinct_strikes ?? 0}</td></tr>
+                          <tr><td>With CFI</td><td>{ctCoverage.coverage?.with_cfi ?? 0} ({ctCoverage.coverage?.cfi_pct ?? 0}%)</td></tr>
+                          <tr><td>With exercise style</td><td>{ctCoverage.coverage?.with_exercise_style ?? 0} ({ctCoverage.coverage?.exercise_style_pct ?? 0}%)</td></tr>
+                          <tr><td>With shares per contract</td><td>{ctCoverage.coverage?.with_shares_per_contract ?? 0} ({ctCoverage.coverage?.shares_per_contract_pct ?? 0}%)</td></tr>
+                          <tr><td>With primary exchange</td><td>{ctCoverage.coverage?.with_primary_exchange ?? 0} ({ctCoverage.coverage?.primary_exchange_pct ?? 0}%)</td></tr>
+                          <tr><td>Full reference metadata (all four)</td><td>{ctCoverage.coverage?.with_full_reference_metadata ?? 0} ({ctCoverage.coverage?.full_reference_metadata_pct ?? 0}%)</td></tr>
                           <tr><td>Oldest entry</td><td>{ctCoverage.freshness?.oldest_ts ?? '—'}</td></tr>
                           <tr><td>Newest entry</td><td>{ctCoverage.freshness?.newest_ts ?? '—'}</td></tr>
                           <tr><td>Stale (&gt;7 days)</td><td>{ctCoverage.freshness?.stale_rows ?? 0}</td></tr>
@@ -1632,9 +1700,11 @@ export function FeedMassiveOptionPage({
             </div>
           </div>
         </FeedMassiveCapabilityPanel>
+        </>
+        ) : null}
 
-        <h4 className="feed-massive-section-header" id="feed-massive-section-agg-bars">Aggregate Bars (OHLC)</h4>
-
+        {deliveryRestSubTab === 'aggregates' ? (
+        <>
         {/* REST Aggregate Bars (OHLC): three DocPage rows — Custom / Daily Ticker Summary / Previous Day Bar (see massive_api_coverage.csv). WS aggregates are separate sections below. */}
         <FeedMassiveCapabilityPanel
           capId="aggregates"
@@ -1839,9 +1909,11 @@ export function FeedMassiveOptionPage({
             </div>
           </div>
         </FeedMassiveCapabilityPanel>
+        </>
+        ) : null}
 
-        <h4 className="feed-massive-section-header" id="feed-massive-section-snapshots">Snapshots</h4>
-
+        {deliveryRestSubTab === 'snapshot' ? (
+        <>
         {/* REST Snapshots: Contract → Chain → Unified (tab order); DocPage names per massive_api_coverage.csv */}
         <FeedMassiveCapabilityPanel
           capId="snapshot"
@@ -2154,9 +2226,11 @@ export function FeedMassiveOptionPage({
             </div>
           ) : null}
         </FeedMassiveCapabilityPanel>
+        </>
+        ) : null}
 
-        <h4 className="feed-massive-section-header" id="feed-massive-section-trade-quotes">Trade & Quotes</h4>
-
+        {deliveryRestSubTab === 'trades-quotes' ? (
+        <>
         {/* REST tab order: Trades, Last Trade, Quotes; then Flat Files: Quotes, Trades. */}
         <FeedMassiveCapabilityPanel
           capId="trades-quotes"
@@ -2477,7 +2551,8 @@ export function FeedMassiveOptionPage({
             </div>
           </div>
         </FeedMassiveCapabilityPanel>
-
+        </>
+        ) : null}
 
             </div>
           ) : null}
@@ -2489,8 +2564,24 @@ export function FeedMassiveOptionPage({
               id="feed-massive-group-ws"
               aria-labelledby="feed-massive-delivery-tab-ws"
             >
-        <h4 className="feed-massive-section-header" id="feed-massive-ws-section-aggregates-s">Aggregates (Per Second)</h4>
+            <div className="feed-massive-delivery-tablist" role="tablist" aria-label="WebSocket sections">
+              {OPTION_WS_SECTION_ORDER.map(sid => (
+                <button
+                  key={sid}
+                  type="button"
+                  role="tab"
+                  id={`feed-massive-ws-subtab-${sid}`}
+                  className={`feed-massive-delivery-tab${deliveryWsSubTab === sid ? ' feed-massive-delivery-tab--active' : ''}`}
+                  aria-selected={deliveryWsSubTab === sid}
+                  tabIndex={deliveryWsSubTab === sid ? 0 : -1}
+                  onClick={() => setDeliveryWsSubTab(sid)}
+                >
+                  {OPTION_WS_SECTION_LABELS[sid]}
+                </button>
+              ))}
+            </div>
 
+        {deliveryWsSubTab === 'ws-aggregates-s' ? (
         <FeedMassiveCapabilityPanel
           capId="ws-aggregates-s"
           checklistRow={rWsAggS}
@@ -2521,9 +2612,9 @@ export function FeedMassiveOptionPage({
             </div>
           </FeedMassiveServiceBlock>
         </FeedMassiveCapabilityPanel>
+        ) : null}
 
-        <h4 className="feed-massive-section-header" id="feed-massive-ws-section-aggregates-m">Aggregates (Per Minute)</h4>
-
+        {deliveryWsSubTab === 'ws-aggregates-m' ? (
         <FeedMassiveCapabilityPanel
           capId="ws-aggregates-m"
           checklistRow={rWsAggM}
@@ -2554,9 +2645,9 @@ export function FeedMassiveOptionPage({
             </div>
           </FeedMassiveServiceBlock>
         </FeedMassiveCapabilityPanel>
+        ) : null}
 
-        <h4 className="feed-massive-section-header" id="feed-massive-ws-section-quotes">Quotes</h4>
-
+        {deliveryWsSubTab === 'ws-quotes' ? (
         <FeedMassiveCapabilityPanel
           capId="ws-quotes"
           checklistRow={rWsQuotes}
@@ -2587,9 +2678,9 @@ export function FeedMassiveOptionPage({
             </div>
           </FeedMassiveServiceBlock>
         </FeedMassiveCapabilityPanel>
+        ) : null}
 
-        <h4 className="feed-massive-section-header" id="feed-massive-ws-section-trades">Trades</h4>
-
+        {deliveryWsSubTab === 'ws-trades' ? (
         <FeedMassiveCapabilityPanel
           capId="ws-trades"
           checklistRow={rWsTrades}
@@ -2623,10 +2714,9 @@ export function FeedMassiveOptionPage({
             </div>
           </FeedMassiveServiceBlock>
         </FeedMassiveCapabilityPanel>
+        ) : null}
 
-        <h4 className="feed-massive-section-header" id="feed-massive-ws-section-fmv">Fair Market Value</h4>
-
-        {/* ── FMV (Fair Market Value) ── */}
+        {deliveryWsSubTab === 'fmv' ? (
         <FeedMassiveCapabilityPanel
           capId="fmv"
           checklistRow={rFmv}
@@ -2725,10 +2815,9 @@ export function FeedMassiveOptionPage({
             </div>
           </div>
         </FeedMassiveCapabilityPanel>
+        ) : null}
 
-        <h4 className="feed-massive-section-header" id="feed-massive-ws-section-verify">Connectivity Verification</h4>
-
-        {/* WebSocket streaming */}
+        {deliveryWsSubTab === 'websocket' ? (
         <FeedMassiveCapabilityPanel
           capId="websocket"
           checklistRow={rWs}
@@ -2763,6 +2852,7 @@ export function FeedMassiveOptionPage({
             </p>
           </FeedMassiveServiceBlock>
         </FeedMassiveCapabilityPanel>
+        ) : null}
 
             </div>
           ) : null}
@@ -2774,43 +2864,55 @@ export function FeedMassiveOptionPage({
               id="feed-massive-group-flat"
               aria-labelledby="feed-massive-delivery-tab-flat"
             >
-        {flatFileRows.map(row => {
-          const eff = flatFileEffMap[row.id] ?? row.projectStatus
-          return (
+            <div className="feed-massive-delivery-tablist" role="tablist" aria-label="Flat Files sections">
+              {flatFileRows.map(row => (
+                <button
+                  key={row.id}
+                  type="button"
+                  role="tab"
+                  id={`feed-massive-flat-subtab-${row.id}`}
+                  className={`feed-massive-delivery-tab${deliveryFlatSubTab === row.id ? ' feed-massive-delivery-tab--active' : ''}`}
+                  aria-selected={deliveryFlatSubTab === row.id}
+                  tabIndex={deliveryFlatSubTab === row.id ? 0 : -1}
+                  onClick={() => setDeliveryFlatSubTab(row.id)}
+                >
+                  {row.service}
+                </button>
+              ))}
+            </div>
+        {flatPanelRow ? (
             <FeedMassiveCapabilityPanel
-              key={row.id}
-              capId={row.id}
-              checklistRow={row}
-              effectiveStatus={eff}
-              expanded={capExpanded[row.id] === true}
-              onToggle={() => toggleCap(row.id)}
-              highlight={highlightedCapabilityId === row.id}
-              ariaLabel={row.service}
+              capId={flatPanelRow.id}
+              checklistRow={flatPanelRow}
+              effectiveStatus={flatFileEffMap[flatPanelRow.id] ?? flatPanelRow.projectStatus}
+              expanded={capExpanded[flatPanelRow.id] === true}
+              onToggle={() => toggleCap(flatPanelRow.id)}
+              highlight={highlightedCapabilityId === flatPanelRow.id}
+              ariaLabel={flatPanelRow.service}
             >
               <FeedMassiveServiceBlock
-                effectiveStatus={eff}
-                checklistRow={row}
-                evidence={row.projectStatus === 'not-implemented'
+                effectiveStatus={flatFileEffMap[flatPanelRow.id] ?? flatPanelRow.projectStatus}
+                checklistRow={flatPanelRow}
+                evidence={flatPanelRow.projectStatus === 'not-implemented'
                   ? 'Not yet integrated. S3 flat file download is available from Massive directly.'
                   : 'Flat file access configured.'}
               >
                 <div className="feed-massive-card-head">
-                  <h3>{row.service}</h3>
+                  <h3>{flatPanelRow.service}</h3>
                 </div>
-                <p className="feed-massive-card-lead">{row.description}</p>
+                <p className="feed-massive-card-lead">{flatPanelRow.description}</p>
                 <p className="feed-massive-flat-delivery-note">
                   <strong>Delivery:</strong> S3 bulk download. Files cover all US options for a given date.
                   See <a className="feed-massive-flat-doc-link" href="https://polygon.io/flat-files" target="_blank" rel="noopener noreferrer">Massive flat file documentation</a> for access details.
                 </p>
-                {row.tierMin !== 'starter' ? (
+                {flatPanelRow.tierMin !== 'starter' ? (
                   <div className="feed-massive-tier-gate-notice">
-                    {row.tierMin === 'developer' ? 'Developer' : 'Business'} tier required.
+                    {flatPanelRow.tierMin === 'developer' ? 'Developer' : 'Business'} tier required.
                   </div>
                 ) : null}
               </FeedMassiveServiceBlock>
             </FeedMassiveCapabilityPanel>
-          )
-        })}
+        ) : null}
 
             </div>
           ) : null}
