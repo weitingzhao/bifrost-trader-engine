@@ -521,6 +521,8 @@ export function OptionDiscoveryPage({
   /** Massive: enqueue chain snapshot jobs for IV-term selection, then reload IV term */
   const [ivTermSyncLoading, setIvTermSyncLoading] = useState(false)
   const [ivTermSyncStatus, setIvTermSyncStatus] = useState<string | null>(null)
+  /** Dedupes auto IV term load per symbol + expiration selection */
+  const ivTermAutoLoadKeyRef = useRef<string>('')
 
   /** Expiration table + IV term chart: same All/Std/Wk/Qtr filter */
   const visibleExpirations = useMemo(() => {
@@ -872,6 +874,29 @@ export function OptionDiscoveryPage({
     }
   }, [selectedSymbol, expirations, ivTermExpKeys])
 
+  useEffect(() => {
+    if (!massiveStatus?.configured) return
+    const sym = selectedSymbol.trim()
+    if (!sym || expirationsLoading || expirationsError) return
+    if (ivTermExpKeys.length < 2) return
+    if (ivTermSyncLoading) return
+    const key = `${sym}|${ivTermExpKeys.join(',')}`
+    if (ivTermAutoLoadKeyRef.current === key) return
+    const tid = window.setTimeout(() => {
+      ivTermAutoLoadKeyRef.current = key
+      void loadIvTermStructure()
+    }, 400)
+    return () => window.clearTimeout(tid)
+  }, [
+    massiveStatus?.configured,
+    selectedSymbol,
+    ivTermExpKeys,
+    expirationsLoading,
+    expirationsError,
+    ivTermSyncLoading,
+    loadIvTermStructure,
+  ])
+
   const syncIvTermMassiveSnapshots = useCallback(async () => {
     const sym = selectedSymbol.trim()
     const ordered = expirations.filter(e => ivTermExpKeys.includes(e)).slice(0, IV_TERM_MAX_EXPIRATIONS)
@@ -953,6 +978,7 @@ export function OptionDiscoveryPage({
     setIvTermExpKeys([])
     setIvTermSyncLoading(false)
     setIvTermSyncStatus(null)
+    ivTermAutoLoadKeyRef.current = ''
   }, [selectedSymbol])
 
   useEffect(() => {

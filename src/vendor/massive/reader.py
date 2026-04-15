@@ -730,6 +730,49 @@ def get_option_snapshots_eod_per_day(
         return []
 
 
+def get_report_option_atm_iv_daily(
+    status_config: dict,
+    symbol: str,
+    expirations: List[str],
+    source: str,
+    since_date: date_type,
+) -> List[Dict[str, Any]]:
+    """Daily ATM IV rollup for IV volatility cone fast path (report_option_atm_iv_daily)."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return []
+    sym = (symbol or "").strip().upper()
+    if not sym or not expirations:
+        return []
+    exp_clean = [str(e).strip() for e in expirations if e and len(str(e).strip()) == 8 and str(e).strip().isdigit()]
+    if not exp_clean:
+        return []
+    src = (source or "massive").strip().lower()
+    if src not in ("massive", "ib"):
+        src = "massive"
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT symbol, expiry, trade_date, atm_iv, iv_call, iv_put, strike, underlying_price, source
+                    FROM report_option_atm_iv_daily
+                    WHERE symbol = %s AND source = %s
+                      AND expiry = ANY(%s)
+                      AND trade_date >= %s
+                    ORDER BY expiry ASC, trade_date ASC
+                    """,
+                    (sym, src, exp_clean, since_date),
+                )
+                return [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("get_report_option_atm_iv_daily failed: %s", e)
+        return []
+
+
 def get_corporate_actions(
     status_config: dict,
     symbol: str,

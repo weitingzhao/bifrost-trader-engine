@@ -592,6 +592,29 @@
 - **索引**：`(symbol, trade_date DESC)`、`(symbol, expiry, trade_date DESC)`。
 - **读取**：`GET /research/max-pain`、`GET /research/max-pain/latest`。
 
+### 2.16.5b 表 `report_option_atm_iv_daily`（Option Discovery：ATM IV 日汇总）
+
+- **用途**：按**交易日**、**标的 + 到期**预计算 **ATM IV**（及当日选取的 iv_call / iv_put / strike / underlying_price），供 `GET /research/iv-volatility-cone` 快速读取 IV Volatility Cone，避免每次请求对 `option_snapshots` 做大范围按日 DISTINCT 扫描。真源仍为 `option_snapshots`；本表为派生报表，由 Massive Worker 在 chain snapshot 成功后增量 UPSERT，或按需全量回填。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| report_option_atm_iv_daily_id | bigserial | 自增主键 |
+| symbol | text NOT NULL | 标的代码 |
+| expiry | text NOT NULL | 到期（YYYYMMDD） |
+| trade_date | date NOT NULL | 交易日（美东日历日，与 cone 中 snap_day 一致） |
+| source | text NOT NULL DEFAULT 'massive' | 数据来源：`massive` \| `ib` |
+| atm_iv | double precision | 当日 ATM IV（可空：无有效 IV 时可不写或写空） |
+| iv_call | double precision | ATM 附近 call IV（可空） |
+| iv_put | double precision | ATM 附近 put IV（可空） |
+| strike | double precision | 选取的 ATM strike（可空） |
+| underlying_price | double precision | 用于选 ATM 的标的价格（可空） |
+| created_at | timestamptz | 写入时间（默认 now()） |
+
+- **唯一约束**：`UNIQUE(symbol, expiry, trade_date, source)`。
+- **索引**：`(symbol, expiry, trade_date DESC)`、`(symbol, trade_date DESC)`。
+- **保留**：可与 `option_snapshots` 热数据窗口对齐（约 90 天），旧行可按运维策略归档或删除。
+
 ### 2.16.6 表 `massive_corporate_action`（R-A6：公司行动缓存）
 
 - **用途**：缓存 Massive 返回的**公司行动**数据（拆股、股息等），供期权分析时对照历史价格与合约调整。轻量缓存表，按需拉取。
@@ -1461,6 +1484,7 @@ python scripts/db/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-04-10 Massive ticker reference 表名统一 | §2.14.1–2.14.5：`tickers`、`ticker_overview`（原 `ticker_reference_details`）、`ticker_types`（原 `ticker_instrument_types`，PK `ticker_types_id`）、`ticker_related_tickers`、`job_ticker_reference_state`；`pg_ddl` 内 DO 块重命名。任务 kind canonical：`ticker_reference_ticker_types`（旧名仍经 `normalize_ticker_ref_kind` 映射）；HTTP `GET /research/massive/reference/ticker-types`；Redis `massive:ingestor:cache:ticker_types:*`。 | 研究 / Massive |
 | 2026-04-14 option_contracts 参考元数据 | `option_contracts` 增加 `exercise_style`、`shares_per_contract`、`cfi`、`primary_exchange`（均可空）；Massive `GET /v3/reference/options/contracts` 分页与 `GET /v3/snapshot/options/{underlying}` 链写入路径同步填充；`GET /research/massive/contracts-coverage` 增加各字段及「四列齐全」覆盖率。§2.16.1。 | 研究 / Massive |
 | 2026-04-15 option_contracts 移除参考元数据列 | 删除 `exercise_style`、`shares_per_contract`、`cfi`、`primary_exchange`；`pg_ddl` 迁移块对上述列 `DROP COLUMN IF EXISTS`。§2.16.1。 | 研究 / Massive |
+| 2026-04-15 report_option_atm_iv_daily | 新增表 `report_option_atm_iv_daily`（§2.16.5b）：按交易日汇总 ATM IV，加速 IV Volatility Cone；`pg_ddl` 建表与索引。 | Option Discovery |
 
 ---
 

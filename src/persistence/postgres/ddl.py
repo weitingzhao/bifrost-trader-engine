@@ -1740,6 +1740,35 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             "CREATE INDEX IF NOT EXISTS report_max_pain_symbol_expiry_date ON report_option_max_pain_daily (symbol, expiry, trade_date DESC)"
         )
 
+        _log_table(
+            "report_option_atm_iv_daily",
+            "Daily ATM IV rollup per symbol/expiry (Option Discovery IV cone fast path)",
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS report_option_atm_iv_daily (
+                report_option_atm_iv_daily_id bigserial PRIMARY KEY,
+                symbol text NOT NULL,
+                expiry text NOT NULL,
+                trade_date date NOT NULL,
+                source text NOT NULL DEFAULT 'massive',
+                atm_iv double precision,
+                iv_call double precision,
+                iv_put double precision,
+                strike double precision,
+                underlying_price double precision,
+                created_at timestamptz DEFAULT now(),
+                UNIQUE (symbol, expiry, trade_date, source)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS report_atm_iv_symbol_expiry_date ON report_option_atm_iv_daily (symbol, expiry, trade_date DESC)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS report_atm_iv_symbol_date ON report_option_atm_iv_daily (symbol, trade_date DESC)"
+        )
+
         _log_table("option_open_interest_daily", "Option daily open interest (Massive)")
         cur.execute(
             """

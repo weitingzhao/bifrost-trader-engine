@@ -891,6 +891,28 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 conn.commit()
                 if count > 0:
                     _refresh_snapshots_latest(conn)
+                    try:
+                        from src.monitor.reader.market import get_stock_day_fallback_price
+
+                        from backend.research.iv_atm_rollup import (
+                            norm_expiry_yyyymmdd,
+                            rebuild_report_atm_iv_daily_for_symbol_expiry,
+                        )
+
+                        exp_roll = norm_expiry_yyyymmdd(str(payload.get("expiration_date") or ""))
+                        fb = get_stock_day_fallback_price(conn, u)
+                        lp = float(fb[0]) if fb and fb[0] is not None and float(fb[0]) > 0 else None
+                        if exp_roll and lp:
+                            rebuild_report_atm_iv_daily_for_symbol_expiry(
+                                status_cfg, conn, u, exp_roll, "massive", 90, lp
+                            )
+                            conn.commit()
+                    except Exception as roll_ex:
+                        logger.debug("report_option_atm_iv_daily rollup: %s", roll_ex)
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
                 raw_results = snap.get("results") or []
                 if not isinstance(raw_results, list):
                     raw_results = []

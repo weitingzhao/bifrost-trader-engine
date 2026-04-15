@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import json
 import math
-import statistics
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -13,6 +12,18 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, BackgroundTasks, Body, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from backend.research.iv_atm import (
+    OPTION_SNAPSHOT_STRIKES_AROUND_ATM,
+    assemble_volatility_cone_points,
+    atm_iv_from_expiry_items,
+    build_cone_key_maps,
+    build_exp_iv_map,
+    daily_atm_ivs_for_expiration,
+    group_hist_rows_by_snap_day,
+    parse_contract_key,
+    rollup_daily_ivs_by_expiration,
+    strikes_around_spot,
+)
 from src.monitor.redis_url import redis_url_from_config
 
 router = APIRouter(tags=["research"])
@@ -32,21 +43,6 @@ def _option_expirations_cache_response(
 
 MAX_OPTION_SNAPSHOT_CONTRACTS = 20
 MAX_OPTION_SNAPSHOT_CONTRACTS_EXTENDED = 60  # when frontend sends many strikes (e.g. 30)
-OPTION_SNAPSHOT_STRIKES_AROUND_ATM = 10  # number of strikes to each side of ATM (total 2*N+1 or capped)
-
-
-def _strikes_around_spot(spot: float, count: int = OPTION_SNAPSHOT_STRIKES_AROUND_ATM) -> List[float]:
-    """Compute strike list around spot for US equity options. Step $5 for spot < 200, else $10."""
-    if not (spot and spot > 0):
-        return []
-    step = 5.0 if spot < 200 else 10.0
-    center = round(spot / step) * step
-    strikes_set: set = set()
-    for i in range(-count, count + 1):
-        s = center + i * step
-        if s > 0:
-            strikes_set.add(s)
-    return sorted(strikes_set)
 
 
 def _db_config(request: Request) -> Optional[dict]:
@@ -75,148 +71,6 @@ def _parse_strikes_csv(strikes: Optional[str]) -> List[float]:
         except ValueError:
             pass
     return out
-
-
-def _parse_contract_key(ck: str) -> Tuple[Optional[float], Optional[str]]:
-    parts = (ck or "").split("|")
-    if len(parts) >= 5:
-        try:
-            return float(parts[3]), parts[4]
-        except (TypeError, ValueError):
-            return None, None
-    return None, None
-
-
-def _build_exp_iv_map(
-    rows: List[Dict[str, Any]],
-    key_exp_map: Dict[str, str],
-    last_price: float,
-) -> Dict[str, List[Tuple[float, Optional[float], Optional[float], float]]]:
-    """Group snapshot rows into per-expiry tuples (distance, iv_call, iv_put, strike)."""
-    exp_iv: Dict[str, List[Tuple[float, Optional[float], Optional[float], float]]] = {}
-    for row in rows:
-        ck = row.get("contract_key") or ""
-        exp = key_exp_map.get(ck)
-        if not exp:
-            continue
-        strike, right = _parse_contract_key(ck)
-        if strike is None:
-            continue
-        iv_val = row.get("iv")
-        if iv_val is None:
-            continue
-        try:
-            iv_f = float(iv_val)
-        except (TypeError, ValueError):
-            continue
-        if not (0 < iv_f < 10):
-            continue
-        entry = exp_iv.setdefault(exp, [])
-        dist = abs(strike - last_price)
-        if right == "C":
-            entry.append((dist, iv_f, None, strike))
-        else:
-            entry.append((dist, None, iv_f, strike))
-    return exp_iv
-
-
-def _atm_iv_from_expiry_items(
-    items: List[Tuple[float, Optional[float], Optional[float], float]],
-) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
-    """Return (atm_iv, iv_call, iv_put, best_strike) using nearest strikes with IV."""
-    if not items:
-        return None, None, None, None
-    items_sorted = sorted(items, key=lambda x: x[0])
-    best_call: Optional[float] = None
-    best_put: Optional[float] = None
-    best_strike: Optional[float] = None
-    for dist, iv_c, iv_p, st in items_sorted:
-        if iv_c is not None and best_call is None:
-            best_call = iv_c
-            if best_strike is None:
-                best_strike = st
-        if iv_p is not None and best_put is None:
-            best_put = iv_p
-            if best_strike is None:
-                best_strike = st
-        if best_call is not None and best_put is not None:
-            break
-
-    atm_iv: Optional[float] = None
-    if best_call is not None and best_put is not None:
-        atm_iv = (best_call + best_put) / 2
-    elif best_call is not None:
-        atm_iv = best_call
-    elif best_put is not None:
-        atm_iv = best_put
-    return atm_iv, best_call, best_put, best_strike
-
-
-def _linear_percentiles(sorted_vals: List[float]) -> Dict[str, Optional[float]]:
-    """p10, p50, p90, min, max from sorted list."""
-    n = len(sorted_vals)
-    if n == 0:
-        return {"p10": None, "p50": None, "p90": None, "min": None, "max": None}
-
-    def pct(p: float) -> float:
-        if n == 1:
-            return sorted_vals[0]
-        i = (n - 1) * (p / 100.0)
-        lo = int(math.floor(i))
-        hi = int(math.ceil(i))
-        if lo == hi:
-            return sorted_vals[lo]
-        return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (i - lo)
-
-    return {
-        "p10": pct(10.0),
-        "p50": pct(50.0),
-        "p90": pct(90.0),
-        "min": sorted_vals[0],
-        "max": sorted_vals[-1],
-    }
-
-
-def _hist_iv_parametrics(daily_ivs: List[float]) -> Dict[str, Optional[float]]:
-    """Sample mean, stdev, min/max, and mean±k·σ (lower clamped to 0) from daily ATM IVs."""
-    n = len(daily_ivs)
-    out: Dict[str, Optional[float]] = {
-        "iv_hist_mean": None,
-        "iv_hist_stdev": None,
-        "iv_hist_min": None,
-        "iv_hist_max": None,
-        "iv_hist_plus_1sd": None,
-        "iv_hist_minus_1sd": None,
-        "iv_hist_plus_2sd": None,
-        "iv_hist_minus_2sd": None,
-    }
-    if n == 0:
-        return out
-    lo = min(daily_ivs)
-    hi = max(daily_ivs)
-    mu = statistics.mean(daily_ivs)
-    out["iv_hist_mean"] = float(mu)
-    out["iv_hist_min"] = float(lo)
-    out["iv_hist_max"] = float(hi)
-    if n < 2:
-        return out
-    sig = float(statistics.stdev(daily_ivs))
-    out["iv_hist_stdev"] = sig
-    out["iv_hist_plus_1sd"] = float(mu + sig)
-    out["iv_hist_minus_1sd"] = float(max(0.0, mu - sig))
-    out["iv_hist_plus_2sd"] = float(mu + 2.0 * sig)
-    out["iv_hist_minus_2sd"] = float(max(0.0, mu - 2.0 * sig))
-    return out
-
-
-def _median_float(vals: List[float]) -> Optional[float]:
-    if not vals:
-        return None
-    s = sorted(vals)
-    m = len(s) // 2
-    if len(s) % 2:
-        return s[m]
-    return (s[m - 1] + s[m]) / 2.0
 
 
 def _filter_option_strikes(strikes_raw: List[float], last_price: Optional[float]) -> List[float]:
@@ -547,7 +401,7 @@ def get_option_snapshots_pg(
         if fallback and fallback[0] is not None and fallback[0] > 0:
             last_price = float(fallback[0])
     if not strikes_list and last_price:
-        strikes_list = _strikes_around_spot(last_price)
+        strikes_list = strikes_around_spot(last_price)
     if not strikes_list:
         return {
             "symbol": sym,
@@ -594,7 +448,7 @@ def get_option_snapshots_pg(
     underlying_price: Optional[float] = None
     for row in rows:
         ck = row.get("contract_key") or ""
-        strike, right = _parse_contract_key(ck)
+        strike, right = parse_contract_key(ck)
         if strike is None or not right:
             continue
         up = row.get("underlying_price")
@@ -685,7 +539,7 @@ def get_option_contract_liquidity_summary(
         fallback = reader.get_stock_day_fallback_price(sym)
         if fallback and fallback[0] is not None and fallback[0] > 0:
             last_price = float(fallback[0])
-    strikes_list = _strikes_around_spot(last_price) if last_price else [strike]
+    strikes_list = strikes_around_spot(last_price) if last_price else [strike]
 
     all_keys: List[str] = []
     for st in strikes_list:
@@ -802,7 +656,7 @@ def get_option_contract_relative_value(
         fallback = reader.get_stock_day_fallback_price(sym)
         if fallback and fallback[0] is not None and fallback[0] > 0:
             last_price = float(fallback[0])
-    wide_strikes = _strikes_around_spot(last_price, count=30) if last_price else [strike]
+    wide_strikes = strikes_around_spot(last_price, count=30) if last_price else [strike]
 
     keys: List[str] = []
     for st in wide_strikes:
@@ -965,7 +819,7 @@ async def post_option_snapshot(
             fallback = reader.get_stock_day_fallback_price(symbol)
             if fallback and fallback[0] is not None and fallback[0] > 0:
                 spot_from_stock_day = float(fallback[0])
-                strikes = _strikes_around_spot(spot_from_stock_day)
+                strikes = strikes_around_spot(spot_from_stock_day)
         if not strikes:
             env_e = await gw.request_async(
                 "fetch_option_expirations",
@@ -1053,7 +907,7 @@ def get_iv_term_structure(
     if not last_price:
         return {"ok": False, "symbol": sym, "points": [], "error": "No underlying price available for ATM strike selection"}
 
-    atm_strikes = _strikes_around_spot(last_price, count=2)
+    atm_strikes = strikes_around_spot(last_price, count=2)
     if not atm_strikes:
         return {"ok": False, "symbol": sym, "points": [], "error": "Cannot compute ATM strikes"}
 
@@ -1067,13 +921,13 @@ def get_iv_term_structure(
                 key_exp_map[k] = exp
 
     rows = get_option_snapshots_latest(db, all_keys, source=src)
-    exp_iv = _build_exp_iv_map(rows, key_exp_map, last_price)
+    exp_iv = build_exp_iv_map(rows, key_exp_map, last_price)
 
     today = date.today()
     points: List[Dict[str, Any]] = []
     for exp in exp_list:
         items = exp_iv.get(exp, [])
-        atm_iv, best_call, best_put, best_strike = _atm_iv_from_expiry_items(items)
+        atm_iv, best_call, best_put, best_strike = atm_iv_from_expiry_items(items)
         if atm_iv is None:
             continue
 
@@ -1112,8 +966,11 @@ def get_iv_volatility_cone(
     """ATM IV percentile bands per expiration from historical option_snapshots (IV volatility cone)."""
     from datetime import date, datetime
 
-    from src.vendor.massive.client import contract_key_from_parts
-    from src.vendor.massive.reader import get_option_snapshots_eod_per_day, get_option_snapshots_latest
+    from src.vendor.massive.reader import (
+        get_option_snapshots_eod_per_day,
+        get_option_snapshots_latest,
+        get_report_option_atm_iv_daily,
+    )
 
     db = _db_config(request)
     if not db:
@@ -1145,120 +1002,51 @@ def get_iv_volatility_cone(
     if not last_price:
         return {"ok": False, "symbol": sym, "points": [], "error": "No underlying price available for ATM strike selection"}
 
-    atm_narrow = _strikes_around_spot(last_price, count=2)
-    atm_wide = _strikes_around_spot(last_price, count=10)
-    if not atm_narrow or not atm_wide:
+    narrow_keys, wide_keys, key_exp_narrow, key_exp_wide = build_cone_key_maps(sym, exp_list, last_price)
+    if not narrow_keys or not wide_keys:
         return {"ok": False, "symbol": sym, "points": [], "error": "Cannot compute ATM strikes"}
 
-    key_exp_narrow: Dict[str, str] = {}
-    narrow_keys: List[str] = []
-    key_exp_wide: Dict[str, str] = {}
-    wide_keys: List[str] = []
-    for exp in exp_list:
-        for st in atm_narrow:
-            for r in ("C", "P"):
-                k = contract_key_from_parts(sym, exp, float(st), r)
-                narrow_keys.append(k)
-                key_exp_narrow[k] = exp
-        for st in atm_wide:
-            for r in ("C", "P"):
-                k2 = contract_key_from_parts(sym, exp, float(st), r)
-                wide_keys.append(k2)
-                key_exp_wide[k2] = exp
-
-    narrow_keys = list(dict.fromkeys(narrow_keys))
-    wide_keys = list(dict.fromkeys(wide_keys))
-
     since_ts = datetime.now(timezone.utc) - timedelta(days=lookback_days)
-    hist_rows = get_option_snapshots_eod_per_day(db, wide_keys, source=src, since_ts=since_ts)
+    since_date = since_ts.date()
+
     latest_rows = get_option_snapshots_latest(db, narrow_keys, source=src)
-    exp_iv_cur_all = _build_exp_iv_map(latest_rows, key_exp_narrow, last_price)
+    exp_iv_cur_all = build_exp_iv_map(latest_rows, key_exp_narrow, last_price)
 
-    by_day: Dict[Any, List[Dict[str, Any]]] = {}
-    for row in hist_rows:
-        sd = row.get("snap_day")
-        if sd is None:
-            continue
-        by_day.setdefault(sd, []).append(row)
+    report_rows = get_report_option_atm_iv_daily(db, sym, exp_list, src, since_date)
+    rollup_ivs = rollup_daily_ivs_by_expiration(report_rows, exp_list, min_trade_date=since_date)
 
-    today = date.today()
-    points: List[Dict[str, Any]] = []
-    band_warns: List[Tuple[str, int]] = []
     min_samples_for_bands = 5
+    needs_eod = any(len(rollup_ivs.get(exp, [])) < min_samples_for_bands for exp in exp_list)
+    if needs_eod:
+        hist_rows = get_option_snapshots_eod_per_day(db, wide_keys, source=src, since_ts=since_ts)
+        by_day = group_hist_rows_by_snap_day(hist_rows)
+    else:
+        by_day = {}
 
+    per_exp_daily_ivs: Dict[str, List[float]] = {}
+    rollup_used = True
     for exp in exp_list:
-        daily_ivs: List[float] = []
-        for _sd in sorted(by_day.keys()):
-            day_rows = by_day[_sd]
-            rows_exp = [
-                r
-                for r in day_rows
-                if key_exp_wide.get(str(r.get("contract_key") or "")) == exp
-            ]
-            spots: List[float] = []
-            for r in rows_exp:
-                up = r.get("underlying_price")
-                if up is not None:
-                    try:
-                        v = float(up)
-                    except (TypeError, ValueError):
-                        continue
-                    if v > 0:
-                        spots.append(v)
-            day_spot = _median_float(spots)
-            if day_spot is None or day_spot <= 0:
-                continue
-            exp_iv = _build_exp_iv_map(rows_exp, key_exp_wide, day_spot)
-            items = exp_iv.get(exp, [])
-            atm_d, _, _, _ = _atm_iv_from_expiry_items(items)
-            if atm_d is not None:
-                daily_ivs.append(float(atm_d))
-
-        try:
-            exp_date = datetime.strptime(exp, "%Y%m%d").date()
-        except ValueError:
-            continue
-        dte = (exp_date - today).days
-        if dte < 0:
-            continue
-
-        items_cur = exp_iv_cur_all.get(exp, [])
-        atm_cur, iv_call_cur, iv_put_cur, strike_cur = _atm_iv_from_expiry_items(items_cur)
-
-        sorted_ivs = sorted(daily_ivs)
-        n = len(sorted_ivs)
-        pct: Dict[str, Optional[float]]
-        if n < min_samples_for_bands:
-            pct = {"p10": None, "p50": None, "p90": None, "min": None, "max": None}
-            band_warns.append((exp, n))
+        r_series = rollup_ivs.get(exp, [])
+        if len(r_series) >= min_samples_for_bands:
+            per_exp_daily_ivs[exp] = r_series
         else:
-            pct = _linear_percentiles(sorted_ivs)
+            per_exp_daily_ivs[exp] = daily_atm_ivs_for_expiration(exp, key_exp_wide, by_day)
+            rollup_used = False
 
-        hist_p = _hist_iv_parametrics(daily_ivs)
-
-        points.append({
-            "expiration": exp,
-            "dte_days": dte,
-            "atm_iv": atm_cur,
-            "iv_call": iv_call_cur,
-            "iv_put": iv_put_cur,
-            "strike": strike_cur,
-            "iv_p10": pct["p10"],
-            "iv_p50": pct["p50"],
-            "iv_p90": pct["p90"],
-            "iv_min": pct["min"],
-            "iv_max": pct["max"],
-            "sample_days": n,
-            **hist_p,
-        })
-
-    points.sort(key=lambda p: p["dte_days"])
+    points, band_warns = assemble_volatility_cone_points(
+        exp_list,
+        last_price,
+        exp_iv_cur_all,
+        per_exp_daily_ivs,
+        min_samples_for_bands=min_samples_for_bands,
+    )
     out: Dict[str, Any] = {
         "ok": True,
         "symbol": sym,
         "underlying_price": last_price,
         "lookback_days": lookback_days,
         "points": points,
+        "rollup_used": rollup_used,
     }
     if band_warns:
         nexp = len(band_warns)

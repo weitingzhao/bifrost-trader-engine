@@ -2110,6 +2110,8 @@ export interface IvVolatilityConeResponse {
   symbol: string
   underlying_price?: number
   lookback_days?: number
+  /** True when all expirations used pre-aggregated report_option_atm_iv_daily for cone bands */
+  rollup_used?: boolean
   points: IvVolatilityConePoint[]
   warning?: string
   error?: string
@@ -2166,6 +2168,7 @@ export async function fetchIvVolatilityCone(
     symbol: j.symbol ?? symbol,
     underlying_price: j.underlying_price != null ? Number(j.underlying_price) : undefined,
     lookback_days: j.lookback_days != null ? Number(j.lookback_days) : undefined,
+    rollup_used: typeof j.rollup_used === 'boolean' ? j.rollup_used : undefined,
     points: pts,
     warning: j.warning != null ? String(j.warning) : undefined,
     error: errMsg,
