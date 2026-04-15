@@ -100,6 +100,11 @@
   --scrollbar-track: var(--color-bg);
   --scrollbar-thumb: rgba(100, 116, 139, 0.42);
   --scrollbar-thumb-hover: rgba(148, 163, 184, 0.62);
+
+  /* Option Discovery — Max Pain charts (dark theme: readable axes) */
+  --od-max-pain-axis-fill: #d8dee8;
+  --od-max-pain-axis-line: #64748b;
+  --od-max-pain-grid-stroke: rgba(148, 163, 184, 0.38);
 }
 
 /* ---------- 明亮主题 ---------- */
@@ -152,6 +157,10 @@
   --scrollbar-track: var(--color-bg);
   --scrollbar-thumb: rgba(148, 163, 184, 0.55);
   --scrollbar-thumb-hover: rgba(100, 116, 139, 0.5);
+
+  --od-max-pain-axis-fill: #4b5563;
+  --od-max-pain-axis-line: #9ca3af;
+  --od-max-pain-grid-stroke: rgba(55, 65, 81, 0.22);
 }
 
 * {
@@ -7359,7 +7368,7 @@ th {
 .strike-ladder-layout {
   display: flex;
   gap: var(--space-3);
-  align-items: flex-start;
+  align-items: stretch;
   margin-top: var(--space-1);
 }
 
@@ -7561,13 +7570,20 @@ th {
 }
 
 .strike-ladder-col-range {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   min-width: 10rem;
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
 }
 
 .strike-ladder-col-range .strike-ladder-controls {
   border-radius: 0 0 8px 8px;
   border-top: none;
+  flex: 1 1 auto;
+  flex-shrink: 1;
+  min-height: 14rem;
+  justify-content: flex-start;
 }
 
 .strike-ladder-table {
@@ -8253,27 +8269,34 @@ th {
   overflow: visible;
 }
 
-/* Option Discovery: sidebar + main layout */
+/* Option Discovery: full-width main + sticky controls stack */
 .option-discovery-layout {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-4);
   margin-top: var(--space-3);
 }
 
-.option-discovery-sidebar {
-  /* Single column width: Underlying + Expiration panels align to the same width */
-  width: clamp(11rem, 16vw, 14rem);
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--space-3);
+.option-discovery-sticky-stack {
   position: sticky;
   top: var(--space-2);
+  z-index: 3;
+  margin: 0 calc(-1 * var(--space-1));
+  background: var(--color-bg, var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+  overflow: visible;
 }
 
-.option-discovery-sidebar .replay-section {
+.option-discovery-sticky-stack .option-discovery-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: stretch;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.option-discovery-controls .replay-section {
   margin-top: 0;
   padding-top: 0;
   border-top: none;
@@ -8282,8 +8305,7 @@ th {
   min-height: 0;
 }
 
-.option-discovery-sidebar .option-discovery-underlying-body,
-.option-discovery-sidebar .option-discovery-expiration-body {
+.option-discovery-controls .option-discovery-underlying-body {
   margin-bottom: 0;
   flex: 1;
   min-height: 0;
@@ -8294,96 +8316,108 @@ th {
   align-items: stretch;
 }
 
-/* Override global flex-start so Underlying matches Expiration panel width */
-.option-discovery-sidebar .option-discovery-underlying-body {
-  align-items: stretch;
+.od-underlying-empty-hint {
+  margin: 0;
+  font-size: var(--text-caption);
 }
 
-.option-discovery-sidebar .option-discovery-list-with-header {
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-  width: 100%;
+/* Underlying: compact horizontal chips (replaces table) */
+.od-underlying-bubbles {
   display: flex;
-  flex-direction: column;
-}
-
-/* Expiration table: fixed columns so width matches Underlying panel above */
-.option-discovery-sidebar .option-discovery-expiration .option-discovery-list-table {
-  table-layout: fixed;
-  width: 100%;
-}
-
-.option-discovery-sidebar .option-discovery-expiration .option-discovery-list-table thead th.option-discovery-expiration-col-date,
-.option-discovery-sidebar .option-discovery-expiration .option-discovery-list-table tbody td.option-discovery-expiration-col-date {
-  width: 72%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.option-discovery-sidebar .option-discovery-expiration .option-discovery-list-table thead th.option-discovery-expiration-col-days,
-.option-discovery-sidebar .option-discovery-expiration .option-discovery-list-table tbody td.option-discovery-expiration-days-cell {
-  width: 28%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-  border-left: 1px solid var(--color-border);
-  padding-left: 0.2rem;
-}
-
-.option-discovery-sidebar .option-discovery-underlying .option-discovery-list-table {
-  table-layout: fixed;
-  width: 100%;
-}
-
-.option-discovery-sidebar .option-discovery-underlying .option-discovery-list-table thead th:first-child,
-.option-discovery-sidebar .option-discovery-underlying .option-discovery-list-table tbody td:first-child {
-  width: 42%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.option-discovery-sidebar .option-discovery-underlying .option-discovery-list-table thead th:nth-child(2),
-.option-discovery-sidebar .option-discovery-underlying .option-discovery-list-table tbody td:nth-child(2) {
-  width: 58%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
   min-width: 0;
 }
 
-/* Reset global 2nd column min-width so fixed layout can shrink in sidebar */
-.option-discovery-sidebar .option-discovery-list-table td:nth-child(2) {
-  min-width: 0;
+.od-underlying-bubbles-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
 }
 
-.option-discovery-sidebar .option-discovery-list-wrap {
-  max-height: 24rem;
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-.option-discovery-sidebar .option-discovery-underlying .option-discovery-list-wrap {
-  min-height: 20rem;
-}
-
-.option-discovery-sidebar .option-discovery-expiration .option-discovery-list-wrap {
-  min-height: 25rem;
-}
-
-.option-discovery-sidebar .option-discovery-list-empty {
-  min-height: 6rem;
+.od-underlying-bubble-row {
   display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.od-underlying-chip {
+  display: inline-flex;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
+  gap: 0.25rem;
+  padding: 0.22rem 0.6rem;
+  min-height: auto;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-main);
+  font: inherit;
+  cursor: pointer;
+  line-height: 1.15;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.od-underlying-chip:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent-soft) 45%, var(--color-surface-elevated));
+}
+
+.od-underlying-chip:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.od-underlying-chip--active {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent-soft) 70%, var(--color-surface-elevated));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent);
+}
+
+.od-underlying-chip-symbol {
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.od-underlying-chip-price {
+  font-size: 0.65rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.od-underlying-chip-line {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: baseline;
+  flex-wrap: nowrap;
+  gap: 0;
+  white-space: nowrap;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.od-underlying-chip-sep {
+  color: var(--color-text-muted);
+  font-weight: 500;
+  font-size: 0.7rem;
 }
 
 .option-discovery-main {
-  flex: 1;
+  width: 100%;
   min-width: 0;
 }
 
@@ -8405,6 +8439,17 @@ th {
   border: 1px solid var(--color-border);
   border-radius: 8px;
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+}
+
+/* Inside option-discovery-sticky-stack: parent is sticky; flatten inner card chrome */
+.od-sticky-context.od-sticky-context--in-stack {
+  position: static;
+  top: auto;
+  z-index: auto;
+  margin: 0;
+  border: none;
+  box-shadow: none;
+  border-radius: 0 0 8px 8px;
 }
 
 .od-sticky-context-row {
@@ -9524,6 +9569,119 @@ th {
   overflow: auto;
 }
 
+/* Chain / quotes expiry (step 2) — horizontal chip strip */
+.od-chain-expiry-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
+}
+
+.od-chain-expiry-label {
+  font-size: var(--text-caption, 0.75rem);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.od-chain-expiry-strip {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.od-chain-expiry-chip {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+  background: var(--color-surface);
+  color: var(--color-text-main);
+  font: inherit;
+  cursor: pointer;
+  line-height: 1.2;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.od-chain-expiry-chip:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent-soft) 40%, var(--color-surface-elevated));
+}
+
+.od-chain-expiry-chip:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.od-chain-expiry-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.od-chain-expiry-chip--active {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent-soft) 70%, var(--color-surface-elevated));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent);
+}
+
+.od-chain-expiry-chip-line {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: baseline;
+  flex-wrap: nowrap;
+  gap: 0;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.od-chain-expiry-chip-date {
+  font-size: 0.76rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.od-chain-expiry-chip-sep {
+  color: var(--color-text-muted);
+  font-weight: 500;
+  font-size: 0.7rem;
+}
+
+.od-chain-expiry-chip-dte {
+  font-size: 0.68rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.od-chain-expiry-chip-kinds {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex-shrink: 0;
+}
+
+.od-chain-expiry-hint {
+  margin: 0;
+  flex: 1 1 100%;
+}
+
 /* Full-chain block (EOD OI / Max Pain) — above Strike window */
 .option-discovery-full-chain {
   width: 100%;
@@ -9687,10 +9845,6 @@ th {
   margin-bottom: 0.35rem;
 }
 
-.od-iv-term-section .od-iv-term-exp-hint {
-  margin-bottom: 0.65rem;
-}
-
 /* IV term: expiration picker — compact card, grid chips */
 .od-iv-term-exp-card {
   margin: 0 0 0.85rem;
@@ -9706,23 +9860,69 @@ th {
 
 .od-iv-term-exp-card-header {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem 0.75rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
   padding: 0.55rem 0.65rem 0.5rem;
   border-bottom: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
 }
 
-.od-iv-term-exp-card-heading {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
+.od-iv-term-exp-toolbar {
+  display: flex;
+  flex-direction: row;
   flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.55rem;
+  width: 100%;
   min-width: 0;
 }
 
+.od-iv-term-exp-toolbar .option-discovery-expiration-filters {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 0.2rem;
+  margin: 0;
+  width: auto;
+  grid-template-columns: none;
+}
+
+.od-iv-term-exp-toolbar .option-discovery-exp-filter-btn {
+  width: auto;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 0.28rem 0.55rem;
+  border-radius: 8px;
+}
+
+.od-iv-term-exp-filter-row {
+  width: auto;
+  flex: 0 1 auto;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.od-iv-term-exp-card-header .od-iv-term-exp-card-actions {
+  width: auto;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.od-iv-term-exp-card-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+  min-width: 0;
+  width: 100%;
+}
+
 .od-iv-term-exp-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -9808,7 +10008,7 @@ th {
   margin: 0;
   padding: 0.5rem 0.55rem 0.55rem;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9.25rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr));
   gap: 0.35rem;
   max-height: 12rem;
   overflow-x: hidden;
@@ -9863,6 +10063,24 @@ th {
   cursor: inherit;
 }
 
+.od-iv-term-exp-date-block {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0;
+  line-height: 1.2;
+}
+
+.od-iv-term-exp-date-dte-sep {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
 .od-iv-term-exp-date {
   font-size: 0.78rem;
   font-weight: 500;
@@ -9872,6 +10090,56 @@ th {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.od-iv-term-exp-dte {
+  font-size: 0.68rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.od-iv-term-exp-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  margin-left: 0.15rem;
+}
+
+/* W / Q kind pills in IV chart list + chain expiry menu */
+.od-iv-term-exp-kind-bubble {
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 0.12rem 0.42rem;
+  line-height: 1.15;
+  min-width: 1.35rem;
+  justify-content: center;
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 12%, transparent);
+}
+
+.od-iv-term-quality {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.od-iv-term-quality svg {
+  display: block;
+}
+
+.od-iv-term-quality--good {
+  color: var(--color-lamp-green, #66bb6a);
+}
+
+.od-iv-term-quality--limited {
+  color: var(--color-warning, #b45309);
+}
+
+.od-iv-term-quality--unknown {
+  color: var(--color-text-dim);
 }
 
 .od-analytics-term-actions {
@@ -9907,10 +10175,10 @@ th {
   word-break: break-word;
 }
 
-/* IV term + cone: two charts per row; data tables below */
+/* IV term + cone (+ parametric when data ok): one row — 2 or 3 columns; data tables below */
 .od-iv-term-cone-charts-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-3);
   align-items: stretch;
   width: 100%;
@@ -9918,14 +10186,13 @@ th {
   margin-top: 0.5rem;
 }
 
-.od-iv-term-parametric-row {
-  width: 100%;
-  min-width: 0;
-  margin-top: var(--space-3);
+.od-iv-term-cone-charts-row.od-iv-term-cone-charts-row--triple {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 @media (max-width: 960px) {
-  .od-iv-term-cone-charts-row {
+  .od-iv-term-cone-charts-row,
+  .od-iv-term-cone-charts-row.od-iv-term-cone-charts-row--triple {
     grid-template-columns: 1fr;
   }
 }
@@ -10044,6 +10311,54 @@ th {
   border-radius: 8px;
   background: var(--color-surface);
   overflow: visible;
+}
+
+.od-iv-combined-details {
+  width: 100%;
+  min-width: 0;
+  margin-top: var(--space-3);
+}
+
+.od-iv-combined-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-elevated);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  user-select: none;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.od-iv-combined-summary:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 25%, var(--color-border));
+}
+
+.od-iv-combined-summary::-webkit-details-marker {
+  display: none;
+}
+
+.od-iv-combined-summary-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.od-iv-combined-details[open] .od-iv-combined-summary {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom-color: transparent;
+}
+
+.od-iv-data-table-sheet--in-details {
+  margin-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 /* Combined IV sheet: hover detail on cells (same pattern as .info-tooltip) */
@@ -10268,6 +10583,14 @@ th {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.od-max-pain-title-exp {
+  font-weight: 500;
+  font-size: 0.92em;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .od-max-pain-refresh-icon-btn.section-header-icon-btn:hover,
@@ -10281,108 +10604,106 @@ th {
   gap: 0.45rem;
 }
 
-.od-max-pain-card {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
-  gap: var(--space-2);
-  margin-bottom: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border-radius: 8px;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface-elevated);
-}
-
 .od-max-pain-layout {
   width: 100%;
   max-width: none;
   margin-bottom: var(--space-3);
 }
 
-.od-max-pain-top-layout {
-  display: grid;
-  grid-template-columns: minmax(11rem, 13rem) minmax(0, 1fr);
-  gap: var(--space-2);
-  align-items: stretch;
-}
-
-.od-max-pain-summary-col {
+/* Summary metrics — single horizontal row above charts */
+.od-max-pain-metrics-bar {
+  width: 100%;
+  margin-bottom: var(--space-3);
   min-width: 0;
 }
 
-.od-max-pain-card.od-max-pain-card--vertical {
-  grid-template-columns: 1fr;
-  gap: 0;
-  margin-bottom: 0;
-  height: 100%;
+.od-max-pain-metrics-inner {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  gap: 0.75rem 1.5rem;
+  padding: var(--space-2) var(--space-3);
   border-radius: 10px;
-  border-color: color-mix(in srgb, var(--color-accent) 22%, var(--color-border));
+  border: 1px solid color-mix(in srgb, var(--color-accent) 22%, var(--color-border));
   background: linear-gradient(180deg,
       color-mix(in srgb, var(--color-accent-soft) 35%, var(--color-surface-elevated)) 0%,
       var(--color-surface-elevated) 100%);
   box-shadow: 0 1px 0 color-mix(in srgb, var(--color-border) 55%, transparent);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
 }
 
-.od-max-pain-card-metric {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
+.od-max-pain-metric-cell {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+  min-width: 0;
+  white-space: nowrap;
 }
 
-.od-max-pain-card--vertical .od-max-pain-card-metric {
-  padding: 0.32rem 0.08rem;
-  border-bottom: 1px dashed color-mix(in srgb, var(--color-border) 78%, transparent);
-}
-
-.od-max-pain-card--vertical .od-max-pain-card-metric:last-of-type {
-  border-bottom: none;
-}
-
-.od-max-pain-card--vertical .od-max-pain-card-metric strong {
-  font-size: 1.04rem;
+.od-max-pain-metric-cell strong {
+  font-size: 1.02rem;
   font-weight: 700;
   letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-main);
 }
 
 .od-max-pain-card-label {
   font-size: var(--text-caption);
   color: var(--color-text-dim);
+  flex-shrink: 0;
 }
 
 .od-max-pain-corp-warn {
-  grid-column: 1 / -1;
   margin: 0;
   font-size: var(--text-caption);
   color: #c9a227;
 }
 
-.od-max-pain-strike-col {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+.od-max-pain-corp-warn--below-metrics {
+  margin-top: var(--space-2);
 }
 
-.od-max-pain-strike-col .mp-chart-pane {
+/* Three charts: liability | OI | Max Pain vs underlying — one row (scroll on narrow viewports) */
+.od-max-pain-charts-scroll {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.od-max-pain-charts-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  align-items: stretch;
+  /* Keep three columns side by side; parent scrolls horizontally when viewport is narrow */
+  width: max(100%, 48rem);
+  min-width: 48rem;
+}
+
+.od-max-pain-chart-cell {
+  display: flex;
+  flex-direction: column;
   border: 1px solid color-mix(in srgb, var(--color-border) 90%, transparent);
   border-radius: 10px;
   padding: var(--space-1) var(--space-2) 0.35rem;
   background: color-mix(in srgb, var(--color-surface-elevated) 92%, var(--color-surface));
+  min-width: 0;
+}
+
+.mp-chart-subtitle--pane {
+  margin: 0 0 var(--space-1);
 }
 
 .od-max-pain-trend-pane {
-  margin-top: var(--space-2);
-}
-
-.od-max-pain-trend-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  margin-bottom: var(--space-1);
-}
-
-.od-max-pain-trend-head .mp-chart-subtitle {
-  margin: 0;
+  margin-top: 0;
 }
 
 /* Tab bar */
@@ -10426,38 +10747,50 @@ th {
   margin-bottom: var(--space-3);
 }
 
-/* Option Discovery: two charts per row (2×2 grid); span-2 = full width row */
-.od-charts-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-3) var(--space-4);
-  margin-bottom: var(--space-3);
-  align-items: start;
-}
-
-.od-charts-grid .mp-chart-pane {
+/* Option Discovery — Option Analytics: IV Smile | OI profile | GEX (same row when all three) */
+.od-analytics-charts-scroll {
+  width: 100%;
   min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  margin-bottom: var(--space-3);
 }
 
-.od-charts-grid .od-chart-pane-span2 {
-  grid-column: 1 / -1;
+.od-analytics-charts-row {
+  display: grid;
+  gap: var(--space-2);
+  align-items: stretch;
+  width: 100%;
+}
+
+.od-analytics-charts-row[data-chart-count="1"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.od-analytics-charts-row[data-chart-count="2"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.od-analytics-charts-row[data-chart-count="3"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: max(100%, 48rem);
+  min-width: 48rem;
+}
+
+.od-analytics-chart-cell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--color-border) 90%, transparent);
+  border-radius: 10px;
+  padding: var(--space-1) var(--space-2) 0.35rem;
+  background: color-mix(in srgb, var(--color-surface-elevated) 92%, var(--color-surface));
 }
 
 @media (max-width: 52rem) {
-  .od-max-pain-top-layout {
-    grid-template-columns: 1fr;
-  }
-
   .od-max-pain-layout {
     max-width: 100%;
-  }
-
-  .od-charts-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .od-charts-grid .od-chart-pane-span2 {
-    grid-column: auto;
   }
 }
 
@@ -10471,6 +10804,32 @@ th {
   font-weight: 600;
   color: var(--color-text-muted);
   letter-spacing: 0.02em;
+}
+
+.mp-chart-pane-head {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: var(--space-1);
+  width: 100%;
+}
+
+.mp-chart-pane-head .mp-chart-subtitle {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mp-chart-inline-trend-hint {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
 }
 
 /* Legend row */
@@ -10529,12 +10888,42 @@ th {
   height: auto;
 }
 
-.od-max-pain-disclaimer {
+/* Max Pain trio: fixed viewBox 640×260 */
+.od-max-pain-chart-cell .od-max-pain-svg {
+  aspect-ratio: 640 / 260;
+  min-height: 0;
+}
+
+/* Option Analytics trio: IV Smile / OI / GEX share 640×240 viewBox */
+.od-analytics-chart-cell .od-max-pain-svg {
+  aspect-ratio: 640 / 240;
+  min-height: 0;
+}
+
+.od-max-pain-disclaimer-details {
   margin: var(--space-3) 0 0;
+  max-width: 52rem;
+}
+
+.od-max-pain-disclaimer-summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.od-max-pain-disclaimer-summary::-webkit-details-marker {
+  display: none;
+}
+
+.od-max-pain-disclaimer-body {
+  margin: var(--space-2) 0 0;
+  padding-left: 0.15rem;
   font-size: var(--text-caption);
   color: var(--color-text-dim);
   line-height: 1.45;
-  max-width: 52rem;
 }
 
 /* ── Option analytics (IV smile / OI profile / skew / term structure) ── */
@@ -11317,6 +11706,30 @@ th {
 /* Tab body */
 .od-detail-body {
   padding: var(--space-3);
+}
+
+/* Contract detail: stacked sections (replaces tab bar) */
+.od-contract-detail-stack {
+  display: flex;
+  flex-direction: column;
+}
+
+.od-detail-section {
+  padding: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.od-contract-detail-stack > .od-detail-section:first-child {
+  border-top: none;
+}
+
+.od-detail-section-title {
+  margin: 0 0 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
 }
 
 /* Option Discovery: contract OHLC from option_day / option_min */

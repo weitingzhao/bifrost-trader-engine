@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import type { IvVolatilityConePoint, OptionSnapshotRow } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import {
+  OD_ANALYTICS_AXIS_TICK_FILL,
+  OD_ANALYTICS_AXIS_TITLE_FILL,
   OD_CHART_AXIS_FONT,
   OD_CHART_AXIS_FONT_IV_TERM,
   OD_IV_TERM_PAD,
@@ -116,7 +118,7 @@ export function IvSmileChart({
             {i > 0 && <line x1={pad.l} x2={pad.l + innerW} y1={y} y2={y}
               stroke="var(--color-border)" strokeWidth={0.5} strokeDasharray="3 3" />}
             <text x={pad.l - 6} y={y + 3} textAnchor="end" fontSize={OD_CHART_AXIS_FONT}
-              fill="var(--color-text-dim)">{fmtIv(val)}</text>
+              fill={OD_ANALYTICS_AXIS_TICK_FILL}>{fmtIv(val)}</text>
           </g>
         )
       })}
@@ -149,14 +151,14 @@ export function IvSmileChart({
         if (s == null) return null
         return (
           <text key={i} x={xFor(s)} y={h - 8} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
-            fill="var(--color-text-dim)">{s % 1 === 0 ? s.toFixed(0) : s.toFixed(1)}</text>
+            fill={OD_ANALYTICS_AXIS_TICK_FILL}>{s % 1 === 0 ? s.toFixed(0) : s.toFixed(1)}</text>
         )
       })}
 
       <text x={pad.l - 4} y={pad.t - 6} textAnchor="end" fontSize={OD_CHART_AXIS_FONT}
-        fill="var(--color-text-dim)">IV</text>
+        fill={OD_ANALYTICS_AXIS_TITLE_FILL}>IV</text>
       <text x={pad.l + innerW / 2} y={h - 0} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
-        fill="var(--color-text-dim)">Strike</text>
+        fill={OD_ANALYTICS_AXIS_TITLE_FILL}>Strike</text>
     </svg>
   )
 }
@@ -215,8 +217,8 @@ export function OiProfileChart({ rows, underlying }: {
   }
 
   const w = 640
-  const h = 220
-  const pad = { l: 52, r: 24, t: 16, b: 40 }
+  const h = 240
+  const pad = { l: 52, r: 24, t: 20, b: 40 }
   const innerW = w - pad.l - pad.r
   const innerH = h - pad.t - pad.b
 
@@ -253,7 +255,7 @@ export function OiProfileChart({ rows, underlying }: {
             {i > 0 && <line x1={pad.l} x2={pad.l + innerW} y1={y} y2={y}
               stroke="var(--color-border)" strokeWidth={0.5} strokeDasharray="3 3" />}
             <text x={pad.l - 6} y={y + 3} textAnchor="end" fontSize={OD_CHART_AXIS_FONT}
-              fill="var(--color-text-dim)">{fmtOiCompact(val)}</text>
+              fill={OD_ANALYTICS_AXIS_TICK_FILL}>{fmtOiCompact(val)}</text>
           </g>
         )
       })}
@@ -283,14 +285,14 @@ export function OiProfileChart({ rows, underlying }: {
         if (!d) return null
         return (
           <text key={i} x={xFor(d.strike)} y={h - 8} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
-            fill="var(--color-text-dim)">{d.strike % 1 === 0 ? d.strike.toFixed(0) : d.strike.toFixed(1)}</text>
+            fill={OD_ANALYTICS_AXIS_TICK_FILL}>{d.strike % 1 === 0 ? d.strike.toFixed(0) : d.strike.toFixed(1)}</text>
         )
       })}
 
       <text x={pad.l - 4} y={pad.t - 2} textAnchor="end" fontSize={OD_CHART_AXIS_FONT}
-        fill="var(--color-text-dim)">Open Interest</text>
+        fill={OD_ANALYTICS_AXIS_TITLE_FILL}>Open Interest</text>
       <text x={pad.l + innerW / 2} y={h - 0} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
-        fill="var(--color-text-dim)">Strike</text>
+        fill={OD_ANALYTICS_AXIS_TITLE_FILL}>Strike</text>
     </svg>
   )
 }
@@ -359,8 +361,8 @@ export function GammaExposureChart({ rows, underlying }: {
   }
 
   const w = 640
-  const h = 220
-  const pad = { l: 56, r: 24, t: 16, b: 40 }
+  const h = 240
+  const pad = { l: 56, r: 24, t: 20, b: 40 }
   const innerW = w - pad.l - pad.r
   const innerH = h - pad.t - pad.b
 
@@ -400,7 +402,7 @@ export function GammaExposureChart({ rows, underlying }: {
             {i > 0 && <line x1={pad.l} x2={pad.l + innerW} y1={y} y2={y}
               stroke="var(--color-border)" strokeWidth={0.5} strokeDasharray="3 3" />}
             <text x={pad.l - 6} y={y + 3} textAnchor="end" fontSize={OD_CHART_AXIS_FONT}
-              fill="var(--color-text-dim)">{fmtGexAxis(val)}</text>
+              fill={OD_ANALYTICS_AXIS_TICK_FILL}>{fmtGexAxis(val)}</text>
           </g>
         )
       })}
@@ -430,14 +432,14 @@ export function GammaExposureChart({ rows, underlying }: {
         if (!d) return null
         return (
           <text key={i} x={xFor(d.strike)} y={h - 8} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
-            fill="var(--color-text-dim)">{d.strike % 1 === 0 ? d.strike.toFixed(0) : d.strike.toFixed(1)}</text>
+            fill={OD_ANALYTICS_AXIS_TICK_FILL}>{d.strike % 1 === 0 ? d.strike.toFixed(0) : d.strike.toFixed(1)}</text>
         )
       })}
 
       <text x={pad.l - 4} y={pad.t - 2} textAnchor="end" fontSize={OD_CHART_AXIS_FONT}
-        fill="var(--color-text-dim)">G×OI×100</text>
+        fill={OD_ANALYTICS_AXIS_TITLE_FILL}>G×OI×100</text>
       <text x={pad.l + innerW / 2} y={h - 0} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
-        fill="var(--color-text-dim)">Strike</text>
+        fill={OD_ANALYTICS_AXIS_TITLE_FILL}>Strike</text>
     </svg>
   )
 }
@@ -775,6 +777,13 @@ function polyIvCone(
     .join(' ')
 }
 
+/** SVG polyline needs ≥2 points to draw a visible segment */
+function polylinePointCount(pointsAttr: string): number {
+  const t = pointsAttr.trim()
+  if (!t) return 0
+  return t.split(/\s+/).length
+}
+
 function extentParametricCone(rows: IvVolatilityConePoint[]): { lo: number; hi: number } | null {
   let lo = Infinity
   let hi = -Infinity
@@ -878,6 +887,20 @@ export function IvParametricConeChart({ points }: { points: IvVolatilityConePoin
   const ptsM1u = linePts(p => p.iv_hist_plus_1sd)
   const ptsMean = linePts(p => p.iv_hist_mean)
 
+  const histSeriesAttrs = [ptsMin, ptsMax, ptsM2l, ptsM2u, ptsM1l, ptsM1u, ptsMean]
+  const anyHistLineDrawable = histSeriesAttrs.some(s => polylinePointCount(s) >= 2)
+  const showParametricBandError =
+    (hasCp && !hasHist)
+    || (hasHist && !anyHistLineDrawable)
+  const parametricErrorLine1 =
+    hasCp && !hasHist
+      ? 'Error: Historical band data (min / max / mean / SD) missing.'
+      : 'Error: Fewer than two expirations have band values — lines need ≥2 points.'
+  const parametricErrorLine2 =
+    hasCp && !hasHist
+      ? 'Call/Put markers use latest snapshots; backfill daily ATM IV for parametric series.'
+      : 'Add snapshots or pick expirations with complete iv_hist_* from the API.'
+
   const yTicks = 4
   const yStep = (ivHi - ivLo) / yTicks
   const axisFill = 'var(--color-text-main)'
@@ -909,29 +932,29 @@ export function IvParametricConeChart({ points }: { points: IvVolatilityConePoin
 
         {hasHist && (
           <>
-            {ptsMin.length > 0 && (
+            {polylinePointCount(ptsMin) >= 2 && (
               <polyline fill="none" stroke="var(--color-text-muted)" strokeWidth={1.2} strokeDasharray="4 3"
                 points={ptsMin} />
             )}
-            {ptsMax.length > 0 && (
+            {polylinePointCount(ptsMax) >= 2 && (
               <polyline fill="none" stroke="var(--color-text-muted)" strokeWidth={1.2} strokeDasharray="4 3"
                 points={ptsMax} />
             )}
-            {ptsM2l.length > 0 && (
+            {polylinePointCount(ptsM2l) >= 2 && (
               <polyline fill="none" stroke="#64748b" strokeWidth={1} strokeDasharray="2 4" points={ptsM2l} />
             )}
-            {ptsM2u.length > 0 && (
+            {polylinePointCount(ptsM2u) >= 2 && (
               <polyline fill="none" stroke="#64748b" strokeWidth={1} strokeDasharray="2 4" points={ptsM2u} />
             )}
-            {ptsM1l.length > 0 && (
+            {polylinePointCount(ptsM1l) >= 2 && (
               <polyline fill="none" stroke="var(--color-link, #7dd3fc)" strokeWidth={1.2} strokeDasharray="5 3"
                 points={ptsM1l} />
             )}
-            {ptsM1u.length > 0 && (
+            {polylinePointCount(ptsM1u) >= 2 && (
               <polyline fill="none" stroke="var(--color-link, #7dd3fc)" strokeWidth={1.2} strokeDasharray="5 3"
                 points={ptsM1u} />
             )}
-            {ptsMean.length > 0 && (
+            {polylinePointCount(ptsMean) >= 2 && (
               <polyline fill="none" stroke="var(--color-accent, #a3e635)" strokeWidth={2} points={ptsMean} />
             )}
           </>
@@ -964,6 +987,34 @@ export function IvParametricConeChart({ points }: { points: IvVolatilityConePoin
           fill={axisFill}>ATM IV</text>
         <text x={pad.l + innerW / 2} y={xTitleY} textAnchor="middle" fontSize={axisFs} fontWeight={600}
           fill={axisFill}>Days to Expiration</text>
+
+        {showParametricBandError && (
+          <g className="od-iv-param-band-error" role="alert" pointerEvents="none">
+            <rect
+              x={pad.l + 6}
+              y={pad.t + 6}
+              width={innerW - 12}
+              height={40}
+              rx={5}
+              fill="color-mix(in srgb, var(--color-danger, #dc2626) 16%, transparent)"
+              stroke="var(--color-danger, #dc2626)"
+              strokeWidth={1.2}
+            />
+            <text
+              fontSize={10}
+              fontWeight={700}
+              fill="var(--color-danger, #ef4444)"
+              textAnchor="middle"
+            >
+              <tspan x={pad.l + innerW / 2} y={pad.t + 22}>
+                {parametricErrorLine1}
+              </tspan>
+              <tspan x={pad.l + innerW / 2} y={pad.t + 35}>
+                {parametricErrorLine2}
+              </tspan>
+            </text>
+          </g>
+        )}
       </svg>
       <div className="od-iv-param-legend" aria-label="Chart legend">
         <span className="od-iv-param-legend-item"><span className="od-iv-param-swatch od-iv-param-swatch--minmax" />Min / Max</span>
@@ -1005,6 +1056,8 @@ export function OptionDiscoveryAnalyticsPanel({
 
   if (!hasIv && !hasOi && !hasGex) return null
 
+  const chartCount = [hasIv, hasOi, hasGex].filter(Boolean).length
+
   return (
     <section className="replay-section od-analytics-section" aria-label="Option analytics">
       <h3 className="od-analytics-title">
@@ -1012,9 +1065,10 @@ export function OptionDiscoveryAnalyticsPanel({
         <InfoTooltip text="Derived from current-expiry snapshot data (Massive, ~15 min delayed). IV Smile and OI by strike for loaded contracts. Scoped to the selected strike window." />
       </h3>
 
-      <div className="od-charts-grid">
+      <div className="od-analytics-charts-scroll">
+        <div className="od-analytics-charts-row" data-chart-count={chartCount}>
         {hasIv && (
-          <div className="mp-chart-pane">
+          <div className="mp-chart-pane od-analytics-chart-cell">
             <div className="od-analytics-chart-head">
               <h4 className="mp-chart-subtitle">IV Smile</h4>
               <button
@@ -1041,7 +1095,7 @@ export function OptionDiscoveryAnalyticsPanel({
         )}
 
         {hasOi && (
-          <div className="mp-chart-pane">
+          <div className="mp-chart-pane od-analytics-chart-cell">
             <div className="od-analytics-chart-head">
               <h4 className="mp-chart-subtitle">Open Interest Profile</h4>
               <button
@@ -1067,7 +1121,7 @@ export function OptionDiscoveryAnalyticsPanel({
         )}
 
         {hasGex && (
-          <div className="mp-chart-pane od-chart-pane-span2">
+          <div className="mp-chart-pane od-analytics-chart-cell">
             <div className="od-analytics-chart-head">
               <h4 className="mp-chart-subtitle">
                 Gamma exposure (dealer-style)
@@ -1097,6 +1151,7 @@ export function OptionDiscoveryAnalyticsPanel({
             )}
           </div>
         )}
+        </div>
       </div>
     </section>
   )

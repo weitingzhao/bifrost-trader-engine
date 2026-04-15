@@ -34,13 +34,19 @@ import { OptionDiscoveryContractChartPanel } from './optionDiscovery/OptionDisco
 import { OptionDiscoveryAnalyticsPanel, IvSmileChart, IvSmileLegend } from './optionDiscovery/OptionDiscoveryAnalytics'
 import type { IvTermPoint, IvVolConePoint } from './optionDiscovery/OptionDiscoveryAnalytics'
 import { OdLayerSection } from './optionDiscovery/OdLayerSection'
+import { OdChainExpiryBubblePicker } from './optionDiscovery/OdChainExpiryBubblePicker'
 import { OptionDiscoveryIvTermSection } from './optionDiscovery/OptionDiscoveryIvTermSection'
 import { OptionDiscoveryCompareDrawer, addCompareRow } from './optionDiscovery/OptionDiscoveryCompareDrawer'
+import {
+  type ExpirationKind,
+  classifyExpiration,
+  expirationDaysFromToday,
+} from './optionDiscovery/expirationMeta'
 
 const STRIKE_COUNT_OPTIONS = [4, 6, 8, 19, 30, 'all'] as const
 type StrikeCountOption = (typeof STRIKE_COUNT_OPTIONS)[number]
 
-/** IV term structure: default count (sidebar order); server accepts up to 12 expirations per request. */
+/** IV term structure: default count (expiration list order); server accepts up to 12 expirations per request. */
 const IV_TERM_DEFAULT_EXPIRATIONS = 8
 const IV_TERM_MAX_EXPIRATIONS = 12
 
@@ -253,8 +259,6 @@ function StrikeLadderOiStrikeCell({
 
 // ── P0–P3: Contract detail types & derived metric helpers ──
 
-type ContractDetailTab = 'overview' | 'chart' | 'liquidity' | 'risk' | 'relative'
-
 interface DerivedMetrics {
   spread: number | null
   spreadPct: number | null
@@ -444,77 +448,6 @@ function computeRelativeValue(
   return { label, ivZScore: z, neighborAvgIv: mean, neighborCount: sameRight.length }
 }
 
-/** Parse expiration string (YYYYMMDD or YYYY-MM-DD) and return days from today. Returns "x day" / "x days". */
-function parseExpirationDateParts(expiration: string): { y: number; m: number; d: number } | null {
-  const s = (expiration || '').trim()
-  if (!s) return null
-  if (/^\d{8}$/.test(s)) {
-    return {
-      y: parseInt(s.slice(0, 4), 10),
-      m: parseInt(s.slice(4, 6), 10) - 1,
-      d: parseInt(s.slice(6, 8), 10),
-    }
-  }
-  const match = s.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  if (!match) return null
-  return {
-    y: parseInt(match[1], 10),
-    m: parseInt(match[2], 10) - 1,
-    d: parseInt(match[3], 10),
-  }
-}
-
-function getThirdFridayDay(year: number, month: number): number {
-  const first = new Date(year, month, 1)
-  const firstDow = first.getDay() // 0=Sun ... 5=Fri
-  const firstFriday = 1 + ((5 - firstDow + 7) % 7)
-  return firstFriday + 14
-}
-
-type ExpirationKind = 'all' | 'standard' | 'weeklies' | 'quarterlies'
-
-function classifyExpiration(expiration: string): Exclude<ExpirationKind, 'all'> {
-  const parts = parseExpirationDateParts(expiration)
-  if (!parts) return 'standard'
-  const dt = new Date(parts.y, parts.m, parts.d)
-  if (Number.isNaN(dt.getTime())) return 'standard'
-  const isFriday = dt.getDay() === 5
-  if (!isFriday) return 'standard'
-  const thirdFriday = getThirdFridayDay(parts.y, parts.m)
-  const isThirdFriday = parts.d === thirdFriday
-  if (!isThirdFriday) return 'weeklies'
-  const quarterMonths = [2, 5, 8, 11] // Mar/Jun/Sep/Dec in zero-based index
-  if (quarterMonths.includes(parts.m)) return 'quarterlies'
-  return 'standard'
-}
-
-function expirationBadge(kind: Exclude<ExpirationKind, 'all'>): string {
-  if (kind === 'weeklies') return 'W'
-  if (kind === 'quarterlies') return 'Q'
-  return ''
-}
-
-function expirationKindLabel(kind: Exclude<ExpirationKind, 'all'>): string {
-  if (kind === 'weeklies') return 'Weeklies'
-  if (kind === 'quarterlies') return 'Quarterlies'
-  return 'Standard'
-}
-
-function expirationDaysFromToday(expiration: string): string {
-  const parts = parseExpirationDateParts(expiration)
-  if (!parts) return '—'
-  const { y, m, d } = parts
-  const expDate = new Date(y, m, d)
-  if (Number.isNaN(expDate.getTime())) return '—'
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  expDate.setHours(0, 0, 0, 0)
-  const diffMs = expDate.getTime() - today.getTime()
-  const days = Math.round(diffMs / (24 * 60 * 60 * 1000))
-  if (days < 0) return '—'
-  return days === 1 ? '1 day' : `${days} days`
-}
-
 export function OptionDiscoveryPage({
   status: _status,
   onGoToScreener,
@@ -561,7 +494,6 @@ export function OptionDiscoveryPage({
 
   // P0–P3: Contract detail panel state
   const [selectedContractIdx, setSelectedContractIdx] = useState<number | null>(null)
-  const [contractDetailTab, setContractDetailTab] = useState<ContractDetailTab>('overview')
 
   // P1: Liquidity async data
   const [liquidityLastTrade, setLiquidityLastTrade] = useState<Record<string, unknown> | null>(null)
@@ -583,11 +515,17 @@ export function OptionDiscoveryPage({
   const [termError, setTermError] = useState<string | null>(null)
   const [conePoints, setConePoints] = useState<IvVolConePoint[]>([])
   const [coneError, setConeError] = useState<string | null>(null)
-  /** Subset of `expirations` (same order as sidebar) to send to IV term API */
+  /** Subset of `expirations` (same order as the expiration list) to send to IV term API */
   const [ivTermExpKeys, setIvTermExpKeys] = useState<string[]>([])
   /** Massive: enqueue chain snapshot jobs for IV-term selection, then reload IV term */
   const [ivTermSyncLoading, setIvTermSyncLoading] = useState(false)
   const [ivTermSyncStatus, setIvTermSyncStatus] = useState<string | null>(null)
+
+  /** Expiration table + IV term chart: same All/Std/Wk/Qtr filter */
+  const visibleExpirations = useMemo(() => {
+    if (expirationFilterKind === 'all') return expirations
+    return expirations.filter(exp => classifyExpiration(exp) === expirationFilterKind)
+  }, [expirations, expirationFilterKind])
 
   const [compareOpen, setCompareOpen] = useState(false)
   const [compareRows, setCompareRows] = useState<OptionSnapshotRow[]>([])
@@ -986,25 +924,25 @@ export function OptionDiscoveryPage({
           if (set.size <= 2 && set.has(exp)) return prev
           set.delete(exp)
         }
-        return expirations.filter(e => set.has(e))
+        return expirations.filter(e => set.has(e) && visibleExpirations.includes(e))
       })
     },
-    [expirations],
+    [expirations, visibleExpirations],
   )
 
   const resetIvTermExpirationsToDefault = useCallback(() => {
-    setIvTermExpKeys(expirations.slice(0, IV_TERM_DEFAULT_EXPIRATIONS).slice(0, IV_TERM_MAX_EXPIRATIONS))
-  }, [expirations])
+    setIvTermExpKeys(visibleExpirations.slice(0, IV_TERM_DEFAULT_EXPIRATIONS).slice(0, IV_TERM_MAX_EXPIRATIONS))
+  }, [visibleExpirations])
 
   const selectAllIvTermExpirations = useCallback(() => {
-    setIvTermExpKeys(expirations.slice(0, IV_TERM_MAX_EXPIRATIONS))
-  }, [expirations])
+    setIvTermExpKeys(visibleExpirations.slice(0, IV_TERM_MAX_EXPIRATIONS))
+  }, [visibleExpirations])
 
   /** Clears extra checks; keeps the first two expirations (minimum required for IV term). */
   const uncheckAllIvTermExpirations = useCallback(() => {
-    if (expirations.length < 2) return
-    setIvTermExpKeys(expirations.slice(0, 2))
-  }, [expirations])
+    if (visibleExpirations.length < 2) return
+    setIvTermExpKeys(visibleExpirations.slice(0, 2))
+  }, [visibleExpirations])
 
   useEffect(() => {
     setTermPoints([])
@@ -1017,18 +955,27 @@ export function OptionDiscoveryPage({
   }, [selectedSymbol])
 
   useEffect(() => {
-    if (expirations.length < 2) {
+    if (visibleExpirations.length < 2) {
       setIvTermExpKeys([])
       return
     }
     setIvTermExpKeys(prev => {
-      const def = expirations.slice(0, IV_TERM_DEFAULT_EXPIRATIONS).slice(0, IV_TERM_MAX_EXPIRATIONS)
+      const def = visibleExpirations.slice(0, IV_TERM_DEFAULT_EXPIRATIONS).slice(0, IV_TERM_MAX_EXPIRATIONS)
       if (prev.length === 0) return def
-      const kept = expirations.filter(e => prev.includes(e))
+      const kept = visibleExpirations.filter(e => prev.includes(e))
       if (kept.length >= 2) return kept.slice(0, IV_TERM_MAX_EXPIRATIONS)
       return def
     })
-  }, [expirations])
+  }, [visibleExpirations])
+
+  /** Full chain / strikes / quotes: stay on a valid row; default to first expiration after All/Std/Wk/Qtr filter. */
+  useEffect(() => {
+    if (visibleExpirations.length === 0) {
+      setSelectedExpiration('')
+      return
+    }
+    setSelectedExpiration(prev => (visibleExpirations.includes(prev) ? prev : visibleExpirations[0]))
+  }, [visibleExpirations])
 
   const handleAddToCompare = useCallback((row: OptionSnapshotRow) => {
     setCompareRows(prev => addCompareRow(prev, row))
@@ -1258,10 +1205,6 @@ export function OptionDiscoveryPage({
   }, [selectedRow, underlyingPrice])
 
   const canLoadQuotes = selectedSymbol.trim() !== '' && selectedExpiration.trim() !== '' && !snapshotLoading
-  const visibleExpirations = useMemo(() => {
-    if (expirationFilterKind === 'all') return expirations
-    return expirations.filter(exp => classifyExpiration(exp) === expirationFilterKind)
-  }, [expirations, expirationFilterKind])
 
   const showCallSide = strikeSideMode === 'all' || strikeSideMode === 'call'
   const showPutSide = strikeSideMode === 'all' || strikeSideMode === 'put'
@@ -1456,203 +1399,90 @@ export function OptionDiscoveryPage({
         </div>
       </section>
 
-      {/* ── Layout: sidebar + main ── */}
+      {/* ── Full-width main: controls + layers ── */}
       <div className="option-discovery-layout">
-        {/* ── Sidebar: Underlying + Expiration ── */}
-        <aside className="option-discovery-sidebar" aria-label="Symbol and expiration selection">
-          <section className="replay-section option-discovery-underlying" aria-label="Underlying">
-            <div className="option-discovery-underlying-body">
-              {stkSymbols.length === 0 ? (
-                <div className="option-discovery-list-wrap option-discovery-list-empty">
-                  Add STK in Watchlist and turn on Option? for symbols that have options.
-                </div>
-              ) : (
-                <div className="option-discovery-list-with-header">
-                  <div className="option-discovery-list-header">Underlying</div>
-                  <div className="option-discovery-list-wrap">
-                    <table className="option-discovery-list-table" role="grid" aria-label="Underlying symbol list">
-                      <thead>
-                        <tr>
-                          <th scope="col">Symbol</th>
-                          <th scope="col">Price (daily)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {stkSymbols.map(sym => (
-                          <tr
-                            key={sym}
-                            role="button"
-                            tabIndex={0}
-                            className={selectedSymbol === sym ? 'option-discovery-list-row-selected' : ''}
-                            onClick={() => setSelectedSymbol(sym)}
-                            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedSymbol(sym) } }}
-                            aria-label={`Select ${sym}`}
-                            aria-pressed={selectedSymbol === sym}
-                          >
-                            <td>{sym}</td>
-                            <td>
-                              {symbolDailyPrices[sym] != null ? fmtUsd(symbolDailyPrices[sym]!) : '—'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          </section>
-
-          <section className="replay-section option-discovery-expiration" aria-label="Expiration">
-            <div className="option-discovery-expiration-body">
-              {expirationsLoading ? (
-                <div className="option-discovery-list-wrap option-discovery-list-empty">Loading…</div>
-              ) : expirations.length === 0 ? (
-                <div className="option-discovery-list-wrap option-discovery-list-empty">
-                  {selectedSymbol ? 'No expirations.' : 'Select symbol.'}
-                  {expirationsError && (
-                    <span style={{ color: 'var(--color-danger)', display: 'block', marginTop: '0.25rem' }} role="alert">{expirationsError}</span>
-                  )}
-                </div>
-              ) : (
-                <div className="option-discovery-list-with-header">
-                  <div className="option-discovery-list-header" aria-label="Expiration">Expiration</div>
-                  <div className="option-discovery-expiration-filters" role="group" aria-label="Expiration type filter">
-                    <button
-                      type="button"
-                      className={`option-discovery-exp-filter-btn ${expirationFilterKind === 'all' ? 'active' : ''}`}
-                      onClick={() => setExpirationFilterKind('all')}
-                      aria-pressed={expirationFilterKind === 'all'}
-                      aria-label="All expirations"
-                      title="All expirations"
-                    >
-                      All
-                    </button>
-                    <button
-                      type="button"
-                      className={`option-discovery-exp-filter-btn ${expirationFilterKind === 'standard' ? 'active' : ''}`}
-                      onClick={() => setExpirationFilterKind('standard')}
-                      aria-pressed={expirationFilterKind === 'standard'}
-                      aria-label="Standard expirations"
-                      title="Standard expirations"
-                    >
-                      Std
-                    </button>
-                    <button
-                      type="button"
-                      className={`option-discovery-exp-filter-btn ${expirationFilterKind === 'weeklies' ? 'active' : ''}`}
-                      onClick={() => setExpirationFilterKind('weeklies')}
-                      aria-pressed={expirationFilterKind === 'weeklies'}
-                      aria-label="Weekly expirations"
-                      title="Weekly expirations"
-                    >
-                      Wk
-                    </button>
-                    <button
-                      type="button"
-                      className={`option-discovery-exp-filter-btn ${expirationFilterKind === 'quarterlies' ? 'active' : ''}`}
-                      onClick={() => setExpirationFilterKind('quarterlies')}
-                      aria-pressed={expirationFilterKind === 'quarterlies'}
-                      aria-label="Quarterly expirations"
-                      title="Quarterly expirations"
-                    >
-                      Qtr
-                    </button>
-                  </div>
-                  <div className="option-discovery-list-wrap">
-                    <table className="option-discovery-list-table" role="grid" aria-label="Expiration list">
-                      <thead>
-                        <tr>
-                          <th scope="col" className="option-discovery-expiration-col-date" />
-                          <th scope="col" className="option-discovery-expiration-col-days">
-                            Days
-                            {selectedExpiration && (
-                              <span className="option-discovery-expiration-days-header"> · {expirationDaysFromToday(selectedExpiration)}</span>
-                            )}
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {visibleExpirations.length === 0 ? (
-                          <tr>
-                            <td className="option-discovery-expiration-empty-cell" colSpan={2}>
-                              No expirations in this filter.
-                            </td>
-                          </tr>
-                        ) : (
-                          visibleExpirations.map(exp => {
-                            const kind = classifyExpiration(exp)
-                            const badge = expirationBadge(kind)
-                            return (
-                              <tr
-                                key={exp}
-                                role="button"
-                                tabIndex={0}
-                                className={selectedExpiration === exp ? 'option-discovery-list-row-selected' : ''}
-                                onClick={() => setSelectedExpiration(exp)}
-                                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedExpiration(exp) } }}
-                                aria-label={`Select ${exp}, ${expirationDaysFromToday(exp)}${badge ? `, ${expirationKindLabel(kind)}` : ''}`}
-                                aria-pressed={selectedExpiration === exp}
-                              >
-                                <td className="option-discovery-expiration-col-date">
-                                  <span>{exp}</span>
-                                  {badge && (
-                                    <span
-                                      className={`option-discovery-expiration-kind-badge option-discovery-expiration-kind-badge--${kind}`}
-                                      title={expirationKindLabel(kind)}
-                                      aria-label={expirationKindLabel(kind)}
-                                    >
-                                      {badge}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="option-discovery-expiration-days-cell">{expirationDaysFromToday(exp)}</td>
-                              </tr>
-                            )
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          </section>
-        </aside>
-
-        {/* ── Main column ── */}
         <div className="option-discovery-main">
           <div className="option-discovery-main-inner">
-            <div id="od-layer-context" className="od-sticky-context">
-              <div className="od-sticky-context-row">
-                <span className="od-sticky-context-chip" title="Current context">
-                  {selectedSymbol.trim() || '—'}
-                  {selectedExpiration.trim() ? ` · ${selectedExpiration}` : ''}
-                  {underlyingPrice != null ? ` · ${fmtUsd(underlyingPrice)}` : ''}
-                </span>
-                <button
-                  type="button"
-                  className="section-header-icon-btn od-compare-icon-btn"
-                  onClick={() => setCompareOpen(true)}
-                  aria-label={`Open compare drawer (${compareRows.length} selected)`}
-                  title={`Open compare drawer (${compareRows.length} selected)`}
-                >
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M6 4v16" />
-                    <path d="M18 4v16" />
-                    <path d="M9 7h6" />
-                    <path d="M9 12h6" />
-                    <path d="M9 17h6" />
-                  </svg>
-                  <span className="od-compare-icon-btn-count" aria-hidden>{compareRows.length}</span>
-                </button>
+            <div className="option-discovery-sticky-stack">
+              <div className="option-discovery-controls" aria-label="Underlying selection">
+                <section className="replay-section option-discovery-underlying" aria-label="Underlying">
+                  <div className="option-discovery-underlying-body">
+                    {stkSymbols.length === 0 ? (
+                      <p className="section-hint od-underlying-empty-hint" role="status">
+                        Add STK in Watchlist and turn on Option? for symbols that have options.
+                      </p>
+                    ) : (
+                      <div className="od-underlying-bubbles">
+                        <span className="od-underlying-bubbles-label" id="od-underlying-bubbles-label">
+                          Underlying
+                        </span>
+                        <div
+                          className="od-underlying-bubble-row"
+                          role="group"
+                          aria-labelledby="od-underlying-bubbles-label"
+                        >
+                          {stkSymbols.map(sym => {
+                            const px = symbolDailyPrices[sym]
+                            const priceLabel = px != null ? fmtUsd(px) : '—'
+                            return (
+                              <button
+                                key={sym}
+                                type="button"
+                                className={`od-underlying-chip ${selectedSymbol === sym ? 'od-underlying-chip--active' : ''}`}
+                                onClick={() => setSelectedSymbol(sym)}
+                                aria-pressed={selectedSymbol === sym}
+                                aria-label={`${sym}, daily price ${priceLabel}`}
+                                title={`${sym} · ${priceLabel} (daily)`}
+                              >
+                                <span className="od-underlying-chip-line">
+                                  <span className="od-underlying-chip-symbol">{sym}</span>
+                                  <span className="od-underlying-chip-sep" aria-hidden>
+                                    {' '}
+                                    ·{' '}
+                                  </span>
+                                  <span className="od-underlying-chip-price">{priceLabel}</span>
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </section>
               </div>
-              <nav className="od-page-toc" aria-label="On this page">
-                <a href="#od-layer-1">1 · IV term</a>
-                <a href="#od-layer-2">2 · Max pain</a>
-                <a href="#od-layer-3">3 · Strike &amp; analytics</a>
-                <a href="#od-layer-4">4 · Quotes &amp; contract</a>
-              </nav>
+
+              <div id="od-layer-context" className="od-sticky-context od-sticky-context--in-stack">
+                <div className="od-sticky-context-row">
+                  <span className="od-sticky-context-chip" title="Current context">
+                    {selectedSymbol.trim() || '—'}
+                    {selectedExpiration.trim() ? ` · ${selectedExpiration}` : ''}
+                    {underlyingPrice != null ? ` · ${fmtUsd(underlyingPrice)}` : ''}
+                  </span>
+                  <button
+                    type="button"
+                    className="section-header-icon-btn od-compare-icon-btn"
+                    onClick={() => setCompareOpen(true)}
+                    aria-label={`Open compare drawer (${compareRows.length} selected)`}
+                    title={`Open compare drawer (${compareRows.length} selected)`}
+                  >
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M6 4v16" />
+                      <path d="M18 4v16" />
+                      <path d="M9 7h6" />
+                      <path d="M9 12h6" />
+                      <path d="M9 17h6" />
+                    </svg>
+                    <span className="od-compare-icon-btn-count" aria-hidden>{compareRows.length}</span>
+                  </button>
+                </div>
+                <nav className="od-page-toc" aria-label="On this page">
+                  <a href="#od-layer-1">1 · IV term</a>
+                  <a href="#od-layer-2">2 · Max pain</a>
+                  <a href="#od-layer-3">3 · Strike &amp; analytics</a>
+                  <a href="#od-layer-4">4 · Quotes &amp; contract</a>
+                </nav>
+              </div>
             </div>
 
             <OdLayerSection
@@ -1661,11 +1491,13 @@ export function OptionDiscoveryPage({
               title="Underlying & IV term structure"
               subtitle="ATM IV across listed expirations (not limited to the selected expiry)."
               enabled={selectedSymbol.trim() !== ''}
-              lockedHint="Select an underlying symbol in the left sidebar."
+              lockedHint="Select an underlying symbol above."
             >
               <OptionDiscoveryIvTermSection
                 symbol={selectedSymbol}
-                expirations={expirations}
+                filteredExpirations={visibleExpirations}
+                expirationFilterKind={expirationFilterKind}
+                onExpirationFilterKindChange={setExpirationFilterKind}
                 selectedExpirations={ivTermExpKeys}
                 onToggleExpiration={toggleIvTermExpiration}
                 onResetExpirationsToDefault={resetIvTermExpirationsToDefault}
@@ -1683,6 +1515,8 @@ export function OptionDiscoveryPage({
                 termError={termError}
                 conePoints={conePoints}
                 coneError={coneError}
+                expirationsLoading={expirationsLoading}
+                expirationsError={expirationsError}
               />
             </OdLayerSection>
 
@@ -1690,10 +1524,30 @@ export function OptionDiscoveryPage({
               id="od-layer-2"
               step={2}
               title="Expiration · full chain"
-              subtitle="Max pain and OI liability for the selected expiration (EOD-style)."
-              enabled={selectedSymbol.trim() !== '' && selectedExpiration.trim() !== ''}
-              lockedHint="Select an expiration in the left sidebar."
+              subtitle="Choose chain and quotes expiry below. Max pain and OI use that expiration (EOD-style). Defaults to the first expiry under the current filter when valid."
+              enabled={selectedSymbol.trim() !== '' && visibleExpirations.length > 0}
+              lockedHint="Select an underlying and wait for expirations (section 1), or widen All/Std/Wk/Qtr."
             >
+              {selectedSymbol.trim() !== '' && (
+                <div className="od-chain-expiry-bar">
+                  <label className="od-chain-expiry-label" htmlFor="od-chain-expiry-select">
+                    Chain / quotes expiry
+                  </label>
+                  <OdChainExpiryBubblePicker
+                    stripId="od-chain-expiry-select"
+                    options={visibleExpirations}
+                    value={selectedExpiration}
+                    onChange={setSelectedExpiration}
+                    disabled={visibleExpirations.length === 0}
+                    aria-label="Chain and quotes expiration date"
+                  />
+                  {visibleExpirations.length === 0 && (
+                    <span className="section-hint od-chain-expiry-hint" role="status">
+                      No expirations for this symbol or filter.
+                    </span>
+                  )}
+                </div>
+              )}
               {selectedSymbol.trim() !== '' && selectedExpiration.trim() !== '' && (
                 <div
                   className="option-discovery-full-chain"
@@ -1715,7 +1569,7 @@ export function OptionDiscoveryPage({
               title="Strike window & option analytics"
               subtitle="Adjust the strike ladder, then review IV smile, OI, and gamma exposure for the loaded snapshot."
               enabled={selectedSymbol.trim() !== '' && selectedExpiration.trim() !== ''}
-              lockedHint="Select symbol and expiration first."
+              lockedHint="Select symbol and chain expiry in section 2."
             >
           {/* Strike window (collapsible) */}
           <details className="option-discovery-strike-window" open aria-label="Strike window">
@@ -2060,7 +1914,7 @@ export function OptionDiscoveryPage({
               title="Option quotes & contract"
               subtitle="Refresh Massive snapshots, browse the chain, then open a contract for liquidity, risk, and K-line."
               enabled={selectedSymbol.trim() !== '' && selectedExpiration.trim() !== ''}
-              lockedHint="Select symbol and expiration first."
+              lockedHint="Select symbol and chain expiry in section 2."
             >
           {/* ── Option quotes ── */}
           <section
@@ -2359,34 +2213,11 @@ export function OptionDiscoveryPage({
             </button>
           </div>
 
-          {/* Tab bar */}
-          <div className="od-detail-tabs" role="tablist">
-            {([
-              ['overview', 'Overview'],
-              ['chart', 'Chart (K-line)'],
-              ['liquidity', 'Liquidity'],
-              ['risk', 'Risk'],
-              ['relative', 'Relative Value'],
-            ] as const).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                className={`od-detail-tab${contractDetailTab === id ? ' od-detail-tab--active' : ''}`}
-                aria-selected={contractDetailTab === id}
-                onClick={() => setContractDetailTab(id)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <p className="section-hint od-detail-chart-hint" style={{ marginTop: '0.35rem', marginBottom: 0 }}>
-            Select a row in the chain table, then open the Chart (K-line) tab for OHLC. If the chart is empty, click Backfill from Massive (Celery worker on the massive queue required).
-          </p>
-
-          {/* ── Tab: Overview (P0) ── */}
-          {contractDetailTab === 'overview' && (
-            <div className="od-detail-body">
+          <div className="od-contract-detail-stack">
+          {/* ── Overview (P0) ── */}
+          <section className="od-detail-section" aria-labelledby="od-contract-sec-overview">
+            <h4 id="od-contract-sec-overview" className="od-detail-section-title">Overview</h4>
+            <div>
               <div className="od-card-grid">
                 <div className="od-card-section">
                   <div className="od-card-section-title">Price</div>
@@ -2454,21 +2285,24 @@ export function OptionDiscoveryPage({
                 </div>
               )}
             </div>
-          )}
+          </section>
 
-          {contractDetailTab === 'chart' && selectedRow && (
-            <div className="od-detail-body">
-              <OptionDiscoveryContractChartPanel
-                symbol={selectedSymbol}
-                expiration={selectedExpiration}
-                strike={selectedRow.strike}
-                optionRight={selectedRow.right === 'P' ? 'P' : 'C'}
-              />
-            </div>
-          )}
+          {/* ── Chart (K-line) ── */}
+          <section className="od-detail-section" aria-labelledby="od-contract-sec-chart">
+            <h4 id="od-contract-sec-chart" className="od-detail-section-title">Chart (K-line)</h4>
+            <p className="section-hint od-detail-chart-hint" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
+              OHLC below uses contract history. If the chart is empty, click Backfill from Massive (Celery worker on the massive queue required).
+            </p>
+            <OptionDiscoveryContractChartPanel
+              symbol={selectedSymbol}
+              expiration={selectedExpiration}
+              strike={selectedRow.strike}
+              optionRight={selectedRow.right === 'P' ? 'P' : 'C'}
+            />
+          </section>
 
-          {/* ── Tab: Liquidity (P1) ── */}
-          {contractDetailTab === 'liquidity' && (() => {
+          {/* ── Liquidity (P1) ── */}
+          {(() => {
             const lastTradeTs = liquidityLastTrade?.sip_timestamp != null
               ? Number(liquidityLastTrade.sip_timestamp) / 1e9
               : null
@@ -2485,7 +2319,8 @@ export function OptionDiscoveryPage({
               spreadPercentile = (rank / spreadRows.length) * 100
             }
             return (
-              <div className="od-detail-body">
+              <section className="od-detail-section" aria-labelledby="od-contract-sec-liquidity">
+                <h4 id="od-contract-sec-liquidity" className="od-detail-section-title">Liquidity</h4>
                 {liquidityLoading && <p className="section-hint">Loading liquidity data…</p>}
                 <div className="od-card-grid">
                   <div className="od-card-section">
@@ -2583,16 +2418,17 @@ export function OptionDiscoveryPage({
                     <span className="od-exec-chip od-exec-chip--ok">Good tradability</span>
                   )}
                 </div>
-              </div>
+              </section>
             )
           })()}
 
-          {/* ── Tab: Risk (P2) ── */}
-          {contractDetailTab === 'risk' && (() => {
+          {/* ── Risk (P2) ── */}
+          {(() => {
             const scenarios = computeScenarios(selectedRow, underlyingPrice)
             const hasGreeks = selectedRow.delta != null && Number.isFinite(selectedRow.delta!)
             return (
-              <div className="od-detail-body">
+              <section className="od-detail-section" aria-labelledby="od-contract-sec-risk">
+                <h4 id="od-contract-sec-risk" className="od-detail-section-title">Risk</h4>
                 {!hasGreeks && (
                   <p className="section-hint">Greeks not available for this contract. Risk scenarios require at least delta.</p>
                 )}
@@ -2652,12 +2488,12 @@ export function OptionDiscoveryPage({
                     </div>
                   </div>
                 </div>
-              </div>
+              </section>
             )
           })()}
 
-          {/* ── Tab: Relative Value (P2) ── */}
-          {contractDetailTab === 'relative' && (() => {
+          {/* ── Relative Value (P2) ── */}
+          {(() => {
             const clientRv = computeRelativeValue(selectedRow, snapshotRows)
             const hasServer = serverRelativeValue?.ok && serverRelativeValue.label != null
             const rvLabel = hasServer ? serverRelativeValue!.label! : clientRv.label
@@ -2666,7 +2502,8 @@ export function OptionDiscoveryPage({
             const rvCount = hasServer ? serverRelativeValue!.contracts_compared : clientRv.neighborCount
             const sameRight = snapshotRows.filter(r => r.right === selectedRow.right && r.iv != null && Number.isFinite(r.iv!))
             return (
-              <div className="od-detail-body">
+              <section className="od-detail-section" aria-labelledby="od-contract-sec-relative">
+                <h4 id="od-contract-sec-relative" className="od-detail-section-title">Relative Value</h4>
                 <div className="od-card-grid">
                   <div className="od-card-section">
                     <div className="od-card-section-title">IV Relative Value {hasServer && <span className="od-kv-dim">(server)</span>}</div>
@@ -2709,9 +2546,10 @@ export function OptionDiscoveryPage({
                     <span className="od-quality-item">OI {greeksCoverage.coverage?.with_oi ?? 0} contracts</span>
                   </div>
                 )}
-              </div>
+              </section>
             )
           })()}
+          </div>
         </section>
       )}
             </OdLayerSection>

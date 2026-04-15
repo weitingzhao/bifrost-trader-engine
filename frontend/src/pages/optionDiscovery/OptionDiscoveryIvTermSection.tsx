@@ -7,9 +7,74 @@ import {
   type IvTermPoint,
   type IvVolConePoint,
 } from './OptionDiscoveryAnalytics'
+import {
+  type ExpirationKind,
+  classifyExpiration,
+  expirationDaysFromToday,
+  expirationKindLabel,
+} from './expirationMeta'
 
 /** Matches backend `min_samples_for_bands` for cone p10–p90 bands. */
 const CONE_MIN_DAILY_SAMPLES = 5
+
+type IvDataQuality = 'good' | 'limited' | 'unknown'
+
+function ivDataQualityForExpiration(
+  exp: string,
+  termPoints: IvTermPoint[],
+  conePoints: IvVolConePoint[],
+): IvDataQuality {
+  const cone = conePoints.find(c => c.expiration === exp)
+  const term = termPoints.find(t => t.expiration === exp)
+  if (cone != null && cone.sample_days >= CONE_MIN_DAILY_SAMPLES) return 'good'
+  const hasTermIv = term?.atm_iv != null && Number.isFinite(term.atm_iv)
+  const hasConeIv = cone?.atm_iv != null && Number.isFinite(cone.atm_iv)
+  if (hasTermIv || hasConeIv) return 'limited'
+  return 'unknown'
+}
+
+function IvDataQualityIcon({ tier }: { tier: IvDataQuality }) {
+  const svgProps = {
+    width: 14,
+    height: 14,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 2,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  }
+  if (tier === 'good') {
+    return (
+      <span className="od-iv-term-quality od-iv-term-quality--good" title="IV cone: enough daily samples for percentile bands" aria-label="IV data quality: good">
+        <svg {...svgProps}>
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+          <polyline points="22 4 12 14.01 9 11.01" />
+        </svg>
+      </span>
+    )
+  }
+  if (tier === 'limited') {
+    return (
+      <span className="od-iv-term-quality od-iv-term-quality--limited" title="ATM IV present but fewer than 5 daily samples for full cone bands" aria-label="IV data quality: limited">
+        <svg {...svgProps}>
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+      </span>
+    )
+  }
+  return (
+    <span className="od-iv-term-quality od-iv-term-quality--unknown" title="Load IV term structure to assess historical cone quality" aria-label="IV data quality: unknown">
+      <svg {...svgProps}>
+        <circle cx="12" cy="12" r="10" />
+        <line x1="8" y1="12" x2="16" y2="12" />
+      </svg>
+    </span>
+  )
+}
 
 const TOOLTIP_SAMPLES_VS_REQ = (actual: number, req: number) =>
   `Expected: at least ${req} calendar days in the lookback window where a daily ATM IV can be computed from PostgreSQL option_snapshots (near-ATM strikes for this expiration, valid IV, and underlying_price that day). Actual: ${actual}. To satisfy: keep ingesting chain snapshots (Massive backfill or Load quotes in section 4) so rows accumulate across days; a wider historical strike grid helps when spot moves. The orange cone line uses option_snapshots_latest and does not require this count.`
@@ -38,7 +103,9 @@ function IvSheetHoverCell({
 
 export function OptionDiscoveryIvTermSection({
   symbol,
-  expirations,
+  filteredExpirations,
+  expirationFilterKind,
+  onExpirationFilterKindChange,
   selectedExpirations,
   onToggleExpiration,
   onResetExpirationsToDefault,
@@ -56,9 +123,14 @@ export function OptionDiscoveryIvTermSection({
   termError,
   conePoints,
   coneError,
+  expirationsLoading,
+  expirationsError,
 }: {
   symbol: string
-  expirations: string[]
+  /** Filtered list (All / Std / Wk / Qtr) for IV chart checkboxes. */
+  filteredExpirations: string[]
+  expirationFilterKind: ExpirationKind
+  onExpirationFilterKindChange: (kind: ExpirationKind) => void
   selectedExpirations: string[]
   onToggleExpiration: (expiration: string, checked: boolean) => void
   onResetExpirationsToDefault: () => void
@@ -76,6 +148,8 @@ export function OptionDiscoveryIvTermSection({
   termError: string | null
   conePoints: IvVolConePoint[]
   coneError: string | null
+  expirationsLoading: boolean
+  expirationsError: string | null
 }) {
   const [busy, setBusy] = useState(false)
   const run = useCallback(async () => {
@@ -97,7 +171,7 @@ export function OptionDiscoveryIvTermSection({
   }, [onBackfillMassiveSnapshots])
 
   const sym = symbol.trim()
-  const canLoad = sym !== '' && expirations.length >= 2
+  const canLoad = sym !== '' && filteredExpirations.length >= 2 && !expirationsLoading
   const selectedCount = selectedExpirations.length
   const blocked = termLoading || busy || snapshotSyncLoading
   const canRunLoad = selectedCount >= 2 && !blocked
@@ -129,26 +203,37 @@ export function OptionDiscoveryIvTermSection({
 
   return (
     <div className="replay-section od-iv-term-section" aria-label="IV term structure">
-      {!canLoad && (
+      {expirationsLoading && (
+        <p className="section-hint od-iv-term-exp-list-status" role="status">
+          Loading expirations…
+        </p>
+      )}
+      {expirationsError && !expirationsLoading && (
+        <p className="section-hint od-iv-term-error" role="alert">
+          {expirationsError}
+        </p>
+      )}
+      {!canLoad && !expirationsLoading && (
         <p className="section-hint" role="status">
           {!sym
             ? 'Select an underlying to load expirations.'
-            : 'Need at least two expiration dates in the list (left sidebar). The highlighted row only drives the chain table below.'}
+            : filteredExpirations.length === 0
+              ? 'No expirations match the current filter (All/Std/Wk/Qtr). Try another filter or symbol.'
+              : 'Need at least two expirations in the filtered list for IV term charts. Adjust All/Std/Wk/Qtr or pick another symbol. Chain / quotes expiry is chosen in section 2.'}
         </p>
       )}
       {canLoad && (
         <>
           <div className="od-iv-term-exp-panel">
-            <p className="section-hint od-iv-term-exp-hint">
-              You may check <strong>any</strong> expirations in the list (up to {maxExpirations}), not only the first{' '}
-              {defaultExpirationCount}. “Select first {defaultExpirationCount}” is a shortcut. IV term reads existing rows in
-              PostgreSQL — if you pick expirations that were never snapshotted, use Backfill (Massive) or Load quotes in section
-              4 for those dates.
-            </p>
             <div className="od-iv-term-exp-card" role="group" aria-label="Expirations for IV term structure">
               <div className="od-iv-term-exp-card-header">
                 <div className="od-iv-term-exp-card-heading">
-                  <span className="od-iv-term-exp-card-title">Expirations in chart</span>
+                  <span className="od-iv-term-exp-card-title">
+                    Expirations in chart
+                    <InfoTooltip
+                      text={`You may check any expirations in the list (up to ${maxExpirations}), not only the first ${defaultExpirationCount}. "Select first ${defaultExpirationCount}" is a shortcut. IV term reads existing rows in PostgreSQL — if you pick expirations that were never snapshotted, use Backfill (Massive) or Load quotes in section 4 for those dates.`}
+                    />
+                  </span>
                   <span
                     className={`od-iv-term-exp-card-badge${selectedCount < 2 ? ' od-iv-term-exp-card-badge--warn' : ''}`}
                     aria-live="polite"
@@ -157,40 +242,86 @@ export function OptionDiscoveryIvTermSection({
                     {selectedCount < 2 ? ' · min 2' : ''}
                   </span>
                 </div>
-                <div className="od-iv-term-exp-card-actions">
-                  <button
-                    type="button"
-                    className="od-iv-term-quick-select-btn"
-                    onClick={onResetExpirationsToDefault}
-                    disabled={blocked}
-                    title={`Select the first ${defaultExpirationCount} expirations in sidebar order`}
-                  >
-                    First {defaultExpirationCount}
-                  </button>
-                  <button
-                    type="button"
-                    className="od-iv-term-quick-select-btn"
-                    onClick={onSelectAllExpirations}
-                    disabled={blocked}
-                    title={`Select up to ${maxExpirations} expirations (all listed, in sidebar order)`}
-                  >
-                    Check all
-                  </button>
-                  <button
-                    type="button"
-                    className="od-iv-term-quick-select-btn od-iv-term-quick-select-btn--muted"
-                    onClick={onUncheckAllExpirations}
-                    disabled={blocked}
-                    title="Clear selection down to the first two expirations in sidebar order (minimum required for IV term)"
-                  >
-                    Uncheck all
-                  </button>
+                <div className="od-iv-term-exp-toolbar">
+                  <div className="option-discovery-expiration-filters od-iv-term-exp-filter-row" role="group" aria-label="Expiration type filter">
+                    <button
+                      type="button"
+                      className={`option-discovery-exp-filter-btn ${expirationFilterKind === 'all' ? 'active' : ''}`}
+                      onClick={() => onExpirationFilterKindChange('all')}
+                      aria-pressed={expirationFilterKind === 'all'}
+                      aria-label="All expirations"
+                      title="All expirations"
+                    >
+                      All
+                    </button>
+                    <button
+                      type="button"
+                      className={`option-discovery-exp-filter-btn ${expirationFilterKind === 'standard' ? 'active' : ''}`}
+                      onClick={() => onExpirationFilterKindChange('standard')}
+                      aria-pressed={expirationFilterKind === 'standard'}
+                      aria-label="Standard expirations"
+                      title="Standard expirations"
+                    >
+                      Std
+                    </button>
+                    <button
+                      type="button"
+                      className={`option-discovery-exp-filter-btn ${expirationFilterKind === 'weeklies' ? 'active' : ''}`}
+                      onClick={() => onExpirationFilterKindChange('weeklies')}
+                      aria-pressed={expirationFilterKind === 'weeklies'}
+                      aria-label="Weekly expirations"
+                      title="Weekly expirations"
+                    >
+                      Wk
+                    </button>
+                    <button
+                      type="button"
+                      className={`option-discovery-exp-filter-btn ${expirationFilterKind === 'quarterlies' ? 'active' : ''}`}
+                      onClick={() => onExpirationFilterKindChange('quarterlies')}
+                      aria-pressed={expirationFilterKind === 'quarterlies'}
+                      aria-label="Quarterly expirations"
+                      title="Quarterly expirations"
+                    >
+                      Qtr
+                    </button>
+                  </div>
+                  <div className="od-iv-term-exp-card-actions">
+                    <button
+                      type="button"
+                      className="od-iv-term-quick-select-btn"
+                      onClick={onResetExpirationsToDefault}
+                      disabled={blocked}
+                      title={`Select the first ${defaultExpirationCount} expirations in expiration list order`}
+                    >
+                      First {defaultExpirationCount}
+                    </button>
+                    <button
+                      type="button"
+                      className="od-iv-term-quick-select-btn"
+                      onClick={onSelectAllExpirations}
+                      disabled={blocked}
+                      title={`Select up to ${maxExpirations} expirations (all listed, in expiration list order)`}
+                    >
+                      Check all
+                    </button>
+                    <button
+                      type="button"
+                      className="od-iv-term-quick-select-btn od-iv-term-quick-select-btn--muted"
+                      onClick={onUncheckAllExpirations}
+                      disabled={blocked}
+                      title="Clear selection down to the first two expirations in expiration list order (minimum required for IV term)"
+                    >
+                      Uncheck all
+                    </button>
+                  </div>
                 </div>
               </div>
               <ul className="od-iv-term-exp-list">
-                {expirations.map(exp => {
+                {filteredExpirations.map(exp => {
                   const checked = selectedExpirations.includes(exp)
                   const atCap = !checked && selectedCount >= maxExpirations
+                  const kind = classifyExpiration(exp)
+                  const q = ivDataQualityForExpiration(exp, termPoints, conePoints)
                   return (
                     <li key={exp} className="od-iv-term-exp-li">
                       <label className={`od-iv-term-exp-item${checked ? ' od-iv-term-exp-item--checked' : ''}`}>
@@ -204,7 +335,36 @@ export function OptionDiscoveryIvTermSection({
                           }}
                           aria-label={`Include ${exp} in IV term structure`}
                         />
-                        <span className="od-iv-term-exp-date">{exp}</span>
+                        <span
+                          className="od-iv-term-exp-date-block"
+                          title={`${exp} · ${expirationDaysFromToday(exp)}`}
+                        >
+                          <span className="od-iv-term-exp-date">{exp}</span>
+                          <span className="od-iv-term-exp-date-dte-sep" aria-hidden>
+                            {' '}
+                            ·{' '}
+                          </span>
+                          <span className="od-iv-term-exp-dte">{expirationDaysFromToday(exp)}</span>
+                        </span>
+                        <span className="od-iv-term-exp-badges">
+                          {kind === 'weeklies' && (
+                            <span
+                              className="option-discovery-expiration-kind-badge option-discovery-expiration-kind-badge--weeklies od-iv-term-exp-kind-bubble"
+                              title={expirationKindLabel(kind)}
+                            >
+                              W
+                            </span>
+                          )}
+                          {kind === 'quarterlies' && (
+                            <span
+                              className="option-discovery-expiration-kind-badge option-discovery-expiration-kind-badge--quarterlies od-iv-term-exp-kind-bubble"
+                              title={expirationKindLabel(kind)}
+                            >
+                              Q
+                            </span>
+                          )}
+                          <IvDataQualityIcon tier={q} />
+                        </span>
                       </label>
                     </li>
                   )
@@ -271,11 +431,17 @@ export function OptionDiscoveryIvTermSection({
 
           {hasChart && (
             <>
-              <div className="od-iv-term-cone-charts-row">
+              <div
+                className={
+                  `od-iv-term-cone-charts-row${
+                    !coneError && conePoints.length >= 2 ? ' od-iv-term-cone-charts-row--triple' : ''
+                  }`
+                }
+              >
                 <div className="od-iv-term-chart-pane">
                   <h4 className="mp-chart-subtitle od-iv-term-chart-pane-title">
                     IV Term Structure
-                    <InfoTooltip text="ATM implied volatility for the expirations you check below (PostgreSQL option_snapshots; source matches your quote pipeline). Order follows the left sidebar list." />
+                    <InfoTooltip text="ATM implied volatility for the expirations you check below (PostgreSQL option_snapshots; source matches your quote pipeline). Order follows the expiration list above." />
                   </h4>
                   <div className="od-iv-term-chart-svg-wrap">
                     <IvTermStructureChart points={termPoints} />
@@ -300,10 +466,8 @@ export function OptionDiscoveryIvTermSection({
                     <p className="section-hint">Not enough cone points (need at least 2 expirations).</p>
                   )}
                 </div>
-              </div>
 
-              {!coneError && conePoints.length >= 2 && (
-                <div className="od-iv-term-parametric-row">
+                {!coneError && conePoints.length >= 2 && (
                   <div className="od-iv-term-chart-pane">
                     <h4 className="mp-chart-subtitle od-iv-term-chart-pane-title">
                       Parametric IV (historical)
@@ -313,21 +477,24 @@ export function OptionDiscoveryIvTermSection({
                       <IvParametricConeChart points={conePoints} />
                     </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
-              <div className="od-iv-data-table-sheet">
-                <h5 className="od-iv-data-table-heading">IV term &amp; cone — combined values</h5>
-                <p className="section-hint od-iv-data-source">
-                  <strong>Term (latest):</strong> PostgreSQL <code className="od-iv-data-code">option_snapshots_latest</code>{' '}
-                  (same pipeline as quotes: Massive or IB).{' '}
-                  <strong>Cone (historical bands):</strong> <code className="od-iv-data-code">option_snapshots</code>, one row per
-                  NY calendar day per contract (last snapshot that day), up to 90 calendar days; percentiles from daily ATM IV.{' '}
-                  <strong>ACT/REQ</strong> = actual daily ATM IV sample count vs minimum ({CONE_MIN_DAILY_SAMPLES}) for bands; hover
-                  cells when highlighted.
-                </p>
-                <div className="od-iv-data-table-wrap od-iv-data-table-wrap--iv-sheet">
-                  <table className="od-iv-data-table od-iv-data-table--merged">
+              <details className="od-iv-combined-details">
+                <summary className="od-iv-combined-summary">
+                  <span className="od-iv-combined-summary-text">IV term &amp; cone — combined values</span>
+                </summary>
+                <div className="od-iv-data-table-sheet od-iv-data-table-sheet--in-details">
+                  <p className="section-hint od-iv-data-source">
+                    <strong>Term (latest):</strong> PostgreSQL <code className="od-iv-data-code">option_snapshots_latest</code>{' '}
+                    (same pipeline as quotes: Massive or IB).{' '}
+                    <strong>Cone (historical bands):</strong> <code className="od-iv-data-code">option_snapshots</code>, one row per
+                    NY calendar day per contract (last snapshot that day), up to 90 calendar days; percentiles from daily ATM IV.{' '}
+                    <strong>ACT/REQ</strong> = actual daily ATM IV sample count vs minimum ({CONE_MIN_DAILY_SAMPLES}) for bands; hover
+                    cells when highlighted.
+                  </p>
+                  <div className="od-iv-data-table-wrap od-iv-data-table-wrap--iv-sheet">
+                    <table className="od-iv-data-table od-iv-data-table--merged">
                     <thead>
                       <tr>
                         <th scope="col" title="Expiration">Exp</th>
@@ -420,9 +587,10 @@ export function OptionDiscoveryIvTermSection({
                         })
                       )}
                     </tbody>
-                  </table>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              </details>
 
               <p className="section-hint od-iv-term-chart-caption" role="status">
                 Plotted expirations (term structure):{' '}

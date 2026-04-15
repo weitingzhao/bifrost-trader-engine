@@ -2,7 +2,25 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from 're
 import { fetchMaxPainCompute, fetchMaxPainComputeHistory, pollMassiveJobUntilDone, postMassiveSync } from '../../api'
 import type { MaxPainComputeResponse, MaxPainHistoryPoint, MaxPainStrikePoint } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
-import { OD_CHART_AXIS_FONT } from './odChartConstants'
+import {
+  OD_MAX_PAIN_AXIS_FONT,
+  OD_MAX_PAIN_PAD_LIABILITY_OI,
+  OD_MAX_PAIN_PAD_TREND,
+  OD_MAX_PAIN_VIEWBOX_H,
+  OD_MAX_PAIN_VIEWBOX_W,
+} from './odChartConstants'
+
+const AXIS_FILL = 'var(--od-max-pain-axis-fill, var(--color-text-muted))'
+
+/** X-axis tick row (below plot, above axis title) */
+function mpPainXTickY(viewH: number) {
+  return viewH - 38
+}
+
+/** Bottom axis title row (“Strike”, etc.) */
+function mpPainXTitleY(viewH: number) {
+  return viewH - 11
+}
 
 const DISCLAIMER =
   'Disclaimer: Max Pain is a theoretical reference metric based on end-of-day open interest data. It does not predict future price movement and should not be used as the sole basis for trading decisions. Open interest data is sourced from Massive (Polygon) with approximately 15-minute delay. Corporate actions (splits, special dividends) may affect strike prices and contract multipliers.'
@@ -37,9 +55,9 @@ function LiabilityByStrikeSvg({
   maxPainStrike: number
   underlyingClose: number | null
 }) {
-  const w = 640
-  const h = 240
-  const pad = { l: 60, r: 24, t: 20, b: 40 }
+  const w = OD_MAX_PAIN_VIEWBOX_W
+  const h = OD_MAX_PAIN_VIEWBOX_H
+  const pad = OD_MAX_PAIN_PAD_LIABILITY_OI
   const innerW = w - pad.l - pad.r
   const innerH = h - pad.t - pad.b
   if (points.length === 0) return null
@@ -66,12 +84,21 @@ function LiabilityByStrikeSvg({
     if (i > 0) {
       gridLines.push(
         <line key={`g-${i}`} x1={pad.l} x2={pad.l + innerW} y1={y} y2={y}
-          stroke="var(--color-border)" strokeWidth={0.5} strokeDasharray="3 3" />,
+          stroke="var(--od-max-pain-grid-stroke, var(--color-border-strong))" strokeWidth={0.5} strokeDasharray="3 3" />,
       )
     }
     yLabels.push(
-      <text key={`yl-${i}`} x={pad.l - 6} y={y + 3} textAnchor="end" fontSize={OD_CHART_AXIS_FONT}
-        fill="var(--color-text-dim)">{fmtDollarCompact(val)}</text>,
+      <text
+        key={`yl-${i}`}
+        x={pad.l - 10}
+        y={y + 4}
+        textAnchor="end"
+        fontSize={OD_MAX_PAIN_AXIS_FONT}
+        fill={AXIS_FILL}
+        dominantBaseline="middle"
+      >
+        {fmtDollarCompact(val)}
+      </text>,
     )
   }
 
@@ -92,9 +119,9 @@ function LiabilityByStrikeSvg({
       {yLabels}
 
       <line x1={pad.l} x2={pad.l + innerW} y1={pad.t + innerH} y2={pad.t + innerH}
-        stroke="var(--color-border)" strokeWidth={1} />
+        stroke="var(--od-max-pain-axis-line, var(--color-border-strong))" strokeWidth={1} />
       <line x1={pad.l} x2={pad.l} y1={pad.t} y2={pad.t + innerH}
-        stroke="var(--color-border)" strokeWidth={1} />
+        stroke="var(--od-max-pain-axis-line, var(--color-border-strong))" strokeWidth={1} />
 
       {points.map((p, i) => {
         const cx = xForStrike(p.strike)
@@ -113,11 +140,11 @@ function LiabilityByStrikeSvg({
       })}
 
       {Number.isFinite(mpX) && (
-        <line x1={mpX} x2={mpX} y1={pad.t - 2} y2={pad.t + innerH + 2}
+        <line x1={mpX} x2={mpX} y1={pad.t} y2={pad.t + innerH}
           stroke="var(--color-accent, #6ea8fe)" strokeWidth={1.5} strokeDasharray="5 3" />
       )}
       {ucX != null && (
-        <line x1={ucX} x2={ucX} y1={pad.t - 2} y2={pad.t + innerH + 2}
+        <line x1={ucX} x2={ucX} y1={pad.t} y2={pad.t + innerH}
           stroke="var(--color-text-main, #e0e0e0)" strokeWidth={1.2} strokeDasharray="2 2" />
       )}
 
@@ -126,16 +153,42 @@ function LiabilityByStrikeSvg({
         if (!p) return null
         const x = xForStrike(p.strike)
         return (
-          <text key={`xt-${i}`} x={x} y={h - 8} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
-            fill="var(--color-text-dim)">{p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike.toFixed(1)}</text>
+          <text
+            key={`xt-${i}`}
+            x={x}
+            y={mpPainXTickY(h)}
+            textAnchor="middle"
+            fontSize={OD_MAX_PAIN_AXIS_FONT}
+            fill={AXIS_FILL}
+            dominantBaseline="middle"
+          >
+            {p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike.toFixed(1)}
+          </text>
         )
       })}
 
-      <text x={pad.l - 4} y={pad.t - 6} textAnchor="end" fontSize={OD_CHART_AXIS_FONT}
-        fill="var(--color-text-dim)">Seller liability ($)</text>
+      <text
+        x={22}
+        y={pad.t + innerH / 2}
+        fontSize={OD_MAX_PAIN_AXIS_FONT}
+        fill={AXIS_FILL}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        transform={`rotate(-90 22 ${pad.t + innerH / 2})`}
+      >
+        Seller liability ($)
+      </text>
 
-      <text x={pad.l + innerW / 2} y={h - 0} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
-        fill="var(--color-text-dim)">Strike</text>
+      <text
+        x={pad.l + innerW / 2}
+        y={mpPainXTitleY(h)}
+        textAnchor="middle"
+        fontSize={OD_MAX_PAIN_AXIS_FONT}
+        fill={AXIS_FILL}
+        dominantBaseline="middle"
+      >
+        Strike
+      </text>
     </svg>
   )
 }
@@ -177,9 +230,9 @@ function OiBarsSvg({
   showCall: boolean
   showPut: boolean
 }) {
-  const w = 640
-  const h = 152
-  const pad = { l: 60, r: 24, t: 8, b: 36 }
+  const w = OD_MAX_PAIN_VIEWBOX_W
+  const h = OD_MAX_PAIN_VIEWBOX_H
+  const pad = OD_MAX_PAIN_PAD_LIABILITY_OI
   const innerW = w - pad.l - pad.r
   const innerH = h - pad.t - pad.b
   if ((!showCall && !showPut) || points.length === 0) return null
@@ -200,6 +253,10 @@ function OiBarsSvg({
     <svg className="od-max-pain-svg od-chart-svg" viewBox={`0 0 ${w} ${h}`} aria-label="Open interest by strike">
       <rect x={pad.l} y={pad.t} width={innerW} height={innerH}
         fill="var(--color-surface)" rx={4} />
+      <line x1={pad.l} x2={pad.l + innerW} y1={pad.t + innerH} y2={pad.t + innerH}
+        stroke="var(--od-max-pain-axis-line, var(--color-border-strong))" strokeWidth={1} />
+      <line x1={pad.l} x2={pad.l} y1={pad.t} y2={pad.t + innerH}
+        stroke="var(--od-max-pain-axis-line, var(--color-border-strong))" strokeWidth={1} />
       {points.flatMap((p, i) => {
         const cx = xForStrike(p.strike)
         const y0 = pad.t + innerH
@@ -226,22 +283,48 @@ function OiBarsSvg({
         if (!p) return null
         const x = xForStrike(p.strike)
         return (
-          <text key={`xt-${i}`} x={x} y={h - 8} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
-            fill="var(--color-text-dim)">{p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike.toFixed(1)}</text>
+          <text
+            key={`xt-${i}`}
+            x={x}
+            y={mpPainXTickY(h)}
+            textAnchor="middle"
+            fontSize={OD_MAX_PAIN_AXIS_FONT}
+            fill={AXIS_FILL}
+            dominantBaseline="middle"
+          >
+            {p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike.toFixed(1)}
+          </text>
         )
       })}
-      <text x={pad.l + innerW / 2} y={h - 0} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
-        fill="var(--color-text-dim)">Strike</text>
-      <text x={pad.l - 4} y={pad.t - 2} textAnchor="end" fontSize={OD_CHART_AXIS_FONT}
-        fill="var(--color-text-dim)">Open Interest</text>
+      <text
+        x={pad.l + innerW / 2}
+        y={mpPainXTitleY(h)}
+        textAnchor="middle"
+        fontSize={OD_MAX_PAIN_AXIS_FONT}
+        fill={AXIS_FILL}
+        dominantBaseline="middle"
+      >
+        Strike
+      </text>
+      <text
+        x={22}
+        y={pad.t + innerH / 2}
+        fontSize={OD_MAX_PAIN_AXIS_FONT}
+        fill={AXIS_FILL}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        transform={`rotate(-90 22 ${pad.t + innerH / 2})`}
+      >
+        Open Interest
+      </text>
     </svg>
   )
 }
 
 function TrendSvg({ series }: { series: MaxPainHistoryPoint[] }) {
-  const w = 640
-  const h = 172
-  const pad = { l: 60, r: 48, t: 16, b: 36 }
+  const w = OD_MAX_PAIN_VIEWBOX_W
+  const h = OD_MAX_PAIN_VIEWBOX_H
+  const pad = OD_MAX_PAIN_PAD_TREND
   const innerW = w - pad.l - pad.r
   const innerH = h - pad.t - pad.b
   if (series.length < 2) {
@@ -280,6 +363,10 @@ function TrendSvg({ series }: { series: MaxPainHistoryPoint[] }) {
     <svg className="od-max-pain-svg od-chart-svg" viewBox={`0 0 ${w} ${h}`} aria-label="Max pain vs underlying price trend over time">
       <rect x={pad.l} y={pad.t} width={innerW} height={innerH}
         fill="var(--color-surface)" rx={4} />
+      <line x1={pad.l} x2={pad.l + innerW} y1={pad.t + innerH} y2={pad.t + innerH}
+        stroke="var(--od-max-pain-axis-line, var(--color-border-strong))" strokeWidth={1} />
+      <line x1={pad.l} x2={pad.l} y1={pad.t} y2={pad.t + innerH}
+        stroke="var(--od-max-pain-axis-line, var(--color-border-strong))" strokeWidth={1} />
 
       {Array.from({ length: yTicks + 1 }, (_, i) => {
         const val = minY + yStep * i
@@ -287,9 +374,17 @@ function TrendSvg({ series }: { series: MaxPainHistoryPoint[] }) {
         return (
           <g key={i}>
             {i > 0 && <line x1={pad.l} x2={pad.l + innerW} y1={y} y2={y}
-              stroke="var(--color-border)" strokeWidth={0.5} strokeDasharray="3 3" />}
-            <text x={pad.l - 6} y={y + 3} textAnchor="end" fontSize={OD_CHART_AXIS_FONT}
-              fill="var(--color-text-dim)">{val.toFixed(1)}</text>
+              stroke="var(--od-max-pain-grid-stroke, var(--color-border-strong))" strokeWidth={0.5} strokeDasharray="3 3" />}
+            <text
+              x={pad.l - 10}
+              y={y + 4}
+              textAnchor="end"
+              fontSize={OD_MAX_PAIN_AXIS_FONT}
+              fill={AXIS_FILL}
+              dominantBaseline="middle"
+            >
+              {val.toFixed(1)}
+            </text>
           </g>
         )
       })}
@@ -305,19 +400,41 @@ function TrendSvg({ series }: { series: MaxPainHistoryPoint[] }) {
         const x = pad.l + scaleLin(i, 0, series.length - 1, 0, innerW)
         const label = s.trade_date.slice(5)
         return (
-          <text key={i} x={x} y={h - 8} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
-            fill="var(--color-text-dim)">{label}</text>
+          <text
+            key={i}
+            x={x}
+            y={mpPainXTickY(h)}
+            textAnchor="middle"
+            fontSize={OD_MAX_PAIN_AXIS_FONT}
+            fill={AXIS_FILL}
+            dominantBaseline="middle"
+          >
+            {label}
+          </text>
         )
       })}
 
-      <text x={w - pad.r} y={pad.t + 10} textAnchor="end" fontSize={OD_CHART_AXIS_FONT} fill="var(--color-accent, #6ea8fe)">
-        Max Pain
+      <text x={w - 14} y={22} textAnchor="end" fontSize={OD_MAX_PAIN_AXIS_FONT}>
+        <tspan fill="var(--color-accent, #6ea8fe)">Max Pain</tspan>
+        {hasClose ? (
+          <>
+            <tspan fill="var(--color-text-muted)"> · </tspan>
+            <tspan fill="var(--color-text-muted)">Underlying</tspan>
+          </>
+        ) : null}
       </text>
-      {hasClose && (
-        <text x={w - pad.r} y={pad.t + 22} textAnchor="end" fontSize={OD_CHART_AXIS_FONT} fill="var(--color-text-muted)">
-          Underlying
-        </text>
-      )}
+
+      <text
+        x={22}
+        y={pad.t + innerH / 2}
+        fontSize={OD_MAX_PAIN_AXIS_FONT}
+        fill={AXIS_FILL}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        transform={`rotate(-90 22 ${pad.t + innerH / 2})`}
+      >
+        Price
+      </text>
     </svg>
   )
 }
@@ -419,6 +536,11 @@ export function OptionDiscoveryMaxPainPanel({
       <section className="replay-section od-max-pain-section" aria-label="Max Pain">
         <h3 className="od-max-pain-title">
           Max Pain Analysis
+          {expiration.trim() ? (
+            <span className="od-max-pain-title-exp" aria-label={`Expiration ${expiration}`}>
+              · {expiration}
+            </span>
+          ) : null}
           <InfoTooltip text="Requires Massive API key and EOD open interest in PostgreSQL." />
         </h3>
         <p className="section-hint">Configure Massive under Settings → Feed → Massive Option to enable Max Pain.</p>
@@ -435,6 +557,11 @@ export function OptionDiscoveryMaxPainPanel({
       <div className="mp-header-row">
         <h3 id="od-max-pain-head" className="od-max-pain-title">
           Max Pain Analysis
+          {expiration.trim() ? (
+            <span className="od-max-pain-title-exp" aria-label={`Expiration ${expiration}`}>
+              · {expiration}
+            </span>
+          ) : null}
           <InfoTooltip text="Based on end-of-day open interest from Massive (15 min delayed source). Computed live from PostgreSQL; not read from stored report rows." />
         </h3>
         <div className="od-max-pain-header-actions">
@@ -505,76 +632,84 @@ export function OptionDiscoveryMaxPainPanel({
 
           {live?.ok && points.length > 0 && (
             <div className="od-max-pain-layout">
-              <div className="od-max-pain-top-layout">
-                <div className="od-max-pain-summary-col">
-                  <div className="od-max-pain-card od-max-pain-card--vertical">
-                    <div className="od-max-pain-card-metric">
-                      <span className="od-max-pain-card-label">Max Pain</span>
-                      <strong>{live.max_pain_strike != null ? live.max_pain_strike.toFixed(2) : '—'}</strong>
-                    </div>
-                    <div className="od-max-pain-card-metric">
-                      <span className="od-max-pain-card-label">Spot</span>
-                      <strong>{live.underlying_close != null ? live.underlying_close.toFixed(2) : '—'}</strong>
-                    </div>
-                    <div className="od-max-pain-card-metric">
-                      <span className="od-max-pain-card-label">Distance</span>
-                      <strong>
-                        {live.distance_to_max_pain_pct != null ? `${(live.distance_to_max_pain_pct * 100).toFixed(2)}%` : '—'}
-                      </strong>
-                    </div>
-                    <div className="od-max-pain-card-metric">
-                      <span className="od-max-pain-card-label">Total OI</span>
-                      <strong>{live.total_oi != null ? live.total_oi.toLocaleString() : '—'}</strong>
-                    </div>
-                    <div className="od-max-pain-card-metric">
-                      <span className="od-max-pain-card-label">OI as-of</span>
-                      <strong>{live.trade_date ?? '—'}</strong>
-                    </div>
-                    {live.recent_corporate_action && (
-                      <p className="od-max-pain-corp-warn" role="status">
-                        Recent corporate action — verify strikes and multipliers.
-                      </p>
-                    )}
+              <div className="od-max-pain-metrics-bar">
+                <div className="od-max-pain-metrics-inner" role="group" aria-label="Max Pain summary">
+                  <div className="od-max-pain-metric-cell">
+                    <span className="od-max-pain-card-label">Max Pain</span>
+                    <strong>{live.max_pain_strike != null ? live.max_pain_strike.toFixed(2) : '—'}</strong>
+                  </div>
+                  <div className="od-max-pain-metric-cell">
+                    <span className="od-max-pain-card-label">Spot</span>
+                    <strong>{live.underlying_close != null ? live.underlying_close.toFixed(2) : '—'}</strong>
+                  </div>
+                  <div className="od-max-pain-metric-cell">
+                    <span className="od-max-pain-card-label">Distance</span>
+                    <strong>
+                      {live.distance_to_max_pain_pct != null ? `${(live.distance_to_max_pain_pct * 100).toFixed(2)}%` : '—'}
+                    </strong>
+                  </div>
+                  <div className="od-max-pain-metric-cell">
+                    <span className="od-max-pain-card-label">Total OI</span>
+                    <strong>{live.total_oi != null ? live.total_oi.toLocaleString() : '—'}</strong>
+                  </div>
+                  <div className="od-max-pain-metric-cell">
+                    <span className="od-max-pain-card-label">OI as-of</span>
+                    <strong>{live.trade_date ?? '—'}</strong>
                   </div>
                 </div>
+                {live.recent_corporate_action && (
+                  <p className="od-max-pain-corp-warn od-max-pain-corp-warn--below-metrics" role="status">
+                    Recent corporate action — verify strikes and multipliers.
+                  </p>
+                )}
+              </div>
 
-                <div className="od-max-pain-strike-col">
-                  <div className="mp-chart-pane">
-                    <h4 className="mp-chart-subtitle">Seller Liability by Strike</h4>
+              <div className="od-max-pain-charts-scroll">
+                <div className="od-max-pain-charts-row">
+                  <div className="mp-chart-pane od-max-pain-chart-cell">
+                    <h4 className="mp-chart-subtitle mp-chart-subtitle--pane">Seller Liability by Strike</h4>
                     <LiabilityLegend underlyingClose={live.underlying_close ?? null} maxPainStrike={live.max_pain_strike ?? 0} />
                     <LiabilityByStrikeSvg points={points} maxPainStrike={live.max_pain_strike ?? 0}
                       underlyingClose={live.underlying_close ?? null} />
                   </div>
 
-                  <div className="mp-chart-pane">
-                    <h4 className="mp-chart-subtitle">Open Interest by Strike</h4>
+                  <div className="mp-chart-pane od-max-pain-chart-cell">
+                    <h4 className="mp-chart-subtitle mp-chart-subtitle--pane">Open Interest by Strike</h4>
                     <OiBarsSvg points={points} showCall showPut />
                   </div>
-                </div>
-              </div>
 
-              <div className="mp-chart-pane od-max-pain-trend-pane">
-                <div className="od-max-pain-trend-head">
-                  <h4 className="mp-chart-subtitle">Historical Trend</h4>
-                  <button
-                    type="button"
-                    className="section-header-icon-btn od-max-pain-refresh-icon-btn"
-                    onClick={() => setTrendCollapsed(v => !v)}
-                    title={trendCollapsed ? 'Expand Historical Trend' : 'Collapse Historical Trend'}
-                    aria-label={trendCollapsed ? 'Expand Historical Trend' : 'Collapse Historical Trend'}
-                    aria-expanded={!trendCollapsed}
-                  >
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <path d={trendCollapsed ? 'M9 18l6-6-6-6' : 'M6 9l6 6 6-6'} />
-                    </svg>
-                  </button>
+                  <div className="mp-chart-pane od-max-pain-chart-cell od-max-pain-trend-pane" aria-label="Max Pain and underlying trend">
+                    <div className="mp-chart-pane-head">
+                      <h4 className="mp-chart-subtitle mp-chart-subtitle--pane">Max Pain · Underlying</h4>
+                      <button
+                        type="button"
+                        className="section-header-icon-btn od-max-pain-refresh-icon-btn"
+                        onClick={() => setTrendCollapsed(v => !v)}
+                        title={trendCollapsed ? 'Expand chart' : 'Collapse chart'}
+                        aria-label={trendCollapsed ? 'Expand Max Pain vs underlying chart' : 'Collapse Max Pain vs underlying chart'}
+                        aria-expanded={!trendCollapsed}
+                        aria-controls="od-max-pain-trend-chart"
+                      >
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d={trendCollapsed ? 'M9 18l6-6-6-6' : 'M6 9l6 6 6-6'} />
+                        </svg>
+                      </button>
+                    </div>
+                    {!trendCollapsed && (
+                      <div id="od-max-pain-trend-chart">
+                        <TrendSvg series={hist} />
+                      </div>
+                    )}
+                  </div>
                 </div>
-                {!trendCollapsed && <TrendSvg series={hist} />}
               </div>
             </div>
           )}
 
-          <p className="od-max-pain-disclaimer">{DISCLAIMER}</p>
+          <details className="od-max-pain-disclaimer-details">
+            <summary className="od-max-pain-disclaimer-summary">Disclaimer</summary>
+            <p className="od-max-pain-disclaimer-body">{DISCLAIMER}</p>
+          </details>
         </>
       )}
     </section>
