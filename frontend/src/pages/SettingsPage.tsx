@@ -39,6 +39,7 @@ import {
   FEED_MASSIVE_OPTION_ID,
   FEED_MASSIVE_OVERVIEW_ID,
   FEED_MASSIVE_STOCK_ID,
+  FEED_INTERACTIVE_BROKERS_LABEL,
   FEED_SUBSECTIONS,
 } from './settings/settingsConstants'
 import { CAPABILITY_GROUP_LABELS, CAPABILITY_GROUP_ORDER, type CapabilityGroup } from './massiveFeedChecklistRows'
@@ -360,7 +361,7 @@ export function SettingsPage({
   } = apiHealthProbes
   const currentHash = typeof window !== 'undefined' ? window.location.hash.slice(1) : ''
   const activeSubId = activeSectionId === 'settings-ib-connection' && IB_CONNECTION_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
-  const activeIbStockFeed = activeSectionId === 'settings-feed' && currentHash === 'feed-ib-stock'
+  const activeInteractiveBrokersFeed = activeSectionId === 'settings-feed' && currentHash === 'feed-ib-stock'
   const currentHashForMassive = currentHash ? `#${currentHash}` : ''
   const isMassiveFeedMenuActive = activeSectionId === 'settings-feed' && isAnyMassiveFeedHash(currentHashForMassive)
   const isMassiveCommonFeedActive = activeSectionId === 'settings-feed' && isMassiveCommonFeedHash(currentHashForMassive)
@@ -862,7 +863,7 @@ export function SettingsPage({
           <a
             key={sub.id}
             href={`#${sub.id}`}
-            className={`settings-sidebar-link ${activeIbStockFeed ? 'active' : ''}`}
+            className={`settings-sidebar-link ${activeInteractiveBrokersFeed ? 'active' : ''}`}
           >
             <SettingsSectionIcon name={sub.icon} />
             {sub.label}
@@ -1297,7 +1298,7 @@ export function SettingsPage({
             onBreadcrumbParent={() => { window.location.hash = '#settings-heartbeat' }}
             breadcrumbParentLabel="Settings"
             onGoToScreener={() => { window.location.hash = '#feed-ib-stock' }}
-            breadcrumbLabel="IB Stock"
+            breadcrumbLabel={FEED_INTERACTIVE_BROKERS_LABEL}
           />
         )
       ) : (

@@ -570,7 +570,7 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
           </>
         ) : (
           <>
-            Full bars job UI: <a href="#feed-ib-stock">IB Stock → Data</a>.
+            Full bars job UI: <a href="#feed-ib-stock">Interactive Brokers → Data</a>.
           </>
         )}
       </p>

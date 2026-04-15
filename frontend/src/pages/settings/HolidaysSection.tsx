@@ -36,7 +36,7 @@ export function HolidaysSection({
     <div className="daemon-group" id="settings-holidays">
       <div className="daemon-group-header">
         <span className="daemon-group-title">US market holidays (NYSE)</span>
-        <InfoTooltip text="Holidays used to decide trading days (e.g. Settings → Status → Feed → IB Stock coverage yellow (end)). Add or delete as needed." />
+        <InfoTooltip text="Holidays used to decide trading days (e.g. Settings → Status → Feed → Interactive Brokers coverage yellow (end)). Add or delete as needed." />
       </div>
       <div className="daemon-group-body">
         <div className="controls settings-holidays-filters">

@@ -124,7 +124,7 @@ export function MarketDataPage({ status, onGoToScreener, breadcrumbLabel = 'Scre
       <section className="replay-section" aria-labelledby="bars-head">
         <h3 id="bars-head" className="page-title-with-tooltip">
           Bars
-          <InfoTooltip text="View bars from DB by symbol and period. For fetching/backfill, use Settings → Status → Feed → IB Stock." />
+          <InfoTooltip text="View bars from DB by symbol and period. For fetching/backfill, use Settings → Status → Feed → Interactive Brokers." />
         </h3>
         <div className="replay-bar-symbol-row">
           <label htmlFor="market-bar-symbol" className="replay-bar-symbol-label">Symbol</label>

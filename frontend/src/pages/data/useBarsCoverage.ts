@@ -150,7 +150,7 @@ export function useBarsCoverage(status: StatusResponse | null) {
   }, [])
 
   const openBarsForSymbol = useCallback(async (_symbol: string, _period: string) => {
-    // no-op in coverage standalone — bars inspect lives in IB Stock page
+    // no-op in coverage standalone — bars inspect lives in Interactive Brokers (Feed) page
   }, [])
 
   const handleConfirmReset = useCallback(async () => {

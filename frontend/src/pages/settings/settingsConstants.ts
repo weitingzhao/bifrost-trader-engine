@@ -43,13 +43,15 @@ export function isCoverageStockHash(hash: string): boolean {
   return h === 'coverage-stock' || h === 'coverage-massive-stock'
 }
 
-/** Feed: IB Stock (single link). Massive Overview / Common / Option / Stock nested under Feed → Massive in SettingsPage. */
+/** Feed: Interactive Brokers (single link, hash feed-ib-stock). Massive Overview / Common / Option / Stock nested under Feed → Massive in SettingsPage. */
 export const FEED_MASSIVE_OVERVIEW_ID = 'feed-massive-overview' as const
 export const FEED_MASSIVE_COMMON_ID = 'feed-massive-common' as const
 export const FEED_MASSIVE_OPTION_ID = 'feed-massive-option' as const
 export const FEED_MASSIVE_STOCK_ID = 'feed-massive-stock' as const
 
-export const FEED_SUBSECTIONS = [{ id: 'feed-ib-stock', label: 'IB Stock', icon: 'feed-ib' as const }] as const
+export const FEED_INTERACTIVE_BROKERS_LABEL = 'Interactive Brokers' as const
+
+export const FEED_SUBSECTIONS = [{ id: 'feed-ib-stock', label: FEED_INTERACTIVE_BROKERS_LABEL, icon: 'feed-ib' as const }] as const
 
 /** All sections in sidebar order (Status first, then Settings). Used for hash fallback etc. */
 export const SETTINGS_SECTIONS = [...STATUS_SECTIONS, ...CONFIG_SECTIONS] as const

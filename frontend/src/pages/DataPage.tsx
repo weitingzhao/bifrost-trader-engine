@@ -4,6 +4,7 @@ import { fetchBars, fetchBarsJobs, deleteBarsJob, deleteAllBarsJobs, postRetryBa
 import { inspectBarsLimitForPeriod } from './data/dataCoverageUtils'
 import { useBarCandidateSymbols } from './data/useBarCandidateSymbols'
 import { DataBarsPreviewPanel, DataJobsPanel } from './data/panels'
+import { FEED_INTERACTIVE_BROKERS_LABEL } from './settings/settingsConstants'
 
 interface DataPageProps {
   status: StatusResponse | null
@@ -19,7 +20,7 @@ export function DataPage({
   onGoToScreener,
   onBreadcrumbParent,
   breadcrumbParentLabel = 'Research',
-  breadcrumbLabel = 'IB Stock',
+  breadcrumbLabel = FEED_INTERACTIVE_BROKERS_LABEL,
   embeddedInSettings = false,
 }: DataPageProps) {
   const [bars, setBars] = useState<Bar[]>([])

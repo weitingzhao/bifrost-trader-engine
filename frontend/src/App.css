@@ -7255,7 +7255,7 @@ th {
   min-width: 0;
 }
 
-/* Horizontal scroll for wide tables (IB Stock in Settings, etc.) */
+/* Horizontal scroll for wide tables (Interactive Brokers / Feed in Settings, etc.) */
 .data-table-scroll-wrap {
   max-width: 100%;
   min-width: 0;
@@ -7267,7 +7267,7 @@ th {
   padding-bottom: var(--space-1);
 }
 
-/* IB Stock (DataPage) under Settings — fit settings-main width */
+/* Interactive Brokers / DataPage under Settings — fit settings-main width */
 .market-data-page--settings-embed {
   width: 100%;
   max-width: 100%;
