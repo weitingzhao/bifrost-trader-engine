@@ -3,6 +3,7 @@ import type { Bar } from '../../types'
 import { fetchOptionBars, pollMassiveJobUntilDone, postMassiveSync } from '../../api'
 import { BarsCandlestickChart } from '../data/BarsCandlestickChart'
 import { InfoTooltip } from '../../components/InfoTooltip'
+import { OdChartExpandOnHover } from './OdChartExpandOnHover'
 import { buildPolygonOptionsTicker } from '../../utils/polygonOptionsTicker'
 
 const OPTION_BAR_PERIODS = [
@@ -201,14 +202,18 @@ export function OptionDiscoveryContractChartPanel({
       {syncHint && <p className="section-hint" role="status">{syncHint}</p>}
       {error && <p className="section-hint" role="status">{error}</p>}
       {chartBars.length > 0 && (
-        <div className="data-bars-chart-container" style={{ marginTop: '0.75rem' }}>
-          <div className="data-bars-chart-header">
-            <span className="data-bars-chart-title">
-              {symbol.trim().toUpperCase()} {optionRight === 'C' ? 'Call' : 'Put'} {strike.toFixed(2)} · {period} · Massive (DB) · {chartBars.length} bars
-            </span>
+        <OdChartExpandOnHover
+          title={`${symbol.trim().toUpperCase()} ${optionRight === 'C' ? 'Call' : 'Put'} ${strike.toFixed(2)} · ${period}`}
+        >
+          <div className="data-bars-chart-container" style={{ marginTop: '0.75rem' }}>
+            <div className="data-bars-chart-header">
+              <span className="data-bars-chart-title">
+                {symbol.trim().toUpperCase()} {optionRight === 'C' ? 'Call' : 'Put'} {strike.toFixed(2)} · {period} · Massive (DB) · {chartBars.length} bars
+              </span>
+            </div>
+            <BarsCandlestickChart bars={chartBars} period={period} />
           </div>
-          <BarsCandlestickChart bars={chartBars} period={period} />
-        </div>
+        </OdChartExpandOnHover>
       )}
       {!loading && chartBars.length === 0 && !error && (
         <p className="section-hint" role="status">No bars returned.</p>

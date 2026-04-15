@@ -7,6 +7,7 @@ import {
   type IvTermPoint,
   type IvVolConePoint,
 } from './OptionDiscoveryAnalytics'
+import { OdChartExpandOnHover } from './OdChartExpandOnHover'
 import {
   type ExpirationKind,
   classifyExpiration,
@@ -444,7 +445,9 @@ export function OptionDiscoveryIvTermSection({
                     <InfoTooltip text="ATM implied volatility for the expirations you check below (PostgreSQL option_snapshots; source matches your quote pipeline). Order follows the expiration list above." />
                   </h4>
                   <div className="od-iv-term-chart-svg-wrap">
-                    <IvTermStructureChart points={termPoints} />
+                    <OdChartExpandOnHover title="IV Term Structure">
+                      <IvTermStructureChart points={termPoints} />
+                    </OdChartExpandOnHover>
                   </div>
                 </div>
                 <div className="od-iv-term-chart-pane">
@@ -459,7 +462,9 @@ export function OptionDiscoveryIvTermSection({
                   )}
                   {!coneError && conePoints.length >= 2 && (
                     <div className="od-iv-term-chart-svg-wrap">
-                      <IvVolConeChart points={conePoints} />
+                      <OdChartExpandOnHover title="IV Volatility Cone">
+                        <IvVolConeChart points={conePoints} />
+                      </OdChartExpandOnHover>
                     </div>
                   )}
                   {!coneError && conePoints.length > 0 && conePoints.length < 2 && (
@@ -474,7 +479,9 @@ export function OptionDiscoveryIvTermSection({
                       <InfoTooltip text="Per expiration: sample mean and sample standard deviation of daily ATM IV over the same lookback as the percentile cone; min/max and mean ±1 SD / ±2 SD (lower bands clamped at 0). Not the same as p10–p90. Call and Put: latest snapshot IV at the chosen ATM strike (same as term structure)." />
                     </h4>
                     <div className="od-iv-term-chart-svg-wrap od-iv-term-chart-svg-wrap--parametric">
-                      <IvParametricConeChart points={conePoints} />
+                      <OdChartExpandOnHover title="Parametric IV (historical)">
+                        <IvParametricConeChart points={conePoints} />
+                      </OdChartExpandOnHover>
                     </div>
                   </div>
                 )}

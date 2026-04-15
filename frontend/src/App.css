@@ -10611,6 +10611,155 @@ th {
 }
 
 /* Summary metrics — single horizontal row above charts */
+/* Option Discovery — hover to enlarge chart (portal overlay) */
+.od-chart-expand-trigger {
+  cursor: pointer;
+  min-width: 0;
+}
+
+/* Shell: clicks pass through to the page; only .od-chart-expand-panel receives events */
+.od-chart-expand-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10060;
+  pointer-events: none;
+}
+
+.od-chart-expand-panel {
+  position: fixed;
+  z-index: 1;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 420px;
+  min-height: 220px;
+  overflow: hidden;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 90%, var(--color-accent));
+  background: var(--color-surface-elevated);
+  box-shadow: 0 20px 50px color-mix(in srgb, #000 35%, transparent);
+  pointer-events: auto;
+}
+
+.od-chart-expand-panel-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  user-select: none;
+}
+
+.od-chart-expand-panel-title {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.od-chart-expand-panel-drag {
+  cursor: grab;
+}
+
+.od-chart-expand-panel-drag:active {
+  cursor: grabbing;
+}
+
+.od-chart-expand-panel-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.od-chart-expand-panel-close:hover {
+  color: var(--color-text-main);
+  border-color: var(--color-border-strong);
+}
+
+.od-chart-expand-panel-body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  width: 100%;
+}
+
+.od-chart-expand-panel-body .od-max-pain-svg,
+.od-chart-expand-panel-body .od-chart-svg {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+.od-chart-expand-panel-body .data-bars-chart-container {
+  max-width: 100%;
+}
+
+.od-chart-expand-panel-hint {
+  flex-shrink: 0;
+  margin: var(--space-2) 2rem 0 0;
+  font-size: 0.65rem;
+  color: var(--color-text-dim);
+}
+
+.od-chart-expand-resize-grip {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 22px;
+  height: 22px;
+  z-index: 2;
+  cursor: nwse-resize;
+  touch-action: none;
+  border-radius: 0 0 10px 0;
+  background: linear-gradient(
+    135deg,
+    transparent 0%,
+    transparent 45%,
+    color-mix(in srgb, var(--color-border-strong) 70%, transparent) 45%,
+    color-mix(in srgb, var(--color-border-strong) 70%, transparent) 50%,
+    transparent 50%,
+    transparent 58%,
+    color-mix(in srgb, var(--color-border-strong) 70%, transparent) 58%,
+    color-mix(in srgb, var(--color-border-strong) 70%, transparent) 64%,
+    transparent 64%
+  );
+}
+
+.od-chart-expand-resize-grip:hover {
+  background: linear-gradient(
+    135deg,
+    transparent 0%,
+    transparent 45%,
+    color-mix(in srgb, var(--color-accent) 55%, var(--color-border)) 45%,
+    color-mix(in srgb, var(--color-accent) 55%, var(--color-border)) 50%,
+    transparent 50%,
+    transparent 58%,
+    color-mix(in srgb, var(--color-accent) 55%, var(--color-border)) 58%,
+    color-mix(in srgb, var(--color-accent) 55%, var(--color-border)) 64%,
+    transparent 64%
+  );
+}
+
 .od-max-pain-metrics-bar {
   width: 100%;
   margin-bottom: var(--space-3);

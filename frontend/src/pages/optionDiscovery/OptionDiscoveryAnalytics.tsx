@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { IvVolatilityConePoint, OptionSnapshotRow } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
+import { OdChartExpandOnHover } from './OdChartExpandOnHover'
 import {
   OD_ANALYTICS_AXIS_TICK_FILL,
   OD_ANALYTICS_AXIS_TITLE_FILL,
@@ -1085,11 +1086,13 @@ export function OptionDiscoveryAnalyticsPanel({
               </button>
             </div>
             {!ivCollapsed && (
-              <>
-                <IvSmileLegend underlying={underlying} />
-                <IvSmileChart rows={rows} underlying={underlying} />
-                <SkewSummary rows={rows} underlying={underlying} />
-              </>
+              <OdChartExpandOnHover title="IV Smile">
+                <>
+                  <IvSmileLegend underlying={underlying} />
+                  <IvSmileChart rows={rows} underlying={underlying} />
+                  <SkewSummary rows={rows} underlying={underlying} />
+                </>
+              </OdChartExpandOnHover>
             )}
           </div>
         )}
@@ -1112,10 +1115,12 @@ export function OptionDiscoveryAnalyticsPanel({
               </button>
             </div>
             {!oiCollapsed && (
-              <>
-                <OiProfileLegend underlying={underlying} />
-                <OiProfileChart rows={rows} underlying={underlying} />
-              </>
+              <OdChartExpandOnHover title="Open Interest Profile">
+                <>
+                  <OiProfileLegend underlying={underlying} />
+                  <OiProfileChart rows={rows} underlying={underlying} />
+                </>
+              </OdChartExpandOnHover>
             )}
           </div>
         )}
@@ -1141,13 +1146,15 @@ export function OptionDiscoveryAnalyticsPanel({
               </button>
             </div>
             {!gexCollapsed && (
-              <>
-                <GammaExposureLegend underlying={underlying} />
-                <GammaExposureChart rows={rows} underlying={underlying} />
-                <p className="section-hint od-gex-disclaimer">
-                  Approximate notional gamma exposure (gamma × OI × 100). For illustration only; not a hedge-flow forecast.
-                </p>
-              </>
+              <OdChartExpandOnHover title="Gamma exposure (dealer-style)">
+                <>
+                  <GammaExposureLegend underlying={underlying} />
+                  <GammaExposureChart rows={rows} underlying={underlying} />
+                  <p className="section-hint od-gex-disclaimer">
+                    Approximate notional gamma exposure (gamma × OI × 100). For illustration only; not a hedge-flow forecast.
+                  </p>
+                </>
+              </OdChartExpandOnHover>
             )}
           </div>
         )}

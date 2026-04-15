@@ -9,6 +9,7 @@ import {
   OD_MAX_PAIN_VIEWBOX_H,
   OD_MAX_PAIN_VIEWBOX_W,
 } from './odChartConstants'
+import { OdChartExpandOnHover } from './OdChartExpandOnHover'
 
 const AXIS_FILL = 'var(--od-max-pain-axis-fill, var(--color-text-muted))'
 
@@ -667,15 +668,23 @@ export function OptionDiscoveryMaxPainPanel({
               <div className="od-max-pain-charts-scroll">
                 <div className="od-max-pain-charts-row">
                   <div className="mp-chart-pane od-max-pain-chart-cell">
-                    <h4 className="mp-chart-subtitle mp-chart-subtitle--pane">Seller Liability by Strike</h4>
-                    <LiabilityLegend underlyingClose={live.underlying_close ?? null} maxPainStrike={live.max_pain_strike ?? 0} />
-                    <LiabilityByStrikeSvg points={points} maxPainStrike={live.max_pain_strike ?? 0}
-                      underlyingClose={live.underlying_close ?? null} />
+                    <OdChartExpandOnHover title="Seller Liability by Strike">
+                      <>
+                        <h4 className="mp-chart-subtitle mp-chart-subtitle--pane">Seller Liability by Strike</h4>
+                        <LiabilityLegend underlyingClose={live.underlying_close ?? null} maxPainStrike={live.max_pain_strike ?? 0} />
+                        <LiabilityByStrikeSvg points={points} maxPainStrike={live.max_pain_strike ?? 0}
+                          underlyingClose={live.underlying_close ?? null} />
+                      </>
+                    </OdChartExpandOnHover>
                   </div>
 
                   <div className="mp-chart-pane od-max-pain-chart-cell">
-                    <h4 className="mp-chart-subtitle mp-chart-subtitle--pane">Open Interest by Strike</h4>
-                    <OiBarsSvg points={points} showCall showPut />
+                    <OdChartExpandOnHover title="Open Interest by Strike">
+                      <>
+                        <h4 className="mp-chart-subtitle mp-chart-subtitle--pane">Open Interest by Strike</h4>
+                        <OiBarsSvg points={points} showCall showPut />
+                      </>
+                    </OdChartExpandOnHover>
                   </div>
 
                   <div className="mp-chart-pane od-max-pain-chart-cell od-max-pain-trend-pane" aria-label="Max Pain and underlying trend">
@@ -697,7 +706,9 @@ export function OptionDiscoveryMaxPainPanel({
                     </div>
                     {!trendCollapsed && (
                       <div id="od-max-pain-trend-chart">
-                        <TrendSvg series={hist} />
+                        <OdChartExpandOnHover title="Max Pain · Underlying">
+                          <TrendSvg series={hist} />
+                        </OdChartExpandOnHover>
                       </div>
                     )}
                   </div>

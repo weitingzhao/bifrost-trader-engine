@@ -37,6 +37,7 @@ import { OdLayerSection } from './optionDiscovery/OdLayerSection'
 import { OdChainExpiryBubblePicker } from './optionDiscovery/OdChainExpiryBubblePicker'
 import { OptionDiscoveryIvTermSection } from './optionDiscovery/OptionDiscoveryIvTermSection'
 import { OptionDiscoveryCompareDrawer, addCompareRow } from './optionDiscovery/OptionDiscoveryCompareDrawer'
+import { OdChartExpandOnHover } from './optionDiscovery/OdChartExpandOnHover'
 import {
   type ExpirationKind,
   classifyExpiration,
@@ -2531,8 +2532,14 @@ export function OptionDiscoveryPage({
                   {sameRight.length >= 3 && (
                     <div className="od-card-section">
                       <div className="od-card-section-title">IV Smile (same expiry, {selectedRow.right === 'C' ? 'Calls' : 'Puts'})</div>
-                      <IvSmileLegend side={selectedRow.right === 'C' ? 'call' : 'put'} underlying={underlyingPrice} />
-                      <IvSmileChart rows={sameRight} underlying={underlyingPrice} side={selectedRow.right === 'C' ? 'call' : 'put'} />
+                      <OdChartExpandOnHover
+                        title={`IV Smile (same expiry, ${selectedRow.right === 'C' ? 'Calls' : 'Puts'})`}
+                      >
+                        <>
+                          <IvSmileLegend side={selectedRow.right === 'C' ? 'call' : 'put'} underlying={underlyingPrice} />
+                          <IvSmileChart rows={sameRight} underlying={underlyingPrice} side={selectedRow.right === 'C' ? 'call' : 'put'} />
+                        </>
+                      </OdChartExpandOnHover>
                     </div>
                   )}
                 </div>
