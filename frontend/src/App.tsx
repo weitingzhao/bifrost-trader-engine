@@ -44,6 +44,7 @@ import { UI_BUILD_LABEL } from './uiBuildLabel'
 import { useSettingsApiHealthProbes } from './hooks/useSettingsApiHealthProbes'
 import { useSocketIngestProbe } from './hooks/useSocketIngestProbe'
 import { MessageCenter, type MessageCenterHandle } from './components/MessageCenter'
+import { isMassiveCommonFeedHash, isMassiveOverviewFeedHash } from './pages/massive/feedMassiveCommonTabUtils'
 import { FEED_MASSIVE_DAILY_DATA_ID, isMassiveOptionFeedHash } from './pages/massive/feedMassiveTabUtils'
 import { isMassiveStockFeedHash } from './pages/massive/feedMassiveStockTabUtils'
 import { SettingsSidebarLampGlyph } from './pages/settings/settingsSidebarLampGlyphs'
@@ -52,7 +53,9 @@ import {
   COVERAGE_OPTION_SUBSECTION,
   COVERAGE_STOCK_GROUP_LABEL,
   COVERAGE_STOCK_SUBSECTIONS,
+  FEED_MASSIVE_COMMON_ID,
   FEED_MASSIVE_OPTION_ID,
+  FEED_MASSIVE_OVERVIEW_ID,
   FEED_MASSIVE_STOCK_ID,
   FEED_SUBSECTIONS,
 } from './pages/settings/settingsConstants'
@@ -382,6 +385,8 @@ export default function App() {
     const h = (hash.startsWith('#') ? hash.slice(1) : hash).trim()
     if (!h) return 'system'
     const hashNorm = hash.startsWith('#') ? hash : `#${hash}`
+    if (isMassiveOverviewFeedHash(hashNorm)) return 'massive'
+    if (isMassiveCommonFeedHash(hashNorm)) return 'massive'
     if (isMassiveOptionFeedHash(hashNorm)) return 'massive'
     if (isMassiveStockFeedHash(hashNorm)) return 'massive'
     if (
@@ -469,6 +474,8 @@ export default function App() {
         h === 'flex-preference' ||
         h === 'settings-ib-connection' ||
         h === FEED_MASSIVE_DAILY_DATA_ID ||
+        isMassiveOverviewFeedHash(raw.startsWith('#') ? raw : `#${raw}`) ||
+        isMassiveCommonFeedHash(raw.startsWith('#') ? raw : `#${raw}`) ||
         isMassiveOptionFeedHash(raw.startsWith('#') ? raw : `#${raw}`) ||
         isMassiveStockFeedHash(raw.startsWith('#') ? raw : `#${raw}`)
       if (impliesSettings) setActiveTab('settings')
@@ -1516,19 +1523,22 @@ export default function App() {
                   {sub.label}
                 </button>
               ))}
+              <div className="app-header-menu-label app-header-menu-label--massive-feed" role="presentation">
+                Massive
+              </div>
               <button
                 type="button"
                 role="menuitem"
-                className={`app-header-menu-item app-header-menu-item-massive ${activeTab === 'settings' && isMassiveOptionFeedHash(urlHash) ? 'active' : ''}`}
+                className={`app-header-menu-item app-header-menu-item-massive ${activeTab === 'settings' && isMassiveOverviewFeedHash(urlHash) ? 'active' : ''}`}
                 onClick={() => {
                   setActiveTab('settings')
-                  window.location.hash = `#${FEED_MASSIVE_OPTION_ID}`
+                  window.location.hash = `#${FEED_MASSIVE_OVERVIEW_ID}`
                   setHeaderMenuOpen(false)
                 }}
-                title="Settings → Feed → Massive Option"
+                title="Settings → Feed → Massive → Overview"
               >
                 <SettingsSectionIcon name="feed-massive" />
-                Massive Option
+                Overview
               </button>
               <button
                 type="button"
@@ -1539,10 +1549,38 @@ export default function App() {
                   window.location.hash = `#${FEED_MASSIVE_STOCK_ID}`
                   setHeaderMenuOpen(false)
                 }}
-                title="Settings → Feed → Massive Stock"
+                title="Settings → Feed → Massive → Stock"
               >
                 <SettingsSectionIcon name="feed-massive-stock" />
-                Massive Stock
+                Stock
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={`app-header-menu-item app-header-menu-item-massive ${activeTab === 'settings' && isMassiveOptionFeedHash(urlHash) ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveTab('settings')
+                  window.location.hash = `#${FEED_MASSIVE_OPTION_ID}`
+                  setHeaderMenuOpen(false)
+                }}
+                title="Settings → Feed → Massive → Option"
+              >
+                <SettingsSectionIcon name="feed-massive" />
+                Option
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={`app-header-menu-item app-header-menu-item-massive ${activeTab === 'settings' && isMassiveCommonFeedHash(urlHash) ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveTab('settings')
+                  window.location.hash = `#${FEED_MASSIVE_COMMON_ID}`
+                  setHeaderMenuOpen(false)
+                }}
+                title="Settings → Feed → Massive → Common"
+              >
+                <SettingsSectionIcon name="feed-massive" />
+                Comm
               </button>
               <button
                 type="button"

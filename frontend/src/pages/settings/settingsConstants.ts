@@ -43,7 +43,9 @@ export function isCoverageStockHash(hash: string): boolean {
   return h === 'coverage-stock' || h === 'coverage-massive-stock'
 }
 
-/** Feed: IB Stock (single link). Massive Option/Stock submenus are nested under Feed in SettingsPage. */
+/** Feed: IB Stock (single link). Massive Overview / Common / Option / Stock nested under Feed → Massive in SettingsPage. */
+export const FEED_MASSIVE_OVERVIEW_ID = 'feed-massive-overview' as const
+export const FEED_MASSIVE_COMMON_ID = 'feed-massive-common' as const
 export const FEED_MASSIVE_OPTION_ID = 'feed-massive-option' as const
 export const FEED_MASSIVE_STOCK_ID = 'feed-massive-stock' as const
 

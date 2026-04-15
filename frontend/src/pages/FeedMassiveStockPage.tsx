@@ -58,8 +58,6 @@ const REST_SECTION_ORDER = [
   'stock-aggregates',
   'stock-snapshots',
   'stock-trades-quotes',
-  'stock-technical-indicators',
-  'stock-market-ops',
   'stock-corporate-actions',
   'stock-fundamentals',
   'stock-filings',
@@ -71,8 +69,6 @@ const REST_SECTION_LABELS: Record<string, string> = {
   'stock-aggregates': 'Aggregate Bars (OHLC)',
   'stock-snapshots': 'Snapshots',
   'stock-trades-quotes': 'Trades & Quotes',
-  'stock-technical-indicators': 'Technical Indicators',
-  'stock-market-ops': 'Market Operations',
   'stock-corporate-actions': 'Corporate Actions',
   'stock-fundamentals': 'Fundamentals',
   'stock-filings': 'Filings & Disclosures',
@@ -165,6 +161,7 @@ export function FeedMassiveStockPage({
     CAPABILITY_GROUP_ORDER.reduce((acc, g) => { acc[g] = true; return acc }, {} as Record<CapabilityGroup, boolean>),
   )
   const [capExpanded, setCapExpanded] = useState<Record<string, boolean>>({})
+  const [channelTab, setChannelTab] = useState<'rest' | 'ws' | 'flat'>('rest')
 
   const [apiCoverageOpen, setApiCoverageOpen] = useState(false)
   const [apiCoverageSyncBusy, setApiCoverageSyncBusy] = useState(false)
@@ -464,6 +461,9 @@ export function FeedMassiveStockPage({
     setHighlightedCapabilityId(id)
     setCapExpanded(prev => ({ ...prev, [id]: true }))
     const g = stockCapabilityGroupForRowId(id)
+    if (g === 'rest' || g === 'ws' || g === 'flat') {
+      setChannelTab(g)
+    }
     if (g) setCapNavGroupExpanded(prev => prev[g] ? prev : { ...prev, [g]: true })
     setTimeout(() => {
       document.getElementById(feedMassiveStockSvcAnchorId(id))?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -534,10 +534,17 @@ export function FeedMassiveStockPage({
         </span>
       )
     }
+    if (row.id === 'stock-corporate-actions' && row.projectStatus === 'implemented') {
+      return (
+        <span className="feed-massive-svc-evidence-ok">
+          Corporate actions sync UI: Feed → Massive Option → Corporate actions (same PostgreSQL table as stocks).
+        </span>
+      )
+    }
     if (row.projectStatus === 'implemented') {
       return (
         <span className="feed-massive-svc-evidence-ok">
-          Shared implementation via Massive Option page. Use the existing UI with stock tickers.
+          Implemented in-app; use the controls in this section or Feed → Massive Common for shared cross-asset REST tools.
         </span>
       )
     }
@@ -1466,7 +1473,7 @@ export function FeedMassiveStockPage({
               </>
             ) : null}
             {breadcrumbLabel}{' '}
-            <InfoTooltip text="Massive (Polygon) Stocks API coverage sheet and capability status. Shared endpoints (Technical Indicators, Market Ops, Corporate Actions) already work via Massive Option. Stock-specific endpoints are planned." />
+            <InfoTooltip text="Massive (Polygon) Stocks API coverage sheet and capability status. Shared REST (Technical Indicators, Market Operations) lives under Feed → Massive Common; corporate actions sync UI remains under Feed → Massive Option. Stock-specific endpoints are planned." />
           </h2>
           {configured && (
             <span className="feed-massive-delay-pill" title={massiveStatus?.delay_notice}>
@@ -1619,7 +1626,7 @@ export function FeedMassiveStockPage({
       {/* Not configured warning */}
       {!configured && (
         <p className="status-page-msg err" role="alert">
-          Massive API key not configured. Set massive credentials in server config. Shared capabilities (Technical Indicators, Market Ops) are already functional via Massive Option.
+          Massive API key not configured. Set massive credentials in server config. Shared capabilities (Technical Indicators, Market Operations) are under Feed → Massive Common.
         </p>
       )}
 
@@ -1646,35 +1653,93 @@ export function FeedMassiveStockPage({
           </button>
         </section>
 
-        {/* REST API */}
-        <h3 className="feed-massive-group-header" id="feed-massive-stock-group-rest">REST API</h3>
+        <div className="feed-massive-delivery-tabs">
+          <div className="feed-massive-delivery-tablist" role="tablist" aria-label="Massive data channel">
+            <button
+              type="button"
+              role="tab"
+              id="feed-massive-stock-delivery-tab-rest"
+              className={`feed-massive-delivery-tab${channelTab === 'rest' ? ' feed-massive-delivery-tab--active' : ''}`}
+              aria-selected={channelTab === 'rest'}
+              tabIndex={channelTab === 'rest' ? 0 : -1}
+              onClick={() => setChannelTab('rest')}
+            >
+              REST API
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="feed-massive-stock-delivery-tab-ws"
+              className={`feed-massive-delivery-tab${channelTab === 'ws' ? ' feed-massive-delivery-tab--active' : ''}`}
+              aria-selected={channelTab === 'ws'}
+              tabIndex={channelTab === 'ws' ? 0 : -1}
+              onClick={() => setChannelTab('ws')}
+            >
+              WebSocket
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="feed-massive-stock-delivery-tab-flat"
+              className={`feed-massive-delivery-tab${channelTab === 'flat' ? ' feed-massive-delivery-tab--active' : ''}`}
+              aria-selected={channelTab === 'flat'}
+              tabIndex={channelTab === 'flat' ? 0 : -1}
+              onClick={() => setChannelTab('flat')}
+            >
+              Flat Files
+            </button>
+          </div>
 
-        {REST_SECTION_ORDER.map(id => {
-          const row = stockChecklistRows.find(r => r.id === id)
-          if (!row) return null
-          return (
-            <div key={id}>
-              <h4 className="feed-massive-section-header">{REST_SECTION_LABELS[id]}</h4>
-              {id === 'stock-tickers'
-                ? renderTickersCap()
-                : id === 'stock-aggregates'
-                  ? renderStockAggregatesCap()
-                  : renderCap(id)}
+          {channelTab === 'rest' ? (
+            <div
+              className="feed-massive-delivery-panel"
+              role="tabpanel"
+              id="feed-massive-stock-group-rest"
+              aria-labelledby="feed-massive-stock-delivery-tab-rest"
+            >
+              {REST_SECTION_ORDER.map(id => {
+                const row = stockChecklistRows.find(r => r.id === id)
+                if (!row) return null
+                return (
+                  <div key={id}>
+                    <h4 className="feed-massive-section-header">{REST_SECTION_LABELS[id]}</h4>
+                    {id === 'stock-tickers'
+                      ? renderTickersCap()
+                      : id === 'stock-aggregates'
+                        ? renderStockAggregatesCap()
+                        : renderCap(id)}
+                  </div>
+                )
+              })}
             </div>
-          )
-        })}
+          ) : null}
 
-        {/* WebSocket */}
-        <h3 className="feed-massive-group-header" id="feed-massive-stock-group-ws">WebSocket</h3>
-        {stockChecklistRows
-          .filter(r => r.group === 'ws')
-          .map(row => renderCap(row.id))}
+          {channelTab === 'ws' ? (
+            <div
+              className="feed-massive-delivery-panel"
+              role="tabpanel"
+              id="feed-massive-stock-group-ws"
+              aria-labelledby="feed-massive-stock-delivery-tab-ws"
+            >
+              {stockChecklistRows
+                .filter(r => r.group === 'ws')
+                .map(row => renderCap(row.id))}
+            </div>
+          ) : null}
 
-        {/* Flat Files */}
-        <h3 className="feed-massive-group-header" id="feed-massive-stock-group-flat">Flat Files</h3>
-        {stockChecklistRows
-          .filter(r => r.group === 'flat')
-          .map(row => renderCap(row.id))}
+          {channelTab === 'flat' ? (
+            <div
+              className="feed-massive-delivery-panel"
+              role="tabpanel"
+              id="feed-massive-stock-group-flat"
+              aria-labelledby="feed-massive-stock-delivery-tab-flat"
+            >
+              {stockChecklistRows
+                .filter(r => r.group === 'flat')
+                .map(row => renderCap(row.id))}
+            </div>
+          ) : null}
+        </div>
 
         {/* Project — only rendered if rows exist in this group */}
         {stockChecklistRows.some(r => r.group === 'project') && (

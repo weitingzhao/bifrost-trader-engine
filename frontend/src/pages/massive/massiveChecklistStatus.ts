@@ -3,6 +3,18 @@ import checklistRows from '../massiveFeedChecklistRows'
 import type { ChecklistRow, CapabilityGroup } from '../massiveFeedChecklistRows'
 import { CAPABILITY_GROUP_ORDER } from '../massiveFeedChecklistRows'
 
+/** Shared REST capabilities (Technical Indicators, Market Operations) live on Feed → Massive Common only. */
+export const MASSIVE_COMMON_CAP_IDS = ['technical-indicators', 'market-ops'] as const
+const COMMON_CAP_ID_SET = new Set<string>(MASSIVE_COMMON_CAP_IDS)
+
+export function optionFeedChecklistRows(): ChecklistRow[] {
+  return checklistRows.filter(r => !COMMON_CAP_ID_SET.has(r.id))
+}
+
+export function commonFeedChecklistRows(): ChecklistRow[] {
+  return checklistRows.filter(r => COMMON_CAP_ID_SET.has(r.id))
+}
+
 /** Effective project status for a capability (tier may override trades). */
 export type EffectiveServiceStatus = ChecklistRow['projectStatus'] | 'not-on-tier'
 
@@ -58,7 +70,7 @@ export function effectiveStatusToSidebarLamp(eff: EffectiveServiceStatus): Massi
 export function massiveFeedParentLamp(massiveStatus: MassiveStatusResponse | null): 'green' | 'yellow' | 'red' {
   const configured = Boolean(massiveStatus?.configured)
   if (!configured) return 'red'
-  const lamps = checklistRows.map(row => {
+  const lamps = optionFeedChecklistRows().map(row => {
     const tierOk = tierOkForRow(row, massiveStatus, true)
     const tradesOk = tradesOkForRow(row, massiveStatus)
     const eff = effectiveChecklistProjectStatus(row, true, tierOk, tradesOk)
@@ -82,12 +94,25 @@ export function checklistEffectiveStatusLabel(eff: EffectiveServiceStatus): stri
   return 'Not implemented'
 }
 
-/** Group rows by CapabilityGroup in display order. */
-export function groupedChecklistRows(): { group: CapabilityGroup; rows: ChecklistRow[] }[] {
+/** Massive Option sidebar + page nav: all checklist rows except shared Common caps. */
+export function groupedOptionFeedChecklistRows(): { group: CapabilityGroup; rows: ChecklistRow[] }[] {
   return CAPABILITY_GROUP_ORDER.map(g => ({
     group: g,
-    rows: checklistRows.filter(r => r.group === g),
+    rows: optionFeedChecklistRows().filter(r => r.group === g),
   })).filter(g => g.rows.length > 0)
+}
+
+/** Massive Common sidebar: Technical Indicators + Market Operations (REST). */
+export function groupedCommonFeedChecklistRows(): { group: CapabilityGroup; rows: ChecklistRow[] }[] {
+  return CAPABILITY_GROUP_ORDER.map(g => ({
+    group: g,
+    rows: commonFeedChecklistRows().filter(r => r.group === g),
+  })).filter(g => g.rows.length > 0)
+}
+
+/** @deprecated Prefer groupedOptionFeedChecklistRows or groupedCommonFeedChecklistRows */
+export function groupedChecklistRows(): { group: CapabilityGroup; rows: ChecklistRow[] }[] {
+  return groupedOptionFeedChecklistRows()
 }
 
 export function capabilityGroupForRowId(rowId: string): CapabilityGroup | null {

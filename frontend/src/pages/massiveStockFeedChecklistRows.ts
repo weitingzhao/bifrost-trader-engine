@@ -91,40 +91,6 @@ const rows: ChecklistRow[] = [
       + 'GET /v3/quotes/{ticker}, GET /v2/last/nbbo/{ticker}.',
   },
   {
-    id: 'stock-technical-indicators',
-    service: 'Technical Indicators',
-    group: 'rest',
-    description:
-      'Shared cross-asset technical indicators from Massive REST: SMA, EMA, RSI, MACD. '
-      + 'Already implemented for options; works with stock tickers natively.',
-    tierMin: 'starter',
-    projectStatus: 'implemented',
-    verification:
-      'Settings → Feed → Massive Option → Technical Indicators: enter a stock ticker (e.g. AAPL) instead of an options ticker.',
-    purpose:
-      'Compute and display technical indicators for stock tickers via Massive API. Same implementation as Massive Option.',
-    helpVerification:
-      'Use the existing Technical Indicators UI in Massive Option. Enter a plain stock ticker (AAPL, NVDA) '
-      + 'instead of an options ticker. The SMA/EMA/RSI/MACD endpoints accept both formats.',
-  },
-  {
-    id: 'stock-market-ops',
-    service: 'Market Operations',
-    group: 'rest',
-    description:
-      'Shared reference data: trade/quote condition codes, exchanges, market holidays, and market status. '
-      + 'Already implemented in Massive Option.',
-    tierMin: 'starter',
-    projectStatus: 'implemented',
-    verification:
-      'Settings → Feed → Massive Option → Market Ops: same endpoints serve stocks and options data.',
-    purpose:
-      'Lookup cross-asset reference data from Massive. These endpoints are shared across all asset types.',
-    helpVerification:
-      'Use the existing Market Ops UI in Massive Option. Condition codes support asset_class filter; '
-      + 'exchanges cover all asset classes; holidays and status are market-wide.',
-  },
-  {
     id: 'stock-corporate-actions',
     service: 'Corporate Actions',
     group: 'rest',

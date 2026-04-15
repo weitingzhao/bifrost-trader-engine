@@ -195,7 +195,7 @@ export function OptionDiscoveryContractChartPanel({
           </svg>
         </button>
         <span className="page-title-with-tooltip" style={{ marginLeft: '0.25rem' }}>
-          <InfoTooltip text="Reads OHLC from PostgreSQL (option_day for Daily, option_min for intraday). Backfill enqueues aggregates on the massive Celery queue. You can also use Feed → Massive Option → Option aggregates." />
+          <InfoTooltip text="Reads OHLC from PostgreSQL (option_day for Daily, option_min for intraday). Backfill enqueues aggregates on the massive Celery queue. You can also use Feed → Massive Option → Aggregate Bars (OHLC)." />
         </span>
       </div>
       {syncHint && <p className="section-hint" role="status">{syncHint}</p>}

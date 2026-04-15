@@ -33,99 +33,104 @@ const rows: ChecklistRow[] = [
     service: 'Contracts',
     group: 'rest',
     description:
-      'Option contract reference listing, single-contract detail lookup, DB coverage verification, and contract-to-snapshot linking via Massive REST.',
+      'Massive Options REST: All Contracts (index) and Contract Overview (single contract), plus local DB coverage and contract-level snapshot linking.',
     tierMin: 'starter',
     projectStatus: 'implemented',
     verification:
-      'Contracts section: Contracts List (fetch filtered list via Celery), Contract Detail (single ticker metadata), DB Verify (option_contracts coverage & mapping), Snapshot Link (contract → snapshot end-to-end).',
+      'Contracts section: All Contracts (GET /v3/reference/options/contracts via Celery), Contract Overview (GET /v3/reference/options/contracts/{options_ticker}), DB Verify (option_contracts coverage & mapping), Snapshot Link (contract → snapshot end-to-end).',
     purpose:
       'Discover, inspect, and verify option contract reference data from Massive. Coverage and mapping metrics quantify local data quality against the API source of truth.',
     helpVerification:
-      '1) Contracts List tab: enqueue a contracts job for an underlying, optionally filter by expiration/type/limit. '
-      + '2) Contract Detail tab: enter a Polygon options ticker to retrieve full metadata (expiry, strike, right, exercise_style, shares_per_contract). '
-      + '3) DB Verify tab: Check Coverage queries GET /research/massive/contracts-coverage for mapping stats. '
-      + '4) Snapshot Link tab: trigger a contract-level snapshot for end-to-end verification.',
+      '1) All Contracts tab — maps to All Contracts: underlying_ticker, contract_type, expiration_date (YYYY-MM-DD), limit (API default 10, max 1000; UI caps limit). Enqueue contracts list job; expect results[].ticker, contract_type, exercise_style, expiration_date, strike_price, etc. '
+      + '2) Contract Overview tab — maps to Contract Overview: path parameter options_ticker (deprecated list query param ticker per Massive docs). Enqueue contracts mode=detail; expect results object with same contract fields. '
+      + '3) DB Verify tab: Check Coverage → GET /research/massive/contracts-coverage (local PG vs API workflow). '
+      + '4) Snapshot Link tab: contract-level snapshot job for end-to-end verification.',
   },
   {
     id: 'aggregates',
     service: 'Aggregate Bars (OHLC)',
     group: 'rest',
     description:
-      'Three REST aggregate endpoints: Custom Bars (OHLCV over custom range), Daily Ticker Summary (open/close for a date), and Previous Day Bar (last trading day OHLC).',
+      'Three Massive REST DocPage rows under Aggregate Bars (OHLC): Custom Bars (OHLC), Daily Ticker Summary (OHLC), and Previous Day Bar (OHLC). WebSocket aggregate streams are listed separately under WebSocket.',
     tierMin: 'starter',
     projectStatus: 'implemented',
     verification:
       'REST: Enqueue aggregates with mode custom_bars | open_close | prev → check Job queue result.',
     purpose:
-      'Custom Bars backfills per-contract bars for charting and backtesting. Daily Summary provides single-day open/close + pre/after-hours. Previous Day gives a quick baseline without calendar math.',
+      'Custom Bars (OHLC): per-contract OHLCV backfills for charting and backtesting. Daily Ticker Summary (OHLC): single-day OHLC with pre/after-hours context. Previous Day Bar (OHLC): prior session OHLC without calendar math.',
     helpVerification:
-      'Custom Bars: Enqueue aggregates (mode custom_bars or omit mode) with options_ticker, symbol, expiry, strike, right, start_ms, end_ms. Open/Close: mode open_close with options_ticker + date (YYYY-MM-DD). Previous Day: mode prev with options_ticker.',
+      'Custom Bars (OHLC): Enqueue aggregates (mode custom_bars or omit mode) with options_ticker, symbol, expiry, strike, right, start_ms, end_ms. '
+      + 'Daily Ticker Summary (OHLC): mode open_close with options_ticker + date (YYYY-MM-DD). '
+      + 'Previous Day Bar (OHLC): mode prev with options_ticker.',
   },
   {
     id: 'snapshot',
     service: 'Snapshots',
     group: 'rest',
-    description: 'Full option chain quotes persisted to option_snapshots',
+    description:
+      'Three Massive REST DocPage rows under Snapshots (UI tab order): Option Contract Snapshot (per-contract), Option Chain Snapshot (chain → option_snapshots), Unified Snapshot (cross-asset).',
     tierMin: 'starter',
     projectStatus: 'implemented',
     verification: 'Enqueue snapshot → GET /research/option-snapshots or Verify section below',
-    purpose: 'Pull a delayed full chain from Massive REST and persist bid/ask/last and greeks when returned.',
+    purpose: 'Pull delayed chain or contract data from Massive REST; chain persists bid/ask/last and greeks when returned.',
     helpVerification:
-      'Enqueue a snapshot job for an underlying, wait until done, then GET /research/option-snapshots?symbol=&expiration=&source=massive or use Verify below.',
+      'Option Chain Snapshot: Celery snapshot_type=chain for an underlying. Option Contract Snapshot: snapshot_type=contract + option_contract. Unified Snapshot: snapshot_type=unified + tickers. '
+      + 'Then GET /research/option-snapshots?symbol=&expiration=&source=massive for chain persistence checks.',
   },
   {
     id: 'trades-quotes',
     service: 'Trade & Quotes',
     group: 'rest',
     description:
-      'Three REST endpoints: Last Trade, Historical Quotes, Historical Trades. '
-      + 'Last trade and historical quotes are available on Starter tier; historical trades require Developer tier and trades_enabled.',
+      'REST (coverage sheet): Last Trade, Quotes, Trades — three DocPage rows. Optional Flat Files pointers: Quotes and Trades bulk downloads (not REST; same section for convenience). '
+      + 'Starter: Last Trade and Quotes; Trades requires Developer tier and trades_enabled.',
     tierMin: 'starter',
     projectStatus: 'implemented',
     verification:
-      'Trades & Quotes section: Last Trade / Historical Quotes / Historical Trades (REST tabs). Trades-specific tab shows tier gate when trades_enabled is off.',
+      'Trade & Quotes section: REST tabs in order Trades / Last Trade / Quotes; then Flat Files tabs. Trades REST tab shows tier gate when trades_enabled is off.',
     purpose:
-      'Query and verify option trade and quote data from Massive REST. Last Trade gives the most recent fill; Historical Quotes retrieves BBO history; Historical Trades provides tick-level fills.',
+      'Query and verify option trade and quote data from Massive REST. Last Trade: most recent fill; Quotes: BBO history; Trades: tick-level fills.',
     helpVerification:
-      '1) Last Trade tab: enter an options ticker, click Fetch. Returns the most recent trade price/size/exchange/timestamp. '
-      + '2) Historical Quotes tab: enter an options ticker + optional timestamp range, click Fetch. Returns BBO quote history. '
-      + '3) Historical Trades tab: enter an options ticker + optional timestamp range, click Fetch. Requires Developer tier.',
+      '1) Last Trade (DocPage): enter an options ticker, click Fetch. '
+      + '2) Quotes (DocPage): optional timestamp range, click Fetch. '
+      + '3) Trades (DocPage): optional timestamp range; requires Developer tier. '
+      + 'Flat Files tabs describe S3 bulk downloads (informational).',
   },
   {
     id: 'technical-indicators',
     service: 'Technical Indicators',
     group: 'rest',
     description:
-      'Read-only cross-asset technical indicators from Massive REST: SMA, EMA, RSI, MACD. Supports both option tickers (O: prefix) and stock/index tickers with customizable window, timespan, and series type.',
+      'Four Massive REST DocPage rows (coverage sheet order): Simple Moving Average (SMA), Exponential Moving Average (EMA), Moving Average Convergence/Divergence (MACD), Relative Strength Index (RSI). '
+      + 'Read-only; option tickers (O:) or equities.',
     tierMin: 'starter',
     projectStatus: 'implemented',
     verification:
-      'Technical Indicators section: SMA / EMA / RSI / MACD tabs. Each tab: enter ticker + parameters, click Fetch, view data table.',
+      'Technical Indicators section: DocPage-named tabs. Each: ticker + parameters, Fetch, data table.',
     purpose:
-      'Compute and display technical indicators for option and equity tickers via Massive API. Enables trend analysis, momentum assessment, and signal generation for trading decisions.',
+      'Compute indicators per Massive REST for trend, momentum, and signal analysis on option or stock tickers.',
     helpVerification:
-      '1) SMA tab: enter an option ticker (O:SPY251219C00600000) or stock ticker (AAPL), set window/timespan, click Fetch. Expect timestamped values. '
-      + '2) EMA tab: same flow, EMA weights recent prices more heavily. '
-      + '3) RSI tab: same flow, values between 0-100 (>70 overbought, <30 oversold). '
-      + '4) MACD tab: configure short/long/signal windows, click Fetch. Expect value, signal, and histogram columns.',
+      'Simple Moving Average (SMA): window/timespan. Exponential Moving Average (EMA): same. '
+      + 'Moving Average Convergence/Divergence (MACD): short/long/signal windows. '
+      + 'Relative Strength Index (RSI): 0–100 scale.',
   },
   {
     id: 'market-ops',
     service: 'Market Operations',
     group: 'rest',
     description:
-      'Read-only reference data: trade/quote condition codes, exchange listings, upcoming market holidays (with local calendar comparison), and real-time market trading status.',
+      'Four Massive REST DocPage rows (UI tab order): Exchanges, Market Holidays, Market Status, Condition Codes — venues, holiday calendar, live status, trade/quote conditions.',
     tierMin: 'starter',
     projectStatus: 'implemented',
     verification:
-      'Market Ops section: Conditions (fetch condition codes by asset class/data type), Exchanges (list by asset class/locale), Market Holidays (Massive vs local comparison), Market Status (real-time open/close).',
+      'Market Operations section: tab order Exchanges → Market Holidays → Market Status → Condition Codes (each maps to one DocPage row).',
     purpose:
-      'Lookup and verify cross-asset reference data directly from Massive. The holiday tab also provides a side-by-side comparison with the local reference_us_holidays table.',
+      'Lookup cross-asset reference data from Massive. Market Holidays includes comparison with local reference_us_holidays.',
     helpVerification:
-      '1) Conditions tab: select asset class and data type filters, click Fetch. Expect a table of condition IDs, names, and descriptions. '
-      + '2) Exchanges tab: filter by asset class/locale, click Fetch. Expect exchange rows with MIC codes and URLs. '
-      + '3) Market Holidays tab: click Fetch & Compare. Shows Massive holidays, local holidays, and a diff summary (in both / massive only / local only). '
-      + '4) Market Status tab: click Fetch. Displays current status cards for each market (equities, options, forex, crypto, etc.).',
+      '1) Exchanges: asset class + locale filters. '
+      + '2) Market Holidays: Fetch & Compare vs local table. '
+      + '3) Market Status: real-time cards per market. '
+      + '4) Condition Codes: asset class + data type filters.',
   },
   // ── Project (derived workflows, not in REST Options taxonomy) ──
   {

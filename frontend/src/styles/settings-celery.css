@@ -205,6 +205,17 @@
   display: none;
 }
 
+/* Massive: Stock / Option / Comm nested under one parent (extra indent, tighter vertical rhythm) */
+.settings-sidebar-subs.settings-sidebar-subs--massive-nested {
+  margin-left: 0;
+  padding-left: var(--space-1);
+  border-left-color: rgba(163, 230, 53, 0.12);
+}
+
+.settings-sidebar-subs--massive-nested > .settings-sidebar-group {
+  margin-bottom: var(--space-1);
+}
+
 .settings-sidebar-link-sub {
   padding-left: var(--space-2);
   font-size: var(--text-caption);

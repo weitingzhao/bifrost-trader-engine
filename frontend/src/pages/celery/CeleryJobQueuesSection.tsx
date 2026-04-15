@@ -562,7 +562,11 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
         {' — '}
         {activeTab?.pipeline === 'massive' ? (
           <>
-            Full Massive controls: <a href="#feed-massive-option">Massive Option</a>.
+            Massive feeds: <a href="#feed-massive-common">Massive Common</a>
+            {' · '}
+            <a href="#feed-massive-option">Massive Option</a>
+            {' · '}
+            <a href="#feed-massive-stock">Massive Stock</a>.
           </>
         ) : (
           <>

@@ -204,12 +204,11 @@ def get_massive_greeks_coverage(
     exp_norm = _norm_expiry_key(exp) if exp else None
 
     import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+
     try:
-        params = {}
-        for k in ("host", "port", "dbname", "user", "password"):
-            v = db.get(f"pg_{k}") or db.get(k)
-            if v is not None:
-                params[k] = int(v) if k == "port" else str(v)
+        params = _get_conn_params(db)
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor() as cur:
@@ -302,12 +301,11 @@ def get_massive_contracts_coverage(
     exp_norm = _norm_expiry_key(exp) if exp else None
 
     import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+
     try:
-        params = {}
-        for k in ("host", "port", "dbname", "user", "password"):
-            v = db.get(f"pg_{k}") or db.get(k)
-            if v is not None:
-                params[k] = int(v) if k == "port" else str(v)
+        params = _get_conn_params(db)
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor() as cur:
