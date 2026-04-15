@@ -496,6 +496,12 @@ export function OptionDiscoveryMaxPainPanel({
           {oiBackfillMsg ? <p className="section-hint" role="status">{oiBackfillMsg}</p> : null}
           {loading && !live ? <p className="section-hint">Loading Max Pain…</p> : null}
           {err ? <p className="msg-error" role="alert">{err}</p> : null}
+          {live?.ok && live.oi_basis === 'chain_snapshot' ? (
+            <p className="section-hint" role="status">
+              Open interest is taken from the latest chain snapshots in PostgreSQL (same data as loaded quotes). EOD
+              daily OI was not available for this expiry; run watchlist EOD OI sync for classic end-of-day OI.
+            </p>
+          ) : null}
 
           {live?.ok && points.length > 0 && (
             <div className="od-max-pain-layout">

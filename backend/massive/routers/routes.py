@@ -328,25 +328,7 @@ def get_massive_contracts_coverage(
                         max(created_at) AS newest_ts,
                         count(CASE WHEN created_at < now() - interval '7 days' THEN 1 END) AS stale_rows,
                         count(DISTINCT expiry) AS distinct_expirations,
-                        count(DISTINCT strike) AS distinct_strikes,
-                        count(*) FILTER (
-                          WHERE cfi IS NOT NULL AND btrim(cfi) <> ''
-                        ) AS with_cfi,
-                        count(*) FILTER (
-                          WHERE exercise_style IS NOT NULL AND btrim(exercise_style) <> ''
-                        ) AS with_exercise_style,
-                        count(*) FILTER (
-                          WHERE shares_per_contract IS NOT NULL
-                        ) AS with_shares_per_contract,
-                        count(*) FILTER (
-                          WHERE primary_exchange IS NOT NULL AND btrim(primary_exchange) <> ''
-                        ) AS with_primary_exchange,
-                        count(*) FILTER (
-                          WHERE cfi IS NOT NULL AND btrim(cfi) <> ''
-                            AND exercise_style IS NOT NULL AND btrim(exercise_style) <> ''
-                            AND shares_per_contract IS NOT NULL
-                            AND primary_exchange IS NOT NULL AND btrim(primary_exchange) <> ''
-                        ) AS with_full_reference_metadata
+                        count(DISTINCT strike) AS distinct_strikes
                     FROM option_contracts
                     WHERE {where}
                     """,
@@ -358,22 +340,8 @@ def get_massive_contracts_coverage(
                         "ok": True, "symbol": sym, "expiration": exp_norm or "",
                         "total": 0, "coverage": {}, "freshness": {},
                     }
-                (
-                    total,
-                    w_ticker,
-                    w_identity,
-                    mismatch,
-                    oldest,
-                    newest,
-                    stale,
-                    dist_exp,
-                    dist_strikes,
-                    w_cfi,
-                    w_exstyle,
-                    w_shares,
-                    w_pex,
-                    w_full_meta,
-                ) = row
+                (total, w_ticker, w_identity, mismatch,
+                 oldest, newest, stale, dist_exp, dist_strikes) = row
                 pct = lambda n: round(n / total * 100, 1) if total else 0  # noqa: E731
                 return {
                     "ok": True, "symbol": sym, "expiration": exp_norm or "",
@@ -386,16 +354,6 @@ def get_massive_contracts_coverage(
                         "mapping_mismatch": mismatch,
                         "distinct_expirations": dist_exp,
                         "distinct_strikes": dist_strikes,
-                        "with_cfi": w_cfi,
-                        "cfi_pct": pct(w_cfi),
-                        "with_exercise_style": w_exstyle,
-                        "exercise_style_pct": pct(w_exstyle),
-                        "with_shares_per_contract": w_shares,
-                        "shares_per_contract_pct": pct(w_shares),
-                        "with_primary_exchange": w_pex,
-                        "primary_exchange_pct": pct(w_pex),
-                        "with_full_reference_metadata": w_full_meta,
-                        "full_reference_metadata_pct": pct(w_full_meta),
                     },
                     "freshness": {
                         "oldest_ts": oldest.isoformat() if oldest else None,

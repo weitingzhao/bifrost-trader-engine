@@ -457,24 +457,7 @@
 ### 2.16.1 表 `option_contracts`（期权合约定义）
 
 - **用途**：期权合约定义，按 contract_key（与 account_positions、contract_quote_live 一致）唯一标识。
-- **列**：
-
-| 列名 | 类型 | 说明 |
-|------|------|------|
-| option_contracts_id | bigserial | 自增主键 |
-| contract_key | text NOT NULL UNIQUE | 合约唯一键 |
-| symbol | text NOT NULL | 标的代码 |
-| expiry | text NOT NULL | 到期日 YYYYMMDD |
-| strike | double precision NOT NULL | 行权价 |
-| option_right | text NOT NULL | C / P |
-| massive_option_ticker | text | 可选，Massive/Polygon 期权代码（如 `O:NVDA250620C00120000`） |
-| exercise_style | text | 可选，行权方式（如 `american` / `european`），来自 Massive reference/snapshot |
-| shares_per_contract | integer | 可选，每份合约标的股数（常见 100） |
-| cfi | text | 可选，ISO 10962 CFI 代码 |
-| primary_exchange | text | 可选，主交易所代码（MIC 等） |
-| created_at | timestamptz | 写入时间（默认 now()） |
-
-- **索引**：`(contract_key)`、`(symbol, expiry, strike, option_right)`。
+- **列**：`option_contracts_id` (bigserial PK)、`contract_key` (text NOT NULL UNIQUE)、`symbol`、`expiry`、`strike`、`option_right`、`massive_option_ticker` (text, 可选, Massive/Polygon 供应商期权代码如 `O:NVDA250620C00120000`，便于 API 往返)、`created_at`。索引 `(contract_key)`、`(symbol, expiry, strike, option_right)`。
 
 ### 2.16.2 表 `option_snapshots`（期权时点快照，含 Greeks/IV）
 
@@ -1477,6 +1460,7 @@ python scripts/db/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-04-09 Stock reference（Massive） | 扩展 §2.14.1 `stocks`（参考字段与 `reference_updated_at`）；新增 §2.14.2 `ticker_instrument_types`、§2.14.3 `stock_related_tickers`、§2.14.4 `job_stock_reference_state`。同步任务 kinds：`stock_reference_universe`、`stock_reference_overview`、`stock_reference_related`、`stock_reference_instrument_types`；Redis 键 `massive:ingestor:cache:*`。 | 研究 / Massive |
 | 2026-04-10 Massive ticker reference 表名统一 | §2.14.1–2.14.5：`tickers`、`ticker_overview`（原 `ticker_reference_details`）、`ticker_types`（原 `ticker_instrument_types`，PK `ticker_types_id`）、`ticker_related_tickers`、`job_ticker_reference_state`；`pg_ddl` 内 DO 块重命名。任务 kind canonical：`ticker_reference_ticker_types`（旧名仍经 `normalize_ticker_ref_kind` 映射）；HTTP `GET /research/massive/reference/ticker-types`；Redis `massive:ingestor:cache:ticker_types:*`。 | 研究 / Massive |
 | 2026-04-14 option_contracts 参考元数据 | `option_contracts` 增加 `exercise_style`、`shares_per_contract`、`cfi`、`primary_exchange`（均可空）；Massive `GET /v3/reference/options/contracts` 分页与 `GET /v3/snapshot/options/{underlying}` 链写入路径同步填充；`GET /research/massive/contracts-coverage` 增加各字段及「四列齐全」覆盖率。§2.16.1。 | 研究 / Massive |
+| 2026-04-15 option_contracts 移除参考元数据列 | 删除 `exercise_style`、`shares_per_contract`、`cfi`、`primary_exchange`；`pg_ddl` 迁移块对上述列 `DROP COLUMN IF EXISTS`。§2.16.1。 | 研究 / Massive |
 
 ---
 

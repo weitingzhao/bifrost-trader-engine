@@ -100,21 +100,6 @@ def _right_from_contract_type(ct: str) -> str:
     return "C"
 
 
-def _option_contract_metadata_from_details(
-    det: Dict[str, Any],
-) -> Tuple[Optional[str], Optional[int], Optional[str], Optional[str]]:
-    """Extract Massive reference fields from chain snapshot ``details`` (when present)."""
-    from src.vendor.massive.client import _parse_shares_per_contract, normalize_primary_exchange
-
-    es = det.get("exercise_style")
-    exercise_style = es.strip().lower() if isinstance(es, str) and es.strip() else None
-    shares_per_contract = _parse_shares_per_contract(det.get("shares_per_contract"))
-    cfi_raw = det.get("cfi")
-    cfi = cfi_raw.strip().upper() if isinstance(cfi_raw, str) and cfi_raw.strip() else None
-    primary_exchange = normalize_primary_exchange(det.get("primary_exchange"))
-    return exercise_style, shares_per_contract, cfi, primary_exchange
-
-
 def _parse_snapshot_ts(item: Dict[str, Any]) -> datetime:
     lt = item.get("last_trade") or {}
     lq = item.get("last_quote") or {}
@@ -181,7 +166,6 @@ def _apply_oi_daily_from_chain(
                 continue
             ort = _right_from_contract_type(det.get("contract_type", "call"))
             ck = contract_key_from_parts(underlying, exp, strike, ort)
-            meta = _option_contract_metadata_from_details(det if isinstance(det, dict) else {})
             oi = item.get("open_interest")
             if oi is None:
                 continue
@@ -191,19 +175,12 @@ def _apply_oi_daily_from_chain(
                 continue
             cur.execute(
                 """
-                INSERT INTO option_contracts (
-                  contract_key, symbol, expiry, strike, option_right, massive_option_ticker,
-                  exercise_style, shares_per_contract, cfi, primary_exchange, created_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                INSERT INTO option_contracts (contract_key, symbol, expiry, strike, option_right, massive_option_ticker, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (contract_key) DO UPDATE SET
-                  massive_option_ticker = COALESCE(EXCLUDED.massive_option_ticker, option_contracts.massive_option_ticker),
-                  exercise_style = COALESCE(EXCLUDED.exercise_style, option_contracts.exercise_style),
-                  shares_per_contract = COALESCE(EXCLUDED.shares_per_contract, option_contracts.shares_per_contract),
-                  cfi = COALESCE(EXCLUDED.cfi, option_contracts.cfi),
-                  primary_exchange = COALESCE(EXCLUDED.primary_exchange, option_contracts.primary_exchange)
+                  massive_option_ticker = COALESCE(EXCLUDED.massive_option_ticker, option_contracts.massive_option_ticker)
                 """,
-                (ck, underlying, exp, strike, ort, ticker, *meta),
+                (ck, underlying, exp, strike, ort, ticker),
             )
             cur.execute(
                 """
@@ -558,7 +535,6 @@ def _apply_snapshot(
                 continue
             ort = _right_from_contract_type(det.get("contract_type", "call"))
             ck = contract_key_from_parts(underlying, exp, strike, ort)
-            meta = _option_contract_metadata_from_details(det if isinstance(det, dict) else {})
             g = item.get("greeks") if isinstance(item.get("greeks"), dict) else {}
             iv = g.get("iv")
             if iv is None:
@@ -592,19 +568,12 @@ def _apply_snapshot(
             ts = _parse_snapshot_ts(item)
             cur.execute(
                 """
-                INSERT INTO option_contracts (
-                  contract_key, symbol, expiry, strike, option_right, massive_option_ticker,
-                  exercise_style, shares_per_contract, cfi, primary_exchange, created_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                INSERT INTO option_contracts (contract_key, symbol, expiry, strike, option_right, massive_option_ticker, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (contract_key) DO UPDATE SET
-                  massive_option_ticker = COALESCE(EXCLUDED.massive_option_ticker, option_contracts.massive_option_ticker),
-                  exercise_style = COALESCE(EXCLUDED.exercise_style, option_contracts.exercise_style),
-                  shares_per_contract = COALESCE(EXCLUDED.shares_per_contract, option_contracts.shares_per_contract),
-                  cfi = COALESCE(EXCLUDED.cfi, option_contracts.cfi),
-                  primary_exchange = COALESCE(EXCLUDED.primary_exchange, option_contracts.primary_exchange)
+                  massive_option_ticker = COALESCE(EXCLUDED.massive_option_ticker, option_contracts.massive_option_ticker)
                 """,
-                (ck, underlying, exp, strike, ort, ticker, *meta),
+                (ck, underlying, exp, strike, ort, ticker),
             )
             cur.execute(
                 """

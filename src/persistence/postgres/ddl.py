@@ -834,10 +834,6 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 strike double precision NOT NULL,
                 option_right text NOT NULL,
                 massive_option_ticker text,
-                exercise_style text,
-                shares_per_contract integer,
-                cfi text,
-                primary_exchange text,
                 created_at timestamptz DEFAULT now()
             )
             """
@@ -1137,29 +1133,30 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 ) THEN
                   ALTER TABLE option_contracts ADD COLUMN massive_option_ticker text;
                 END IF;
-                IF NOT EXISTS (
+                -- Drop deprecated reference metadata columns if present (removed 2026-04).
+                IF EXISTS (
                   SELECT 1 FROM information_schema.columns
                   WHERE table_schema = 'public' AND table_name = 'option_contracts' AND column_name = 'exercise_style'
                 ) THEN
-                  ALTER TABLE option_contracts ADD COLUMN exercise_style text;
+                  ALTER TABLE option_contracts DROP COLUMN exercise_style;
                 END IF;
-                IF NOT EXISTS (
+                IF EXISTS (
                   SELECT 1 FROM information_schema.columns
                   WHERE table_schema = 'public' AND table_name = 'option_contracts' AND column_name = 'shares_per_contract'
                 ) THEN
-                  ALTER TABLE option_contracts ADD COLUMN shares_per_contract integer;
+                  ALTER TABLE option_contracts DROP COLUMN shares_per_contract;
                 END IF;
-                IF NOT EXISTS (
+                IF EXISTS (
                   SELECT 1 FROM information_schema.columns
                   WHERE table_schema = 'public' AND table_name = 'option_contracts' AND column_name = 'cfi'
                 ) THEN
-                  ALTER TABLE option_contracts ADD COLUMN cfi text;
+                  ALTER TABLE option_contracts DROP COLUMN cfi;
                 END IF;
-                IF NOT EXISTS (
+                IF EXISTS (
                   SELECT 1 FROM information_schema.columns
                   WHERE table_schema = 'public' AND table_name = 'option_contracts' AND column_name = 'primary_exchange'
                 ) THEN
-                  ALTER TABLE option_contracts ADD COLUMN primary_exchange text;
+                  ALTER TABLE option_contracts DROP COLUMN primary_exchange;
                 END IF;
               END IF;
 

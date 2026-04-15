@@ -1152,6 +1152,106 @@ def _recent_corporate_action_flag(cur: Any, symbol: str) -> bool:
         return False
 
 
+def _load_oi_rows_from_chain_snapshots(
+    cur: Any,
+    symbol: str,
+    exp_norm: str,
+) -> Tuple[List[Dict[str, Any]], Optional[date_type], Optional[float]]:
+    """When EOD ``option_open_interest_daily`` is empty, use latest snapshot OI per contract.
+
+    Option Discovery syncs chain quotes into ``option_snapshots`` (often with open_interest)
+    even when the watchlist EOD OI job has not populated ``option_open_interest_daily``.
+
+    Returns (raw_rows for strike_map_for_expiry, max snapshot calendar date, representative underlying price).
+    """
+    from src.monitor.reader.max_pain_math import normalize_expiry_for_oi
+
+    sym = (symbol or "").strip().upper()
+    if not sym or not exp_norm:
+        return [], None, None
+
+    best_rows: List[Dict[str, Any]] = []
+    best_td: Optional[date_type] = None
+    best_uc: Optional[float] = None
+    best_count = 0
+
+    for src in ("massive", "ib"):
+        try:
+            cur.execute(
+                """
+                SELECT DISTINCT ON (oc.contract_key)
+                    oc.expiry, oc.strike, oc.option_right, os.open_interest,
+                    os.snapshot_ts, os.underlying_price
+                FROM option_contracts oc
+                INNER JOIN option_snapshots os ON os.contract_key = oc.contract_key
+                WHERE oc.symbol = %s AND oc.expiry = %s AND os.source = %s
+                  AND os.open_interest IS NOT NULL AND os.open_interest > 0
+                ORDER BY oc.contract_key, os.snapshot_ts DESC
+                """,
+                (sym, exp_norm, src),
+            )
+            rows = cur.fetchall() or []
+        except Exception as ex:
+            logger.debug("_load_oi_rows_from_chain_snapshots: %s", ex)
+            try:
+                cur.connection.rollback()
+            except Exception:
+                pass
+            continue
+
+        raw: List[Dict[str, Any]] = []
+        max_ts: Optional[datetime] = None
+        uc_vals: List[float] = []
+        for row in rows:
+            exp_v, strike, ort, oi, snap_ts, und = row[0], row[1], row[2], row[3], row[4], row[5]
+            exp_key = exp_v.isoformat()[:10].replace("-", "") if hasattr(exp_v, "isoformat") else str(exp_v or "")
+            if normalize_expiry_for_oi(exp_key) != exp_norm:
+                continue
+            raw.append(
+                {
+                    "expiry": exp_v.isoformat() if hasattr(exp_v, "isoformat") else str(exp_v),
+                    "strike": float(strike),
+                    "option_right": str(ort or "").strip().upper(),
+                    "open_interest": int(oi),
+                }
+            )
+            if snap_ts is not None:
+                if isinstance(snap_ts, datetime):
+                    ts = snap_ts
+                else:
+                    try:
+                        ts = datetime.fromisoformat(str(snap_ts).replace("Z", "+00:00"))
+                    except (TypeError, ValueError):
+                        ts = None
+                if ts is not None:
+                    if max_ts is None or ts > max_ts:
+                        max_ts = ts
+            if und is not None:
+                try:
+                    ufv = float(und)
+                    if ufv > 0:
+                        uc_vals.append(ufv)
+                except (TypeError, ValueError):
+                    pass
+
+        if len(raw) > best_count:
+            best_count = len(raw)
+            best_rows = raw
+            if max_ts is not None:
+                best_td = max_ts.date()
+            else:
+                best_td = None
+            if uc_vals:
+                best_uc = sum(uc_vals) / len(uc_vals)
+            else:
+                best_uc = None
+
+        if best_count > 0:
+            break
+
+    return best_rows, best_td, best_uc
+
+
 def compute_max_pain_live_from_db(
     status_config: dict,
     *,
@@ -1159,7 +1259,7 @@ def compute_max_pain_live_from_db(
     expiry: str,
     trade_date: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Real-time Max Pain from option_open_interest_daily (no report table)."""
+    """Real-time Max Pain from option_open_interest_daily, with chain-snapshot OI fallback."""
     from src.monitor.reader.max_pain_math import (
         compute_max_pain_curve,
         normalize_expiry_for_oi,
@@ -1173,15 +1273,31 @@ def compute_max_pain_live_from_db(
     if not sym or not exp:
         return {"ok": False, "error": "symbol and expiry are required"}
     exp_norm = normalize_expiry_for_oi(exp)
+    explicit_trade_date = bool(trade_date and str(trade_date).strip())
+    oi_basis = "eod_open_interest_daily"
+    snapshot_uc: Optional[float] = None
     try:
         params = _get_conn_params(status_config)
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor() as cur:
                 td_use: Optional[date_type] = None
-                if trade_date and str(trade_date).strip():
-                    raw = str(trade_date).strip()[:10]
-                    td_use = date_type.fromisoformat(raw)
+                raw_rows: List[Dict[str, Any]] = []
+                if explicit_trade_date:
+                    raw_td = str(trade_date).strip()[:10]
+                    td_use = date_type.fromisoformat(raw_td)
+                    cur.execute(
+                        """
+                        SELECT expiry, strike, option_right, open_interest
+                        FROM option_open_interest_daily
+                        WHERE symbol = %s AND expiry = %s AND trade_date = %s AND source = 'massive'
+                        """,
+                        (sym, exp_norm, td_use),
+                    )
+                    raw_rows = [
+                        {"expiry": row[0], "strike": row[1], "option_right": row[2], "open_interest": row[3]}
+                        for row in cur.fetchall()
+                    ]
                 else:
                     cur.execute(
                         """
@@ -1194,37 +1310,48 @@ def compute_max_pain_live_from_db(
                     if r0 and r0[0] is not None:
                         d0 = r0[0]
                         td_use = d0 if isinstance(d0, date_type) else date_type.fromisoformat(str(d0)[:10])
-                if td_use is None:
+                    if td_use is not None:
+                        cur.execute(
+                            """
+                            SELECT expiry, strike, option_right, open_interest
+                            FROM option_open_interest_daily
+                            WHERE symbol = %s AND expiry = %s AND trade_date = %s AND source = 'massive'
+                            """,
+                            (sym, exp_norm, td_use),
+                        )
+                        raw_rows = [
+                            {"expiry": row[0], "strike": row[1], "option_right": row[2], "open_interest": row[3]}
+                            for row in cur.fetchall()
+                        ]
+
+                skmap = strike_map_for_expiry(raw_rows, exp)
+
+                if not explicit_trade_date and (td_use is None or not skmap):
+                    snap_rows, snap_td, snap_uc = _load_oi_rows_from_chain_snapshots(cur, sym, exp_norm)
+                    if snap_rows:
+                        raw_rows = snap_rows
+                        td_use = snap_td if snap_td is not None else date_type.today()
+                        oi_basis = "chain_snapshot"
+                        snapshot_uc = snap_uc
+                        skmap = strike_map_for_expiry(raw_rows, exp)
+                    else:
+                        snapshot_uc = None
+
+                if td_use is None or not skmap:
                     return {
                         "ok": False,
-                        "error": "No open interest rows for this symbol/expiry",
+                        "error": (
+                            "No open interest for this symbol/expiry. "
+                            "Run EOD OI sync or load chain snapshots (quotes) so PostgreSQL has OI."
+                        ),
                         "symbol": sym,
                         "expiry": exp_norm,
                     }
 
-                cur.execute(
-                    """
-                    SELECT expiry, strike, option_right, open_interest
-                    FROM option_open_interest_daily
-                    WHERE symbol = %s AND expiry = %s AND trade_date = %s AND source = 'massive'
-                    """,
-                    (sym, exp_norm, td_use),
-                )
-                raw_rows = [
-                    {"expiry": row[0], "strike": row[1], "option_right": row[2], "open_interest": row[3]}
-                    for row in cur.fetchall()
-                ]
-                skmap = strike_map_for_expiry(raw_rows, exp)
-                if not skmap:
-                    return {
-                        "ok": False,
-                        "error": "No OI rows for this expiry on trade_date",
-                        "symbol": sym,
-                        "expiry": exp_norm,
-                        "trade_date": td_use.isoformat(),
-                    }
                 mp_strike, min_pain, points, total_oi = compute_max_pain_curve(skmap)
                 underlying_close = _stock_close_on_date(cur, sym, td_use)
+                if underlying_close is None and snapshot_uc is not None and snapshot_uc > 0:
+                    underlying_close = snapshot_uc
                 corp_flag = _recent_corporate_action_flag(cur, sym)
         finally:
             conn.close()
@@ -1237,7 +1364,7 @@ def compute_max_pain_live_from_db(
     if uc is not None and uc > 0:
         dist_pct = abs(float(mp_strike) - float(uc)) / float(uc)
 
-    return {
+    out: Dict[str, Any] = {
         "ok": True,
         "symbol": sym,
         "expiry": exp_norm,
@@ -1249,7 +1376,9 @@ def compute_max_pain_live_from_db(
         "distance_to_max_pain_pct": dist_pct,
         "pain_by_strike": points,
         "recent_corporate_action": corp_flag,
+        "oi_basis": oi_basis,
     }
+    return out
 
 
 def compute_max_pain_history_from_db(
@@ -1553,7 +1682,7 @@ def upsert_option_contracts_from_reference_rows(
     contract_rows: List[Dict[str, Any]],
 ) -> int:
     """Upsert option_contracts from Polygon reference contract rows."""
-    from src.vendor.massive.client import contract_key_from_parts, normalize_primary_exchange
+    from src.vendor.massive.client import contract_key_from_parts
 
     underlying = (underlying or "").strip().upper()
     if not contract_rows or not underlying:
@@ -1583,52 +1712,14 @@ def upsert_option_contracts_from_reference_rows(
                     ort = _right_from_ref_contract_type(str(row.get("contract_type") or "call"))
                     ticker = (row.get("ticker") or "").strip() or None
                     ck = contract_key_from_parts(underlying, ed, strike, ort)
-                    es_raw = row.get("exercise_style")
-                    exercise_style = (
-                        es_raw.strip().lower()
-                        if isinstance(es_raw, str) and es_raw.strip()
-                        else None
-                    )
-                    spc_raw = row.get("shares_per_contract")
-                    try:
-                        shares_per_contract = int(spc_raw) if spc_raw is not None else None
-                    except (TypeError, ValueError):
-                        shares_per_contract = None
-                    if shares_per_contract is not None and shares_per_contract <= 0:
-                        shares_per_contract = None
-                    cfi_raw = row.get("cfi")
-                    cfi = cfi_raw.strip().upper() if isinstance(cfi_raw, str) and cfi_raw.strip() else None
-                    pe_raw = row.get("primary_exchange")
-                    if isinstance(pe_raw, str):
-                        primary_exchange = pe_raw.strip() or None
-                    else:
-                        primary_exchange = normalize_primary_exchange(pe_raw)
                     cur.execute(
                         """
-                        INSERT INTO option_contracts (
-                          contract_key, symbol, expiry, strike, option_right, massive_option_ticker,
-                          exercise_style, shares_per_contract, cfi, primary_exchange, created_at
-                        )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                        INSERT INTO option_contracts (contract_key, symbol, expiry, strike, option_right, massive_option_ticker, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, now())
                         ON CONFLICT (contract_key) DO UPDATE SET
-                          massive_option_ticker = COALESCE(EXCLUDED.massive_option_ticker, option_contracts.massive_option_ticker),
-                          exercise_style = COALESCE(EXCLUDED.exercise_style, option_contracts.exercise_style),
-                          shares_per_contract = COALESCE(EXCLUDED.shares_per_contract, option_contracts.shares_per_contract),
-                          cfi = COALESCE(EXCLUDED.cfi, option_contracts.cfi),
-                          primary_exchange = COALESCE(EXCLUDED.primary_exchange, option_contracts.primary_exchange)
+                          massive_option_ticker = COALESCE(EXCLUDED.massive_option_ticker, option_contracts.massive_option_ticker)
                         """,
-                        (
-                            ck,
-                            underlying,
-                            ed,
-                            strike,
-                            ort,
-                            ticker,
-                            exercise_style,
-                            shares_per_contract,
-                            cfi,
-                            primary_exchange,
-                        ),
+                        (ck, underlying, ed, strike, ort, ticker),
                     )
                     n += 1
             conn.commit()

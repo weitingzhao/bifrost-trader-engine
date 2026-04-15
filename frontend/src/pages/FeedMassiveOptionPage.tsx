@@ -1559,8 +1559,6 @@ export function FeedMassiveOptionPage({
                       <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val">{ctCoverage.coverage?.ticker_pct ?? 0}%</span><span className="gk-quality-summary-lbl">Ticker %</span></div>
                       <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val">{ctCoverage.coverage?.distinct_expirations ?? 0}</span><span className="gk-quality-summary-lbl">Expirations</span></div>
                       <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val">{ctCoverage.coverage?.distinct_strikes ?? 0}</span><span className="gk-quality-summary-lbl">Strikes</span></div>
-                      <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val">{ctCoverage.coverage?.with_full_reference_metadata ?? 0}</span><span className="gk-quality-summary-lbl">Full metadata</span></div>
-                      <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val">{ctCoverage.coverage?.full_reference_metadata_pct ?? 0}%</span><span className="gk-quality-summary-lbl">Full metadata %</span></div>
                       {ctCoverage.coverage?.mapping_mismatch != null && ctCoverage.coverage.mapping_mismatch > 0 ? (
                         <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val" style={{ color: 'var(--clr-warning)' }}>{ctCoverage.coverage.mapping_mismatch}</span><span className="gk-quality-summary-lbl">Mismatches</span></div>
                       ) : null}
@@ -1612,7 +1610,7 @@ export function FeedMassiveOptionPage({
               {ctSubTab === 'db_verify' ? (
                 <div className="feed-massive-agg-tab-panel" role="tabpanel" id="feed-massive-ct-panel-verify" aria-labelledby="feed-massive-ct-tab-verify">
                   <div className="feed-massive-agg-sub-doc">
-                    <p><strong>Use case:</strong> Verify local <code>option_contracts</code> table coverage and mapping consistency against the Massive API. Shows ticker mapping, identity completeness, stored reference fields (CFI, exercise style, shares per contract, primary exchange), and freshness.</p>
+                    <p><strong>Use case:</strong> Verify local <code>option_contracts</code> table coverage and mapping consistency against the Massive API. Shows how many contracts have a Polygon ticker mapped, identity completeness, and freshness.</p>
                     <p><strong>When to use:</strong> After running chain snapshots (which populate <code>option_contracts</code>), use this to audit data quality and identify gaps before downstream analysis.</p>
                   </div>
                   <div className="feed-massive-form-grid">
@@ -1642,11 +1640,6 @@ export function FeedMassiveOptionPage({
                           <tr><td>Mapping mismatches</td><td>{ctCoverage.coverage?.mapping_mismatch ?? 0}</td></tr>
                           <tr><td>Distinct expirations</td><td>{ctCoverage.coverage?.distinct_expirations ?? 0}</td></tr>
                           <tr><td>Distinct strikes</td><td>{ctCoverage.coverage?.distinct_strikes ?? 0}</td></tr>
-                          <tr><td>With CFI</td><td>{ctCoverage.coverage?.with_cfi ?? 0} ({ctCoverage.coverage?.cfi_pct ?? 0}%)</td></tr>
-                          <tr><td>With exercise style</td><td>{ctCoverage.coverage?.with_exercise_style ?? 0} ({ctCoverage.coverage?.exercise_style_pct ?? 0}%)</td></tr>
-                          <tr><td>With shares per contract</td><td>{ctCoverage.coverage?.with_shares_per_contract ?? 0} ({ctCoverage.coverage?.shares_per_contract_pct ?? 0}%)</td></tr>
-                          <tr><td>With primary exchange</td><td>{ctCoverage.coverage?.with_primary_exchange ?? 0} ({ctCoverage.coverage?.primary_exchange_pct ?? 0}%)</td></tr>
-                          <tr><td>Full reference metadata (all four)</td><td>{ctCoverage.coverage?.with_full_reference_metadata ?? 0} ({ctCoverage.coverage?.full_reference_metadata_pct ?? 0}%)</td></tr>
                           <tr><td>Oldest entry</td><td>{ctCoverage.freshness?.oldest_ts ?? '—'}</td></tr>
                           <tr><td>Newest entry</td><td>{ctCoverage.freshness?.newest_ts ?? '—'}</td></tr>
                           <tr><td>Stale (&gt;7 days)</td><td>{ctCoverage.freshness?.stale_rows ?? 0}</td></tr>
