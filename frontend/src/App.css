@@ -9918,6 +9918,12 @@ th {
   margin-top: 0.5rem;
 }
 
+.od-iv-term-parametric-row {
+  width: 100%;
+  min-width: 0;
+  margin-top: var(--space-3);
+}
+
 @media (max-width: 960px) {
   .od-iv-term-cone-charts-row {
     grid-template-columns: 1fr;
@@ -9951,6 +9957,81 @@ th {
   max-width: 100%;
   /* Matches OD_IV_TERM_VIEWBOX_W / OD_IV_TERM_VIEWBOX_H — IV Term + Cone same aspect, equal height in row */
   aspect-ratio: 640 / 260;
+}
+
+.od-iv-term-chart-svg-wrap--parametric {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.od-iv-param-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  font-size: var(--text-tiny);
+  color: var(--color-text-muted);
+  line-height: 1.35;
+}
+
+.od-iv-param-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.od-iv-param-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 3px;
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.od-iv-param-swatch--minmax {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--color-text-muted) 0 3px,
+    transparent 3px 6px
+  );
+  height: 2px;
+}
+
+.od-iv-param-swatch--sd2 {
+  background: repeating-linear-gradient(90deg, #64748b 0 2px, transparent 2px 5px);
+  height: 2px;
+}
+
+.od-iv-param-swatch--sd1 {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--color-link, #7dd3fc) 0 4px,
+    transparent 4px 7px
+  );
+  height: 2px;
+}
+
+.od-iv-param-swatch--mean {
+  background: var(--color-accent, #a3e635);
+  height: 3px;
+}
+
+.od-iv-param-swatch--call {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-accent, #6ea8fe);
+  border: 1px solid var(--color-border);
+}
+
+.od-iv-param-swatch--put {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-warning, #e8a849);
+  border: 1px solid var(--color-border);
 }
 
 .od-iv-data-table-sheet {

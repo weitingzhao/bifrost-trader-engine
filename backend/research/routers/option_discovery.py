@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import math
+import statistics
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -174,6 +175,38 @@ def _linear_percentiles(sorted_vals: List[float]) -> Dict[str, Optional[float]]:
         "min": sorted_vals[0],
         "max": sorted_vals[-1],
     }
+
+
+def _hist_iv_parametrics(daily_ivs: List[float]) -> Dict[str, Optional[float]]:
+    """Sample mean, stdev, min/max, and mean±k·σ (lower clamped to 0) from daily ATM IVs."""
+    n = len(daily_ivs)
+    out: Dict[str, Optional[float]] = {
+        "iv_hist_mean": None,
+        "iv_hist_stdev": None,
+        "iv_hist_min": None,
+        "iv_hist_max": None,
+        "iv_hist_plus_1sd": None,
+        "iv_hist_minus_1sd": None,
+        "iv_hist_plus_2sd": None,
+        "iv_hist_minus_2sd": None,
+    }
+    if n == 0:
+        return out
+    lo = min(daily_ivs)
+    hi = max(daily_ivs)
+    mu = statistics.mean(daily_ivs)
+    out["iv_hist_mean"] = float(mu)
+    out["iv_hist_min"] = float(lo)
+    out["iv_hist_max"] = float(hi)
+    if n < 2:
+        return out
+    sig = float(statistics.stdev(daily_ivs))
+    out["iv_hist_stdev"] = sig
+    out["iv_hist_plus_1sd"] = float(mu + sig)
+    out["iv_hist_minus_1sd"] = float(max(0.0, mu - sig))
+    out["iv_hist_plus_2sd"] = float(mu + 2.0 * sig)
+    out["iv_hist_minus_2sd"] = float(max(0.0, mu - 2.0 * sig))
+    return out
 
 
 def _median_float(vals: List[float]) -> Optional[float]:
@@ -1190,7 +1223,7 @@ def get_iv_volatility_cone(
             continue
 
         items_cur = exp_iv_cur_all.get(exp, [])
-        atm_cur, _, _, _ = _atm_iv_from_expiry_items(items_cur)
+        atm_cur, iv_call_cur, iv_put_cur, strike_cur = _atm_iv_from_expiry_items(items_cur)
 
         sorted_ivs = sorted(daily_ivs)
         n = len(sorted_ivs)
@@ -1201,16 +1234,22 @@ def get_iv_volatility_cone(
         else:
             pct = _linear_percentiles(sorted_ivs)
 
+        hist_p = _hist_iv_parametrics(daily_ivs)
+
         points.append({
             "expiration": exp,
             "dte_days": dte,
             "atm_iv": atm_cur,
+            "iv_call": iv_call_cur,
+            "iv_put": iv_put_cur,
+            "strike": strike_cur,
             "iv_p10": pct["p10"],
             "iv_p50": pct["p50"],
             "iv_p90": pct["p90"],
             "iv_min": pct["min"],
             "iv_max": pct["max"],
             "sample_days": n,
+            **hist_p,
         })
 
     points.sort(key=lambda p: p["dte_days"])

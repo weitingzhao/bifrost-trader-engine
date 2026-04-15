@@ -1,6 +1,12 @@
 import { useCallback, useMemo, useState } from 'react'
 import { InfoTooltip } from '../../components/InfoTooltip'
-import { IvTermStructureChart, IvVolConeChart, type IvTermPoint, type IvVolConePoint } from './OptionDiscoveryAnalytics'
+import {
+  IvParametricConeChart,
+  IvTermStructureChart,
+  IvVolConeChart,
+  type IvTermPoint,
+  type IvVolConePoint,
+} from './OptionDiscoveryAnalytics'
 
 /** Matches backend `min_samples_for_bands` for cone p10–p90 bands. */
 const CONE_MIN_DAILY_SAMPLES = 5
@@ -295,6 +301,20 @@ export function OptionDiscoveryIvTermSection({
                   )}
                 </div>
               </div>
+
+              {!coneError && conePoints.length >= 2 && (
+                <div className="od-iv-term-parametric-row">
+                  <div className="od-iv-term-chart-pane">
+                    <h4 className="mp-chart-subtitle od-iv-term-chart-pane-title">
+                      Parametric IV (historical)
+                      <InfoTooltip text="Per expiration: sample mean and sample standard deviation of daily ATM IV over the same lookback as the percentile cone; min/max and mean ±1 SD / ±2 SD (lower bands clamped at 0). Not the same as p10–p90. Call and Put: latest snapshot IV at the chosen ATM strike (same as term structure)." />
+                    </h4>
+                    <div className="od-iv-term-chart-svg-wrap od-iv-term-chart-svg-wrap--parametric">
+                      <IvParametricConeChart points={conePoints} />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="od-iv-data-table-sheet">
                 <h5 className="od-iv-data-table-heading">IV term &amp; cone — combined values</h5>

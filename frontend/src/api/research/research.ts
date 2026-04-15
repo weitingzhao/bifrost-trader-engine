@@ -2075,16 +2075,34 @@ export async function fetchIvTermStructure(
   }
 }
 
+function numOrNull(v: unknown): number | null {
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
 export interface IvVolatilityConePoint {
   expiration: string
   dte_days: number
   atm_iv: number | null
+  iv_call?: number | null
+  iv_put?: number | null
+  strike?: number | null
   iv_p10: number | null
   iv_p50: number | null
   iv_p90: number | null
   iv_min: number | null
   iv_max: number | null
   sample_days: number
+  /** Historical daily ATM IV — sample mean */
+  iv_hist_mean?: number | null
+  iv_hist_stdev?: number | null
+  iv_hist_min?: number | null
+  iv_hist_max?: number | null
+  iv_hist_plus_1sd?: number | null
+  iv_hist_minus_1sd?: number | null
+  iv_hist_plus_2sd?: number | null
+  iv_hist_minus_2sd?: number | null
 }
 
 export interface IvVolatilityConeResponse {
@@ -2116,12 +2134,23 @@ export async function fetchIvVolatilityCone(
         expiration: String(p.expiration ?? ''),
         dte_days: Number(p.dte_days ?? 0),
         atm_iv: p.atm_iv != null ? Number(p.atm_iv) : null,
+        iv_call: numOrNull(p.iv_call),
+        iv_put: numOrNull(p.iv_put),
+        strike: numOrNull(p.strike),
         iv_p10: p.iv_p10 != null ? Number(p.iv_p10) : null,
         iv_p50: p.iv_p50 != null ? Number(p.iv_p50) : null,
         iv_p90: p.iv_p90 != null ? Number(p.iv_p90) : null,
         iv_min: p.iv_min != null ? Number(p.iv_min) : null,
         iv_max: p.iv_max != null ? Number(p.iv_max) : null,
         sample_days: Number(p.sample_days ?? 0),
+        iv_hist_mean: numOrNull(p.iv_hist_mean),
+        iv_hist_stdev: numOrNull(p.iv_hist_stdev),
+        iv_hist_min: numOrNull(p.iv_hist_min),
+        iv_hist_max: numOrNull(p.iv_hist_max),
+        iv_hist_plus_1sd: numOrNull(p.iv_hist_plus_1sd),
+        iv_hist_minus_1sd: numOrNull(p.iv_hist_minus_1sd),
+        iv_hist_plus_2sd: numOrNull(p.iv_hist_plus_2sd),
+        iv_hist_minus_2sd: numOrNull(p.iv_hist_minus_2sd),
       }))
     : []
   const errMsg = (() => {

@@ -754,6 +754,230 @@ export function IvVolConeChart({ points }: { points: IvVolConePoint[] }) {
 }
 
 // ---------------------------------------------------------------------------
+// IV Parametric historical cone (mean ± sample σ, min/max, current Call/Put)
+// ---------------------------------------------------------------------------
+
+function polyIvCone(
+  rows: IvVolatilityConePoint[],
+  pick: (p: IvVolatilityConePoint) => number | null | undefined,
+  xFor: (d: number) => number,
+  yFor: (iv: number) => number,
+): string {
+  return rows
+    .filter(p => {
+      const v = pick(p)
+      return v != null && Number.isFinite(v)
+    })
+    .map(p => {
+      const v = pick(p)!
+      return `${xFor(p.dte_days)},${yFor(v)}`
+    })
+    .join(' ')
+}
+
+function extentParametricCone(rows: IvVolatilityConePoint[]): { lo: number; hi: number } | null {
+  let lo = Infinity
+  let hi = -Infinity
+  const bump = (v: number | null | undefined) => {
+    if (v != null && Number.isFinite(v)) {
+      lo = Math.min(lo, v)
+      hi = Math.max(hi, v)
+    }
+  }
+  for (const p of rows) {
+    bump(p.iv_hist_min)
+    bump(p.iv_hist_max)
+    bump(p.iv_hist_mean)
+    bump(p.iv_hist_plus_1sd)
+    bump(p.iv_hist_minus_1sd)
+    bump(p.iv_hist_plus_2sd)
+    bump(p.iv_hist_minus_2sd)
+    bump(p.iv_call)
+    bump(p.iv_put)
+    bump(p.atm_iv)
+  }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null
+  return { lo, hi }
+}
+
+export function IvParametricConeChart({ points }: { points: IvVolatilityConePoint[] }) {
+  const valid = useMemo(
+    () =>
+      points
+        .filter(p => p.dte_days >= 0)
+        .sort((a, b) => a.dte_days - b.dte_days),
+    [points],
+  )
+
+  const hasHist = useMemo(
+    () =>
+      valid.some(
+        p =>
+          (p.iv_hist_mean != null && Number.isFinite(p.iv_hist_mean))
+          || (p.iv_hist_min != null && Number.isFinite(p.iv_hist_min)),
+      ),
+    [valid],
+  )
+  const hasCp = useMemo(
+    () =>
+      valid.some(
+        p =>
+          (p.iv_call != null && Number.isFinite(p.iv_call))
+          || (p.iv_put != null && Number.isFinite(p.iv_put)),
+      ),
+    [valid],
+  )
+
+  if (valid.length < 2) {
+    return (
+      <p className="section-hint">
+        Not enough data for parametric chart (need at least 2 expirations with DTE ≥ 0).
+      </p>
+    )
+  }
+
+  if (!hasHist && !hasCp) {
+    return (
+      <p className="section-hint">
+        No historical ATM IV samples or latest Call/Put IV for this selection — load cone data with daily snapshots.
+      </p>
+    )
+  }
+
+  const ext0 = extentParametricCone(valid)
+  if (ext0 == null) {
+    return <p className="section-hint">Not enough numeric IV values to plot.</p>
+  }
+
+  const w = OD_IV_TERM_VIEWBOX_W
+  const h = OD_IV_TERM_VIEWBOX_H
+  const axisFs = OD_CHART_AXIS_FONT_IV_TERM
+  const pad = OD_IV_TERM_PAD
+  const innerW = w - pad.l - pad.r
+  const innerH = h - pad.t - pad.b
+  const xTickY = odIvTermXTickY(h)
+  const xTitleY = odIvTermXAxisTitleY(h)
+
+  const dtes = valid.map(p => p.dte_days)
+  const minD = Math.min(...dtes)
+  const maxD = Math.max(...dtes)
+  const ivPad = (ext0.hi - ext0.lo) * 0.1 || 0.01
+  const ivLo = Math.max(0, ext0.lo - ivPad)
+  const ivHi = ext0.hi + ivPad
+
+  const xFor = (d: number) => pad.l + scaleLin(d, minD, maxD, 0, innerW)
+  const yFor = (iv: number) => pad.t + innerH - scaleLin(iv, ivLo, ivHi, 0, innerH)
+
+  const linePts = (fn: (p: IvVolatilityConePoint) => number | null | undefined) =>
+    polyIvCone(valid, fn, xFor, yFor)
+  const ptsMin = linePts(p => p.iv_hist_min)
+  const ptsMax = linePts(p => p.iv_hist_max)
+  const ptsM2l = linePts(p => p.iv_hist_minus_2sd)
+  const ptsM2u = linePts(p => p.iv_hist_plus_2sd)
+  const ptsM1l = linePts(p => p.iv_hist_minus_1sd)
+  const ptsM1u = linePts(p => p.iv_hist_plus_1sd)
+  const ptsMean = linePts(p => p.iv_hist_mean)
+
+  const yTicks = 4
+  const yStep = (ivHi - ivLo) / yTicks
+  const axisFill = 'var(--color-text-main)'
+  const axisTickFill = 'var(--risk-payoff-tick)'
+
+  const jitter = 5
+
+  return (
+    <>
+      <svg className="od-max-pain-svg od-chart-svg" viewBox={`0 0 ${w} ${h}`}
+        aria-label="Parametric IV cone: historical daily ATM IV mean, standard deviation bands, min and max, with latest Call and Put IV markers">
+        <rect x={pad.l} y={pad.t} width={innerW} height={innerH}
+          fill="var(--color-surface)" rx={4} />
+
+        {Array.from({ length: yTicks + 1 }, (_, i) => {
+          const val = ivLo + yStep * i
+          const y = yFor(val)
+          return (
+            <g key={i}>
+              {i > 0 && (
+                <line x1={pad.l} x2={pad.l + innerW} y1={y} y2={y}
+                  stroke="var(--color-border)" strokeWidth={0.5} strokeDasharray="3 3" />
+              )}
+              <text x={pad.l - 8} y={y + 4} textAnchor="end" fontSize={axisFs} fontWeight={500}
+                fill={axisTickFill}>{fmtIv(val)}</text>
+            </g>
+          )
+        })}
+
+        {hasHist && (
+          <>
+            {ptsMin.length > 0 && (
+              <polyline fill="none" stroke="var(--color-text-muted)" strokeWidth={1.2} strokeDasharray="4 3"
+                points={ptsMin} />
+            )}
+            {ptsMax.length > 0 && (
+              <polyline fill="none" stroke="var(--color-text-muted)" strokeWidth={1.2} strokeDasharray="4 3"
+                points={ptsMax} />
+            )}
+            {ptsM2l.length > 0 && (
+              <polyline fill="none" stroke="#64748b" strokeWidth={1} strokeDasharray="2 4" points={ptsM2l} />
+            )}
+            {ptsM2u.length > 0 && (
+              <polyline fill="none" stroke="#64748b" strokeWidth={1} strokeDasharray="2 4" points={ptsM2u} />
+            )}
+            {ptsM1l.length > 0 && (
+              <polyline fill="none" stroke="var(--color-link, #7dd3fc)" strokeWidth={1.2} strokeDasharray="5 3"
+                points={ptsM1l} />
+            )}
+            {ptsM1u.length > 0 && (
+              <polyline fill="none" stroke="var(--color-link, #7dd3fc)" strokeWidth={1.2} strokeDasharray="5 3"
+                points={ptsM1u} />
+            )}
+            {ptsMean.length > 0 && (
+              <polyline fill="none" stroke="var(--color-accent, #a3e635)" strokeWidth={2} points={ptsMean} />
+            )}
+          </>
+        )}
+
+        {hasCp && valid.map((p, i) => {
+          const yc = p.iv_call != null && Number.isFinite(p.iv_call) ? yFor(p.iv_call) : null
+          const yp = p.iv_put != null && Number.isFinite(p.iv_put) ? yFor(p.iv_put) : null
+          const xc = xFor(p.dte_days)
+          return (
+            <g key={`cp-${i}`}>
+              {yc != null && (
+                <circle cx={xc - jitter} cy={yc} r={3.5}
+                  fill="var(--color-accent, #6ea8fe)" stroke="var(--color-border)" strokeWidth={0.5} />
+              )}
+              {yp != null && (
+                <circle cx={xc + jitter} cy={yp} r={3.5}
+                  fill="var(--color-warning, #e8a849)" stroke="var(--color-border)" strokeWidth={0.5} />
+              )}
+            </g>
+          )
+        })}
+
+        {valid.map((p, i) => (
+          <text key={`l-${i}`} x={xFor(p.dte_days)} y={xTickY} textAnchor="middle" fontSize={axisFs} fontWeight={500}
+            fill={axisTickFill}>{p.dte_days}d</text>
+        ))}
+
+        <text x={pad.l - 4} y={OD_IV_TERM_Y_AXIS_TITLE_Y} textAnchor="end" fontSize={axisFs} fontWeight={600}
+          fill={axisFill}>ATM IV</text>
+        <text x={pad.l + innerW / 2} y={xTitleY} textAnchor="middle" fontSize={axisFs} fontWeight={600}
+          fill={axisFill}>Days to Expiration</text>
+      </svg>
+      <div className="od-iv-param-legend" aria-label="Chart legend">
+        <span className="od-iv-param-legend-item"><span className="od-iv-param-swatch od-iv-param-swatch--minmax" />Min / Max</span>
+        <span className="od-iv-param-legend-item"><span className="od-iv-param-swatch od-iv-param-swatch--sd2" />Mean ±2 SD</span>
+        <span className="od-iv-param-legend-item"><span className="od-iv-param-swatch od-iv-param-swatch--sd1" />Mean ±1 SD</span>
+        <span className="od-iv-param-legend-item"><span className="od-iv-param-swatch od-iv-param-swatch--mean" />Mean</span>
+        <span className="od-iv-param-legend-item"><span className="od-iv-param-swatch od-iv-param-swatch--call" />Call (latest)</span>
+        <span className="od-iv-param-legend-item"><span className="od-iv-param-swatch od-iv-param-swatch--put" />Put (latest)</span>
+      </div>
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Combined analytics panel — vertical stack (no tabs)
 // ---------------------------------------------------------------------------
 
