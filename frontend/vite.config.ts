@@ -97,6 +97,7 @@ export default defineConfig({
       '/research/docs': { target: DOCS, changeOrigin: true },
       '/research/option': { target: RESEARCH, changeOrigin: true },
       '/research/iv-term-structure': { target: RESEARCH, changeOrigin: true },
+      '/research/iv-volatility-cone': { target: RESEARCH, changeOrigin: true },
       '/research/max-pain': { target: RESEARCH, changeOrigin: true },
       '/risk_summary': { target: MONITOR, changeOrigin: true },
       '/executions': { target: TRADING, changeOrigin: true },

@@ -1,7 +1,16 @@
 import { useMemo, useState } from 'react'
-import type { OptionSnapshotRow } from '../../api'
+import type { IvVolatilityConePoint, OptionSnapshotRow } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
-import { OD_CHART_AXIS_FONT } from './odChartConstants'
+import {
+  OD_CHART_AXIS_FONT,
+  OD_CHART_AXIS_FONT_IV_TERM,
+  OD_IV_TERM_PAD,
+  OD_IV_TERM_VIEWBOX_H,
+  OD_IV_TERM_VIEWBOX_W,
+  OD_IV_TERM_Y_AXIS_TITLE_Y,
+  odIvTermXAxisTitleY,
+  odIvTermXTickY,
+} from './odChartConstants'
 
 function scaleLin(v: number, vmin: number, vmax: number, outMin: number, outMax: number): number {
   if (!Number.isFinite(v)) return (outMin + outMax) / 2
@@ -533,9 +542,12 @@ export function IvTermStructureChart({ points }: { points: IvTermPoint[] }) {
     return <p className="section-hint">Not enough term structure data (need at least 2 expirations with ATM IV).</p>
   }
 
-  const w = 640
-  const h = 220
-  const pad = { l: 52, r: 24, t: 20, b: 40 }
+  const w = OD_IV_TERM_VIEWBOX_W
+  const h = OD_IV_TERM_VIEWBOX_H
+  const axisFs = OD_CHART_AXIS_FONT_IV_TERM
+  const pad = OD_IV_TERM_PAD
+  const xTickY = odIvTermXTickY(h)
+  const xTitleY = odIvTermXAxisTitleY(h)
   const innerW = w - pad.l - pad.r
   const innerH = h - pad.t - pad.b
 
@@ -556,6 +568,9 @@ export function IvTermStructureChart({ points }: { points: IvTermPoint[] }) {
 
   const yTicks = 4
   const yStep = (ivHi - ivLo) / yTicks
+  /** Plot axes: use main text for titles; payoff tick color reads better on dark plot surfaces than --color-text-muted */
+  const axisFill = 'var(--color-text-main)'
+  const axisTickFill = 'var(--risk-payoff-tick)'
 
   return (
     <svg className="od-max-pain-svg od-chart-svg" viewBox={`0 0 ${w} ${h}`}
@@ -570,8 +585,8 @@ export function IvTermStructureChart({ points }: { points: IvTermPoint[] }) {
           <g key={i}>
             {i > 0 && <line x1={pad.l} x2={pad.l + innerW} y1={y} y2={y}
               stroke="var(--color-border)" strokeWidth={0.5} strokeDasharray="3 3" />}
-            <text x={pad.l - 6} y={y + 3} textAnchor="end" fontSize={OD_CHART_AXIS_FONT}
-              fill="var(--color-text-dim)">{fmtIv(val)}</text>
+            <text x={pad.l - 8} y={y + 4} textAnchor="end" fontSize={axisFs} fontWeight={500}
+              fill={axisTickFill}>{fmtIv(val)}</text>
           </g>
         )
       })}
@@ -583,14 +598,157 @@ export function IvTermStructureChart({ points }: { points: IvTermPoint[] }) {
       ))}
 
       {valid.map((p, i) => (
-        <text key={`l-${i}`} x={xFor(p.dte_days)} y={h - 6} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
-          fill="var(--color-text-dim)">{p.dte_days}d</text>
+        <text key={`l-${i}`} x={xFor(p.dte_days)} y={xTickY} textAnchor="middle" fontSize={axisFs} fontWeight={500}
+          fill={axisTickFill}>{p.dte_days}d</text>
       ))}
 
-      <text x={pad.l - 4} y={pad.t - 6} textAnchor="end" fontSize={OD_CHART_AXIS_FONT}
-        fill="var(--color-text-dim)">ATM IV</text>
-      <text x={pad.l + innerW / 2} y={h - 0} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
-        fill="var(--color-text-dim)">Days to Expiration</text>
+      <text x={pad.l - 4} y={OD_IV_TERM_Y_AXIS_TITLE_Y} textAnchor="end" fontSize={axisFs} fontWeight={600}
+        fill={axisFill}>ATM IV</text>
+      <text x={pad.l + innerW / 2} y={xTitleY} textAnchor="middle" fontSize={axisFs} fontWeight={600}
+        fill={axisFill}>Days to Expiration</text>
+    </svg>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// IV Volatility Cone (historical ATM IV bands per calendar expiration)
+// ---------------------------------------------------------------------------
+
+export type IvVolConePoint = IvVolatilityConePoint
+
+export function IvVolConeChart({ points }: { points: IvVolConePoint[] }) {
+  const valid = useMemo(() =>
+    points
+      .filter(p => p.dte_days >= 0)
+      .sort((a, b) => a.dte_days - b.dte_days),
+    [points],
+  )
+
+  const hasLine = valid.some(p => p.atm_iv != null && Number.isFinite(p.atm_iv))
+  const hasBand = valid.some(
+    p => p.iv_p10 != null && p.iv_p90 != null && Number.isFinite(p.iv_p10) && Number.isFinite(p.iv_p90),
+  )
+
+  if (valid.length < 2 || (!hasLine && !hasBand)) {
+    return (
+      <p className="section-hint">
+        Not enough IV cone data (need at least 2 expirations with ATM IV and historical samples in PostgreSQL).
+      </p>
+    )
+  }
+
+  const w = OD_IV_TERM_VIEWBOX_W
+  const h = OD_IV_TERM_VIEWBOX_H
+  const axisFs = OD_CHART_AXIS_FONT_IV_TERM
+  const pad = OD_IV_TERM_PAD
+  const xTickY = odIvTermXTickY(h)
+  const xTitleY = odIvTermXAxisTitleY(h)
+  const innerW = w - pad.l - pad.r
+  const innerH = h - pad.t - pad.b
+
+  const dtes = valid.map(p => p.dte_days)
+  const minD = Math.min(...dtes)
+  const maxD = Math.max(...dtes)
+
+  const ivVals: number[] = []
+  for (const p of valid) {
+    if (p.atm_iv != null && Number.isFinite(p.atm_iv)) ivVals.push(p.atm_iv)
+    if (p.iv_p10 != null && Number.isFinite(p.iv_p10)) ivVals.push(p.iv_p10)
+    if (p.iv_p90 != null && Number.isFinite(p.iv_p90)) ivVals.push(p.iv_p90)
+    if (p.iv_min != null && Number.isFinite(p.iv_min)) ivVals.push(p.iv_min)
+    if (p.iv_max != null && Number.isFinite(p.iv_max)) ivVals.push(p.iv_max)
+  }
+  if (ivVals.length === 0) {
+    return <p className="section-hint">Not enough IV cone data.</p>
+  }
+  const minIv = Math.min(...ivVals)
+  const maxIv = Math.max(...ivVals)
+  const ivPad = (maxIv - minIv) * 0.1 || 0.01
+  const ivLo = Math.max(0, minIv - ivPad)
+  const ivHi = maxIv + ivPad
+
+  const xFor = (d: number) => pad.l + scaleLin(d, minD, maxD, 0, innerW)
+  const yFor = (iv: number) => pad.t + innerH - scaleLin(iv, ivLo, ivHi, 0, innerH)
+
+  const linePts = valid
+    .filter(p => p.atm_iv != null && Number.isFinite(p.atm_iv))
+    .map(p => `${xFor(p.dte_days)},${yFor(p.atm_iv!)}`)
+    .join(' ')
+
+  const barW = Math.min(14, innerW / Math.max(valid.length * 2, 6))
+
+  const yTicks = 4
+  const yStep = (ivHi - ivLo) / yTicks
+  /** Plot axes: use main text for titles; payoff tick color reads better on dark plot surfaces than --color-text-muted */
+  const axisFill = 'var(--color-text-main)'
+  const axisTickFill = 'var(--risk-payoff-tick)'
+
+  return (
+    <svg className="od-max-pain-svg od-chart-svg" viewBox={`0 0 ${w} ${h}`}
+      aria-label="IV volatility cone: historical ATM IV p10–p90 band per expiration vs days to expiration; current ATM IV overlaid">
+      <rect x={pad.l} y={pad.t} width={innerW} height={innerH}
+        fill="var(--color-surface)" rx={4} />
+
+      {Array.from({ length: yTicks + 1 }, (_, i) => {
+        const val = ivLo + yStep * i
+        const y = yFor(val)
+        return (
+          <g key={i}>
+            {i > 0 && <line x1={pad.l} x2={pad.l + innerW} y1={y} y2={y}
+              stroke="var(--color-border)" strokeWidth={0.5} strokeDasharray="3 3" />}
+            <text x={pad.l - 8} y={y + 4} textAnchor="end" fontSize={axisFs} fontWeight={500}
+              fill={axisTickFill}>{fmtIv(val)}</text>
+          </g>
+        )
+      })}
+
+      {valid.map((p, i) => {
+        if (
+          p.iv_p10 == null || p.iv_p90 == null
+          || !Number.isFinite(p.iv_p10) || !Number.isFinite(p.iv_p90)
+        ) {
+          return null
+        }
+        const x = xFor(p.dte_days)
+        const y1 = yFor(p.iv_p90)
+        const y2 = yFor(p.iv_p10)
+        const top = Math.min(y1, y2)
+        const hbar = Math.abs(y2 - y1)
+        return (
+          <rect
+            key={`band-${i}`}
+            x={x - barW / 2}
+            y={top}
+            width={barW}
+            height={Math.max(hbar, 1)}
+            fill="var(--color-accent, #6ea8fe)"
+            opacity={0.22}
+            rx={2}
+          />
+        )
+      })}
+
+      {linePts && (
+        <polyline fill="none" stroke="var(--color-warning, #e8a849)" strokeWidth={2} points={linePts} />
+      )}
+      {valid.map((p, i) => (
+        p.atm_iv != null && Number.isFinite(p.atm_iv)
+          ? (
+              <circle key={`dot-${i}`} cx={xFor(p.dte_days)} cy={yFor(p.atm_iv)} r={3}
+                fill="var(--color-warning, #e8a849)" />
+            )
+          : null
+      ))}
+
+      {valid.map((p, i) => (
+        <text key={`l-${i}`} x={xFor(p.dte_days)} y={xTickY} textAnchor="middle" fontSize={axisFs} fontWeight={500}
+          fill={axisTickFill}>{p.dte_days}d</text>
+      ))}
+
+      <text x={pad.l - 4} y={OD_IV_TERM_Y_AXIS_TITLE_Y} textAnchor="end" fontSize={axisFs} fontWeight={600}
+        fill={axisFill}>ATM IV</text>
+      <text x={pad.l + innerW / 2} y={xTitleY} textAnchor="middle" fontSize={axisFs} fontWeight={600}
+        fill={axisFill}>Days to Expiration</text>
     </svg>
   )
 }

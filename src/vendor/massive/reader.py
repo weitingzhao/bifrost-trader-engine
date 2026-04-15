@@ -664,6 +664,72 @@ def get_option_snapshots_latest(
         return []
 
 
+def get_option_snapshots_eod_per_day(
+    status_config: dict,
+    contract_keys: List[str],
+    source: str = "massive",
+    since_ts: Optional[datetime] = None,
+    chunk_size: int = 100,
+) -> List[Dict[str, Any]]:
+    """Latest snapshot per calendar day (America/New_York) per contract_key.
+
+    Uses DISTINCT ON (snap_day, contract_key) with last snapshot_ts that day.
+    Batches ``contract_keys`` to keep ``ANY()`` lists small.
+    """
+    if not contract_keys or not status_config or (
+        status_config.get("sink") != "postgres" and not status_config.get("postgres")
+    ):
+        return []
+    keys = [k for k in contract_keys if k and str(k).strip()]
+    if not keys:
+        return []
+    if since_ts is None:
+        since_ts = datetime(1970, 1, 1)
+    src = (source or "massive").strip().lower()
+    if src not in ("massive", "ib"):
+        src = "massive"
+    chunk_size = max(10, min(120, int(chunk_size)))
+
+    out: List[Dict[str, Any]] = []
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                for i in range(0, len(keys), chunk_size):
+                    batch = keys[i : i + chunk_size]
+                    cur.execute(
+                        """
+                        SELECT DISTINCT ON (
+                          (DATE(timezone('America/New_York', snapshot_ts))),
+                          contract_key
+                        )
+                          DATE(timezone('America/New_York', snapshot_ts)) AS snap_day,
+                          contract_key,
+                          iv,
+                          underlying_price,
+                          snapshot_ts
+                        FROM option_snapshots
+                        WHERE source = %s
+                          AND contract_key = ANY(%s)
+                          AND snapshot_ts >= %s
+                        ORDER BY
+                          DATE(timezone('America/New_York', snapshot_ts)),
+                          contract_key,
+                          snapshot_ts DESC
+                        """,
+                        (src, batch, since_ts),
+                    )
+                    for row in cur.fetchall():
+                        out.append(dict(row))
+            return out
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("get_option_snapshots_eod_per_day failed: %s", e)
+        return []
+
+
 def get_corporate_actions(
     status_config: dict,
     symbol: str,

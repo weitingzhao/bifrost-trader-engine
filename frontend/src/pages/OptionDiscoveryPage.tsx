@@ -32,7 +32,7 @@ import { buildPolygonOptionsTicker } from '../utils/polygonOptionsTicker'
 import { OptionDiscoveryMaxPainPanel } from './optionDiscovery/OptionDiscoveryMaxPainPanel'
 import { OptionDiscoveryContractChartPanel } from './optionDiscovery/OptionDiscoveryContractChartPanel'
 import { OptionDiscoveryAnalyticsPanel, IvSmileChart, IvSmileLegend } from './optionDiscovery/OptionDiscoveryAnalytics'
-import type { IvTermPoint } from './optionDiscovery/OptionDiscoveryAnalytics'
+import type { IvTermPoint, IvVolConePoint } from './optionDiscovery/OptionDiscoveryAnalytics'
 import { OdLayerSection } from './optionDiscovery/OdLayerSection'
 import { OptionDiscoveryIvTermSection } from './optionDiscovery/OptionDiscoveryIvTermSection'
 import { OptionDiscoveryCompareDrawer, addCompareRow } from './optionDiscovery/OptionDiscoveryCompareDrawer'
@@ -581,6 +581,8 @@ export function OptionDiscoveryPage({
   const [termPoints, setTermPoints] = useState<IvTermPoint[]>([])
   const [termLoading, setTermLoading] = useState(false)
   const [termError, setTermError] = useState<string | null>(null)
+  const [conePoints, setConePoints] = useState<IvVolConePoint[]>([])
+  const [coneError, setConeError] = useState<string | null>(null)
   /** Subset of `expirations` (same order as sidebar) to send to IV term API */
   const [ivTermExpKeys, setIvTermExpKeys] = useState<string[]>([])
   /** Massive: enqueue chain snapshot jobs for IV-term selection, then reload IV term */
@@ -893,25 +895,39 @@ export function OptionDiscoveryPage({
     if (!sym || ordered.length < 2) return
     setTermLoading(true)
     setTermError(null)
+    setConeError(null)
     setTermPoints([])
+    setConePoints([])
     try {
-      const { fetchIvTermStructure } = await import('../api/research/research')
-      const res = await fetchIvTermStructure(sym, ordered.slice(0, IV_TERM_MAX_EXPIRATIONS), 'massive')
+      const { fetchIvTermStructure, fetchIvVolatilityCone } = await import('../api/research/research')
+      const expSlice = ordered.slice(0, IV_TERM_MAX_EXPIRATIONS)
+      const [res, coneRes] = await Promise.all([
+        fetchIvTermStructure(sym, expSlice, 'massive'),
+        fetchIvVolatilityCone(sym, expSlice, 'massive', 90),
+      ])
       if (!res.ok) {
         setTermError(res.error ?? 'Failed to load IV term structure')
-        return
-      }
-      const pts = res.points ?? []
-      if (pts.length < 2) {
-        setTermError(
-          'Not enough ATM IV in PostgreSQL for the checked expirations (need ≥2 with IV). Use Backfill snapshots (Massive) to enqueue chain jobs for the selection, or Load quotes in section 4 per expiration. You can check any expirations (up to 12), not only the first eight.',
-        )
+      } else {
+        const pts = res.points ?? []
+        if (pts.length < 2) {
+          setTermError(
+            'Not enough ATM IV in PostgreSQL for the checked expirations (need ≥2 with IV). Use Backfill snapshots (Massive) to enqueue chain jobs for the selection, or Load quotes in section 4 per expiration. You can check any expirations (up to 12), not only the first eight.',
+          )
+        } else {
+          setTermError(null)
+        }
         setTermPoints(pts)
-        return
       }
-      setTermPoints(pts)
+      if (!coneRes.ok) {
+        setConeError(coneRes.error ?? 'Failed to load IV volatility cone')
+        setConePoints([])
+      } else {
+        setConeError(null)
+        setConePoints(coneRes.points ?? [])
+      }
     } catch (e) {
       setTermError(e instanceof Error ? e.message : 'Failed to load IV term structure')
+      setConeError(e instanceof Error ? e.message : 'Failed to load IV volatility cone')
     } finally {
       setTermLoading(false)
     }
@@ -993,6 +1009,8 @@ export function OptionDiscoveryPage({
   useEffect(() => {
     setTermPoints([])
     setTermError(null)
+    setConePoints([])
+    setConeError(null)
     setIvTermExpKeys([])
     setIvTermSyncLoading(false)
     setIvTermSyncStatus(null)
@@ -1663,6 +1681,8 @@ export function OptionDiscoveryPage({
                 termPoints={termPoints}
                 termLoading={termLoading}
                 termError={termError}
+                conePoints={conePoints}
+                coneError={coneError}
               />
             </OdLayerSection>
 

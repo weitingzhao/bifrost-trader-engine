@@ -2074,3 +2074,71 @@ export async function fetchIvTermStructure(
     error: errMsg,
   }
 }
+
+export interface IvVolatilityConePoint {
+  expiration: string
+  dte_days: number
+  atm_iv: number | null
+  iv_p10: number | null
+  iv_p50: number | null
+  iv_p90: number | null
+  iv_min: number | null
+  iv_max: number | null
+  sample_days: number
+}
+
+export interface IvVolatilityConeResponse {
+  ok: boolean
+  symbol: string
+  underlying_price?: number
+  lookback_days?: number
+  points: IvVolatilityConePoint[]
+  warning?: string
+  error?: string
+}
+
+export async function fetchIvVolatilityCone(
+  symbol: string,
+  expirations: string[],
+  source: string = 'massive',
+  lookbackDays: number = 90,
+): Promise<IvVolatilityConeResponse> {
+  const params = new URLSearchParams({
+    symbol,
+    expirations: expirations.join(','),
+    source,
+    lookback_days: String(lookbackDays),
+  })
+  const r = await fetch(`${researchApiUrl('/research/iv-volatility-cone')}?${params}`)
+  const j = await r.json().catch(() => ({}))
+  const pts: IvVolatilityConePoint[] = Array.isArray(j.points)
+    ? j.points.map((p: Record<string, unknown>) => ({
+        expiration: String(p.expiration ?? ''),
+        dte_days: Number(p.dte_days ?? 0),
+        atm_iv: p.atm_iv != null ? Number(p.atm_iv) : null,
+        iv_p10: p.iv_p10 != null ? Number(p.iv_p10) : null,
+        iv_p50: p.iv_p50 != null ? Number(p.iv_p50) : null,
+        iv_p90: p.iv_p90 != null ? Number(p.iv_p90) : null,
+        iv_min: p.iv_min != null ? Number(p.iv_min) : null,
+        iv_max: p.iv_max != null ? Number(p.iv_max) : null,
+        sample_days: Number(p.sample_days ?? 0),
+      }))
+    : []
+  const errMsg = (() => {
+    if (j.error != null && String(j.error).trim() !== '') return String(j.error)
+    const d = j.detail
+    if (typeof d === 'string') return d
+    if (Array.isArray(d) && d[0]?.msg) return String(d[0].msg)
+    if (!r.ok) return `HTTP ${r.status}`
+    return undefined
+  })()
+  return {
+    ok: Boolean(j.ok) && r.ok,
+    symbol: j.symbol ?? symbol,
+    underlying_price: j.underlying_price != null ? Number(j.underlying_price) : undefined,
+    lookback_days: j.lookback_days != null ? Number(j.lookback_days) : undefined,
+    points: pts,
+    warning: j.warning != null ? String(j.warning) : undefined,
+    error: errMsg,
+  }
+}

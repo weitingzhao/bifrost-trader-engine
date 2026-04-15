@@ -9901,10 +9901,232 @@ th {
 }
 
 .od-iv-term-chart-caption {
-  margin-top: 0.5rem;
+  margin-top: 0.75rem;
   margin-bottom: 0;
   font-size: var(--text-caption);
   word-break: break-word;
+}
+
+/* IV term + cone: two charts per row; data tables below */
+.od-iv-term-cone-charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  margin-top: 0.5rem;
+}
+
+@media (max-width: 960px) {
+  .od-iv-term-cone-charts-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.od-iv-term-chart-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-elevated, var(--color-surface));
+}
+
+.od-iv-term-chart-pane-title {
+  margin-top: 0;
+  margin-bottom: 0.35rem;
+}
+
+.od-iv-term-chart-svg-wrap {
+  width: 100%;
+  min-width: 0;
+}
+
+.od-iv-term-chart-svg-wrap .od-chart-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  /* Matches OD_IV_TERM_VIEWBOX_W / OD_IV_TERM_VIEWBOX_H — IV Term + Cone same aspect, equal height in row */
+  aspect-ratio: 640 / 260;
+}
+
+.od-iv-data-table-sheet {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin-top: var(--space-3);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  overflow: visible;
+}
+
+/* Combined IV sheet: hover detail on cells (same pattern as .info-tooltip) */
+.od-iv-sheet-hover {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  cursor: help;
+  max-width: 100%;
+}
+
+.od-iv-sheet-hover-target {
+  border-bottom: 1px dotted var(--color-text-dim);
+}
+
+.od-iv-sheet-hover--warn .od-iv-sheet-hover-target {
+  color: var(--color-warning, #c98a2a);
+  font-weight: 600;
+  border-bottom-color: var(--color-warning, #c98a2a);
+}
+
+.od-iv-sheet-hover-popup {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(100% + 0.35rem);
+  z-index: 120;
+  min-width: 14rem;
+  max-width: 22rem;
+  padding: 0.5rem 0.75rem;
+  font-size: var(--text-caption);
+  font-weight: normal;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-fast);
+}
+
+.od-iv-sheet-hover:hover .od-iv-sheet-hover-popup {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.od-iv-data-row--cone-warn {
+  background: rgba(201, 138, 42, 0.08);
+}
+
+.od-iv-data-cell--warn {
+  font-variant-numeric: tabular-nums;
+}
+
+.od-iv-data-cell--muted {
+  color: var(--color-text-dim);
+}
+
+.od-iv-samples-pair {
+  font-variant-numeric: tabular-nums;
+}
+
+.od-iv-samples-actual {
+  font-weight: 600;
+}
+
+.od-iv-sheet-hover--warn .od-iv-samples-actual {
+  color: var(--color-warning, #c98a2a);
+}
+
+.od-iv-band-incomplete {
+  font-weight: 600;
+  color: var(--color-warning, #c98a2a);
+}
+
+.od-iv-data-table th .info-tooltip-wrap {
+  margin-left: 0.2rem;
+  vertical-align: middle;
+}
+
+.od-iv-data-table-heading {
+  margin: 0 0 0.35rem;
+  font-size: var(--text-small, 0.875rem);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.od-iv-data-source {
+  margin: 0 0 0.5rem !important;
+  font-size: var(--text-caption) !important;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.od-iv-data-code {
+  font-size: 0.85em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--color-surface-elevated, rgba(128, 128, 128, 0.12));
+}
+
+.od-iv-data-table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* IV term & cone sheet: no scrollbars — table fits main column width */
+.od-iv-data-table-wrap--iv-sheet {
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+}
+
+.od-iv-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-caption);
+}
+
+.od-iv-data-table th,
+.od-iv-data-table td {
+  padding: 0.35rem 0.5rem;
+  text-align: right;
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.od-iv-data-table th:first-child,
+.od-iv-data-table td:first-child {
+  text-align: left;
+}
+
+.od-iv-data-table thead th {
+  font-weight: 600;
+  color: var(--color-text-dim);
+  background: var(--color-surface-elevated, rgba(128, 128, 128, 0.06));
+}
+
+.od-iv-data-table-empty {
+  text-align: center !important;
+  color: var(--color-text-dim);
+  font-style: italic;
+}
+
+.od-iv-data-table--merged {
+  min-width: 0;
+  max-width: 100%;
+  table-layout: fixed;
+  /* Slightly larger than body caption so the combined sheet stays readable */
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.od-iv-data-table--merged th,
+.od-iv-data-table--merged td {
+  padding: 0.28rem 0.22rem;
+}
+
+.od-iv-data-table--merged td:first-child {
+  font-variant-numeric: tabular-nums;
 }
 
 .od-max-pain-section {

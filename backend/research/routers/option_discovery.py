@@ -3,8 +3,9 @@
 import asyncio
 import hashlib
 import json
+import math
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -85,6 +86,104 @@ def _parse_contract_key(ck: str) -> Tuple[Optional[float], Optional[str]]:
     return None, None
 
 
+def _build_exp_iv_map(
+    rows: List[Dict[str, Any]],
+    key_exp_map: Dict[str, str],
+    last_price: float,
+) -> Dict[str, List[Tuple[float, Optional[float], Optional[float], float]]]:
+    """Group snapshot rows into per-expiry tuples (distance, iv_call, iv_put, strike)."""
+    exp_iv: Dict[str, List[Tuple[float, Optional[float], Optional[float], float]]] = {}
+    for row in rows:
+        ck = row.get("contract_key") or ""
+        exp = key_exp_map.get(ck)
+        if not exp:
+            continue
+        strike, right = _parse_contract_key(ck)
+        if strike is None:
+            continue
+        iv_val = row.get("iv")
+        if iv_val is None:
+            continue
+        try:
+            iv_f = float(iv_val)
+        except (TypeError, ValueError):
+            continue
+        if not (0 < iv_f < 10):
+            continue
+        entry = exp_iv.setdefault(exp, [])
+        dist = abs(strike - last_price)
+        if right == "C":
+            entry.append((dist, iv_f, None, strike))
+        else:
+            entry.append((dist, None, iv_f, strike))
+    return exp_iv
+
+
+def _atm_iv_from_expiry_items(
+    items: List[Tuple[float, Optional[float], Optional[float], float]],
+) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+    """Return (atm_iv, iv_call, iv_put, best_strike) using nearest strikes with IV."""
+    if not items:
+        return None, None, None, None
+    items_sorted = sorted(items, key=lambda x: x[0])
+    best_call: Optional[float] = None
+    best_put: Optional[float] = None
+    best_strike: Optional[float] = None
+    for dist, iv_c, iv_p, st in items_sorted:
+        if iv_c is not None and best_call is None:
+            best_call = iv_c
+            if best_strike is None:
+                best_strike = st
+        if iv_p is not None and best_put is None:
+            best_put = iv_p
+            if best_strike is None:
+                best_strike = st
+        if best_call is not None and best_put is not None:
+            break
+
+    atm_iv: Optional[float] = None
+    if best_call is not None and best_put is not None:
+        atm_iv = (best_call + best_put) / 2
+    elif best_call is not None:
+        atm_iv = best_call
+    elif best_put is not None:
+        atm_iv = best_put
+    return atm_iv, best_call, best_put, best_strike
+
+
+def _linear_percentiles(sorted_vals: List[float]) -> Dict[str, Optional[float]]:
+    """p10, p50, p90, min, max from sorted list."""
+    n = len(sorted_vals)
+    if n == 0:
+        return {"p10": None, "p50": None, "p90": None, "min": None, "max": None}
+
+    def pct(p: float) -> float:
+        if n == 1:
+            return sorted_vals[0]
+        i = (n - 1) * (p / 100.0)
+        lo = int(math.floor(i))
+        hi = int(math.ceil(i))
+        if lo == hi:
+            return sorted_vals[lo]
+        return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (i - lo)
+
+    return {
+        "p10": pct(10.0),
+        "p50": pct(50.0),
+        "p90": pct(90.0),
+        "min": sorted_vals[0],
+        "max": sorted_vals[-1],
+    }
+
+
+def _median_float(vals: List[float]) -> Optional[float]:
+    if not vals:
+        return None
+    s = sorted(vals)
+    m = len(s) // 2
+    if len(s) % 2:
+        return s[m]
+    return (s[m - 1] + s[m]) / 2.0
 
 
 def _filter_option_strikes(strikes_raw: List[float], last_price: Optional[float]) -> List[float]:
@@ -935,61 +1034,13 @@ def get_iv_term_structure(
                 key_exp_map[k] = exp
 
     rows = get_option_snapshots_latest(db, all_keys, source=src)
-
-    exp_iv: Dict[str, List[Tuple[float, Optional[float], Optional[float], float]]] = {}
-    for row in rows:
-        ck = row.get("contract_key") or ""
-        exp = key_exp_map.get(ck)
-        if not exp:
-            continue
-        strike, right = _parse_contract_key(ck)
-        if strike is None:
-            continue
-        iv_val = row.get("iv")
-        if iv_val is None:
-            continue
-        try:
-            iv_f = float(iv_val)
-        except (TypeError, ValueError):
-            continue
-        if not (0 < iv_f < 10):
-            continue
-        entry = exp_iv.setdefault(exp, [])
-        dist = abs(strike - last_price)
-        if right == "C":
-            entry.append((dist, iv_f, None, strike))
-        else:
-            entry.append((dist, None, iv_f, strike))
+    exp_iv = _build_exp_iv_map(rows, key_exp_map, last_price)
 
     today = date.today()
     points: List[Dict[str, Any]] = []
     for exp in exp_list:
         items = exp_iv.get(exp, [])
-        if not items:
-            continue
-        items.sort(key=lambda x: x[0])
-        best_call: Optional[float] = None
-        best_put: Optional[float] = None
-        best_strike: Optional[float] = None
-        for dist, iv_c, iv_p, st in items:
-            if iv_c is not None and best_call is None:
-                best_call = iv_c
-                if best_strike is None:
-                    best_strike = st
-            if iv_p is not None and best_put is None:
-                best_put = iv_p
-                if best_strike is None:
-                    best_strike = st
-            if best_call is not None and best_put is not None:
-                break
-
-        atm_iv: Optional[float] = None
-        if best_call is not None and best_put is not None:
-            atm_iv = (best_call + best_put) / 2
-        elif best_call is not None:
-            atm_iv = best_call
-        elif best_put is not None:
-            atm_iv = best_put
+        atm_iv, best_call, best_put, best_strike = _atm_iv_from_expiry_items(items)
         if atm_iv is None:
             continue
 
@@ -1012,3 +1063,171 @@ def get_iv_term_structure(
 
     points.sort(key=lambda p: p["dte_days"])
     return {"ok": True, "symbol": sym, "underlying_price": last_price, "points": points}
+
+
+@router.get("/research/iv-volatility-cone", response_model=None)
+def get_iv_volatility_cone(
+    request: Request,
+    symbol: str = Query(..., description="Underlying symbol"),
+    expirations: str = Query(
+        ...,
+        description="Comma-separated expiration dates (YYYYMMDD or YYYY-MM-DD), max 12",
+    ),
+    source: str = Query("massive", description="Snapshot source: massive | ib"),
+    lookback_days: int = Query(90, ge=1, le=90, description="Calendar days of history (max 90)"),
+) -> Dict[str, Any]:
+    """ATM IV percentile bands per expiration from historical option_snapshots (IV volatility cone)."""
+    from datetime import date, datetime
+
+    from src.vendor.massive.client import contract_key_from_parts
+    from src.vendor.massive.reader import get_option_snapshots_eod_per_day, get_option_snapshots_latest
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "symbol": symbol, "points": [], "error": "PostgreSQL not configured"}
+
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"ok": False, "symbol": sym, "points": [], "error": "symbol is required"}
+
+    src = (source or "massive").strip().lower()
+    if src not in ("massive", "ib"):
+        src = "massive"
+
+    exp_list: List[str] = []
+    for raw in (expirations or "").split(","):
+        e = _norm_expiry_key(raw)
+        if len(e) == 8 and e.isdigit():
+            exp_list.append(e)
+    exp_list = exp_list[:12]
+    if len(exp_list) < 2:
+        return {"ok": False, "symbol": sym, "points": [], "error": "Need at least 2 valid expirations"}
+
+    reader = getattr(request.app.state, "reader", None)
+    last_price: Optional[float] = None
+    if reader and hasattr(reader, "get_stock_day_fallback_price"):
+        fallback = reader.get_stock_day_fallback_price(sym)
+        if fallback and fallback[0] is not None and fallback[0] > 0:
+            last_price = float(fallback[0])
+    if not last_price:
+        return {"ok": False, "symbol": sym, "points": [], "error": "No underlying price available for ATM strike selection"}
+
+    atm_narrow = _strikes_around_spot(last_price, count=2)
+    atm_wide = _strikes_around_spot(last_price, count=10)
+    if not atm_narrow or not atm_wide:
+        return {"ok": False, "symbol": sym, "points": [], "error": "Cannot compute ATM strikes"}
+
+    key_exp_narrow: Dict[str, str] = {}
+    narrow_keys: List[str] = []
+    key_exp_wide: Dict[str, str] = {}
+    wide_keys: List[str] = []
+    for exp in exp_list:
+        for st in atm_narrow:
+            for r in ("C", "P"):
+                k = contract_key_from_parts(sym, exp, float(st), r)
+                narrow_keys.append(k)
+                key_exp_narrow[k] = exp
+        for st in atm_wide:
+            for r in ("C", "P"):
+                k2 = contract_key_from_parts(sym, exp, float(st), r)
+                wide_keys.append(k2)
+                key_exp_wide[k2] = exp
+
+    narrow_keys = list(dict.fromkeys(narrow_keys))
+    wide_keys = list(dict.fromkeys(wide_keys))
+
+    since_ts = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    hist_rows = get_option_snapshots_eod_per_day(db, wide_keys, source=src, since_ts=since_ts)
+    latest_rows = get_option_snapshots_latest(db, narrow_keys, source=src)
+    exp_iv_cur_all = _build_exp_iv_map(latest_rows, key_exp_narrow, last_price)
+
+    by_day: Dict[Any, List[Dict[str, Any]]] = {}
+    for row in hist_rows:
+        sd = row.get("snap_day")
+        if sd is None:
+            continue
+        by_day.setdefault(sd, []).append(row)
+
+    today = date.today()
+    points: List[Dict[str, Any]] = []
+    band_warns: List[Tuple[str, int]] = []
+    min_samples_for_bands = 5
+
+    for exp in exp_list:
+        daily_ivs: List[float] = []
+        for _sd in sorted(by_day.keys()):
+            day_rows = by_day[_sd]
+            rows_exp = [
+                r
+                for r in day_rows
+                if key_exp_wide.get(str(r.get("contract_key") or "")) == exp
+            ]
+            spots: List[float] = []
+            for r in rows_exp:
+                up = r.get("underlying_price")
+                if up is not None:
+                    try:
+                        v = float(up)
+                    except (TypeError, ValueError):
+                        continue
+                    if v > 0:
+                        spots.append(v)
+            day_spot = _median_float(spots)
+            if day_spot is None or day_spot <= 0:
+                continue
+            exp_iv = _build_exp_iv_map(rows_exp, key_exp_wide, day_spot)
+            items = exp_iv.get(exp, [])
+            atm_d, _, _, _ = _atm_iv_from_expiry_items(items)
+            if atm_d is not None:
+                daily_ivs.append(float(atm_d))
+
+        try:
+            exp_date = datetime.strptime(exp, "%Y%m%d").date()
+        except ValueError:
+            continue
+        dte = (exp_date - today).days
+        if dte < 0:
+            continue
+
+        items_cur = exp_iv_cur_all.get(exp, [])
+        atm_cur, _, _, _ = _atm_iv_from_expiry_items(items_cur)
+
+        sorted_ivs = sorted(daily_ivs)
+        n = len(sorted_ivs)
+        pct: Dict[str, Optional[float]]
+        if n < min_samples_for_bands:
+            pct = {"p10": None, "p50": None, "p90": None, "min": None, "max": None}
+            band_warns.append((exp, n))
+        else:
+            pct = _linear_percentiles(sorted_ivs)
+
+        points.append({
+            "expiration": exp,
+            "dte_days": dte,
+            "atm_iv": atm_cur,
+            "iv_p10": pct["p10"],
+            "iv_p50": pct["p50"],
+            "iv_p90": pct["p90"],
+            "iv_min": pct["min"],
+            "iv_max": pct["max"],
+            "sample_days": n,
+        })
+
+    points.sort(key=lambda p: p["dte_days"])
+    out: Dict[str, Any] = {
+        "ok": True,
+        "symbol": sym,
+        "underlying_price": last_price,
+        "lookback_days": lookback_days,
+        "points": points,
+    }
+    if band_warns:
+        nexp = len(band_warns)
+        examples = "; ".join(f"{e}: samples={cnt}" for e, cnt in band_warns[:3])
+        more = f" (+{nexp - 3} more expirations)" if nexp > 3 else ""
+        out["warning"] = (
+            f"p10–p90 bands need ≥{min_samples_for_bands} daily ATM IV points per expiration in the lookback; "
+            f"{nexp} expiration(s) below that ({examples}{more}). "
+            "See Hist. samples column. Current ATM line still uses latest snapshots."
+        )
+    return out

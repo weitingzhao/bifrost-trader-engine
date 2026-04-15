@@ -140,11 +140,14 @@ export {
   fetchMaxPainCompute,
   fetchMaxPainComputeHistory,
   fetchIvTermStructure,
+  fetchIvVolatilityCone,
 } from './research/research'
 export type {
   OptionSnapshotRow,
   IvTermStructurePoint,
   IvTermStructureResponse,
+  IvVolatilityConePoint,
+  IvVolatilityConeResponse,
   MassiveOptionExpirationsDebug,
   MassiveApiHealthResponse,
   DocsApiHealthResponse,
