@@ -21,7 +21,7 @@ import {
 } from './utils/celeryRuntime'
 import { LivePage } from './pages/LivePage'
 import { AccountsPage } from './pages/AccountsPage'
-import { MarketDataPage } from './pages/MarketDataPage'
+import { OptionScreenerPage } from './pages/OptionScreenerPage'
 import { PositionsPage } from './pages/PositionsPage'
 import { TradeHistoryPage } from './pages/TradeHistoryPage'
 import type { PortfolioView } from './pages/portfolio/types'
@@ -1740,7 +1740,7 @@ export default function App() {
       )}
 
       {activeTab === 'research' && researchView === 'screener' && (
-        <MarketDataPage
+        <OptionScreenerPage
           status={status}
           onGoToScreener={() => setResearchView('screener')}
           breadcrumbLabel="Screener"

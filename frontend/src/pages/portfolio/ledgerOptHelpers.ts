@@ -67,6 +67,9 @@ export function sliceExecutionForInstanceOptView(ex: Execution, instanceId: numb
         ? ex.strategy_opportunity_name?.trim() ?? null
         : null
 
+    const taxes = ex.taxes
+    const netCash = ex.net_cash
+
     return {
       ...ex,
       quantity: allocQty,
@@ -74,6 +77,10 @@ export function sliceExecutionForInstanceOptView(ex: Execution, instanceId: numb
         rp != null && Number.isFinite(Number(rp)) ? Number(rp) * w : rp,
       commission:
         comm != null && Number.isFinite(Number(comm)) ? Number(comm) * w : comm,
+      taxes:
+        taxes != null && Number.isFinite(Number(taxes)) ? Number(taxes) * w : taxes,
+      net_cash:
+        netCash != null && Number.isFinite(Number(netCash)) ? Number(netCash) * w : netCash,
       strategy_opportunity_id: resolvedOppId,
       strategy_opportunity_name: resolvedOppName,
       strategy_instance_id: instanceId,
@@ -85,6 +92,47 @@ export function sliceExecutionForInstanceOptView(ex: Execution, instanceId: numb
 
   if (ex.strategy_instance_id === instanceId) return ex
   return null
+}
+
+/** Sum of |allocated_quantity| across instance_allocations; used for split ratio display. */
+export function getInstanceAllocationSplitMeta(
+  ex: Execution,
+  strategyInstanceId: number,
+): { allocatedAbs: number; totalAbs: number } | null {
+  const allocs = ex.instance_allocations
+  if (!allocs?.length) return null
+  let totalAbs = 0
+  for (const a of allocs) {
+    totalAbs += Math.abs(Number(a.allocated_quantity) || 0)
+  }
+  if (totalAbs <= 0) return null
+  const mine = allocs.find(a => Number(a.strategy_instance_id) === strategyInstanceId)
+  if (!mine) return null
+  const allocatedAbs = Math.abs(Number(mine.allocated_quantity) || 0)
+  return { allocatedAbs, totalAbs }
+}
+
+/** Short "allocated/total" label for split rows (abs quantities). */
+export function formatInstanceAllocationRatioShort(allocatedAbs: number, totalAbs: number): string {
+  const fmt = (n: number) =>
+    Number.isInteger(n) ? String(n) : n.toFixed(4).replace(/\.?0+$/, '')
+  return `${fmt(allocatedAbs)}/${fmt(totalAbs)}`
+}
+
+/**
+ * Tooltip + ratio label when this execution row uses account_execution_instance_allocation
+ * (for UI next to Executions Final).
+ */
+export function describeInstanceAllocationSplitForDisplay(
+  ex: Execution,
+  strategyInstanceId: number,
+): { ratioLabel: string; tooltip: string } | null {
+  const meta = getInstanceAllocationSplitMeta(ex, strategyInstanceId)
+  if (!meta) return null
+  return {
+    ratioLabel: formatInstanceAllocationRatioShort(meta.allocatedAbs, meta.totalAbs),
+    tooltip: `Split via instance allocation (account_execution_instance_allocation). This instance share: |${meta.allocatedAbs}| of |${meta.totalAbs}| by abs allocated quantity.`,
+  }
 }
 
 /**

@@ -23301,3 +23301,312 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   color: var(--color-text-main);
   word-break: break-word;
 }
+
+/* Strategy Instance Detail — compact shell + buy/sell match executions */
+.instance-detail-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 1rem);
+}
+
+.instance-detail-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.instance-detail-header-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.75rem;
+}
+
+.instance-detail-header-id {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.instance-detail-header-label {
+  font-size: var(--text-small, 0.875rem);
+}
+
+.instance-detail-header-account {
+  font-size: var(--text-small, 0.875rem);
+}
+
+.instance-detail-header-links {
+  font-size: var(--text-small, 0.875rem);
+}
+
+.instance-detail-main-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3, 1rem);
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .instance-detail-main-grid {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  }
+}
+
+.instance-detail-overview-card {
+  margin-top: 0;
+}
+
+.instance-detail-section-title {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.instance-detail-subheading {
+  margin: 0.75rem 0 0.35rem;
+  font-size: var(--text-small, 0.875rem);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.instance-detail-info-dl {
+  gap: 0.2rem 0.85rem !important;
+}
+
+.instance-detail-structure-embed {
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.instance-detail-opened-at-row {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.instance-detail-opened-at-row .create-instance-input {
+  max-width: 12rem;
+}
+
+.instance-detail-opened-at-error {
+  display: block;
+  width: 100%;
+}
+
+.instance-detail-pnl-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.65rem 1rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface, rgba(255, 255, 255, 0.03));
+}
+
+.instance-detail-pnl-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 5.5rem;
+}
+
+.instance-detail-pnl-label {
+  font-size: var(--text-tiny, 0.7rem);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.instance-detail-pnl-value {
+  font-size: var(--text-small, 0.9375rem);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.instance-detail-pnl-value.is-positive {
+  color: var(--color-success, #3d9a62);
+}
+
+.instance-detail-pnl-value.is-negative {
+  color: var(--color-danger, #c45c5c);
+}
+
+.instance-detail-pnl-value.is-neutral {
+  color: var(--color-text-main);
+}
+
+.instance-detail-pnl-value.is-commission {
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.instance-detail-risk {
+  margin-top: 0;
+}
+
+.instance-detail-executions {
+  margin-top: 0;
+}
+
+.instance-detail-exec-tabs {
+  display: inline-flex;
+  gap: 0;
+  margin-bottom: 0.35rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.instance-detail-exec-tab {
+  padding: 0.4rem 0.85rem;
+  font-size: var(--text-small, 0.875rem);
+  font-weight: 500;
+  border: none;
+  background: var(--color-bg);
+  color: var(--color-text-main);
+  cursor: pointer;
+}
+
+.instance-detail-exec-tab + .instance-detail-exec-tab {
+  border-left: 1px solid var(--color-border);
+}
+
+.instance-detail-exec-tab.active {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+.instance-detail-exec-tab:hover:not(.active) {
+  background: var(--color-surface);
+}
+
+.instance-detail-exec-hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.instance-detail-match-wrap {
+  margin-bottom: 0.75rem;
+}
+
+.instance-detail-match-table {
+  font-size: var(--text-small, 0.8125rem);
+}
+
+.instance-detail-match-table th,
+.instance-detail-match-table td {
+  vertical-align: top;
+  padding: 0.45rem 0.5rem;
+}
+
+.instance-detail-match-th-buy {
+  text-align: left;
+  color: var(--color-success, #3d9a62);
+}
+
+.instance-detail-match-th-sell {
+  text-align: left;
+  color: var(--color-danger, #c45c5c);
+}
+
+.instance-detail-match-th-center {
+  min-width: 10rem;
+}
+
+.instance-detail-match-buy {
+  background: rgba(61, 154, 98, 0.06);
+  border-left: 2px solid rgba(61, 154, 98, 0.35);
+}
+
+.instance-detail-match-sell {
+  background: rgba(196, 92, 92, 0.06);
+  border-right: 2px solid rgba(196, 92, 92, 0.35);
+}
+
+.instance-detail-match-row.is-matched .instance-detail-match-center {
+  background: rgba(128, 128, 128, 0.06);
+}
+
+.instance-detail-match-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.instance-detail-contract-title {
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.instance-detail-net-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.2rem;
+}
+
+.instance-detail-status-chip {
+  font-size: var(--text-tiny, 0.7rem);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.instance-detail-status-chip.is-flat {
+  background: rgba(61, 154, 98, 0.2);
+  color: var(--color-success, #3d9a62);
+}
+
+.instance-detail-status-chip.is-open {
+  background: rgba(200, 160, 60, 0.2);
+  color: var(--color-text-main);
+}
+
+.instance-detail-match-detail-row td {
+  padding: 0.35rem 0.5rem 0.65rem;
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.instance-detail-fills-table {
+  font-size: 0.8125rem;
+}
+
+.instance-detail-fills-wrap {
+  margin: 0;
+}
+
+.instance-detail-split-ratio {
+  font-size: 0.75rem;
+  margin-left: 0.25em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.instance-detail-exec-id {
+  font-size: 0.8125rem;
+  font-weight: 400;
+  margin-left: 0.25em;
+}
+
+.instance-detail-non-opt {
+  margin-top: 0.75rem;
+}
+
+.instance-detail-future-card {
+  margin-top: 0;
+  padding: 0.65rem 0.75rem;
+}
+
+.instance-detail-future-card ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--color-text-muted);
+  font-size: var(--text-small, 0.875rem);
+}

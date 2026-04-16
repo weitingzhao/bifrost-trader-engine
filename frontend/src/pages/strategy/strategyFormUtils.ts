@@ -44,6 +44,15 @@ export const DEFAULT_STRUCTURE_PAYLOAD: StructurePayload = {
   meta: [],
 }
 
+/** Strategy structure types supported by the Option Screener. */
+export const SCREENER_STRUCTURE_TYPES = [
+  { value: 'cash_secured_put', label: 'Cash Secured Put' },
+  { value: 'covered_call', label: 'Covered Call' },
+  { value: 'iron_condor', label: 'Iron Condor' },
+  { value: 'bull_put_spread', label: 'Bull Put Spread' },
+  { value: 'bear_call_spread', label: 'Bear Call Spread' },
+] as const
+
 export const SCOPE_TYPES = ['', 'watchlist_stk', 'explicit_symbols'] as const
 
 /** Display labels for scope types (backend key -> human-readable). */

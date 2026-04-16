@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { StrategyInstance, StatusResponse } from '../types'
-import type { Execution } from '../types'
-import type { PerformanceResponse } from '../types'
+import type { StrategyInstance, StatusResponse, Execution, PerformanceResponse } from '../types'
 import type { StrategyStructure } from '../api'
 import { fetchStrategyInstance, fetchPerformance, fetchExecutions, updateStrategyInstance, fetchStructure } from '../api'
-import { fmtTs, fmtTsShort, fmtUsd, unixToDatetimeLocal, parseOptionContractKey } from '../utils/format'
+import { fmtUsd, unixToDatetimeLocal, parseOptionContractKey } from '../utils/format'
 import { RiskProfileDl } from '../components/RiskProfileDl'
-import { summarizeLegs, summarizeConstraints, getStructureTypeLabel } from './strategy/strategyFormUtils'
 import { computeRiskProfile, formatRiskHedgedBreakdown } from '../utils/riskProfile'
 import type { RiskPosition, RiskProfile } from '../utils/riskProfile'
+import {
+  describeInstanceAllocationSplitForDisplay,
+  sliceExecutionForInstanceOptView,
+} from './portfolio/ledgerOptHelpers'
+import { InstanceDetailHeader } from './strategy/instanceDetail/InstanceDetailHeader'
+import { InstanceOverviewCard } from './strategy/instanceDetail/InstanceOverviewCard'
+import { InstancePnLStrip } from './strategy/instanceDetail/InstancePnLStrip'
+import { InstanceExecutionsPanel } from './strategy/instanceDetail/InstanceExecutionsPanel'
+import type { HoldingAnchorKind } from './strategy/instanceDetail/instanceHoldingTooltip'
 
 export interface StrategyInstanceDetailPageProps {
   strategyInstanceId: number
@@ -27,7 +33,7 @@ export function StrategyInstanceDetailPage({
   const [executionsFinal, setExecutionsFinal] = useState<Execution[]>([])
   const [executionsTwsRaw, setExecutionsTwsRaw] = useState<Execution[]>([])
   const [executionsLoading, setExecutionsLoading] = useState(true)
-  const [openedAtEdit, setOpenedAtEdit] = useState<string>('')
+  const [openedAtEdit, setOpenedAtEdit] = useState('')
   const [openedAtSaving, setOpenedAtSaving] = useState(false)
   const [openedAtError, setOpenedAtError] = useState<string | null>(null)
   const [structure, setStructure] = useState<StrategyStructure | null>(null)
@@ -65,10 +71,10 @@ export function StrategyInstanceDetailPage({
     Promise.all([
       fetchExecutions(undefined, undefined, 500, false, undefined, strategyInstanceId, 'performance_book')
         .then((res) => res.executions ?? [])
-        .catch(() => [] as Execution[]),
+        .catch(() => []),
       fetchExecutions(undefined, undefined, 500, false, undefined, strategyInstanceId, 'tws_raw')
         .then((res) => res.executions ?? [])
-        .catch(() => [] as Execution[]),
+        .catch(() => []),
     ])
       .then(([final, tws]) => {
         setExecutionsFinal(final)
@@ -125,15 +131,62 @@ export function StrategyInstanceDetailPage({
     setOpenedAtError(null)
   }, [instance?.opened_at_epoch, instance?.opened_at])
 
+  const executionsFinalForInstance = useMemo(() => {
+    return executionsFinal
+      .map((ex) => sliceExecutionForInstanceOptView(ex, strategyInstanceId))
+      .filter((row): row is Execution => row != null)
+  }, [executionsFinal, strategyInstanceId])
+
+  const executionsTwsForInstance = useMemo(() => {
+    return executionsTwsRaw
+      .map((ex) => sliceExecutionForInstanceOptView(ex, strategyInstanceId))
+      .filter((row): row is Execution => row != null)
+  }, [executionsTwsRaw, strategyInstanceId])
+
+  const executionsFinalSplitMetaByExecId = useMemo(() => {
+    const m = new Map<number, { ratioLabel: string; tooltip: string }>()
+    for (const ex of executionsFinal) {
+      const d = describeInstanceAllocationSplitForDisplay(ex, strategyInstanceId)
+      if (d != null && ex.account_executions_id != null) {
+        try {
+          m.set(Number(ex.account_executions_id), d)
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    return m
+  }, [executionsFinal, strategyInstanceId])
+
   const oldestExecution =
-    executionsFinal.length > 0
-      ? executionsFinal.reduce((a, b) => {
+    executionsFinalForInstance.length > 0
+      ? executionsFinalForInstance.reduce((a, b) => {
           const at = a.time != null && Number.isFinite(a.time) ? a.time : Infinity
           const bt = b.time != null && Number.isFinite(b.time) ? b.time : Infinity
           return at <= bt ? a : b
         })
       : null
   const canQuickSet = oldestExecution != null
+
+  /** Anchor for hold time (PnL annualization): Opened at, else oldest final-book execution. */
+  const holdingPeriodMeta = useMemo((): { epoch: number | null; anchor: HoldingAnchorKind | null } => {
+    if (instance == null) return { epoch: null, anchor: null }
+    if (instance.opened_at_epoch != null && Number.isFinite(instance.opened_at_epoch)) {
+      return { epoch: instance.opened_at_epoch, anchor: 'opened_at_epoch' }
+    }
+    if (instance.opened_at != null && typeof instance.opened_at === 'string') {
+      try {
+        const t = new Date(instance.opened_at).getTime() / 1000
+        if (Number.isFinite(t)) return { epoch: t, anchor: 'opened_at_field' }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (oldestExecution?.time != null && Number.isFinite(oldestExecution.time)) {
+      return { epoch: oldestExecution.time, anchor: 'oldest_fill' }
+    }
+    return { epoch: null, anchor: null }
+  }, [instance, oldestExecution])
 
   const handleQuickSetOpenedAt = useCallback(() => {
     if (!canQuickSet || oldestExecution == null) return
@@ -152,7 +205,6 @@ export function StrategyInstanceDetailPage({
     setOpenedAtSaving(true)
     setOpenedAtError(null)
     try {
-      // Send date as UTC noon so the day does not flip in any timezone when displayed
       const iso = openedAtEdit.trim() + 'T12:00:00.000Z'
       await updateStrategyInstance(instance.strategy_instance_id, { opened_at: iso })
       await loadInstance()
@@ -163,13 +215,11 @@ export function StrategyInstanceDetailPage({
     }
   }, [instance, openedAtEdit, loadInstance])
 
-  const summary = performance?.summary
-
   const riskProfile = useMemo(() => {
-    if (!executionsFinal.length) return null
-    const hasUnderlying = structure?.legs?.some(l => (l.role ?? '').toLowerCase() === 'underlying')
+    if (!executionsFinalForInstance.length) return null
+    const hasUnderlying = structure?.legs?.some((l) => (l.role ?? '').toLowerCase() === 'underlying')
     const byAcct = new Map<string, Execution[]>()
-    for (const e of executionsFinal) {
+    for (const e of executionsFinalForInstance) {
       if ((e.sec_type ?? '').toUpperCase() !== 'OPT') continue
       const aid = (e.account_id ?? '').trim()
       if (!byAcct.has(aid)) byAcct.set(aid, [])
@@ -199,7 +249,7 @@ export function StrategyInstanceDetailPage({
         const side = (e.side ?? '').toUpperCase()
         const qty = Math.abs(Number(e.quantity) || 0)
         const price = Number(e.price) || 0
-        const signedQty = (side === 'BUY' || side === 'BOT' || side === 'B') ? qty : -qty
+        const signedQty = side === 'BUY' || side === 'BOT' || side === 'B' ? qty : -qty
         const prev = netByKey.get(key) ?? { strike, right: r, qty: 0, totalCost: 0 }
         prev.qty += signedQty
         prev.totalCost += price * qty * (signedQty > 0 ? 1 : -1)
@@ -236,334 +286,75 @@ export function StrategyInstanceDetailPage({
       merged = merged == null ? rp : pickWorse(merged, rp)
     }
     return merged
-  }, [executionsFinal, structure, status?.portfolio?.accounts])
-
-  const formatExecutionStrike = (strike: number | undefined | null): string => {
-    if (strike == null || !Number.isFinite(Number(strike))) return '—'
-    const n = Number(strike)
-    return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, '')
-  }
-
-  type ExecutionTableSource = 'performance_final' | 'tws_raw'
-
-  const executionTable = (rows: Execution[], source: ExecutionTableSource) => {
-    const isTwsRaw = source === 'tws_raw'
-    return (
-      <div className="table-wrapper" style={{ overflowX: 'auto' }}>
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Contract</th>
-              <th title="Display date: trade_date if set, otherwise exec time">Date</th>
-              <th>Trade date</th>
-              {!isTwsRaw ? (
-                <>
-                  <th>Report date</th>
-                  <th>Settle date target</th>
-                  <th>Transaction type</th>
-                  <th>Taxes</th>
-                  <th>Net cash</th>
-                </>
-              ) : (
-                <>
-                  <th>Expiry</th>
-                  <th>Strike</th>
-                </>
-              )}
-              <th>Side</th>
-              <th
-                title={
-                  isTwsRaw
-                    ? 'TWS raw table: quantity is always positive; use Side for Buy vs Sell. (Final book uses signed quantity: Sell negative.)'
-                    : 'Final book: Sell rows use negative quantity.'
-                }
-              >
-                Qty
-              </th>
-              <th>Price</th>
-              <th>Realized PnL</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((e) => (
-              <tr key={`${e.account_executions_id ?? ''}-${e.exec_id ?? ''}-${e.time ?? ''}`}>
-                <td>
-                  {e.symbol ?? '—'}
-                  {e.account_executions_id != null ? (
-                    <span
-                      title={`account_executions_id: ${e.account_executions_id}`}
-                      style={{
-                        color: 'var(--color-text-muted)',
-                        fontSize: '0.8125rem',
-                        fontWeight: 400,
-                        marginLeft: '0.25em',
-                      }}
-                    >
-                      {' '}
-                      #{e.account_executions_id}
-                    </span>
-                  ) : null}
-                </td>
-                <td>
-                  {e.trade_date ?? (e.time != null ? fmtTsShort(e.time) : '—')}
-                </td>
-                <td>{e.trade_date ?? '—'}</td>
-                {!isTwsRaw ? (
-                  <>
-                    <td>{e.report_date ?? '—'}</td>
-                    <td>{e.settle_date_target ?? '—'}</td>
-                    <td>{e.transaction_type ?? '—'}</td>
-                    <td>{e.taxes != null ? fmtUsd(e.taxes) : '—'}</td>
-                    <td>{e.net_cash != null ? fmtUsd(e.net_cash) : '—'}</td>
-                  </>
-                ) : (
-                  <>
-                    <td>{e.expiry != null && String(e.expiry).trim() !== '' ? String(e.expiry) : '—'}</td>
-                    <td>{formatExecutionStrike(e.strike)}</td>
-                  </>
-                )}
-                <td>{e.side ?? '—'}</td>
-                <td>
-                  {e.quantity == null || !Number.isFinite(Number(e.quantity))
-                    ? '—'
-                    : isTwsRaw
-                      ? String(Math.abs(Number(e.quantity)))
-                      : String(e.quantity)}
-                </td>
-                <td>{e.price != null ? Number(e.price).toFixed(2) : '—'}</td>
-                <td>{e.realized_pnl != null ? fmtUsd(e.realized_pnl) : '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )
-  }
+  }, [executionsFinalForInstance, structure, status?.portfolio?.accounts])
 
   return (
-    <div className="card process-section">
-      <h2 className="page-title-with-tooltip" style={{ margin: 0 }}>
-        Instance {strategyInstanceId}
-      </h2>
-
-      {instanceError != null && (
-        <p className="error-message" style={{ marginTop: '0.5rem' }}>{instanceError}</p>
-      )}
-
+    <div className="card process-section instance-detail-page">
       {instanceLoading ? (
-        <p style={{ marginTop: '1rem' }}>Loading instance…</p>
+        <p>Loading instance…</p>
       ) : instance == null ? (
-        <p style={{ marginTop: '1rem' }}>Instance not found.</p>
+        <p className="error-message">{instanceError ?? 'Instance not found.'}</p>
       ) : (
         <>
-          {/* 1. Strategy info block */}
-          <section className="detail-block" style={{ marginTop: '1.5rem' }}>
-            <h3 style={{ marginBottom: '0.5rem' }}>Strategy info</h3>
-            <dl className="info-dl" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 1rem', margin: 0 }}>
-              <dt>Opportunity</dt>
-              <dd>
-                {instance.strategy_opportunity_id != null && Number.isFinite(Number(instance.strategy_opportunity_id)) ? (
-                  <a
-                    href={`#/strategies/opportunities/${instance.strategy_opportunity_id}`}
-                    className="instance-sheet-inst-link"
-                  >
-                    {instance.strategy_opportunity_name ?? `Opportunity #${instance.strategy_opportunity_id}`}
-                  </a>
-                ) : (
-                  <span>{instance.strategy_opportunity_name ?? instance.strategy_opportunity_id ?? '—'}</span>
-                )}
-              </dd>
-              <dt>Structure</dt>
-              <dd>
-                {instance.strategy_structure_name != null || instance.strategy_structure_id != null ? (
-                  <span>{instance.strategy_structure_name ?? `Structure ${instance.strategy_structure_id}`}</span>
-                ) : (
-                  '—'
-                )}
-                {instance.strategy_structure_id != null && instance.strategy_structure_name != null && (
-                  <span className="muted" style={{ marginLeft: '0.25rem' }}>({instance.strategy_structure_id})</span>
-                )}
-              </dd>
-              <dt>Account</dt>
-              <dd>{instance.account_id}</dd>
-              <dt>Opened at</dt>
-              <dd>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <input
-                    type="date"
-                    value={openedAtEdit}
-                    onChange={(e) => setOpenedAtEdit(e.target.value)}
-                    className="create-instance-input"
-                    style={{ maxWidth: '12rem' }}
-                    aria-label="Opened at (editable)"
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-small btn-secondary"
-                    onClick={handleQuickSetOpenedAt}
-                    disabled={!canQuickSet}
-                    title="Set Opened at to the Trade date of the oldest execution below"
-                  >
-                    Quick Set
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-small btn-primary"
-                    onClick={handleSaveOpenedAt}
-                    disabled={openedAtSaving || !openedAtEdit.trim()}
-                  >
-                    {openedAtSaving ? 'Saving…' : 'Save'}
-                  </button>
-                  {openedAtError != null && (
-                    <span className="section-hint replay-form-error" style={{ display: 'block', width: '100%' }}>
-                      {openedAtError}
-                    </span>
-                  )}
-                </span>
-              </dd>
-              <dt>Created at</dt>
-              <dd>
-                {instance.created_at_epoch != null
-                  ? fmtTs(instance.created_at_epoch)
-                  : instance.created_at ?? '—'}
-              </dd>
-              <dt>Label</dt>
-              <dd>{instance.label ?? '—'}</dd>
-              {instance.notes != null && instance.notes.trim() !== '' && (
-                <>
-                  <dt>Notes</dt>
-                  <dd>{instance.notes}</dd>
-                </>
-              )}
-            </dl>
-          </section>
+          <InstanceDetailHeader strategyInstanceId={strategyInstanceId} instance={instance} />
 
-          {/* 1b. Strategy Structure block (from opportunity → strategy_structure_id) */}
-          {instance.strategy_structure_id != null && (
-            <section className="detail-block" style={{ marginTop: '1.5rem' }}>
-              <h3 style={{ marginBottom: '0.5rem' }}>Strategy Structure</h3>
-              {structureLoading ? (
-                <p>Loading structure…</p>
-              ) : structureError != null ? (
-                <p className="error-message">{structureError}</p>
-              ) : structure != null ? (
-                <>
-                  <dl className="info-dl" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 1rem', margin: 0 }}>
-                    <dt>Name</dt>
-                    <dd>
-                      {structure.name}
-                      <span className="muted" style={{ marginLeft: '0.25rem' }}>({structure.strategy_structure_id})</span>
-                    </dd>
-                    <dt>Type</dt>
-                    <dd>{getStructureTypeLabel(structure.structure_type)}</dd>
-                    {structure.structure_subtype != null && structure.structure_subtype !== '' && (
-                      <>
-                        <dt>Subtype</dt>
-                        <dd>{structure.structure_subtype_label ?? structure.structure_subtype}</dd>
-                      </>
-                    )}
-                    {structure.template_display_name != null && structure.template_display_name !== '' && (
-                      <>
-                        <dt>Template</dt>
-                        <dd>{structure.template_display_name}</dd>
-                      </>
-                    )}
-                    <dt>Legs</dt>
-                    <dd title={summarizeLegs(structure.legs)}>{summarizeLegs(structure.legs)}</dd>
-                    <dt>Constraints</dt>
-                    <dd title={summarizeConstraints(structure.constraints)}>{summarizeConstraints(structure.constraints)}</dd>
-                  </dl>
-                </>
-              ) : (
-                <p className="muted">Structure not found.</p>
-              )}
-            </section>
-          )}
+          {instanceError != null && <p className="error-message">{instanceError}</p>}
 
-          {/* 2. PnL block */}
-          <section className="detail-block" style={{ marginTop: '1.5rem' }}>
-            <h3 style={{ marginBottom: '0.5rem' }}>PnL (this instance)</h3>
-            {performanceLoading ? (
-              <p>Loading performance…</p>
-            ) : summary ? (
-              <dl className="info-dl" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 1rem', margin: 0 }}>
-                <dt>Net PnL</dt>
-                <dd>{fmtUsd(summary.net_pnl)}</dd>
-                <dt>Realized PnL</dt>
-                <dd>{fmtUsd(summary.total_realized_pnl)}</dd>
-                <dt>Commission</dt>
-                <dd>{fmtUsd(summary.total_commission)}</dd>
-                <dt>Trade count</dt>
-                <dd>{summary.trade_count ?? 0}</dd>
-                {summary.win_rate != null && (
-                  <>
-                    <dt>Win rate</dt>
-                    <dd>{(Number(summary.win_rate) * 100).toFixed(1)}%</dd>
-                  </>
-                )}
-              </dl>
-            ) : (
-              <p>No performance data for this instance.</p>
-            )}
-          </section>
+          <div className="instance-detail-main-grid">
+            <InstanceOverviewCard
+              instance={instance}
+              structure={structure}
+              structureLoading={structureLoading}
+              structureError={structureError}
+              openedAtEdit={openedAtEdit}
+              onOpenedAtChange={setOpenedAtEdit}
+              onQuickSet={handleQuickSetOpenedAt}
+              onSaveOpenedAt={handleSaveOpenedAt}
+              canQuickSet={canQuickSet}
+              openedAtSaving={openedAtSaving}
+              openedAtError={openedAtError}
+            />
+            <div className="instance-detail-pnl-column">
+              <h3 className="instance-detail-section-title">PnL (this instance)</h3>
+              <InstancePnLStrip
+                loading={performanceLoading}
+                performance={performance}
+                holdingStartEpochSec={holdingPeriodMeta.epoch}
+                holdingAnchor={holdingPeriodMeta.anchor}
+                executionsForNotional={executionsFinalForInstance}
+              />
+            </div>
+          </div>
 
           {riskProfile && (
-            <section className="detail-block risk-profile-section" style={{ marginTop: '1.5rem' }}>
-              <h3 style={{ marginBottom: '0.5rem' }}>Risk Profile (at expiration)</h3>
+            <section className="detail-block risk-profile-section instance-detail-risk">
+              <h3 className="instance-detail-section-title">Risk profile (at expiration)</h3>
               <RiskProfileDl profile={riskProfile} fmtUsd={fmtUsd} />
               {riskProfile.naked_short_call_contracts > 0 && (
                 <ul className="risk-hedged-breakdown" style={{ margin: '0.75rem 0 0', paddingLeft: '1.25rem' }}>
                   {formatRiskHedgedBreakdown(riskProfile).map((line, i) => (
-                    <li key={i} className="risk-unlimited-warning">{line}</li>
+                    <li key={i} className="risk-unlimited-warning">
+                      {line}
+                    </li>
                   ))}
                 </ul>
               )}
             </section>
           )}
 
-          <section className="detail-block" style={{ marginTop: '1.5rem' }}>
-            <h4 style={{ marginTop: '0', marginBottom: '0.5rem' }}>Executions</h4>
-            {executionsLoading ? (
-              <p>Loading executions…</p>
-            ) : (
-              <>
-                <div style={{ marginTop: '1rem' }}>
-                  <h5 style={{ margin: '0 0 0.35rem' }}>Executions Final</h5>
-                  <p className="muted" style={{ margin: '0 0 0.5rem', fontSize: '0.875rem' }}>
-                    Source: account_executions_final (Flex + journal performance book).
-                  </p>
-                  {executionsFinal.length === 0 ? (
-                    <p>No rows in the final book for this instance.</p>
-                  ) : (
-                    executionTable(executionsFinal, 'performance_final')
-                  )}
-                </div>
-                <div style={{ marginTop: '1.5rem' }}>
-                  <h5 style={{ margin: '0 0 0.35rem' }}>Executions (TWS client)</h5>
-                  <p className="muted" style={{ margin: '0 0 0.5rem', fontSize: '0.875rem' }}>
-                    Source: executions_raw_tws (IB client / manual fills). IDs are negative (synthetic account_executions_id).
-                    Quantity is always positive here; direction is in Side. The final book uses signed quantity (Sell negative).
-                  </p>
-                  {executionsTwsRaw.length === 0 ? (
-                    <p>No TWS client rows tagged for this instance.</p>
-                  ) : (
-                    executionTable(executionsTwsRaw, 'tws_raw')
-                  )}
-                </div>
-              </>
-            )}
-          </section>
+          <InstanceExecutionsPanel
+            loading={executionsLoading}
+            executionsFinal={executionsFinalForInstance}
+            executionsTws={executionsTwsForInstance}
+            splitMetaByExecId={executionsFinalSplitMetaByExecId}
+          />
 
-          {/* 4. Backtest placeholder */}
-          <section className="detail-block placeholder-block" style={{ marginTop: '1rem' }}>
-            <h3 style={{ marginBottom: '0.5rem' }}>Backtest</h3>
-            <p className="muted">Coming soon. Link to backtest when available.</p>
-          </section>
-
-          {/* 5. Capital placeholder */}
-          <section className="detail-block placeholder-block" style={{ marginTop: '1rem' }}>
-            <h3 style={{ marginBottom: '0.5rem' }}>Capital usage</h3>
-            <p className="muted">Coming soon. Capital usage for this instance.</p>
+          <section className="detail-block placeholder-block instance-detail-future-card">
+            <h3 className="instance-detail-section-title">Coming soon</h3>
+            <ul>
+              <li>Backtest for this instance</li>
+              <li>Capital usage for this instance</li>
+            </ul>
           </section>
         </>
       )}
