@@ -422,6 +422,7 @@
 | low | double precision | 低 |
 | close | double precision | 收 |
 | volume | double precision | 成交量（可选） |
+| vwap | double precision | 成交量加权平均价（可选；Massive `/v2/aggs` 的 `vw`） |
 | source | text NOT NULL DEFAULT 'ib' | 数据来源：`ib` 或 `massive` |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
@@ -448,6 +449,7 @@
 | low | double precision | 低 |
 | close | double precision | 收 |
 | volume | double precision | 成交量（可选） |
+| vwap | double precision | 成交量加权平均价（可选；Massive `/v2/aggs` 的 `vw`） |
 | source | text NOT NULL DEFAULT 'ib' | 数据来源：`ib` 或 `massive` |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
@@ -1485,6 +1487,7 @@ python scripts/db/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-04-14 option_contracts 参考元数据 | `option_contracts` 增加 `exercise_style`、`shares_per_contract`、`cfi`、`primary_exchange`（均可空）；Massive `GET /v3/reference/options/contracts` 分页与 `GET /v3/snapshot/options/{underlying}` 链写入路径同步填充；`GET /research/massive/contracts-coverage` 增加各字段及「四列齐全」覆盖率。§2.16.1。 | 研究 / Massive |
 | 2026-04-15 option_contracts 移除参考元数据列 | 删除 `exercise_style`、`shares_per_contract`、`cfi`、`primary_exchange`；`pg_ddl` 迁移块对上述列 `DROP COLUMN IF EXISTS`。§2.16.1。 | 研究 / Massive |
 | 2026-04-15 report_option_atm_iv_daily | 新增表 `report_option_atm_iv_daily`（§2.16.5b）：按交易日汇总 ATM IV，加速 IV Volatility Cone；`pg_ddl` 建表与索引。 | Option Discovery |
+| 2026-04-15 option_day / option_min vwap | `option_day`、`option_min` 增加可空列 `vwap`（Massive 聚合 `vw` 回填）；`pg_ddl` 迁移 `ADD COLUMN`；GET `/bars`（option）与 K 线前端展示。§2.15、§2.16。 | 期权研究 / Option Discovery |
 
 ---
 

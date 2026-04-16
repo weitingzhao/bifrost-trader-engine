@@ -1,5 +1,7 @@
 /** Shared expiration classification (matches main Option Discovery expiration table). */
 
+import { utcMsForNyWallClock } from '../massive/customBarsTimePresets'
+
 export type ExpirationKind = 'all' | 'standard' | 'weeklies' | 'quarterlies'
 
 export function parseExpirationDateParts(expiration: string): { y: number; m: number; d: number } | null {
@@ -68,4 +70,18 @@ export function expirationDaysFromToday(expiration: string): string {
   const days = Math.round(diffMs / (24 * 60 * 60 * 1000))
   if (days < 0) return '—'
   return days === 1 ? '1 day' : `${days} days`
+}
+
+/**
+ * True when the contract is past US equity option expiration: after 16:00 America/New_York
+ * on the expiration calendar date (CBOE regular-hours close convention).
+ * Unparseable expirations return false (caller may still show the row).
+ */
+export function isOptionExpirationPastNyClose(expiration: string, nowMs: number = Date.now()): boolean {
+  const parts = parseExpirationDateParts(expiration)
+  if (!parts) return false
+  const ymd = `${parts.y}-${String(parts.m + 1).padStart(2, '0')}-${String(parts.d).padStart(2, '0')}`
+  const closeUtcMs = utcMsForNyWallClock(ymd, 16, 0)
+  if (closeUtcMs == null) return false
+  return nowMs > closeUtcMs
 }

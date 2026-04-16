@@ -858,7 +858,7 @@ def get_option_bars(
                 if per.upper() == "1 D":
                     cur.execute(
                         """
-                        SELECT extract(epoch from bar_time) AS time, open, high, low, close, volume, source
+                        SELECT extract(epoch from bar_time) AS time, open, high, low, close, volume, vwap, source
                         FROM option_day
                         WHERE symbol = %s AND expiry = %s AND strike = %s AND option_right = %s AND source = %s
                         ORDER BY bar_time DESC NULLS LAST
@@ -869,7 +869,7 @@ def get_option_bars(
                 else:
                     cur.execute(
                         """
-                        SELECT extract(epoch from bar_time) AS time, open, high, low, close, volume, source
+                        SELECT extract(epoch from bar_time) AS time, open, high, low, close, volume, vwap, source
                         FROM option_min
                         WHERE symbol = %s AND expiry = %s AND strike = %s AND option_right = %s
                           AND period = %s AND source = %s

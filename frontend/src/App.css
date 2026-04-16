@@ -8122,6 +8122,38 @@ th {
   white-space: nowrap;
 }
 
+.data-bars-chart-brush-hint {
+  margin: 0 0 0.5rem;
+  font-size: var(--text-caption, 0.8125rem);
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.data-bars-chart-range-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-top: 0.5rem;
+  font-size: var(--text-caption, 0.8125rem);
+  color: var(--color-text-muted);
+}
+
+.data-bars-chart-range-reset {
+  padding: 0.2rem 0.55rem;
+  font-size: inherit;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.data-bars-chart-range-reset:hover {
+  border-color: var(--color-accent, #0ea5e9);
+  color: var(--color-accent, #0ea5e9);
+}
+
 .data-bars-chart-legend-time {
   font-weight: 500;
   color: var(--color-text);
@@ -12002,8 +12034,29 @@ th {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
   gap: 0.75rem 1rem;
   margin-bottom: 0.25rem;
+  width: 100%;
+}
+
+.od-contract-chart-period-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.od-contract-chart-toolbar-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem 0.75rem;
+  flex: 0 1 auto;
+  margin-left: auto;
 }
 
 .od-contract-chart-toolbar-label {
@@ -12017,16 +12070,109 @@ th {
 .od-contract-chart-periods {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
+  gap: 0.4rem;
   align-items: center;
 }
 
+.od-contract-chart-period-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .od-contract-chart-period-item {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  justify-content: center;
   cursor: pointer;
   font-size: var(--text-caption);
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  user-select: none;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.od-contract-chart-period-item:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.od-contract-chart-period-item:has(.od-contract-chart-period-input:checked) {
+  border-color: var(--color-accent, #0ea5e9);
+  background: rgba(14, 165, 233, 0.12);
+  color: var(--color-text);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.35);
+}
+
+.od-contract-chart-period-item:has(.od-contract-chart-period-input:focus-visible) {
+  outline: 2px solid var(--color-accent, #0ea5e9);
+  outline-offset: 2px;
+}
+
+.od-contract-chart-period-item-text {
+  line-height: 1.2;
+}
+
+.od-contract-chart-vwap-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text);
+  user-select: none;
+  padding: 0.4rem 0.95rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.od-contract-chart-vwap-toggle:hover:not(:has(input:disabled)) {
+  border-color: var(--color-border-strong);
+}
+
+.od-contract-chart-vwap-toggle:has(input:checked):not(:has(input:disabled)) {
+  border-color: var(--color-accent, #0ea5e9);
+  background: rgba(14, 165, 233, 0.12);
+  box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.35);
+}
+
+.od-contract-chart-vwap-toggle:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.od-contract-chart-vwap-toggle input[type='checkbox'] {
+  width: 0.95rem;
+  height: 0.95rem;
+  margin: 0;
+  accent-color: var(--color-accent, #0ea5e9);
+  cursor: inherit;
+}
+
+.od-contract-chart-vwap-toggle:has(input:focus-visible) {
+  outline: 2px solid var(--color-accent, #0ea5e9);
+  outline-offset: 2px;
 }
 
 .od-contract-chart-source {
@@ -12036,6 +12182,21 @@ th {
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-text);
+}
+
+.od-chart-vwap-missing {
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.5rem 0.65rem;
+  font-size: var(--text-caption, 0.8125rem);
+  line-height: 1.45;
+  color: var(--danger, #b91c1c);
+  background: rgba(185, 28, 28, 0.1);
+  border: 1px solid rgba(185, 28, 28, 0.35);
+  border-radius: 6px;
+}
+
+.od-chart-vwap-missing code {
+  font-size: 0.92em;
 }
 
 /* Card grid: 2-4 columns responsive */
@@ -12059,6 +12220,13 @@ th {
   letter-spacing: 0.04em;
   color: var(--color-text-muted);
   margin-bottom: var(--space-2);
+}
+
+.od-card-section-title--with-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
 }
 
 .od-kv-grid {

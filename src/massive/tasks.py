@@ -603,6 +603,37 @@ def _apply_snapshot(
     return n
 
 
+def _option_min_bar_vwap(bar: Dict[str, Any]) -> Optional[float]:
+    """Prefer Massive ``vw``; if absent but volume > 0, use typical price (H+L+C)/3."""
+    vw = bar.get("vw")
+    if vw is not None:
+        try:
+            return float(vw)
+        except (TypeError, ValueError):
+            pass
+    v = bar.get("v")
+    try:
+        vol = float(v) if v is not None else 0.0
+    except (TypeError, ValueError):
+        vol = 0.0
+    if vol <= 0:
+        return None
+    h, l_, c = bar.get("h"), bar.get("l"), bar.get("c")
+    try:
+        hf = float(h) if h is not None else None
+        lf = float(l_) if l_ is not None else None
+        cf = float(c) if c is not None else None
+    except (TypeError, ValueError):
+        return None
+    if hf is not None and lf is not None and cf is not None:
+        return (hf + lf + cf) / 3.0
+    if cf is not None:
+        return cf
+    if hf is not None and lf is not None:
+        return (hf + lf) / 2.0
+    return None
+
+
 def _apply_aggs(
     conn: Any,
     symbol: str,
@@ -640,17 +671,19 @@ def _apply_aggs(
             l = bar.get("l")
             c = bar.get("c")
             v = bar.get("v")
+            vw = _option_min_bar_vwap(bar)
             cur.execute(
                 """
                 INSERT INTO option_min (
                   symbol, expiry, strike, option_right, period, bar_time,
-                  open, high, low, close, volume, source, created_at
+                  open, high, low, close, volume, vwap, source, created_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'massive', now())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'massive', now())
                 ON CONFLICT (symbol, expiry, strike, option_right, period, bar_time, source)
                 DO UPDATE SET
                   open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
-                  close = EXCLUDED.close, volume = EXCLUDED.volume
+                  close = EXCLUDED.close, volume = EXCLUDED.volume,
+                  vwap = EXCLUDED.vwap
                 """,
                 (
                     symbol.upper(),
@@ -664,6 +697,7 @@ def _apply_aggs(
                     float(l) if l is not None else None,
                     float(c) if c is not None else None,
                     float(v) if v is not None else None,
+                    float(vw) if vw is not None else None,
                 ),
             )
             n += 1
@@ -706,17 +740,19 @@ def _apply_option_day_aggs(
             l = bar.get("l")
             c = bar.get("c")
             v = bar.get("v")
+            vw = bar.get("vw")
             cur.execute(
                 """
                 INSERT INTO option_day (
                   symbol, expiry, strike, option_right, bar_time,
-                  open, high, low, close, volume, source, created_at
+                  open, high, low, close, volume, vwap, source, created_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'massive', now())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'massive', now())
                 ON CONFLICT (symbol, expiry, strike, option_right, bar_time, source)
                 DO UPDATE SET
                   open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
-                  close = EXCLUDED.close, volume = EXCLUDED.volume
+                  close = EXCLUDED.close, volume = EXCLUDED.volume,
+                  vwap = EXCLUDED.vwap
                 """,
                 (
                     symbol.upper(),
@@ -729,6 +765,7 @@ def _apply_option_day_aggs(
                     float(l) if l is not None else None,
                     float(c) if c is not None else None,
                     float(v) if v is not None else None,
+                    float(vw) if vw is not None else None,
                 ),
             )
             n += 1

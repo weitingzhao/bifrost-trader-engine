@@ -33,6 +33,35 @@ router = APIRouter(tags=["market"])
 # Back-compat for ops job_queues (delegate to service).
 _job_row_to_api = job_row_to_api
 
+
+def _synthetic_option_vwap_from_ohlcv(row_pg: Dict[str, Any]) -> Optional[float]:
+    """When PG ``vwap`` is NULL, derive a mark from OHLCV (same rules as ``src.massive.tasks._option_min_bar_vwap``).
+
+    Massive REST may return ``vw`` while historical rows in ``option_min`` / ``option_day`` were stored with NULL
+    ``vwap``; this fills the chart without requiring a full re-backfill.
+    """
+    try:
+        vol = float(row_pg["volume"]) if row_pg.get("volume") is not None else 0.0
+    except (TypeError, ValueError):
+        vol = 0.0
+    if vol <= 0:
+        return None
+    h, l_, c = row_pg.get("high"), row_pg.get("low"), row_pg.get("close")
+    try:
+        hf = float(h) if h is not None else None
+        lf = float(l_) if l_ is not None else None
+        cf = float(c) if c is not None else None
+    except (TypeError, ValueError):
+        return None
+    if hf is not None and lf is not None and cf is not None:
+        return (hf + lf + cf) / 3.0
+    if cf is not None:
+        return cf
+    if hf is not None and lf is not None:
+        return (hf + lf) / 2.0
+    return None
+
+
 # --- Bars read ---
 
 @router.get("/bars")
@@ -75,8 +104,9 @@ def get_bars(
             source=src,
             limit=limit,
         )
-        bars = [
-            {
+        bars = []
+        for r in items:
+            row: Dict[str, Any] = {
                 "time": float(r["time"]) if r.get("time") is not None else 0,
                 "open": float(r["open"]) if r.get("open") is not None else 0,
                 "high": float(r["high"]) if r.get("high") is not None else 0,
@@ -85,8 +115,20 @@ def get_bars(
                 "volume": float(r["volume"]) if r.get("volume") is not None else 0,
                 "source": (r.get("source") or src),
             }
-            for r in items
-        ]
+            resolved: Optional[float] = None
+            vw = r.get("vwap")
+            if vw is not None:
+                try:
+                    resolved = float(vw)
+                except (TypeError, ValueError):
+                    resolved = None
+            if resolved is None:
+                syn = _synthetic_option_vwap_from_ohlcv(r)
+                if syn is not None:
+                    resolved = syn
+            if resolved is not None:
+                row["vwap"] = resolved
+            bars.append(row)
         return {"bars": bars, "source": src, "asset": "option"}
 
     per = (period or "1 D").strip()

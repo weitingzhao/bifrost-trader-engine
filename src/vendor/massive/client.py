@@ -518,13 +518,14 @@ class MassiveClient:
     def _v2_range_aggs_query_params(ticker: str) -> Dict[str, Any]:
         """Query params for GET /v2/aggs/ticker/.../range/...
 
-        Polygon **indices** (tickers like ``I:SPX``) use the same path as stocks but do not
-        document ``adjusted``; sending ``adjusted=true`` (stock default) can yield empty
-        ``results`` for some index tickers. Omit it for ``I:`` prefixes only.
+        Polygon **indices** (``I:SPX``) and **options** (``O:…``) omit ``adjusted``:
+        index docs omit it; option contract bars can behave poorly or omit fields like ``vw``
+        when ``adjusted=true`` is forced like equities.
+        Stocks use ``adjusted=true`` by default.
         """
         t = (ticker or "").strip().upper()
         base: Dict[str, Any] = {"sort": "asc", "limit": 50000}
-        if t.startswith("I:"):
+        if t.startswith("I:") or t.startswith("O:"):
             return base
         return {**base, "adjusted": "true"}
 
@@ -536,7 +537,10 @@ class MassiveClient:
         start_ms: int,
         end_ms: int,
     ) -> Dict[str, Any]:
-        """GET /v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from}/{to} (ms)."""
+        """GET /v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from}/{to} (ms).
+
+        Follows ``next_url`` and merges ``results`` from all pages (Polygon caps page size).
+        """
         ot = (options_ticker or "").strip()
         if not ot or not self._api_key:
             return {"results": [], "error": "ticker or api key missing"}
@@ -547,11 +551,50 @@ class MassiveClient:
         if status >= 400:
             err = data.get("error", data) if isinstance(data, dict) else str(data)
             return {"results": [], "error": err}
-        if isinstance(data, dict):
-            logical = _polygon_body_error_message(data, status)
+        if not isinstance(data, dict):
+            return {"results": []}
+        logical = _polygon_body_error_message(data, status)
+        if logical:
+            return {"results": [], "error": logical}
+
+        merged_results: List[Any] = []
+        seen: Optional[Dict[str, Any]] = data
+        max_pages = 200
+        pages = 0
+        while seen and pages < max_pages:
+            pages += 1
+            chunk = seen.get("results") or []
+            if isinstance(chunk, list):
+                merged_results.extend(chunk)
+            next_url = seen.get("next_url") if isinstance(seen, dict) else None
+            if not next_url:
+                break
+            url = next_url
+            if "apiKey=" not in url and "apikey=" not in url.lower():
+                sep = "&" if "?" in url else "?"
+                url = f"{url}{sep}apiKey={self._api_key}"
+            req = Request(url, headers={"Accept": "application/json"}, method="GET")
+            try:
+                with urlopen(req, timeout=120, context=self._ssl) as resp:
+                    body = resp.read().decode("utf-8", errors="replace")
+                    st = int(getattr(resp, "status", 200) or 200)
+                    if st >= 400:
+                        break
+                    seen = json.loads(body)
+            except (OSError, ValueError, json.JSONDecodeError) as e:
+                logger.warning("fetch_option_aggs next_url fetch failed: %s", e)
+                break
+            if not isinstance(seen, dict):
+                break
+            logical = _polygon_body_error_message(seen, 200)
             if logical:
-                return {"results": [], "error": logical}
-        return data if isinstance(data, dict) else {"results": []}
+                break
+
+        out = dict(data)
+        out["results"] = merged_results
+        out["next_url"] = None
+        out["resultsCount"] = len(merged_results)
+        return out
 
     def fetch_option_open_close(
         self,

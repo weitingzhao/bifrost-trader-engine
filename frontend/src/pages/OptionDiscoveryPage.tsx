@@ -42,6 +42,7 @@ import {
   type ExpirationKind,
   classifyExpiration,
   expirationDaysFromToday,
+  isOptionExpirationPastNyClose,
 } from './optionDiscovery/expirationMeta'
 
 const STRIKE_COUNT_OPTIONS = [4, 6, 8, 19, 30, 'all'] as const
@@ -201,6 +202,43 @@ function normalizeOptionRight(r: string): 'C' | 'P' | null {
   return null
 }
 
+/**
+ * Default selected chain row: strike closest to underlying (ATM), prefer Call at that strike.
+ * Falls back to index 0 when spot is unknown (previous behavior was first row / often lowest strike).
+ */
+function defaultSnapshotContractIndex(
+  rows: OptionSnapshotRow[],
+  underlyingFromResponse: number | null,
+  fallbackSpot: number | null,
+): number {
+  if (rows.length === 0) return 0
+  const spot =
+    underlyingFromResponse != null && Number.isFinite(underlyingFromResponse) && underlyingFromResponse > 0
+      ? underlyingFromResponse
+      : fallbackSpot != null && Number.isFinite(fallbackSpot) && fallbackSpot > 0
+        ? fallbackSpot
+        : null
+  if (spot == null) return 0
+  const strikes = [...new Set(rows.map(r => r.strike).filter(s => Number.isFinite(s)))] as number[]
+  if (strikes.length === 0) return 0
+  strikes.sort((a, b) => a - b)
+  let bestK = strikes[0]!
+  let bestD = Math.abs(bestK - spot)
+  for (const k of strikes) {
+    const d = Math.abs(k - spot)
+    if (d < bestD || (d === bestD && k < bestK)) {
+      bestD = d
+      bestK = k
+    }
+  }
+  const callIdx = rows.findIndex(r => r.strike === bestK && normalizeOptionRight(r.right) === 'C')
+  if (callIdx >= 0) return callIdx
+  const putIdx = rows.findIndex(r => r.strike === bestK && normalizeOptionRight(r.right) === 'P')
+  if (putIdx >= 0) return putIdx
+  const anyIdx = rows.findIndex(r => r.strike === bestK)
+  return anyIdx >= 0 ? anyIdx : 0
+}
+
 function fmtOiCompact(n: number | null): string {
   if (n == null || !Number.isFinite(n)) return '—'
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -270,19 +308,33 @@ interface DerivedMetrics {
   moneynessLabel: 'ITM' | 'ATM' | 'OTM' | '—'
 }
 
+/**
+ * Mark price for decomposition: stored mid, else (bid+ask)/2, else last trade.
+ * Matches how Massive snapshot ingestion fills `mid` when possible.
+ */
+function effectiveQuotePremium(row: OptionSnapshotRow): number | null {
+  const { bid, ask, mid, last } = row
+  if (mid != null && Number.isFinite(mid) && mid >= 0) return mid
+  if (bid != null && ask != null && Number.isFinite(bid) && Number.isFinite(ask)) return (bid + ask) / 2
+  if (last != null && Number.isFinite(last) && last >= 0) return last
+  return null
+}
+
 function computeDerivedMetrics(
   row: OptionSnapshotRow,
   underlying: number | null,
 ): DerivedMetrics {
   const bid = row.bid
   const ask = row.ask
-  const mid = row.mid
   const strike = row.strike
-  const isCall = row.right === 'C'
+  const nr = normalizeOptionRight(row.right)
+  const isCall = nr !== 'P'
+
+  const mark = effectiveQuotePremium(row)
 
   const spread = bid != null && ask != null && Number.isFinite(bid) && Number.isFinite(ask)
     ? ask - bid : null
-  const spreadPct = spread != null && mid != null && mid > 0 ? (spread / mid) * 100 : null
+  const spreadPct = spread != null && mark != null && mark > 0 ? (spread / mark) * 100 : null
 
   let intrinsic: number | null = null
   let extrinsic: number | null = null
@@ -294,10 +346,9 @@ function computeDerivedMetrics(
     intrinsic = isCall
       ? Math.max(0, underlying - strike)
       : Math.max(0, strike - underlying)
-    const premium = mid ?? (bid != null && ask != null ? (bid + ask) / 2 : null)
-    if (premium != null && Number.isFinite(premium)) {
-      extrinsic = Math.max(0, premium - intrinsic)
-      breakeven = isCall ? strike + premium : strike - premium
+    if (mark != null && Number.isFinite(mark)) {
+      extrinsic = Math.max(0, mark - (intrinsic ?? 0))
+      breakeven = isCall ? strike + mark : strike - mark
     }
     moneyness = ((underlying - strike) / underlying) * 100 * (isCall ? 1 : -1)
     const threshold = 0.5
@@ -526,8 +577,11 @@ export function OptionDiscoveryPage({
 
   /** Expiration table + IV term chart: same All/Std/Wk/Qtr filter */
   const visibleExpirations = useMemo(() => {
-    if (expirationFilterKind === 'all') return expirations
-    return expirations.filter(exp => classifyExpiration(exp) === expirationFilterKind)
+    const byKind =
+      expirationFilterKind === 'all'
+        ? expirations
+        : expirations.filter(exp => classifyExpiration(exp) === expirationFilterKind)
+    return byKind.filter(exp => !isOptionExpirationPastNyClose(exp))
   }, [expirations, expirationFilterKind])
 
   const [compareOpen, setCompareOpen] = useState(false)
@@ -803,9 +857,13 @@ export function OptionDiscoveryPage({
         const rows = sn.rows ?? []
         if (rows.length > 0) {
           setSnapshotRows(rows)
-          setSelectedContractIdx(0)
-          if (sn.underlying_price != null && Number.isFinite(Number(sn.underlying_price))) {
-            setUnderlyingPrice(Number(sn.underlying_price))
+          const up =
+            sn.underlying_price != null && Number.isFinite(Number(sn.underlying_price))
+              ? Number(sn.underlying_price)
+              : null
+          setSelectedContractIdx(defaultSnapshotContractIndex(rows, up, stockDayLastPrice))
+          if (up != null) {
+            setUnderlyingPrice(up)
           }
           setSnapshotFeedback(null)
           if (snapshotWatchIntervalRef.current != null) {
@@ -822,7 +880,7 @@ export function OptionDiscoveryPage({
 
     void runTick()
     snapshotWatchIntervalRef.current = setInterval(() => { void runTick() }, intervalMs)
-  }, [])
+  }, [stockDayLastPrice])
 
   useEffect(() => {
     stopSnapshotPgWatch()
@@ -1053,10 +1111,14 @@ export function OptionDiscoveryPage({
       const sn = await fetchOptionSnapshotsPg(sym, exp, strikesCsv, 'massive')
       const rows = sn.rows ?? []
       setSnapshotRows(rows)
-      setUnderlyingPrice(sn.underlying_price ?? null)
+      const up =
+        sn.underlying_price != null && Number.isFinite(Number(sn.underlying_price))
+          ? Number(sn.underlying_price)
+          : null
+      setUnderlyingPrice(up)
 
       if (rows.length > 0) {
-        setSelectedContractIdx(0)
+        setSelectedContractIdx(defaultSnapshotContractIndex(rows, up, stockDayLastPrice))
         setSnapshotFeedback(null)
         return
       }
@@ -1102,7 +1164,7 @@ export function OptionDiscoveryPage({
     } finally {
       setSnapshotLoading(false)
     }
-  }, [selectedSymbol, selectedExpiration, effectiveStrikes, stopSnapshotPgWatch, startSnapshotPgWatch])
+  }, [selectedSymbol, selectedExpiration, effectiveStrikes, stopSnapshotPgWatch, startSnapshotPgWatch, stockDayLastPrice])
 
   // Auto-load quotes when symbol / expiration / strikes / source change (debounced)
   const loadQuotesDebounced = useMemo(() => debounce(() => { void loadQuotes() }, 400), [loadQuotes])
@@ -1230,6 +1292,17 @@ export function OptionDiscoveryPage({
     if (!selectedRow) return null
     return computeDerivedMetrics(selectedRow, underlyingPrice)
   }, [selectedRow, underlyingPrice])
+
+  /** Mid column: stored mid, or estimated from bid/ask/last when mid is null in DB. */
+  const overviewMidDisplay = useMemo(() => {
+    if (!selectedRow) return { primary: '—' as string, est: false }
+    if (selectedRow.mid != null && Number.isFinite(selectedRow.mid)) {
+      return { primary: fmtUsd(selectedRow.mid), est: false }
+    }
+    const m = effectiveQuotePremium(selectedRow)
+    if (m == null) return { primary: '—', est: false }
+    return { primary: fmtUsd(m), est: true }
+  }, [selectedRow])
 
   const canLoadQuotes = selectedSymbol.trim() !== '' && selectedExpiration.trim() !== '' && !snapshotLoading
 
@@ -2247,12 +2320,19 @@ export function OptionDiscoveryPage({
             <div>
               <div className="od-card-grid">
                 <div className="od-card-section">
-                  <div className="od-card-section-title">Price</div>
+                  <div className="od-card-section-title od-card-section-title--with-hint">
+                    Price
+                    <InfoTooltip text="Bid, ask, mid, and last are read from the latest PostgreSQL option_snapshots row for this contract (Massive chain snapshot → option_snapshots). Underlying price for decomposition comes from that row or from the stock day fallback when missing. If all quote fields are empty, reload quotes or confirm the Massive job wrote bid/ask data." />
+                  </div>
                   <div className="od-kv-grid">
                     <span className="od-kv-k">Bid</span><span className="od-kv-v">{selectedRow.bid != null ? fmtUsd(selectedRow.bid) : '—'}</span>
                     <span className="od-kv-k">Ask</span><span className="od-kv-v">{selectedRow.ask != null ? fmtUsd(selectedRow.ask) : '—'}</span>
                     <span className="od-kv-k">Last</span><span className="od-kv-v">{selectedRow.last != null ? fmtUsd(selectedRow.last) : '—'}</span>
-                    <span className="od-kv-k">Mid</span><span className="od-kv-v">{selectedRow.mid != null ? fmtUsd(selectedRow.mid) : '—'}</span>
+                    <span className="od-kv-k">Mid</span>
+                    <span className="od-kv-v">
+                      {overviewMidDisplay.primary}
+                      {overviewMidDisplay.est && <span className="od-kv-dim"> (est.)</span>}
+                    </span>
                     <span className="od-kv-k">Spread</span>
                     <span className="od-kv-v">
                       {selectedDerived.spread != null ? `${fmtUsd(selectedDerived.spread)}` : '—'}

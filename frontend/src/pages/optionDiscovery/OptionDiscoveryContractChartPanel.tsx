@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Bar } from '../../types'
 import { fetchOptionBars, pollMassiveJobUntilDone, postMassiveSync } from '../../api'
-import { BarsCandlestickChart } from '../data/BarsCandlestickChart'
+import { BarsCandlestickChart, finiteVwap } from '../data/BarsCandlestickChart'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import { OdChartExpandOnHover } from './OdChartExpandOnHover'
 import { buildPolygonOptionsTicker } from '../../utils/polygonOptionsTicker'
@@ -42,6 +42,8 @@ export function OptionDiscoveryContractChartPanel({
   const [error, setError] = useState<string | null>(null)
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncHint, setSyncHint] = useState<string | null>(null)
+  /** K-line VWAP overlay; default on. */
+  const [showVwap, setShowVwap] = useState(true)
 
   const load = useCallback(async () => {
     const sym = symbol.trim().toUpperCase()
@@ -146,63 +148,91 @@ export function OptionDiscoveryContractChartPanel({
 
   const chartBars = useMemo(() => sortBarsAsc(bars), [bars])
 
+  /** BarsCandlestickChart draws VWAP only when `vwap` is present on bars from GET /bars. */
+  const chartHasVwap = useMemo(
+    () => chartBars.some(b => finiteVwap(b.vwap) != null),
+    [chartBars],
+  )
+
   return (
     <div className="od-contract-chart">
       <div className="od-contract-chart-toolbar">
-        <span className="od-contract-chart-toolbar-label">Period</span>
-        <div className="od-contract-chart-periods" role="group" aria-label="Bar period">
-          {OPTION_BAR_PERIODS.map(p => (
-            <label key={p.value} className="od-contract-chart-period-item">
-              <input
-                type="radio"
-                name="od-opt-bar-period"
-                value={p.value}
-                checked={period === p.value}
-                onChange={() => setPeriod(p.value)}
-              />
-              {p.label}
-            </label>
-          ))}
+        <div className="od-contract-chart-period-cluster">
+          <span className="od-contract-chart-toolbar-label">Period</span>
+          <div className="od-contract-chart-periods" role="group" aria-label="Bar period">
+            {OPTION_BAR_PERIODS.map(p => (
+              <label key={p.value} className="od-contract-chart-period-item">
+                <input
+                  className="od-contract-chart-period-input"
+                  type="radio"
+                  name="od-opt-bar-period"
+                  value={p.value}
+                  checked={period === p.value}
+                  onChange={() => setPeriod(p.value)}
+                />
+                <span className="od-contract-chart-period-item-text">{p.label}</span>
+              </label>
+            ))}
+          </div>
         </div>
-        <button
-          type="button"
-          className="section-header-icon-btn od-contract-chart-icon-btn"
-          disabled={loading || syncBusy}
-          onClick={() => void load()}
-          title={loading ? 'Loading bars' : 'Reload bars'}
-          aria-label={loading ? 'Loading bars' : 'Reload bars'}
-        >
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-            <path d="M3 3v5h5" />
-            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
-            <path d="M16 21h5v-5" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          className="section-header-icon-btn od-contract-chart-icon-btn"
-          disabled={loading || syncBusy}
-          title={
-            syncBusy
-              ? 'Backfilling bars from Massive'
-              : period === '1 D'
-              ? 'Enqueue Celery job: Massive /v2/aggs (1 day) → option_day (~2 years lookback)'
-              : 'Enqueue Celery job: Massive /v2/aggs → option_min (last 7 days)'
-          }
-          aria-label={syncBusy ? 'Backfilling bars from Massive' : 'Backfill bars from Massive'}
-          onClick={() => void runMassiveAggregatesBackfill()}
-        >
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M7 7h10" />
-            <path d="M7 12h10" />
-            <path d="M7 17h6" />
-            <path d="M16 14l3 3-3 3" />
-          </svg>
-        </button>
-        <span className="page-title-with-tooltip" style={{ marginLeft: '0.25rem' }}>
-          <InfoTooltip text="Reads OHLC from PostgreSQL (option_day for Daily, option_min for intraday). Backfill enqueues Massive /v2/aggs on the Celery queue: daily bars upsert option_day (~2y window); intraday upserts option_min (7 days). You can also use Feed → Massive Option → Aggregate Bars (OHLC)." />
-        </span>
+        <div className="od-contract-chart-toolbar-right">
+          <button
+            type="button"
+            className="section-header-icon-btn od-contract-chart-icon-btn"
+            disabled={loading || syncBusy}
+            onClick={() => void load()}
+            title={loading ? 'Loading bars' : 'Reload bars'}
+            aria-label={loading ? 'Loading bars' : 'Reload bars'}
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+              <path d="M16 21h5v-5" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="section-header-icon-btn od-contract-chart-icon-btn"
+            disabled={loading || syncBusy}
+            title={
+              syncBusy
+                ? 'Backfilling bars from Massive'
+                : period === '1 D'
+                ? 'Enqueue Celery job: Massive /v2/aggs (1 day) → option_day (~2 years lookback)'
+                : 'Enqueue Celery job: Massive /v2/aggs → option_min (last 7 days)'
+            }
+            aria-label={syncBusy ? 'Backfilling bars from Massive' : 'Backfill bars from Massive'}
+            onClick={() => void runMassiveAggregatesBackfill()}
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M7 7h10" />
+              <path d="M7 12h10" />
+              <path d="M7 17h6" />
+              <path d="M16 14l3 3-3 3" />
+            </svg>
+          </button>
+          <span className="page-title-with-tooltip" style={{ marginLeft: '0.25rem' }}>
+            <InfoTooltip text="Reads OHLC from PostgreSQL (option_day for Daily, option_min for intraday). Backfill enqueues Massive /v2/aggs on the Celery queue: daily bars upsert option_day (~2y window); intraday upserts option_min (7 days). You can also use Feed → Massive Option → Aggregate Bars (OHLC)." />
+          </span>
+          <label
+            className="od-contract-chart-vwap-toggle"
+            title={
+              chartBars.length > 0 && !chartHasVwap
+                ? 'No VWAP in loaded bars'
+                : 'Show or hide volume-weighted average price on the chart'
+            }
+          >
+            <input
+              type="checkbox"
+              checked={showVwap}
+              disabled={chartBars.length === 0 || !chartHasVwap}
+              onChange={e => setShowVwap(e.target.checked)}
+              aria-label="Show VWAP on chart"
+            />
+            <span>VWAP</span>
+          </label>
+        </div>
       </div>
       {syncHint && <p className="section-hint" role="status">{syncHint}</p>}
       {error && <p className="section-hint" role="status">{error}</p>}
@@ -216,7 +246,17 @@ export function OptionDiscoveryContractChartPanel({
                 {symbol.trim().toUpperCase()} {optionRight === 'C' ? 'Call' : 'Put'} {strike.toFixed(2)} · {period} · Massive (DB) · {chartBars.length} bars
               </span>
             </div>
-            <BarsCandlestickChart bars={chartBars} period={period} />
+            {!chartHasVwap && (
+              <p className="od-chart-vwap-missing" role="alert">
+                VWAP data missing: loaded bars do not include <code>vwap</code> from the Market API, so the chart cannot draw the VWAP line. OHLC and volume still use returned fields. Re-fetch bars after backfill, or verify GET /bars returns <code>vwap</code> for <code>asset=option</code>.
+              </p>
+            )}
+            <BarsCandlestickChart
+              bars={chartBars}
+              period={period}
+              showVwap={showVwap}
+              enableTimeRangeBrush
+            />
           </div>
         </OdChartExpandOnHover>
       )}

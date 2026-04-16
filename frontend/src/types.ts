@@ -757,6 +757,8 @@ export interface Bar {
   low: number
   close: number
   volume?: number
+  /** Volume-weighted average price (optional; e.g. Massive aggregates `vw`). */
+  vwap?: number | null
 }
 
 export interface BarsResponse {

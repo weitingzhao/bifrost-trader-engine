@@ -788,6 +788,7 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 low double precision,
                 close double precision,
                 volume double precision,
+                vwap double precision,
                 source text NOT NULL DEFAULT 'ib',
                 created_at timestamptz DEFAULT now(),
                 UNIQUE(symbol, expiry, strike, option_right, bar_time, source)
@@ -813,6 +814,7 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 low double precision,
                 close double precision,
                 volume double precision,
+                vwap double precision,
                 source text NOT NULL DEFAULT 'ib',
                 created_at timestamptz DEFAULT now(),
                 UNIQUE(symbol, expiry, strike, option_right, period, bar_time, source)
@@ -1104,6 +1106,12 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                   ALTER TABLE option_day ADD CONSTRAINT option_day_bar_uidx
                     UNIQUE (symbol, expiry, strike, option_right, bar_time, source);
                 END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'option_day' AND column_name = 'vwap'
+                ) THEN
+                  ALTER TABLE option_day ADD COLUMN vwap double precision;
+                END IF;
               END IF;
 
               IF to_regclass('public.option_min') IS NOT NULL THEN
@@ -1123,6 +1131,12 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 ) THEN
                   ALTER TABLE option_min ADD CONSTRAINT option_min_bar_uidx
                     UNIQUE (symbol, expiry, strike, option_right, period, bar_time, source);
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'option_min' AND column_name = 'vwap'
+                ) THEN
+                  ALTER TABLE option_min ADD COLUMN vwap double precision;
                 END IF;
               END IF;
 
