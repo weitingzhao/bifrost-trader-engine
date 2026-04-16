@@ -630,7 +630,13 @@ def get_option_snapshots_latest(
                         cur.execute(
                             """
                             SELECT contract_key, snapshot_ts, last, bid, ask, mid,
-                                   iv, delta, gamma, theta, vega, open_interest, underlying_price, source
+                                   iv, delta, gamma, theta, vega, open_interest, underlying_price,
+                                   underlying_ticker,
+                                   day_open, day_high, day_low, day_close,
+                                   day_previous_close, day_change, day_change_percent,
+                                   day_volume, day_vwap, day_last_updated,
+                                   break_even_price, fmv, fmv_last_updated,
+                                   source, created_at
                             FROM option_snapshots_latest
                             WHERE contract_key = ANY(%s) AND source = %s
                             """,
@@ -648,7 +654,13 @@ def get_option_snapshots_latest(
                         """
                         SELECT DISTINCT ON (contract_key)
                             contract_key, snapshot_ts, last, bid, ask, mid,
-                            iv, delta, gamma, theta, vega, open_interest, underlying_price, source
+                            iv, delta, gamma, theta, vega, open_interest, underlying_price,
+                            underlying_ticker,
+                            day_open, day_high, day_low, day_close,
+                            day_previous_close, day_change, day_change_percent,
+                            day_volume, day_vwap, day_last_updated,
+                            break_even_price, fmv, fmv_last_updated,
+                            source, created_at
                         FROM option_snapshots
                         WHERE contract_key = ANY(%s) AND source = %s
                         ORDER BY contract_key, snapshot_ts DESC

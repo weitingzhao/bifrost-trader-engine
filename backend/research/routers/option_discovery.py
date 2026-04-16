@@ -471,6 +471,20 @@ def get_option_snapshots_pg(
                 "theta": row.get("theta"),
                 "vega": row.get("vega"),
                 "open_interest": row.get("open_interest"),
+                "underlying_ticker": row.get("underlying_ticker"),
+                "day_open": row.get("day_open"),
+                "day_high": row.get("day_high"),
+                "day_low": row.get("day_low"),
+                "day_close": row.get("day_close"),
+                "day_previous_close": row.get("day_previous_close"),
+                "day_change": row.get("day_change"),
+                "day_change_percent": row.get("day_change_percent"),
+                "day_volume": row.get("day_volume"),
+                "day_vwap": row.get("day_vwap"),
+                "day_last_updated": row.get("day_last_updated"),
+                "break_even_price": row.get("break_even_price"),
+                "fmv": row.get("fmv"),
+                "fmv_last_updated": row.get("fmv_last_updated"),
             }
         )
     out_rows.sort(key=lambda x: (x["strike"], 0 if x["right"] == "C" else 1))

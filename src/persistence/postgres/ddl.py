@@ -836,6 +836,8 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 strike double precision NOT NULL,
                 option_right text NOT NULL,
                 massive_option_ticker text,
+                exercise_style text,
+                shares_per_contract integer,
                 created_at timestamptz DEFAULT now()
             )
             """
@@ -896,6 +898,20 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                     vega double precision,
                     open_interest integer,
                     underlying_price double precision,
+                    underlying_ticker text,
+                    day_open double precision,
+                    day_high double precision,
+                    day_low double precision,
+                    day_close double precision,
+                    day_previous_close double precision,
+                    day_change double precision,
+                    day_change_percent double precision,
+                    day_volume bigint,
+                    day_vwap double precision,
+                    day_last_updated timestamptz,
+                    break_even_price double precision,
+                    fmv double precision,
+                    fmv_last_updated timestamptz,
                     source text NOT NULL DEFAULT 'ib',
                     created_at timestamptz DEFAULT now(),
                     PRIMARY KEY (option_snapshots_id, snapshot_ts)
@@ -951,6 +967,20 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                     vega double precision,
                     open_interest integer,
                     underlying_price double precision,
+                    underlying_ticker text,
+                    day_open double precision,
+                    day_high double precision,
+                    day_low double precision,
+                    day_close double precision,
+                    day_previous_close double precision,
+                    day_change double precision,
+                    day_change_percent double precision,
+                    day_volume bigint,
+                    day_vwap double precision,
+                    day_last_updated timestamptz,
+                    break_even_price double precision,
+                    fmv double precision,
+                    fmv_last_updated timestamptz,
                     source text NOT NULL DEFAULT 'ib',
                     created_at timestamptz DEFAULT now(),
                     PRIMARY KEY (option_snapshots_id, snapshot_ts)
@@ -988,6 +1018,20 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                     vega,
                     open_interest,
                     underlying_price,
+                    underlying_ticker,
+                    day_open,
+                    day_high,
+                    day_low,
+                    day_close,
+                    day_previous_close,
+                    day_change,
+                    day_change_percent,
+                    day_volume,
+                    day_vwap,
+                    day_last_updated,
+                    break_even_price,
+                    fmv,
+                    fmv_last_updated,
                     source,
                     created_at
                 )
@@ -1006,6 +1050,20 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                     vega,
                     open_interest,
                     underlying_price,
+                    NULL::text,
+                    NULL::double precision,
+                    NULL::double precision,
+                    NULL::double precision,
+                    NULL::double precision,
+                    NULL::double precision,
+                    NULL::double precision,
+                    NULL::double precision,
+                    NULL::bigint,
+                    NULL::double precision,
+                    NULL::timestamptz,
+                    NULL::double precision,
+                    NULL::double precision,
+                    NULL::timestamptz,
                     source,
                     created_at
                 FROM option_snapshots;
@@ -1062,27 +1120,7 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             "CREATE INDEX IF NOT EXISTS option_snapshots_contract_key_ts ON option_snapshots (contract_key, snapshot_ts DESC)"
         )
 
-        _log("option_snapshots_latest materialized view")
-        cur.execute(
-            """
-            DO $snap_mv$
-            BEGIN
-              IF to_regclass('public.option_snapshots_latest') IS NULL THEN
-                EXECUTE '
-                  CREATE MATERIALIZED VIEW option_snapshots_latest AS
-                  SELECT DISTINCT ON (contract_key)
-                      contract_key, snapshot_ts, last, bid, ask, mid,
-                      iv, delta, gamma, theta, vega, open_interest, underlying_price, source
-                  FROM option_snapshots
-                  ORDER BY contract_key, snapshot_ts DESC
-                ';
-                CREATE UNIQUE INDEX option_snapshots_latest_ck
-                  ON option_snapshots_latest (contract_key);
-              END IF;
-            END $snap_mv$;
-            """
-        )
-
+        _log("option_snapshots_latest materialized view (created after migrate_opt when base columns exist)")
         _log("migrate option_* tables for Massive (R-A6): source column, snapshots greeks")
         cur.execute(
             """
@@ -1147,18 +1185,17 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 ) THEN
                   ALTER TABLE option_contracts ADD COLUMN massive_option_ticker text;
                 END IF;
-                -- Drop deprecated reference metadata columns if present (removed 2026-04).
-                IF EXISTS (
+                IF NOT EXISTS (
                   SELECT 1 FROM information_schema.columns
                   WHERE table_schema = 'public' AND table_name = 'option_contracts' AND column_name = 'exercise_style'
                 ) THEN
-                  ALTER TABLE option_contracts DROP COLUMN exercise_style;
+                  ALTER TABLE option_contracts ADD COLUMN exercise_style text;
                 END IF;
-                IF EXISTS (
+                IF NOT EXISTS (
                   SELECT 1 FROM information_schema.columns
                   WHERE table_schema = 'public' AND table_name = 'option_contracts' AND column_name = 'shares_per_contract'
                 ) THEN
-                  ALTER TABLE option_contracts DROP COLUMN shares_per_contract;
+                  ALTER TABLE option_contracts ADD COLUMN shares_per_contract integer;
                 END IF;
                 IF EXISTS (
                   SELECT 1 FROM information_schema.columns
@@ -1187,6 +1224,65 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                   ALTER TABLE option_snapshots ADD COLUMN open_interest integer;
                   ALTER TABLE option_snapshots ADD COLUMN underlying_price double precision;
                   ALTER TABLE option_snapshots ADD COLUMN source text NOT NULL DEFAULT 'ib';
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'option_snapshots' AND column_name = 'underlying_ticker'
+                ) THEN
+                  ALTER TABLE option_snapshots ADD COLUMN underlying_ticker text;
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'option_snapshots' AND column_name = 'day_open'
+                ) THEN
+                  ALTER TABLE option_snapshots ADD COLUMN day_open double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN day_high double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN day_low double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN day_close double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN day_previous_close double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN day_change double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN day_change_percent double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN day_volume bigint;
+                  ALTER TABLE option_snapshots ADD COLUMN day_vwap double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN day_last_updated timestamptz;
+                  ALTER TABLE option_snapshots ADD COLUMN break_even_price double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN fmv double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN fmv_last_updated timestamptz;
+                END IF;
+              END IF;
+
+              -- Recreate option_snapshots_latest when base table has Massive day-bar columns but MV does not (upgrade path).
+              IF to_regclass('public.option_snapshots') IS NOT NULL THEN
+                IF EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'option_snapshots' AND column_name = 'day_close'
+                ) AND (
+                  NOT EXISTS (
+                    SELECT 1 FROM pg_matviews
+                    WHERE schemaname = 'public' AND matviewname = 'option_snapshots_latest'
+                  )
+                  OR NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'option_snapshots_latest' AND column_name = 'day_close'
+                  )
+                ) THEN
+                  DROP MATERIALIZED VIEW IF EXISTS option_snapshots_latest;
+                  EXECUTE $mvos$
+                    CREATE MATERIALIZED VIEW option_snapshots_latest AS
+                    SELECT DISTINCT ON (contract_key)
+                      contract_key, snapshot_ts, last, bid, ask, mid,
+                      iv, delta, gamma, theta, vega, open_interest, underlying_price,
+                      underlying_ticker,
+                      day_open, day_high, day_low, day_close,
+                      day_previous_close, day_change, day_change_percent,
+                      day_volume, day_vwap, day_last_updated,
+                      break_even_price, fmv, fmv_last_updated,
+                      source, created_at
+                    FROM option_snapshots
+                    ORDER BY contract_key, snapshot_ts DESC
+                  $mvos$;
+                  CREATE UNIQUE INDEX IF NOT EXISTS option_snapshots_latest_ck
+                    ON option_snapshots_latest (contract_key);
                 END IF;
               END IF;
             END

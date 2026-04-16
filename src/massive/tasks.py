@@ -100,24 +100,34 @@ def _right_from_contract_type(ct: str) -> str:
     return "C"
 
 
+def _ns_to_datetime(ns: Any) -> Optional[datetime]:
+    """Parse Massive/Polygon nanosecond or millisecond epoch to UTC."""
+    if ns is None:
+        return None
+    try:
+        n = int(ns)
+        if n > 1_000_000_000_000_000_000:
+            return datetime.fromtimestamp(n / 1e9, tz=timezone.utc)
+        if n > 1_000_000_000_000:
+            return datetime.fromtimestamp(n / 1000.0, tz=timezone.utc)
+        return datetime.fromtimestamp(float(n), tz=timezone.utc)
+    except (TypeError, ValueError, OSError):
+        return None
+
+
 def _parse_snapshot_ts(item: Dict[str, Any]) -> datetime:
     lt = item.get("last_trade") or {}
     lq = item.get("last_quote") or {}
+    day = item.get("day") if isinstance(item.get("day"), dict) else {}
     for ns in (
         lt.get("sip_timestamp"),
         lt.get("participant_timestamp"),
         lq.get("last_updated"),
+        day.get("last_updated"),
     ):
-        if ns is not None:
-            try:
-                n = int(ns)
-                if n > 1_000_000_000_000_000_000:
-                    return datetime.fromtimestamp(n / 1e9, tz=timezone.utc)
-                if n > 1_000_000_000_000:
-                    return datetime.fromtimestamp(n / 1000.0, tz=timezone.utc)
-                return datetime.fromtimestamp(float(n), tz=timezone.utc)
-            except (TypeError, ValueError, OSError):
-                pass
+        dt = _ns_to_datetime(ns)
+        if dt is not None:
+            return dt
     return datetime.now(timezone.utc)
 
 
@@ -504,6 +514,15 @@ def _refresh_snapshots_latest(conn: Any) -> None:
             pass
 
 
+def _f_or_none(x: Any) -> Optional[float]:
+    if x is None:
+        return None
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
 def _apply_snapshot(
     conn: Any,
     underlying: str,
@@ -546,57 +565,121 @@ def _apply_snapshot(
             last = lt.get("price")
             if last is None and isinstance(lt.get("last"), (int, float)):
                 last = lt.get("last")
-            mid = None
+
+            day = item.get("day") if isinstance(item.get("day"), dict) else {}
+            day_close = _f_or_none(day.get("close"))
+            if last is None and day_close is not None:
+                last = day_close
+
+            mid: Optional[float] = None
             if bid is not None and ask is not None:
                 try:
                     mid = (float(bid) + float(ask)) / 2.0
                 except (TypeError, ValueError):
-                    mid = last
-            else:
-                mid = last
+                    mid = _f_or_none(last)
+            elif last is not None:
+                mid = _f_or_none(last)
+            elif day_close is not None:
+                mid = day_close
+
             oi = item.get("open_interest")
             if oi is not None:
                 try:
                     oi = int(oi)
                 except (TypeError, ValueError):
                     oi = None
-            ua = item.get("underlying_asset") or {}
-            if isinstance(ua, dict):
-                up = ua.get("price")
-            else:
-                up = None
+            ua = item.get("underlying_asset") if isinstance(item.get("underlying_asset"), dict) else {}
+            up = ua.get("price")
+            underlying_ticker = (ua.get("ticker") or "").strip() or None
             ts = _parse_snapshot_ts(item)
+
+            ex_style = (det.get("exercise_style") or "").strip() or None
+            spc = det.get("shares_per_contract")
+            shares_per_contract: Optional[int] = None
+            if spc is not None:
+                try:
+                    shares_per_contract = int(spc)
+                except (TypeError, ValueError):
+                    shares_per_contract = None
+
+            day_ou = _f_or_none(day.get("open"))
+            day_hi = _f_or_none(day.get("high"))
+            day_lo = _f_or_none(day.get("low"))
+            day_pc = _f_or_none(day.get("previous_close"))
+            day_ch = _f_or_none(day.get("change"))
+            day_chp = _f_or_none(day.get("change_percent"))
+            day_vol: Optional[int] = None
+            if day.get("volume") is not None:
+                try:
+                    day_vol = int(day.get("volume"))
+                except (TypeError, ValueError):
+                    day_vol = None
+            day_vw = _f_or_none(day.get("vwap"))
+            day_lu = _ns_to_datetime(day.get("last_updated"))
+
+            be = _f_or_none(item.get("break_even_price"))
+            fmv = _f_or_none(item.get("fmv"))
+            fmv_lu = _ns_to_datetime(item.get("fmv_last_updated"))
+
             cur.execute(
                 """
-                INSERT INTO option_contracts (contract_key, symbol, expiry, strike, option_right, massive_option_ticker, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, now())
+                INSERT INTO option_contracts (
+                  contract_key, symbol, expiry, strike, option_right, massive_option_ticker,
+                  exercise_style, shares_per_contract, created_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (contract_key) DO UPDATE SET
-                  massive_option_ticker = COALESCE(EXCLUDED.massive_option_ticker, option_contracts.massive_option_ticker)
+                  massive_option_ticker = COALESCE(EXCLUDED.massive_option_ticker, option_contracts.massive_option_ticker),
+                  exercise_style = COALESCE(EXCLUDED.exercise_style, option_contracts.exercise_style),
+                  shares_per_contract = COALESCE(EXCLUDED.shares_per_contract, option_contracts.shares_per_contract)
                 """,
-                (ck, underlying, exp, strike, ort, ticker),
+                (ck, underlying, exp, strike, ort, ticker, ex_style, shares_per_contract),
             )
             cur.execute(
                 """
                 INSERT INTO option_snapshots (
                   contract_key, snapshot_ts, last, bid, ask, mid,
-                  iv, delta, gamma, theta, vega, open_interest, underlying_price, source, created_at
+                  iv, delta, gamma, theta, vega, open_interest, underlying_price,
+                  underlying_ticker,
+                  day_open, day_high, day_low, day_close,
+                  day_previous_close, day_change, day_change_percent,
+                  day_volume, day_vwap, day_last_updated,
+                  break_even_price, fmv, fmv_last_updated,
+                  source, created_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'massive', now())
+                VALUES (
+                  %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                  %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'massive', now()
+                )
                 """,
                 (
                     ck,
                     ts,
-                    float(last) if last is not None else None,
-                    float(bid) if bid is not None else None,
-                    float(ask) if ask is not None else None,
-                    float(mid) if mid is not None else None,
-                    float(iv) if iv is not None else None,
-                    float(g.get("delta")) if g.get("delta") is not None else None,
-                    float(g.get("gamma")) if g.get("gamma") is not None else None,
-                    float(g.get("theta")) if g.get("theta") is not None else None,
-                    float(g.get("vega")) if g.get("vega") is not None else None,
+                    _f_or_none(last),
+                    _f_or_none(bid),
+                    _f_or_none(ask),
+                    mid,
+                    _f_or_none(iv),
+                    _f_or_none(g.get("delta")),
+                    _f_or_none(g.get("gamma")),
+                    _f_or_none(g.get("theta")),
+                    _f_or_none(g.get("vega")),
                     oi,
-                    float(up) if up is not None else None,
+                    _f_or_none(up),
+                    underlying_ticker,
+                    day_ou,
+                    day_hi,
+                    day_lo,
+                    day_close,
+                    day_pc,
+                    day_ch,
+                    day_chp,
+                    day_vol,
+                    day_vw,
+                    day_lu,
+                    be,
+                    fmv,
+                    fmv_lu,
                 ),
             )
             n += 1
@@ -1039,6 +1122,9 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 result = {
                     "ok": True, "kind": kind, "snapshot_type": "chain",
                     "rows_written": count,
+                    "massive_request_id": snap.get("request_id"),
+                    "massive_status": snap.get("status"),
+                    "next_url": snap.get("next_url"),
                     "summary": {
                         "underlying": u,
                         "results_count": len(raw_results),

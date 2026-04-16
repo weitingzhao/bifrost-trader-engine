@@ -459,7 +459,7 @@
 ### 2.16.1 表 `option_contracts`（期权合约定义）
 
 - **用途**：期权合约定义，按 contract_key（与 account_positions、contract_quote_live 一致）唯一标识。
-- **列**：`option_contracts_id` (bigserial PK)、`contract_key` (text NOT NULL UNIQUE)、`symbol`、`expiry`、`strike`、`option_right`、`massive_option_ticker` (text, 可选, Massive/Polygon 供应商期权代码如 `O:NVDA250620C00120000`，便于 API 往返)、`created_at`。索引 `(contract_key)`、`(symbol, expiry, strike, option_right)`。
+- **列**：`option_contracts_id` (bigserial PK)、`contract_key` (text NOT NULL UNIQUE)、`symbol`、`expiry`、`strike`、`option_right`、`massive_option_ticker` (text, 可选, Massive/Polygon 供应商期权代码如 `O:NVDA250620C00120000`，便于 API 往返)、`exercise_style` (text, 可选, Massive `details.exercise_style`)、`shares_per_contract` (integer, 可选, Massive `details.shares_per_contract`)、`created_at`。索引 `(contract_key)`、`(symbol, expiry, strike, option_right)`。
 
 ### 2.16.2 表 `option_snapshots`（期权时点快照，含 Greeks/IV）
 
@@ -471,17 +471,25 @@
 | option_snapshots_id | bigserial | 自增主键 |
 | contract_key | text NOT NULL | 合约唯一键 |
 | snapshot_ts | timestamptz NOT NULL | 快照时间戳 |
-| last | double precision | 最新价 |
-| bid | double precision | 买一 |
-| ask | double precision | 卖一 |
-| mid | double precision | 中间价 |
-| iv | double precision | 隐含波动率（可空） |
+| last | double precision | 最新价（优先 last trade；无则可为 Massive `day.close` 回退） |
+| bid | double precision | 买一（仅真实 quote 时填写） |
+| ask | double precision | 卖一（仅真实 quote 时填写） |
+| mid | double precision | 中间价（bid/ask 或回退 `day.close`） |
+| iv | double precision | 隐含波动率（可空；API `implied_volatility` 或 `greeks.iv`） |
 | delta | double precision | Delta（可空） |
 | gamma | double precision | Gamma（可空） |
 | theta | double precision | Theta（可空） |
 | vega | double precision | Vega（可空） |
 | open_interest | integer | 快照时点的 OI（可空，若随报价一并返回） |
-| underlying_price | double precision | 标的价格（可空，快照时标的 spot） |
+| underlying_price | double precision | 标的价格（可空；Massive `underlying_asset.price`） |
+| underlying_ticker | text | 标的代码（可空；Massive `underlying_asset.ticker`） |
+| day_open / day_high / day_low / day_close | double precision | Massive 链快照 `day` 对象 OHLC |
+| day_previous_close / day_change / day_change_percent | double precision | Massive `day` |
+| day_volume | bigint | Massive `day.volume` |
+| day_vwap | double precision | Massive `day.vwap` |
+| day_last_updated | timestamptz | 由 Massive `day.last_updated`（纳秒）换算 |
+| break_even_price | double precision | Massive `break_even_price` |
+| fmv / fmv_last_updated | double precision / timestamptz | Massive FMV（若套餐返回） |
 | source | text NOT NULL DEFAULT 'ib' | 数据来源：`ib` 或 `massive` |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
@@ -493,9 +501,9 @@
 #### 物化视图 `option_snapshots_latest`
 
 - **用途**：按 `contract_key` 取最新一行的物化视图，加速 Discovery 读路径。
-- **定义**：`CREATE MATERIALIZED VIEW option_snapshots_latest AS SELECT DISTINCT ON (contract_key) ... FROM option_snapshots ORDER BY contract_key, snapshot_ts DESC`。
+- **定义**：`CREATE MATERIALIZED VIEW option_snapshots_latest AS SELECT DISTINCT ON (contract_key) ... FROM option_snapshots ORDER BY contract_key, snapshot_ts DESC`，列集与 `option_snapshots` 中参与展示/研究的列对齐（含 `day_*`、`underlying_ticker`、FMV 等）。
 - **唯一索引**：`UNIQUE (contract_key)`——支持 `REFRESH MATERIALIZED VIEW CONCURRENTLY`。
-- **刷新**：chain snapshot 写入成功后自动 `REFRESH CONCURRENTLY`（见 `massive_tasks.py`）。
+- **刷新**：chain snapshot 写入成功后自动 `REFRESH CONCURRENTLY`（见 `src/massive/tasks.py`）。schema 升级时若基表新增列而 MV 未包含，`pg_ddl` 会 `DROP` 后按新列重建。
 
 ### 2.16.3 表 `option_open_interest_daily`（R-A6：期权日终 Open Interest）
 
@@ -1488,6 +1496,7 @@ python scripts/db/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-04-15 option_contracts 移除参考元数据列 | 删除 `exercise_style`、`shares_per_contract`、`cfi`、`primary_exchange`；`pg_ddl` 迁移块对上述列 `DROP COLUMN IF EXISTS`。§2.16.1。 | 研究 / Massive |
 | 2026-04-15 report_option_atm_iv_daily | 新增表 `report_option_atm_iv_daily`（§2.16.5b）：按交易日汇总 ATM IV，加速 IV Volatility Cone；`pg_ddl` 建表与索引。 | Option Discovery |
 | 2026-04-15 option_day / option_min vwap | `option_day`、`option_min` 增加可空列 `vwap`（Massive 聚合 `vw` 回填）；`pg_ddl` 迁移 `ADD COLUMN`；GET `/bars`（option）与 K 线前端展示。§2.15、§2.16。 | 期权研究 / Option Discovery |
+| 2026-04-16 Massive chain snapshot 全量落库 | `option_contracts` 恢复 `exercise_style`、`shares_per_contract`（可空）。`option_snapshots` 增加 `underlying_ticker`、`day_*`（OHLC/量能/vwap/last_updated）、`break_even_price`、`fmv`/`fmv_last_updated`；`iv` 列语义对应 API `implied_volatility`。物化视图 `option_snapshots_latest` 列集同步；迁移路径在 `migrate_opt` 末尾按基表与 MV 差异重建 MV。Massive Worker 写入与 Research API / Option Discovery 读路径扩展。§2.16.1–2.16.2。 | Massive / Option Discovery |
 
 ---
 

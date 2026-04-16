@@ -61,6 +61,8 @@ type ChainColumnId =
   | 'ask'
   | 'last'
   | 'mid'
+  | 'day_close'
+  | 'day_vol'
   | 'iv'
   | 'delta'
   | 'gamma'
@@ -73,6 +75,8 @@ const CHAIN_COLUMN_LABEL: Record<ChainColumnId, string> = {
   ask: 'Ask',
   last: 'Last',
   mid: 'Mid',
+  day_close: 'Day close',
+  day_vol: 'Day vol',
   iv: 'IV',
   delta: 'Delta',
   gamma: 'Gamma',
@@ -86,6 +90,8 @@ const DEFAULT_CHAIN_COLUMN_VISIBILITY: Record<ChainColumnId, boolean> = {
   ask: true,
   last: true,
   mid: true,
+  day_close: false,
+  day_vol: false,
   iv: true,
   delta: true,
   gamma: false,
@@ -309,14 +315,15 @@ interface DerivedMetrics {
 }
 
 /**
- * Mark price for decomposition: stored mid, else (bid+ask)/2, else last trade.
- * Matches how Massive snapshot ingestion fills `mid` when possible.
+ * Mark price for decomposition: stored mid, else (bid+ask)/2, else last trade,
+ * else Massive `day.close` when live quotes are absent.
  */
 function effectiveQuotePremium(row: OptionSnapshotRow): number | null {
-  const { bid, ask, mid, last } = row
+  const { bid, ask, mid, last, day_close: dayClose } = row
   if (mid != null && Number.isFinite(mid) && mid >= 0) return mid
   if (bid != null && ask != null && Number.isFinite(bid) && Number.isFinite(ask)) return (bid + ask) / 2
   if (last != null && Number.isFinite(last) && last >= 0) return last
+  if (dayClose != null && Number.isFinite(dayClose) && dayClose >= 0) return dayClose
   return null
 }
 
@@ -1315,6 +1322,8 @@ export function OptionDiscoveryPage({
       'ask',
       'last',
       'mid',
+      'day_close',
+      'day_vol',
       ...(['iv', 'delta', 'gamma', 'theta', 'vega', 'oi'] as const satisfies readonly ChainColumnId[]),
     ]
     return order.filter(id => chainColumnVisibility[id] !== false)
@@ -1368,6 +1377,12 @@ export function OptionDiscoveryPage({
             case 'mid':
               cell = row.mid != null ? fmtUsd(row.mid) : '—'
               break
+            case 'day_close':
+              cell = row.day_close != null ? fmtUsd(row.day_close) : '—'
+              break
+            case 'day_vol':
+              cell = row.day_volume != null ? String(row.day_volume) : '—'
+              break
             case 'iv':
               cell = fmtOptNum(row.iv, 4)
               break
@@ -1407,7 +1422,7 @@ export function OptionDiscoveryPage({
   )
 
   const chainFilterColumnIds = useMemo((): ChainColumnId[] => {
-    return ['bid', 'ask', 'last', 'mid', 'iv', 'delta', 'gamma', 'theta', 'vega', 'oi']
+    return ['bid', 'ask', 'last', 'mid', 'day_close', 'day_vol', 'iv', 'delta', 'gamma', 'theta', 'vega', 'oi']
   }, [])
 
   return (
@@ -2322,7 +2337,7 @@ export function OptionDiscoveryPage({
                 <div className="od-card-section">
                   <div className="od-card-section-title od-card-section-title--with-hint">
                     Price
-                    <InfoTooltip text="Bid, ask, mid, and last are read from the latest PostgreSQL option_snapshots row for this contract (Massive chain snapshot → option_snapshots). Underlying price for decomposition comes from that row or from the stock day fallback when missing. If all quote fields are empty, reload quotes or confirm the Massive job wrote bid/ask data." />
+                    <InfoTooltip text="Bid, ask, mid, and last come from the latest PostgreSQL option_snapshots row (Massive chain snapshot). When your plan does not include last_quote/last_trade, the worker stores Massive day bar fields (e.g. day close) and uses them to fill last/mid for display. Underlying price for decomposition uses underlying_price from the snapshot or stock day fallback when missing." />
                   </div>
                   <div className="od-kv-grid">
                     <span className="od-kv-k">Bid</span><span className="od-kv-v">{selectedRow.bid != null ? fmtUsd(selectedRow.bid) : '—'}</span>

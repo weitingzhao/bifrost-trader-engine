@@ -112,6 +112,22 @@ export interface OptionSnapshotRow {
   theta?: number | null
   vega?: number | null
   open_interest?: number | null
+  /** Massive `underlying_asset.ticker` when present */
+  underlying_ticker?: string | null
+  /** Massive chain snapshot `day` bar (delayed tier / no live quote) */
+  day_open?: number | null
+  day_high?: number | null
+  day_low?: number | null
+  day_close?: number | null
+  day_previous_close?: number | null
+  day_change?: number | null
+  day_change_percent?: number | null
+  day_volume?: number | null
+  day_vwap?: number | null
+  day_last_updated?: string | null
+  break_even_price?: number | null
+  fmv?: number | null
+  fmv_last_updated?: string | null
 }
 
 /** OD.3: Option snapshot (bid/ask/last/mid) for symbol + expiration with optional strikes (IB live). */
@@ -920,6 +936,31 @@ export async function fetchOptionSnapshotsPg(
           row.open_interest != null && Number.isFinite(Number(row.open_interest))
             ? Number(row.open_interest)
             : null,
+        underlying_ticker: typeof row.underlying_ticker === 'string' ? row.underlying_ticker : null,
+        day_open: row.day_open != null && Number.isFinite(Number(row.day_open)) ? Number(row.day_open) : null,
+        day_high: row.day_high != null && Number.isFinite(Number(row.day_high)) ? Number(row.day_high) : null,
+        day_low: row.day_low != null && Number.isFinite(Number(row.day_low)) ? Number(row.day_low) : null,
+        day_close: row.day_close != null && Number.isFinite(Number(row.day_close)) ? Number(row.day_close) : null,
+        day_previous_close:
+          row.day_previous_close != null && Number.isFinite(Number(row.day_previous_close))
+            ? Number(row.day_previous_close)
+            : null,
+        day_change:
+          row.day_change != null && Number.isFinite(Number(row.day_change)) ? Number(row.day_change) : null,
+        day_change_percent:
+          row.day_change_percent != null && Number.isFinite(Number(row.day_change_percent))
+            ? Number(row.day_change_percent)
+            : null,
+        day_volume:
+          row.day_volume != null && Number.isFinite(Number(row.day_volume)) ? Number(row.day_volume) : null,
+        day_vwap: row.day_vwap != null && Number.isFinite(Number(row.day_vwap)) ? Number(row.day_vwap) : null,
+        day_last_updated: typeof row.day_last_updated === 'string' ? row.day_last_updated : null,
+        break_even_price:
+          row.break_even_price != null && Number.isFinite(Number(row.break_even_price))
+            ? Number(row.break_even_price)
+            : null,
+        fmv: row.fmv != null && Number.isFinite(Number(row.fmv)) ? Number(row.fmv) : null,
+        fmv_last_updated: typeof row.fmv_last_updated === 'string' ? row.fmv_last_updated : null,
       }))
     : []
   return {
