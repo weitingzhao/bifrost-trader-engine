@@ -1,7 +1,17 @@
-import { Fragment, useMemo, useState } from 'react'
-import type { Execution, OptExecutionGroup } from '../../../types'
+import { Fragment, useCallback, useMemo, useState } from 'react'
+import type { Execution, OptExecutionGroup, OptionStockLinkRow, OptionStockLinkSummary } from '../../../types'
 import { fmtTsShort, fmtUsd } from '../../../utils/format'
 import { buildOptExecutionGroups } from '../../portfolio/buildOptExecutionGroups'
+import {
+  collectLinkIdsForOptGroup,
+  flattenLinksForOptGroup,
+  getOptionStockLinkDetailForExecution,
+  instanceAttributedSlippageForFill,
+  instanceAttributedStockSlippageForOptGroup,
+  ledgerOptDetailRowPnlInstanceSlice,
+  sumInstanceGroupDisplayRealizedPnl,
+} from '../../portfolio/ledgerOptHelpers'
+import { ViewOptionStockLinksModal } from '../../portfolio/ViewOptionStockLinksModal'
 import { InstanceAllocationSplitIcon } from './InstanceAllocationSplitIcon'
 
 export type ExecutionSourceTab = 'performance_book' | 'tws_raw'
@@ -28,10 +38,21 @@ function ExecutionFillsTable({
   rows,
   source,
   splitMetaByExecId,
+  optionStockLinkByOptionId,
+  parentOptQtyByExecId,
+  onViewOptionStockLinks,
 }: {
   rows: Execution[]
   source: ExecutionSourceTab
   splitMetaByExecId?: Map<number, { ratioLabel: string; tooltip: string }>
+  optionStockLinkByOptionId: Record<number, OptionStockLinkSummary>
+  parentOptQtyByExecId: Map<number, number>
+  onViewOptionStockLinks: (
+    linkRows: OptionStockLinkRow[],
+    title: string,
+    slippageTotal: number | null,
+    instanceAttributedSlippage: number | null,
+  ) => void
 }) {
   const isTwsRaw = source === 'tws_raw'
   if (rows.length === 0) return null
@@ -69,6 +90,32 @@ function ExecutionFillsTable({
               !isTwsRaw && execId != null && splitMetaByExecId != null
                 ? splitMetaByExecId.get(execId)
                 : undefined
+            const optLedger =
+              (e.sec_type ?? '').toUpperCase() === 'OPT' && execId != null
+                ? ledgerOptDetailRowPnlInstanceSlice(
+                    e,
+                    parentOptQtyByExecId.get(execId),
+                    optionStockLinkByOptionId,
+                  )
+                : null
+            const realizedDisplay =
+              optLedger != null
+                ? fmtUsd(optLedger.displayPnl)
+                : e.realized_pnl != null
+                  ? fmtUsd(e.realized_pnl)
+                  : '—'
+            const realizedTitle = optLedger?.hasCombinedStock
+              ? 'Option premium economics + prorated linked-stock slippage (Trade Ledger)'
+              : undefined
+            const stockLinkDetail =
+              execId != null && (e.sec_type ?? '').toUpperCase() === 'OPT'
+                ? getOptionStockLinkDetailForExecution(e, optionStockLinkByOptionId)
+                : { linkIds: [] as number[], links: [] as OptionStockLinkRow[], slippageTotal: null as number | null }
+            const fillStockAttr =
+              execId != null && (e.sec_type ?? '').toUpperCase() === 'OPT'
+                ? instanceAttributedSlippageForFill(e, parentOptQtyByExecId, optionStockLinkByOptionId)
+                : null
+            const detailTitle = `${(e.symbol ?? '').trim().split(/\s+/)[0] ?? '—'} ${formatStrike(e.strike)}`.trim()
             return (
               <tr key={`${e.account_executions_id ?? ''}-${e.exec_id ?? ''}-${e.time ?? ''}`}>
                 <td>
@@ -89,6 +136,29 @@ function ExecutionFillsTable({
                         {splitMeta.ratioLabel}
                       </span>
                     </>
+                  ) : null}
+                  {stockLinkDetail.linkIds.length > 0 ? (
+                    <span className="ledger-opt-link-stock-badges">
+                      {stockLinkDetail.linkIds.map((lid) => (
+                        <button
+                          key={lid}
+                          type="button"
+                          className="ledger-opt-link-stock-badge"
+                          title="View linked stock executions"
+                          onClick={(ev) => {
+                            ev.stopPropagation()
+                            onViewOptionStockLinks(
+                              stockLinkDetail.links,
+                              `Link #${lid} · Exec #${e.account_executions_id ?? '?'} · ${detailTitle}`,
+                              stockLinkDetail.slippageTotal,
+                              fillStockAttr,
+                            )
+                          }}
+                        >
+                          #{lid}
+                        </button>
+                      ))}
+                    </span>
                   ) : null}
                 </td>
                 <td>{e.trade_date ?? (e.time != null ? fmtTsShort(e.time) : '—')}</td>
@@ -112,7 +182,9 @@ function ExecutionFillsTable({
                       : String(e.quantity)}
                 </td>
                 <td className="tabular-nums">{e.price != null ? Number(e.price).toFixed(2) : '—'}</td>
-                <td>{e.realized_pnl != null ? fmtUsd(e.realized_pnl) : '—'}</td>
+                <td className="tabular-nums" title={realizedTitle}>
+                  {realizedDisplay}
+                </td>
               </tr>
             )
           })}
@@ -127,13 +199,42 @@ export function InstanceExecutionsPanel({
   executionsFinal,
   executionsTws,
   splitMetaByExecId,
+  optionStockLinkByOptionId,
+  parentOptQtyByExecId,
 }: {
   loading: boolean
   executionsFinal: Execution[]
   executionsTws: Execution[]
   splitMetaByExecId: Map<number, { ratioLabel: string; tooltip: string }>
+  optionStockLinkByOptionId: Record<number, OptionStockLinkSummary>
+  parentOptQtyByExecId: Map<number, number>
 }) {
   const [tab, setTab] = useState<ExecutionSourceTab>('performance_book')
+  const [stockModal, setStockModal] = useState<{
+    open: boolean
+    title: string
+    rows: OptionStockLinkRow[]
+    slippageTotal: number | null
+    instanceAttributedSlippage: number | null
+  }>({
+    open: false,
+    title: '',
+    rows: [],
+    slippageTotal: null,
+    instanceAttributedSlippage: null,
+  })
+
+  const openViewStockLinks = useCallback(
+    (
+      rows: OptionStockLinkRow[],
+      title: string,
+      slippageTotal: number | null,
+      instanceAttributedSlippage: number | null,
+    ) => {
+      setStockModal({ open: true, title, rows, slippageTotal, instanceAttributedSlippage })
+    },
+    [],
+  )
 
   const activeRows = tab === 'performance_book' ? executionsFinal : executionsTws
 
@@ -155,8 +256,8 @@ export function InstanceExecutionsPanel({
 
   const tabHint =
     tab === 'performance_book'
-      ? 'account_executions_final (Flex + journal). Contract-level buy/sell summary with fill rows below each contract. Split executions show this instance share only.'
-      : 'executions_raw_tws (synthetic negative ids). Same grouping with fills below each contract.'
+      ? 'account_executions_final (Flex + journal). Contract-level buy/sell summary with fill rows below each contract. Split executions show this instance share only. OPT Realized PnL includes linked-stock slippage when links exist (Trade Ledger layer).'
+      : 'executions_raw_tws (synthetic negative ids). Same grouping with fills below each contract. OPT Realized PnL includes linked-stock slippage when links exist.'
 
   return (
     <section className="detail-block instance-detail-executions">
@@ -205,6 +306,53 @@ export function InstanceExecutionsPanel({
                 <tbody>
                   {groups.map((g) => {
                     const matched = g.status === 'realized'
+                    const linkIds = collectLinkIdsForOptGroup(g, optionStockLinkByOptionId)
+                    const linkRows = flattenLinksForOptGroup(g, optionStockLinkByOptionId)
+                    let linkSlippageSum: number | null = null
+                    if (linkIds.length > 0) {
+                      let s = 0
+                      let anySl = false
+                      const seenOid = new Set<number>()
+                      for (const ex of g.trades ?? []) {
+                        const oid = ex.account_executions_id
+                        if (oid == null || seenOid.has(oid)) continue
+                        seenOid.add(oid)
+                        const t = optionStockLinkByOptionId[oid]?.slippage_total
+                        if (t != null && Number.isFinite(t)) {
+                          s += t
+                          anySl = true
+                        }
+                      }
+                      linkSlippageSum = anySl ? s : null
+                    }
+                    const instanceAttrGroup = instanceAttributedStockSlippageForOptGroup(
+                      g,
+                      optionStockLinkByOptionId,
+                      parentOptQtyByExecId,
+                    )
+                    const groupStockIcon =
+                      linkIds.length > 0 ? (
+                        <button
+                          type="button"
+                          className="ledger-opt-link-stock-aggregate-icon"
+                          title="Linked stock fills — open details"
+                          aria-label="Linked stock fills"
+                          onClick={(ev) => {
+                            ev.stopPropagation()
+                            openViewStockLinks(
+                              linkRows,
+                              `Linked stocks · ${contractLabel(g)}`,
+                              linkSlippageSum,
+                              instanceAttrGroup,
+                            )
+                          }}
+                        >
+                          <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                            <path d="M3 18h6v-6H3v6zm9-12h6V3h-6v3zM3 8h6V3H3v5zm9 10h6v-6h-6v6z" />
+                            <path d="M14 9h2M9 14v2" />
+                          </svg>
+                        </button>
+                      ) : null
                     return (
                       <Fragment key={g.contract_key}>
                         <tr className={`instance-detail-match-row ${matched ? 'is-matched' : ''}`}>
@@ -225,7 +373,10 @@ export function InstanceExecutionsPanel({
                             </div>
                           </td>
                           <td className="instance-detail-match-center">
-                            <div className="instance-detail-contract-title">{contractLabel(g)}</div>
+                            <div className="instance-detail-contract-title instance-detail-contract-title-with-stock">
+                              <span>{contractLabel(g)}</span>
+                              {groupStockIcon}
+                            </div>
                             <div className="instance-detail-net-line">
                               <span className="muted">Net</span>{' '}
                               <span className="tabular-nums instance-detail-net-qty">{g.net_qty.toFixed(4).replace(/\.?0+$/, '')}</span>
@@ -253,7 +404,14 @@ export function InstanceExecutionsPanel({
                               </span>
                             </div>
                           </td>
-                          <td className="tabular-nums">{fmtUsd(g.realized_pnl)}</td>
+                          <td
+                            className="tabular-nums"
+                            title="Premium match PnL plus prorated linked-stock slippage per fill (same as Trade Ledger layer)"
+                          >
+                            {fmtUsd(
+                              sumInstanceGroupDisplayRealizedPnl(g, optionStockLinkByOptionId, parentOptQtyByExecId),
+                            )}
+                          </td>
                         </tr>
                         <tr className="instance-detail-match-detail-row">
                           <td colSpan={4}>
@@ -261,6 +419,9 @@ export function InstanceExecutionsPanel({
                               rows={g.trades}
                               source={tab}
                               splitMetaByExecId={tab === 'performance_book' ? splitMetaByExecId : undefined}
+                              optionStockLinkByOptionId={optionStockLinkByOptionId}
+                              parentOptQtyByExecId={parentOptQtyByExecId}
+                              onViewOptionStockLinks={openViewStockLinks}
                             />
                           </td>
                         </tr>
@@ -279,11 +440,30 @@ export function InstanceExecutionsPanel({
                 rows={nonOptRows}
                 source={tab}
                 splitMetaByExecId={tab === 'performance_book' ? splitMetaByExecId : undefined}
+                optionStockLinkByOptionId={optionStockLinkByOptionId}
+                parentOptQtyByExecId={parentOptQtyByExecId}
+                onViewOptionStockLinks={openViewStockLinks}
               />
             </div>
           )}
         </>
       )}
+      <ViewOptionStockLinksModal
+        open={stockModal.open}
+        title={stockModal.title}
+        rows={stockModal.rows}
+        slippageTotal={stockModal.slippageTotal}
+        instanceAttributedSlippage={stockModal.instanceAttributedSlippage}
+        onClose={() =>
+          setStockModal({
+            open: false,
+            title: '',
+            rows: [],
+            slippageTotal: null,
+            instanceAttributedSlippage: null,
+          })
+        }
+      />
     </section>
   )
 }

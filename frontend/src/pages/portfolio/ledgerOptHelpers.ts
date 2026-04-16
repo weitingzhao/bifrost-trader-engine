@@ -331,6 +331,164 @@ export function stockSlippageTotalForOptionExecution(
 }
 
 /**
+ * Prorated sum of option–stock link slippage (Trade Ledger layer) attributed to this strategy instance.
+ * For split executions, slippage scales by (|instance qty| / |parent execution qty|), same as allocated realized PnL.
+ */
+export function instanceOptionStockSlippageAdjustment(
+  executionsFinalRaw: Execution[],
+  strategyInstanceId: number,
+  linkByOptionId: Record<number, OptionStockLinkSummary> | undefined,
+): number {
+  if (!linkByOptionId || Object.keys(linkByOptionId).length === 0) return 0
+  let sum = 0
+  for (const ex of executionsFinalRaw) {
+    if ((ex.sec_type ?? '').toUpperCase() !== 'OPT') continue
+    const slice = sliceExecutionForInstanceOptView(ex, strategyInstanceId)
+    if (!slice) continue
+    const oid = ex.account_executions_id
+    if (oid == null) continue
+    const parentQty = Math.abs(Number(ex.quantity) || 0)
+    if (parentQty < 1e-9) continue
+    const sliceQty = Math.abs(Number(slice.quantity) || 0)
+    const ratio = sliceQty / parentQty
+    const slip = stockSlippageTotalForOptionExecution(oid, linkByOptionId)
+    if (slip !== 0) sum += slip * ratio
+  }
+  return sum
+}
+
+/** Prorated linked-stock slippage for one instance-sliced OPT row (matches a single row of {@link buildInstanceLinkedStockPnlRows}). */
+export function instanceAttributedSlippageForFill(
+  slicedEx: Execution,
+  parentOptQtyByExecId: Map<number, number>,
+  linkByOptionId: Record<number, OptionStockLinkSummary> | undefined,
+): number {
+  if ((slicedEx.sec_type ?? '').toUpperCase() !== 'OPT') return 0
+  const oid = slicedEx.account_executions_id
+  if (oid == null) return 0
+  const slipFull = stockSlippageTotalForOptionExecution(oid, linkByOptionId)
+  if (slipFull === 0) return 0
+  const parentAbs = parentOptQtyByExecId.get(oid) ?? Math.abs(Number(slicedEx.quantity) || 0)
+  const sliceAbs = Math.abs(Number(slicedEx.quantity) || 0)
+  const ratio = parentAbs > 1e-9 ? sliceAbs / parentAbs : 1
+  return slipFull * ratio
+}
+
+/** Sum of {@link instanceAttributedSlippageForFill} over distinct option execution ids in a contract group. */
+export function instanceAttributedStockSlippageForOptGroup(
+  g: OptExecutionGroup,
+  linkByOptionId: Record<number, OptionStockLinkSummary> | undefined,
+  parentOptQtyByExecId: Map<number, number>,
+): number {
+  if (!linkByOptionId) return 0
+  let sum = 0
+  const seen = new Set<number>()
+  for (const ex of g.trades ?? []) {
+    const oid = ex.account_executions_id
+    if (oid == null || seen.has(oid)) continue
+    seen.add(oid)
+    sum += instanceAttributedSlippageForFill(ex, parentOptQtyByExecId, linkByOptionId)
+  }
+  return sum
+}
+
+export type InstanceLinkedStockPnlRow = {
+  accountExecutionsId: number
+  linkCount: number
+  slippageFull: number
+  allocationRatio: number
+  slippageAttributed: number
+}
+
+/** One row per distinct OPT parent execution with links/slippage — for Instance Detail PnL explain modal. */
+export function buildInstanceLinkedStockPnlRows(
+  executionsFinalRaw: Execution[],
+  strategyInstanceId: number,
+  linkByOptionId: Record<number, OptionStockLinkSummary> | undefined,
+): InstanceLinkedStockPnlRow[] {
+  if (!linkByOptionId || Object.keys(linkByOptionId).length === 0) return []
+  const out: InstanceLinkedStockPnlRow[] = []
+  const seen = new Set<number>()
+  for (const ex of executionsFinalRaw) {
+    if ((ex.sec_type ?? '').toUpperCase() !== 'OPT') continue
+    const slice = sliceExecutionForInstanceOptView(ex, strategyInstanceId)
+    if (!slice) continue
+    const oid = ex.account_executions_id
+    if (oid == null || seen.has(oid)) continue
+    seen.add(oid)
+    const slipFull = stockSlippageTotalForOptionExecution(oid, linkByOptionId)
+    const linkCount = linkByOptionId[oid]?.links?.length ?? 0
+    if (slipFull === 0 && linkCount === 0) continue
+    const parentAbs = Math.abs(Number(ex.quantity) || 0)
+    const sliceAbs = Math.abs(Number(slice.quantity) || 0)
+    const ratio = parentAbs > 1e-9 ? sliceAbs / parentAbs : 1
+    out.push({
+      accountExecutionsId: oid,
+      linkCount,
+      slippageFull: slipFull,
+      allocationRatio: ratio,
+      slippageAttributed: slipFull * ratio,
+    })
+  }
+  return out
+}
+
+/**
+ * Trade Ledger–style Realized PnL for one instance-sliced OPT fill: premium cash from slice + prorated linked-stock slippage.
+ * Non-OPT rows: DB `realized_pnl` only.
+ */
+export function ledgerOptDetailRowPnlInstanceSlice(
+  slicedEx: Execution,
+  parentAbsQuantity: number | null | undefined,
+  linkByOptionId: Record<number, OptionStockLinkSummary> | undefined,
+): { displayPnl: number; hasCombinedStock: boolean } {
+  if ((slicedEx.sec_type ?? '').toUpperCase() !== 'OPT') {
+    const rp = slicedEx.realized_pnl != null ? Number(slicedEx.realized_pnl) : NaN
+    return { displayPnl: Number.isFinite(rp) ? rp : 0, hasCombinedStock: false }
+  }
+  const s = (slicedEx.side ?? '').toUpperCase()
+  const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
+  const isSell = !isBuy
+  const q = Number(slicedEx.quantity) || 0
+  const p = Number(slicedEx.price) || 0
+  const c = Number(slicedEx.commission) || 0
+  const value = q * p * 100 - c
+  const optionEconomic = isBuy ? -value : value
+  const oid = slicedEx.account_executions_id
+  const slipFull = stockSlippageTotalForOptionExecution(oid, linkByOptionId)
+  const linkCount = oid != null && linkByOptionId ? (linkByOptionId[oid]?.links?.length ?? 0) : 0
+  const sliceAbs = Math.abs(q)
+  const parentAbs = parentAbsQuantity != null && parentAbsQuantity > 1e-9 ? parentAbsQuantity : sliceAbs
+  const ratio = parentAbs > 1e-9 ? sliceAbs / parentAbs : 1
+  const stockAdjScaled = slipFull * ratio
+  const hasCombinedStock =
+    oid != null && linkByOptionId != null && (linkCount > 0 || slipFull !== 0)
+  let displayPnl: number
+  if (hasCombinedStock) {
+    displayPnl = optionEconomic + stockAdjScaled
+  } else {
+    const pnl = optionEconomic
+    displayPnl = isSell ? Math.abs(pnl) : pnl
+  }
+  return { displayPnl, hasCombinedStock }
+}
+
+/** Contract group total: sum of per-fill {@link ledgerOptDetailRowPnlInstanceSlice} (Instance Detail match table). */
+export function sumInstanceGroupDisplayRealizedPnl(
+  g: OptExecutionGroup,
+  linkByOptionId: Record<number, OptionStockLinkSummary> | undefined,
+  parentQtyByExecId: Map<number, number>,
+): number {
+  let sum = 0
+  for (const ex of g.trades ?? []) {
+    const oid = ex.account_executions_id
+    const parentAbs = oid != null ? parentQtyByExecId.get(Number(oid)) : undefined
+    sum += ledgerOptDetailRowPnlInstanceSlice(ex, parentAbs, linkByOptionId).displayPnl
+  }
+  return sum
+}
+
+/**
  * Options detail table (per fill): premium cash flow for this row plus linked-stock slippage when
  * this option execution has stock links (or non-zero slippage from the bulk query).
  * When not combined, matches legacy display (non-buy uses abs on the option-only cash flow).

@@ -670,6 +670,71 @@ def _apply_aggs(
     return n
 
 
+def _apply_option_day_aggs(
+    conn: Any,
+    symbol: str,
+    expiry: str,
+    strike: float,
+    option_right: str,
+    aggs: Dict[str, Any],
+) -> int:
+    """Upsert option_day daily bars from /v2/aggs (timespan day) response."""
+    exp = _norm_expiry(expiry)
+    r = option_right.strip().upper()
+    if r in ("CALL",):
+        r = "C"
+    if r in ("PUT",):
+        r = "P"
+    bars = aggs.get("results") or []
+    if not isinstance(bars, list):
+        return 0
+    n = 0
+    with conn.cursor() as cur:
+        for bar in bars:
+            if not isinstance(bar, dict):
+                continue
+            t = bar.get("t")
+            if t is None:
+                continue
+            try:
+                ts_ms = int(t)
+                bt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc)
+            except (TypeError, ValueError, OSError):
+                continue
+            o = bar.get("o")
+            h = bar.get("h")
+            l = bar.get("l")
+            c = bar.get("c")
+            v = bar.get("v")
+            cur.execute(
+                """
+                INSERT INTO option_day (
+                  symbol, expiry, strike, option_right, bar_time,
+                  open, high, low, close, volume, source, created_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'massive', now())
+                ON CONFLICT (symbol, expiry, strike, option_right, bar_time, source)
+                DO UPDATE SET
+                  open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
+                  close = EXCLUDED.close, volume = EXCLUDED.volume
+                """,
+                (
+                    symbol.upper(),
+                    exp,
+                    float(strike),
+                    r,
+                    bt,
+                    float(o) if o is not None else None,
+                    float(h) if h is not None else None,
+                    float(l) if l is not None else None,
+                    float(c) if c is not None else None,
+                    float(v) if v is not None else None,
+                ),
+            )
+            n += 1
+    return n
+
+
 def _apply_corporate_actions(
     conn: Any,
     client: Any,
@@ -1397,10 +1462,18 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 period = period_map.get(ts, "1 min")
                 if not start_ms or not end_ms:
                     raise ValueError("start_ms and end_ms required")
-                aggs = client.fetch_option_aggs(ot, mult, ts, start_ms, end_ms)
-                if aggs.get("error"):
-                    raise RuntimeError(str(aggs.get("error")))
-                count = _apply_aggs(conn, sym, exp, strike, opt_right, period, aggs)
+                ts_norm = ts.lower()
+                if ts_norm == "day":
+                    mult = max(1, mult)
+                    aggs = client.fetch_option_aggs(ot, mult, "day", start_ms, end_ms)
+                    if aggs.get("error"):
+                        raise RuntimeError(str(aggs.get("error")))
+                    count = _apply_option_day_aggs(conn, sym, exp, strike, opt_right, aggs)
+                else:
+                    aggs = client.fetch_option_aggs(ot, mult, ts, start_ms, end_ms)
+                    if aggs.get("error"):
+                        raise RuntimeError(str(aggs.get("error")))
+                    count = _apply_aggs(conn, sym, exp, strike, opt_right, period, aggs)
                 conn.commit()
                 result = {"ok": True, "kind": kind, "mode": "custom_bars", "bars_upserted": count}
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)

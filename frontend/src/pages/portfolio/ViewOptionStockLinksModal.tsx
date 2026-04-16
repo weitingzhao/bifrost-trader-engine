@@ -5,7 +5,13 @@ interface ViewOptionStockLinksModalProps {
   open: boolean
   title: string
   rows: OptionStockLinkRow[]
+  /** Full-option slippage total from the link query (same as Trade Ledger). */
   slippageTotal: number | null
+  /**
+   * When set (e.g. Instance Detail with split allocations), this instance’s share of slippage
+   * (prorated by allocated |qty| / parent |qty|) — ties to Net PnL add-on.
+   */
+  instanceAttributedSlippage?: number | null
   onClose: () => void
 }
 
@@ -14,6 +20,7 @@ export function ViewOptionStockLinksModal({
   title,
   rows,
   slippageTotal,
+  instanceAttributedSlippage,
   onClose,
 }: ViewOptionStockLinksModalProps) {
   if (!open) return null
@@ -27,8 +34,14 @@ export function ViewOptionStockLinksModal({
           {title}
         </p>
         {slippageTotal != null && Number.isFinite(slippageTotal) && (
-          <p className="section-hint" style={{ marginBottom: 'var(--space-3)' }}>
+          <p className="section-hint" style={{ marginBottom: 'var(--space-2)' }}>
             Total stock slippage vs close (signed qty × (price − close)): <strong>{fmtUsd(slippageTotal)}</strong>
+          </p>
+        )}
+        {instanceAttributedSlippage != null && Number.isFinite(instanceAttributedSlippage) && (
+          <p className="section-hint" style={{ marginBottom: 'var(--space-3)' }}>
+            <strong>This instance’s attributed slippage</strong> (prorated by allocated |qty| ÷ parent |qty|):{' '}
+            <strong>{fmtUsd(instanceAttributedSlippage)}</strong>
           </p>
         )}
         {rows.length === 0 ? (

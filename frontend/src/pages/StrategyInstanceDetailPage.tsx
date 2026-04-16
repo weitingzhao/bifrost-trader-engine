@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { StrategyInstance, StatusResponse, Execution, PerformanceResponse } from '../types'
+import type { StrategyInstance, StatusResponse, Execution, PerformanceResponse, OptionStockLinkSummary } from '../types'
 import type { StrategyStructure } from '../api'
 import { fetchStrategyInstance, fetchPerformance, fetchExecutions, fetchStructure } from '../api'
+import { fetchOptionStockLinkMapForExecutions } from './performance/fetchOptionStockLinkMap'
 import { fmtUsd, parseOptionContractKey } from '../utils/format'
 import { RiskProfileDl } from '../components/RiskProfileDl'
 import { computeRiskProfile, formatRiskHedgedBreakdown } from '../utils/riskProfile'
 import type { RiskPosition, RiskProfile } from '../utils/riskProfile'
 import {
+  buildInstanceLinkedStockPnlRows,
   describeInstanceAllocationSplitForDisplay,
+  instanceOptionStockSlippageAdjustment,
   sliceExecutionForInstanceOptView,
 } from './portfolio/ledgerOptHelpers'
 import { InstanceDetailHeader } from './strategy/instanceDetail/InstanceDetailHeader'
@@ -36,6 +39,10 @@ export function StrategyInstanceDetailPage({
   const [structure, setStructure] = useState<StrategyStructure | null>(null)
   const [structureLoading, setStructureLoading] = useState(false)
   const [structureError, setStructureError] = useState<string | null>(null)
+  /** Bulk option id → linked stock legs + slippage (same POST as Trade Ledger). */
+  const [optionStockLinkByOptionId, setOptionStockLinkByOptionId] = useState<
+    Record<number, OptionStockLinkSummary>
+  >({})
 
   const loadInstance = useCallback((): Promise<void> => {
     setInstanceLoading(true)
@@ -123,6 +130,50 @@ export function StrategyInstanceDetailPage({
       .map((ex) => sliceExecutionForInstanceOptView(ex, strategyInstanceId))
       .filter((row): row is Execution => row != null)
   }, [executionsTwsRaw, strategyInstanceId])
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      const combined = [...executionsFinalForInstance, ...executionsTwsForInstance]
+      if (combined.length === 0) {
+        if (!cancelled) setOptionStockLinkByOptionId({})
+        return
+      }
+      const map = await fetchOptionStockLinkMapForExecutions(combined)
+      if (!cancelled) setOptionStockLinkByOptionId(map)
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [executionsFinalForInstance, executionsTwsForInstance])
+
+  /** Parent |qty| per OPT account_executions_id (final + TWS raw) for prorating linked-stock slippage on instance slices. */
+  const parentOptQtyByExecId = useMemo(() => {
+    const m = new Map<number, number>()
+    const ingest = (list: Execution[]) => {
+      for (const ex of list) {
+        if ((ex.sec_type ?? '').toUpperCase() !== 'OPT') continue
+        const id = ex.account_executions_id
+        if (id == null) continue
+        m.set(Number(id), Math.abs(Number(ex.quantity) || 0))
+      }
+    }
+    ingest(executionsFinal)
+    ingest(executionsTwsRaw)
+    return m
+  }, [executionsFinal, executionsTwsRaw])
+
+  const optionStockSlippageAdjustmentForInstance = useMemo(
+    () =>
+      instanceOptionStockSlippageAdjustment(executionsFinal, strategyInstanceId, optionStockLinkByOptionId),
+    [executionsFinal, strategyInstanceId, optionStockLinkByOptionId],
+  )
+
+  const linkedStockPnlRows = useMemo(
+    () => buildInstanceLinkedStockPnlRows(executionsFinal, strategyInstanceId, optionStockLinkByOptionId),
+    [executionsFinal, strategyInstanceId, optionStockLinkByOptionId],
+  )
 
   const executionsFinalSplitMetaByExecId = useMemo(() => {
     const m = new Map<number, { ratioLabel: string; tooltip: string }>()
@@ -241,6 +292,8 @@ export function StrategyInstanceDetailPage({
                 loading={performanceLoading}
                 performance={performance}
                 executionsForNotional={executionsFinalForInstance}
+                optionStockSlippageAdjustment={optionStockSlippageAdjustmentForInstance}
+                linkedStockPnlRows={linkedStockPnlRows}
               />
             </div>
           </div>
@@ -266,6 +319,8 @@ export function StrategyInstanceDetailPage({
             executionsFinal={executionsFinalForInstance}
             executionsTws={executionsTwsForInstance}
             splitMetaByExecId={executionsFinalSplitMetaByExecId}
+            optionStockLinkByOptionId={optionStockLinkByOptionId}
+            parentOptQtyByExecId={parentOptQtyByExecId}
           />
 
           <section className="detail-block placeholder-block instance-detail-future-card">

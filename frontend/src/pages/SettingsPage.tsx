@@ -142,6 +142,7 @@ export interface SettingsPageProps {
   operations?: Operation[]
   onNavigateToStrategy?: () => void
   onNavigateToSocket?: () => void
+  onGoToScreener?: () => void
   /** Celery runtime lamp (same source as header / System aggregate). */
   celeryLamp?: 'green' | 'yellow' | 'red' | 'none'
   /** API sidebar lamps + utilized services (from App `useSettingsApiHealthProbes`, same as header shortcuts). */
@@ -154,6 +155,7 @@ export function SettingsPage({
   operations = [],
   onNavigateToStrategy,
   onNavigateToSocket,
+  onGoToScreener,
   celeryLamp = 'none',
   apiHealthProbes,
 }: SettingsPageProps) {
@@ -1282,7 +1284,7 @@ export function SettingsPage({
           <FeedMassiveOptionPage
             status={status}
             onGoToFeed={() => { window.location.hash = '#feed-ib-stock' }}
-            onGoToScreener={() => { window.location.hash = '#feed-ib-stock' }}
+            onGoToScreener={onGoToScreener}
             breadcrumbLabel="Massive Option"
           />
         ) : isMassiveStockFeedHash(currentHashForMassive) ? (

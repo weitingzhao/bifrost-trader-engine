@@ -16,6 +16,11 @@ const OPTION_BAR_PERIODS = [
 /** Option Discovery chart always reads Massive-backed rows in PostgreSQL (option_min / option_day). */
 const BAR_SOURCE: 'massive' = 'massive'
 
+/** Massive aggregates backfill: intraday job window (option_min). */
+const AGG_LOOKBACK_MS_INTRADAY = 7 * 24 * 60 * 60 * 1000
+/** Massive aggregates backfill: daily bars → option_day (plan default: ~2 years). */
+const AGG_LOOKBACK_MS_DAILY = 730 * 24 * 60 * 60 * 1000
+
 function sortBarsAsc(bars: Bar[]): Bar[] {
   return [...bars].sort((a, b) => a.time - b.time)
 }
@@ -63,7 +68,9 @@ export function OptionDiscoveryContractChartPanel({
         const msg = (res.message || '').trim()
         setError(
           msg ||
-            'No bars in the database for this contract. Click Backfill from Massive to enqueue aggregates (option_min), or run the same job from Feed → Massive Option.',
+            (period === '1 D'
+              ? 'No bars in the database for this contract. Click Backfill from Massive to enqueue daily aggregates (option_day), or run the same job from Feed → Massive Option.'
+              : 'No bars in the database for this contract. Click Backfill from Massive to enqueue aggregates (option_min), or run the same job from Feed → Massive Option.'),
         )
       }
     } catch (e) {
@@ -82,23 +89,21 @@ export function OptionDiscoveryContractChartPanel({
     const sym = symbol.trim().toUpperCase()
     const exp = expiration.trim()
     if (!sym || !exp || !Number.isFinite(strike)) return
-    if (period === '1 D') {
-      setSyncHint(
-        'Daily bars are read from option_day. The Massive aggregates job only writes intraday rows to option_min. Use IB bars elsewhere or open/close on the Massive Option feed page.',
-      )
-      return
-    }
     setSyncBusy(true)
     setSyncHint(null)
     setError(null)
     try {
       const optionsTicker = buildPolygonOptionsTicker(sym, exp, strike, optionRight)
       const endMs = Date.now()
-      const lookbackMs = 7 * 24 * 60 * 60 * 1000
+      const isDaily = period === '1 D'
+      const lookbackMs = isDaily ? AGG_LOOKBACK_MS_DAILY : AGG_LOOKBACK_MS_INTRADAY
       const startMs = endMs - lookbackMs
       let timespan = 'minute'
       let multiplier = 1
-      if (period === '1 hour') {
+      if (isDaily) {
+        timespan = 'day'
+        multiplier = 1
+      } else if (period === '1 hour') {
         timespan = 'hour'
         multiplier = 1
       } else {
@@ -129,7 +134,7 @@ export function OptionDiscoveryContractChartPanel({
         setSyncHint('Backfill wrote 1-minute bars. Chart period set to 1 min to match.')
         setPeriod('1 min')
       } else {
-        setSyncHint('Backfill finished. Reloading bars from PostgreSQL.')
+        setSyncHint(isDaily ? 'Daily backfill finished (option_day, ~2y window). Reloading bars from PostgreSQL.' : 'Backfill finished. Reloading bars from PostgreSQL.')
         await load()
       }
     } catch (e) {
@@ -177,12 +182,12 @@ export function OptionDiscoveryContractChartPanel({
         <button
           type="button"
           className="section-header-icon-btn od-contract-chart-icon-btn"
-          disabled={loading || syncBusy || period === '1 D'}
+          disabled={loading || syncBusy}
           title={
             syncBusy
               ? 'Backfilling bars from Massive'
               : period === '1 D'
-              ? 'Daily bars are not filled by REST aggregates; use another pipeline for option_day.'
+              ? 'Enqueue Celery job: Massive /v2/aggs (1 day) → option_day (~2 years lookback)'
               : 'Enqueue Celery job: Massive /v2/aggs → option_min (last 7 days)'
           }
           aria-label={syncBusy ? 'Backfilling bars from Massive' : 'Backfill bars from Massive'}
@@ -196,7 +201,7 @@ export function OptionDiscoveryContractChartPanel({
           </svg>
         </button>
         <span className="page-title-with-tooltip" style={{ marginLeft: '0.25rem' }}>
-          <InfoTooltip text="Reads OHLC from PostgreSQL (option_day for Daily, option_min for intraday). Backfill enqueues aggregates on the massive Celery queue. You can also use Feed → Massive Option → Aggregate Bars (OHLC)." />
+          <InfoTooltip text="Reads OHLC from PostgreSQL (option_day for Daily, option_min for intraday). Backfill enqueues Massive /v2/aggs on the Celery queue: daily bars upsert option_day (~2y window); intraday upserts option_min (7 days). You can also use Feed → Massive Option → Aggregate Bars (OHLC)." />
         </span>
       </div>
       {syncHint && <p className="section-hint" role="status">{syncHint}</p>}

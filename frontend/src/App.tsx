@@ -1743,6 +1743,14 @@ export default function App() {
         <OptionScreenerPage
           status={status}
           onGoToScreener={() => setResearchView('screener')}
+          onOpenMassiveFeed={() => {
+            setActiveTab('settings')
+            window.location.hash = `#${FEED_MASSIVE_OPTION_ID}`
+          }}
+          onOpenMassiveDelay={() => {
+            setActiveTab('settings')
+            window.location.hash = '#coverage-massive-stock'
+          }}
           breadcrumbLabel="Screener"
         />
       )}
@@ -1834,6 +1842,7 @@ export default function App() {
           operations={operations}
           onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
           onNavigateToSocket={openSocketInSettings}
+          onGoToScreener={() => { setActiveTab('research'); setResearchView('screener') }}
           celeryLamp={celeryLamp}
           apiHealthProbes={apiHealthProbes}
         />

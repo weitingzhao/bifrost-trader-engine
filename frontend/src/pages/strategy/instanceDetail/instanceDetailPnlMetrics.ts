@@ -1,5 +1,5 @@
 import type { Execution } from '../../../types'
-import { parseOptionContractKey } from '../../../utils/format'
+import { fmtExpiry, parseOptionContractKey } from '../../../utils/format'
 import { buildOptExecutionGroups } from '../../portfolio/buildOptExecutionGroups'
 
 /** Same epsilon as {@link buildOptExecutionGroups} net flat check. */
@@ -177,4 +177,87 @@ export function formatHoldDaysRounded0(spanDays: number): string {
 export function holdDaysForAnnualization(spanDays: number): number {
   if (!Number.isFinite(spanDays) || spanDays < 0) return 1
   return Math.max(spanDays, 1)
+}
+
+/** Parse list End Date display (YYYY-MM-DD or YYYY-MM) to UTC ms for sorting. */
+function parseEndDisplayToUtcMs(s: string | null | undefined): number | null {
+  if (s == null || typeof s !== 'string') return null
+  const t = s.trim()
+  if (!t) return null
+  if (t.length >= 10) {
+    const ms = Date.parse(`${t.slice(0, 10)}T12:00:00.000Z`)
+    return Number.isFinite(ms) ? ms : null
+  }
+  const m = t.match(/^(\d{4})-(\d{2})$/)
+  if (!m) return null
+  const y = Number(m[1])
+  const mo = Number(m[2])
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || mo < 1 || mo > 12) return null
+  const last = new Date(y, mo, 0).getDate()
+  return Date.UTC(y, mo - 1, last, 12, 0, 0)
+}
+
+function expirySortValueFromRaw(exp: string): number {
+  const d = String(exp).replace(/\D/g, '')
+  if (d.length >= 8) return parseInt(d.slice(0, 8), 10)
+  if (d.length >= 6) {
+    const y = parseInt(d.slice(0, 4), 10)
+    const m = parseInt(d.slice(4, 6), 10)
+    if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return 0
+    const lastDay = new Date(y, m, 0).getDate()
+    return y * 10000 + m * 100 + lastDay
+  }
+  return 0
+}
+
+/**
+ * Latest formatted OPT expiry among option legs with non-zero net qty (open).
+ * Returns null when there is no such leg or expiry cannot be parsed.
+ */
+export function openPositionLatestOptExpiryYmd(executions: Execution[]): string | null {
+  const groups = buildOptExecutionGroups(executions)
+  let bestRaw: string | null = null
+  let bestVal = -Infinity
+  for (const g of groups) {
+    if (Math.abs(g.net_qty) < NET_QTY_EPS) continue
+    const raw = String(g.expiry ?? '').trim()
+    const fromKey = parseOptionContractKey(g.contract_key).expiry
+    const exp = raw && raw !== '—' ? raw : fromKey !== '—' ? fromKey : ''
+    if (!exp || exp === '—') continue
+    const v = expirySortValueFromRaw(exp)
+    if (v > bestVal) {
+      bestVal = v
+      bestRaw = exp
+    }
+  }
+  if (bestRaw == null) return null
+  const formatted = fmtExpiry(bestRaw)
+  return formatted === '—' ? null : formatted
+}
+
+/**
+ * Instance list End Date column: for **open** positions, show latest OPT expiry among open legs;
+ * otherwise max `report_date` (same as before). Sort key uses the displayed date.
+ */
+export function instanceListEndDateColumn(
+  executions: Execution[],
+  positionStatus: InstancePositionStatus,
+): { display: string | null; sortUtcMs: number | null; cellTitle: string | undefined } {
+  const report = reportDateStartEnd(executions)
+  if (positionStatus === 'open') {
+    const exp = openPositionLatestOptExpiryYmd(executions)
+    if (exp != null) {
+      return {
+        display: exp,
+        sortUtcMs: parseEndDisplayToUtcMs(exp),
+        cellTitle: `Option expiry (latest among open legs). Max report date: ${report.end ?? '—'}.`,
+      }
+    }
+  }
+  const sortUtcMs = parseYmdToUtcMs(report.end)
+  return {
+    display: report.end,
+    sortUtcMs,
+    cellTitle: report.end != null ? 'Max report date in the performance window.' : undefined,
+  }
 }

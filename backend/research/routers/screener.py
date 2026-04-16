@@ -24,11 +24,11 @@ RISK_FREE_RATE = 0.045
 class ScreenerRequest(BaseModel):
     structure_type: str = "cash_secured_put"
     symbols: List[str]
-    dte_min: Optional[int] = 10
-    dte_max: Optional[int] = 60
-    max_prob_itm: Optional[float] = 0.30
-    min_annualized_return: Optional[float] = 0.10
-    max_spread_pct: Optional[float] = 0.30
+    dte_min: Optional[int] = None
+    dte_max: Optional[int] = None
+    max_prob_itm: Optional[float] = None
+    min_annualized_return: Optional[float] = None
+    max_spread_pct: Optional[float] = None
     include_earnings_span: bool = False
     min_premium: Optional[float] = None
     source: str = "massive"

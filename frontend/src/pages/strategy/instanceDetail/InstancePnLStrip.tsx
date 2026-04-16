@@ -2,6 +2,7 @@ import { useId, useMemo, useState } from 'react'
 import type { Execution, PerformanceResponse } from '../../../types'
 import { DraggableModal } from '../../../components/DraggableModal'
 import { fmtUsd } from '../../../utils/format'
+import type { InstanceLinkedStockPnlRow } from '../../portfolio/ledgerOptHelpers'
 import {
   annualReturnDetailFromNetAndExecutions,
   formatHoldDaysRounded0,
@@ -30,10 +31,16 @@ export function InstancePnLStrip({
   loading,
   performance,
   executionsForNotional,
+  optionStockSlippageAdjustment = 0,
+  linkedStockPnlRows = [],
 }: {
   loading: boolean
   performance: PerformanceResponse | null
   executionsForNotional: Execution[]
+  /** Prorated option–stock link slippage (Trade Ledger layer); added to performance Net PnL. */
+  optionStockSlippageAdjustment?: number
+  /** Per parent OPT execution: full slippage, allocation ratio, attributed slippage (matches add-on sum). */
+  linkedStockPnlRows?: InstanceLinkedStockPnlRow[]
 }) {
   const metricsExplainTitleId = useId()
   const [metricsExplainOpen, setMetricsExplainOpen] = useState(false)
@@ -42,6 +49,11 @@ export function InstancePnLStrip({
   const underlyingLines = useMemo(
     () => underlyingCostSellBreakdown(executionsForNotional),
     [executionsForNotional],
+  )
+
+  const linkedStockAttributedSum = useMemo(
+    () => linkedStockPnlRows.reduce((s, r) => s + r.slippageAttributed, 0),
+    [linkedStockPnlRows],
   )
 
   const holdSpanDays = holdTimeDaysFromReportDateSpan(executionsForNotional)
@@ -57,9 +69,17 @@ export function InstancePnLStrip({
   const underlyingCostUsd = underlyingCostSellOptUsd(executionsForNotional)
   const holdDaysRoundedDisplay = holdSpanDays != null && Number.isFinite(holdSpanDays) ? Math.round(holdSpanDays) : null
 
+  const adjustedNetPnl = useMemo(() => {
+    if (summary == null) return null
+    return Number(summary.net_pnl) + optionStockSlippageAdjustment
+  }, [summary, optionStockSlippageAdjustment])
+
   const annualDetail = useMemo(
-    () => (summary != null ? annualReturnDetailFromNetAndExecutions(summary.net_pnl, executionsForNotional) : null),
-    [summary, executionsForNotional],
+    () =>
+      summary != null && adjustedNetPnl != null
+        ? annualReturnDetailFromNetAndExecutions(adjustedNetPnl, executionsForNotional)
+        : null,
+    [summary, adjustedNetPnl, executionsForNotional],
   )
 
   const explainDisabled = loading || summary == null
@@ -92,9 +112,18 @@ export function InstancePnLStrip({
         <>
           <div className="instance-detail-pnl-strip" role="group" aria-label="PnL this instance">
             <div className="instance-detail-pnl-metric">
-              <span className="instance-detail-pnl-label">Net PnL</span>
-              <span className={`instance-detail-pnl-value ${signedPnlClass(Number(summary.net_pnl))}`}>
-                {fmtUsd(summary.net_pnl)}
+              <span
+                className="instance-detail-pnl-label"
+                title={
+                  optionStockSlippageAdjustment !== 0
+                    ? 'Performance summary net PnL plus prorated option–stock link slippage (same layer as Trade Ledger).'
+                    : undefined
+                }
+              >
+                Net PnL
+              </span>
+              <span className={`instance-detail-pnl-value ${signedPnlClass(adjustedNetPnl)}`}>
+                {fmtUsd(adjustedNetPnl)}
               </span>
             </div>
             <div className="instance-detail-pnl-metric">
@@ -160,10 +189,66 @@ export function InstancePnLStrip({
             }
           >
             <p className="muted" style={{ marginBottom: 'var(--space-3)' }}>
-              Net PnL, realized, commission, and trades come from the <strong>performance summary</strong> for this strategy
-              instance (server-side, over the time range requested by the app). Hold time, underlying cost, and annual return
-              use <strong>execution rows</strong> loaded for this instance on this page (final book).
+              <strong>Net PnL</strong> starts from the <strong>performance summary</strong> net for this instance (server-side,
+              requested time range). When option executions have <strong>linked stock legs</strong> (exercise/assignment), we add
+              prorated slippage vs Flex close — same layer as the Trade Ledger
+              {optionStockSlippageAdjustment !== 0 ? (
+                <>
+                  {' '}
+                  (current add-on <strong>{fmtUsd(optionStockSlippageAdjustment)}</strong>).
+                </>
+              ) : (
+                <> (add-on is zero when there are no links or slippage).</>
+              )}{' '}
+              <strong>Realized</strong>, <strong>commission</strong>, and <strong>trades</strong> stay as in the summary.
+              Hold time, underlying cost, and annual return use <strong>execution rows</strong> on this page (final book).
             </p>
+
+            {linkedStockPnlRows.length > 0 && (
+              <>
+                <h4 className="instance-detail-pnl-explain-sub">Linked stock slippage (this instance)</h4>
+                <p style={{ marginBottom: 'var(--space-2)' }}>
+                  From <code>POST /executions/option-stock-links/query</code> (same bulk load as Trade Ledger). Total stock
+                  slippage vs Flex close for each option execution is multiplied by{' '}
+                  <code>|instance qty| ÷ |parent execution qty|</code> when the row is split across instances. The{' '}
+                  <strong>Attributed</strong> column sums to the Net PnL add-on above.
+                </p>
+                <div className="instance-detail-pnl-underlying-breakdown-wrap" style={{ marginBottom: 'var(--space-3)' }}>
+                  <table className="table-operations instance-detail-pnl-underlying-table">
+                    <thead>
+                      <tr>
+                        <th>OPT exec #</th>
+                        <th className="tabular-nums">Links</th>
+                        <th className="tabular-nums">Full slippage</th>
+                        <th className="tabular-nums">Ratio</th>
+                        <th className="tabular-nums">Attributed</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {linkedStockPnlRows.map((row) => (
+                        <tr key={row.accountExecutionsId}>
+                          <td>#{row.accountExecutionsId}</td>
+                          <td className="tabular-nums">{row.linkCount}</td>
+                          <td className="tabular-nums">{fmtUsd(row.slippageFull)}</td>
+                          <td className="tabular-nums">{row.allocationRatio.toFixed(4)}</td>
+                          <td className="tabular-nums">{fmtUsd(row.slippageAttributed)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={4}>
+                          <strong>Total attributed (→ Net PnL add-on)</strong>
+                        </td>
+                        <td className="tabular-nums">
+                          <strong>{fmtUsd(linkedStockAttributedSum)}</strong>
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </>
+            )}
 
             <h4 className="instance-detail-pnl-explain-sub">Underlying cost (this instance)</h4>
             <p style={{ marginBottom: 'var(--space-2)' }}>
@@ -243,8 +328,17 @@ export function InstancePnLStrip({
               <dd>
                 <code>(net PnL × scale factor ÷ underlying cost) × 100</code>
               </dd>
-              <dt>Net PnL</dt>
-              <dd>{fmtUsd(Number(summary.net_pnl))}</dd>
+              <dt>Net PnL (adjusted)</dt>
+              <dd>
+                {fmtUsd(Number(summary.net_pnl))} (summary){' '}
+                {optionStockSlippageAdjustment !== 0 ? (
+                  <>
+                    + {fmtUsd(optionStockSlippageAdjustment)} (linked stock) = <strong>{fmtUsd(adjustedNetPnl)}</strong>
+                  </>
+                ) : (
+                  <span className="muted"> — no linked-stock add-on</span>
+                )}
+              </dd>
               <dt>Result</dt>
               <dd>
                 {annualDetail != null ? (

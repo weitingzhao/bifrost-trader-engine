@@ -68,22 +68,37 @@ export interface ScreenerResponse {
 
 export async function runScreener(filters: ScreenerFilters): Promise<ScreenerResponse> {
   const url = researchApiUrl('/research/screener')
+  // Strip null fields: backend treats omitted optional fields as "no filter" (default None).
+  // Sending null causes Pydantic validation errors in some versions.
+  const body = Object.fromEntries(
+    Object.entries(filters).filter(([, v]) => v !== null && v !== undefined),
+  )
   const r = await fetchWithTimeout(
     url,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(filters),
+      body: JSON.stringify(body),
     },
     60_000,
   )
   if (!r.ok) {
-    const j = await r.json().catch(() => ({}))
-    throw new Error(
-      (j as { detail?: string }).detail ??
-        (j as { error?: string }).error ??
-        r.statusText,
-    )
+    const j = await r.json().catch(() => ({})) as { detail?: unknown; error?: string }
+    const detail = j.detail
+    let msg: string
+    if (typeof detail === 'string') {
+      msg = detail
+    } else if (Array.isArray(detail)) {
+      // FastAPI 422 Pydantic validation errors: [{loc, msg, type}, ...]
+      msg = detail
+        .map((e: { loc?: unknown[]; msg?: string }) =>
+          e.loc ? `${e.loc.slice(1).join('.')}: ${e.msg}` : (e.msg ?? JSON.stringify(e))
+        )
+        .join('; ')
+    } else {
+      msg = j.error ?? r.statusText
+    }
+    throw new Error(msg)
   }
   return r.json() as Promise<ScreenerResponse>
 }

@@ -11015,6 +11015,8 @@ th {
   width: 100%;
   min-width: 0;
   overflow-x: auto;
+  /* overflow-x:auto implies overflow-y:auto in CSS; hide vertical bar — this strip only scrolls horizontally */
+  overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   margin-bottom: var(--space-3);
@@ -23476,8 +23478,19 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   white-space: nowrap;
 }
 
+.strategy-instances-table th.strategy-instances-th-long-header {
+  white-space: normal;
+  line-height: 1.25;
+  vertical-align: bottom;
+}
+
 .strategy-instances-table thead abbr {
   text-decoration: none;
+  cursor: help;
+  border-bottom: 1px dotted var(--color-text-muted, #888);
+}
+
+.strategy-instances-table th.strategy-instances-th-long-header .strategy-instances-sort-btn-label span[title] {
   cursor: help;
   border-bottom: 1px dotted var(--color-text-muted, #888);
 }
@@ -23864,6 +23877,13 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
 .instance-detail-contract-title {
   font-weight: 600;
   word-break: break-word;
+}
+
+.instance-detail-contract-title-with-stock {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
 }
 
 .instance-detail-net-line {
