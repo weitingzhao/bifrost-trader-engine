@@ -1,4 +1,5 @@
 import type { StatusResponse } from '../types'
+import { DraggableModal } from '../components/DraggableModal'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { useBarsCoverage } from './data/useBarsCoverage'
 import { DataCoveragePanel } from './data/panels'
@@ -70,10 +71,45 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
       />
 
       {/* Watchlist EOD Refresh dry-run preview modal */}
-      {cov.watchlistRefreshPreview && (
-        <div className="data-reset-modal-overlay" onClick={() => { if (!cov.watchlistRefreshRunning) cov.setWatchlistRefreshPreview(null) }} role="dialog" aria-modal="true" aria-labelledby="eod-dry-run-title">
-          <div className="data-reset-modal" style={{ maxWidth: 'min(1100px, 92vw)', width: '92vw', maxHeight: '85vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
-            <h3 id="eod-dry-run-title">Dry run: EOD Pull</h3>
+      <DraggableModal
+        open={cov.watchlistRefreshPreview != null}
+        onBackdropClick={() => {
+          if (!cov.watchlistRefreshRunning) cov.setWatchlistRefreshPreview(null)
+        }}
+        backdropLocked={cov.watchlistRefreshRunning}
+        title="Dry run: EOD Pull"
+        titleId="eod-dry-run-title"
+        maxWidth="min(1100px, 92vw)"
+        panelStyle={{ width: '92vw', maxHeight: '85vh' }}
+        footer={
+          <div className="data-reset-modal-actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={cov.watchlistRefreshRunning}
+              onClick={() => cov.setWatchlistRefreshPreview(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={
+                cov.watchlistRefreshRunning ||
+                cov.watchlistRefreshPreview?.ready_to_enqueue === false ||
+                (cov.watchlistRefreshPreview?.items || []).length === 0
+              }
+              onClick={() => {
+                void cov.confirmWatchlistEodRefresh()
+              }}
+            >
+              {cov.watchlistRefreshRunning ? 'Queuing…' : 'Confirm and Queue'}
+            </button>
+          </div>
+        }
+      >
+        {cov.watchlistRefreshPreview != null && (
+          <>
             <p>Review overwrite records, gap range, and IB request chunks before queueing worker jobs.</p>
             <div className="replay-placeholder" role="status" style={{ marginBottom: '0.75rem' }}>
               {(cov.watchlistRefreshPreview.message || 'Dry run ready') +
@@ -137,52 +173,106 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
                 ))}
               </div>
             )}
-            <div className="data-reset-modal-actions">
-              <button type="button" className="btn btn-secondary" disabled={cov.watchlistRefreshRunning} onClick={() => cov.setWatchlistRefreshPreview(null)}>Cancel</button>
-              <button type="button" className="btn btn-primary" disabled={cov.watchlistRefreshRunning || cov.watchlistRefreshPreview.ready_to_enqueue === false || (cov.watchlistRefreshPreview.items || []).length === 0} onClick={() => { void cov.confirmWatchlistEodRefresh() }}>
-                {cov.watchlistRefreshRunning ? 'Queuing…' : 'Confirm and Queue'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </DraggableModal>
 
       {/* Reset confirmation modal */}
-      {cov.resetConfirmSymbol && (
-        <div className="data-reset-modal-overlay" onClick={() => { cov.setResetConfirmSymbol(null); cov.setResetConfirmIsIndex(false) }} role="dialog" aria-modal="true" aria-labelledby="reset-modal-title">
-          <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
-            <h3 id="reset-modal-title">{cov.resetConfirmIsIndex ? 'Reset index data' : 'Reset data'}</h3>
-            {cov.resetConfirmIsIndex ? (
-              <p>Clear daily bars for this index only (cannot be undone).</p>
-            ) : (
-              <>
-                <p>Select periods to clear (cannot be undone):</p>
-                <div className="data-reset-periods">
-                  {BAR_PERIODS.map(({ value, label }) => (
-                    <label key={value} className="data-reset-period-check">
-                      <input type="checkbox" checked={cov.resetPeriods.includes(value)} onChange={e => {
-                        if (e.target.checked) cov.setResetPeriods(p => [...p, value])
-                        else cov.setResetPeriods(p => p.filter(x => x !== value))
-                      }} />
-                      <span>{label}</span>
-                    </label>
-                  ))}
-                </div>
-              </>
-            )}
-            <div className="data-reset-modal-actions">
-              <button type="button" className="btn btn-secondary" onClick={() => { cov.setResetConfirmSymbol(null); cov.setResetConfirmIsIndex(false) }}>No</button>
-              <button type="button" className="btn btn-reset" disabled={!cov.resetConfirmIsIndex && cov.resetPeriods.length === 0} onClick={() => { void cov.handleConfirmReset() }}>Yes</button>
-            </div>
+      <DraggableModal
+        open={cov.resetConfirmSymbol != null}
+        onBackdropClick={() => {
+          cov.setResetConfirmSymbol(null)
+          cov.setResetConfirmIsIndex(false)
+        }}
+        title={cov.resetConfirmIsIndex ? 'Reset index data' : 'Reset data'}
+        titleId="reset-modal-title"
+        footer={
+          <div className="data-reset-modal-actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                cov.setResetConfirmSymbol(null)
+                cov.setResetConfirmIsIndex(false)
+              }}
+            >
+              No
+            </button>
+            <button
+              type="button"
+              className="btn btn-reset"
+              disabled={!cov.resetConfirmIsIndex && cov.resetPeriods.length === 0}
+              onClick={() => {
+                void cov.handleConfirmReset()
+              }}
+            >
+              Yes
+            </button>
           </div>
-        </div>
-      )}
+        }
+      >
+        {cov.resetConfirmIsIndex ? (
+          <p>Clear daily bars for this index only (cannot be undone).</p>
+        ) : (
+          <>
+            <p>Select periods to clear (cannot be undone):</p>
+            <div className="data-reset-periods">
+              {BAR_PERIODS.map(({ value, label }) => (
+                <label key={value} className="data-reset-period-check">
+                  <input
+                    type="checkbox"
+                    checked={cov.resetPeriods.includes(value)}
+                    onChange={e => {
+                      if (e.target.checked) cov.setResetPeriods(p => [...p, value])
+                      else cov.setResetPeriods(p => p.filter(x => x !== value))
+                    }}
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+      </DraggableModal>
 
       {/* Pull range modal */}
-      {cov.pullModalSymbol && (
-        <div className="data-reset-modal-overlay" onClick={() => { cov.setPullModalSymbol(null); cov.setPullModalIsIndex(false) }} role="dialog" aria-modal="true" aria-labelledby="pull-range-modal-title">
-          <div className="data-reset-modal data-pull-range-modal" onClick={e => e.stopPropagation()}>
-            <h3 id="pull-range-modal-title">{cov.pullModalIsIndex ? 'Pull index (Massive/Polygon)' : 'Time range for backfill'}</h3>
+      <DraggableModal
+        open={cov.pullModalSymbol != null}
+        onBackdropClick={() => {
+          cov.setPullModalSymbol(null)
+          cov.setPullModalIsIndex(false)
+        }}
+        title={cov.pullModalIsIndex ? 'Pull index (Massive/Polygon)' : 'Time range for backfill'}
+        titleId="pull-range-modal-title"
+        panelClassName="data-pull-range-modal"
+        maxWidth="min(420px, calc(100vw - 24px))"
+        footer={
+          <div className="data-reset-modal-actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                cov.setPullModalSymbol(null)
+                cov.setPullModalIsIndex(false)
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={cov.pullRangeMode === null || (!cov.pullModalIsIndex && cov.pullSelectedPeriods.length === 0)}
+              onClick={() => {
+                void cov.handleConfirmPull()
+              }}
+            >
+              Confirm
+            </button>
+          </div>
+        }
+      >
+        {cov.pullModalSymbol != null && (
+          <>
             <p className="data-pull-range-desc">
               {cov.pullModalIsIndex
                 ? `Choose how many days to fetch for ${cov.pullModalSymbol}. Index data is daily only (Massive/Polygon).`
@@ -190,47 +280,98 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
             </p>
             <div className="data-pull-range-options">
               {(['max', 'min', 'custom'] as const).map(mode => {
-                const labels = { max: 'Maximum — use history_backfill config', min: 'Minimum — Daily 30d; 1min 1h; 5min 1d; 1h 1w', custom: 'Custom — set your own span' }
+                const labels = {
+                  max: 'Maximum — use history_backfill config',
+                  min: 'Minimum — Daily 30d; 1min 1h; 5min 1d; 1h 1w',
+                  custom: 'Custom — set your own span',
+                }
                 return (
                   <label key={mode} className="data-pull-range-option">
                     <input type="radio" name="pullRange" checked={cov.pullRangeMode === mode} onChange={() => cov.setPullRangeMode(mode)} />
-                    <span><strong>{mode.charAt(0).toUpperCase() + mode.slice(1)}</strong> — {labels[mode].split(' — ')[1]}</span>
+                    <span>
+                      <strong>{mode.charAt(0).toUpperCase() + mode.slice(1)}</strong> — {labels[mode].split(' — ')[1]}
+                    </span>
                   </label>
                 )
               })}
             </div>
             {cov.pullRangeMode === 'custom' && (
               <div className="data-pull-range-custom">
-                <label className="data-pull-range-custom-row"><span>Daily (days):</span><input type="number" min={1} max={3650} value={cov.pullCustomDailyDays} onChange={e => cov.setPullCustomDailyDays(Math.max(1, Number(e.target.value) || 1))} /></label>
-                {!cov.pullModalIsIndex && (<>
-                  <label className="data-pull-range-custom-row"><span>1 min (hours):</span><input type="number" min={1} max={8760} value={cov.pullCustom1minHours} onChange={e => cov.setPullCustom1minHours(Math.max(1, Number(e.target.value) || 1))} /></label>
-                  <label className="data-pull-range-custom-row"><span>5 mins (days):</span><input type="number" min={1} max={3650} value={cov.pullCustom5minDays} onChange={e => cov.setPullCustom5minDays(Math.max(1, Number(e.target.value) || 1))} /></label>
-                  <label className="data-pull-range-custom-row"><span>1 hour (days):</span><input type="number" min={1} max={3650} value={cov.pullCustom1hourDays} onChange={e => cov.setPullCustom1hourDays(Math.max(1, Number(e.target.value) || 1))} /></label>
-                </>)}
+                <label className="data-pull-range-custom-row">
+                  <span>Daily (days):</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={3650}
+                    value={cov.pullCustomDailyDays}
+                    onChange={e => cov.setPullCustomDailyDays(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </label>
+                {!cov.pullModalIsIndex && (
+                  <>
+                    <label className="data-pull-range-custom-row">
+                      <span>1 min (hours):</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={8760}
+                        value={cov.pullCustom1minHours}
+                        onChange={e => cov.setPullCustom1minHours(Math.max(1, Number(e.target.value) || 1))}
+                      />
+                    </label>
+                    <label className="data-pull-range-custom-row">
+                      <span>5 mins (days):</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={3650}
+                        value={cov.pullCustom5minDays}
+                        onChange={e => cov.setPullCustom5minDays(Math.max(1, Number(e.target.value) || 1))}
+                      />
+                    </label>
+                    <label className="data-pull-range-custom-row">
+                      <span>1 hour (days):</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={3650}
+                        value={cov.pullCustom1hourDays}
+                        onChange={e => cov.setPullCustom1hourDays(Math.max(1, Number(e.target.value) || 1))}
+                      />
+                    </label>
+                  </>
+                )}
               </div>
             )}
             {!cov.pullModalIsIndex && (
               <div className="data-pull-range-periods">
                 <span className="data-pull-range-periods-label">Periods to pull:</span>
-                <label className="data-pull-range-period-check"><input type="checkbox" checked={cov.pullSelectedPeriods.length === 4} onChange={e => cov.setPullSelectedPeriods(e.target.checked ? [...ALL_BAR_PERIOD_VALUES] : [])} /><span>All</span></label>
+                <label className="data-pull-range-period-check">
+                  <input
+                    type="checkbox"
+                    checked={cov.pullSelectedPeriods.length === 4}
+                    onChange={e => cov.setPullSelectedPeriods(e.target.checked ? [...ALL_BAR_PERIOD_VALUES] : [])}
+                  />
+                  <span>All</span>
+                </label>
                 {ALL_BAR_PERIOD_VALUES.map(period => (
                   <label key={period} className="data-pull-range-period-check">
-                    <input type="checkbox" checked={cov.pullSelectedPeriods.includes(period)} onChange={e => {
-                      if (e.target.checked) cov.setPullSelectedPeriods(p => [...p, period])
-                      else cov.setPullSelectedPeriods(p => p.filter(x => x !== period))
-                    }} />
+                    <input
+                      type="checkbox"
+                      checked={cov.pullSelectedPeriods.includes(period)}
+                      onChange={e => {
+                        if (e.target.checked) cov.setPullSelectedPeriods(p => [...p, period])
+                        else cov.setPullSelectedPeriods(p => p.filter(x => x !== period))
+                      }}
+                    />
                     <span>{BAR_PERIODS.find(p => p.value === period)?.label ?? period}</span>
                   </label>
                 ))}
               </div>
             )}
-            <div className="data-reset-modal-actions">
-              <button type="button" className="btn btn-secondary" onClick={() => { cov.setPullModalSymbol(null); cov.setPullModalIsIndex(false) }}>Cancel</button>
-              <button type="button" className="btn btn-primary" disabled={cov.pullRangeMode === null || (!cov.pullModalIsIndex && cov.pullSelectedPeriods.length === 0)} onClick={() => { void cov.handleConfirmPull() }}>Confirm</button>
-            </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </DraggableModal>
     </div>
   )
 }

@@ -1,5 +1,26 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { IbPositionRow, StatusResponse } from '../types'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import type { Execution, PerformanceSummary, StrategyInstance, StatusResponse } from '../types'
+import type { StrategyOpportunity } from '../api'
+import {
+  fetchStrategyInstances,
+  fetchOpportunities,
+  createStrategyInstance,
+  deleteStrategyInstance,
+  fetchPerformance,
+  fetchExecutions,
+} from '../api'
+import { StrategyOpportunityCombobox } from '../components/StrategyOpportunityCombobox'
+import { StrategyInstanceDetailPage } from './StrategyInstanceDetailPage'
+import { fmtUsd, parseOptionContractKey } from '../utils/format'
+import { sliceExecutionForInstanceOptView } from './portfolio/ledgerOptHelpers'
+import {
+  annualReturnDetailFromNetAndExecutions,
+  computeInstancePositionStatus,
+  formatHoldDaysRounded0,
+  holdTimeDaysFromReportDateSpan,
+  reportDateStartEnd,
+  underlyingCostSellOptUsd,
+} from './strategy/instanceDetail/instanceDetailPnlMetrics'
 
 function fmtExpiryMonthBubble(ym: string): string {
   const [year, month] = ym.split('-')
@@ -8,20 +29,128 @@ function fmtExpiryMonthBubble(ym: string): string {
   if (!year || m < 0 || m > 11 || Number.isNaN(m)) return ym
   return `${MONTHS[m]} '${year.slice(2)}`
 }
-import type { StrategyInstance } from '../types'
-import type { StrategyOpportunity, StrategyStructure } from '../api'
-import {
-  fetchStrategyInstances,
-  fetchOpportunities,
-  fetchStructures,
-  createStrategyInstance,
-  deleteStrategyInstance,
-} from '../api'
-import { StrategyOpportunityCombobox } from '../components/StrategyOpportunityCombobox'
-import { StrategyInstanceDetailPage } from './StrategyInstanceDetailPage'
-import { fmtTsShort, fmtDate, parseOptionContractKey } from '../utils/format'
-import { computeRiskProfile, formatRiskLabel } from '../utils/riskProfile'
-import type { RiskProfile, RiskPosition } from '../utils/riskProfile'
+
+function signedPnlClass(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return 'is-neutral'
+  if (n > 1e-9) return 'is-positive'
+  if (n < -1e-9) return 'is-negative'
+  return 'is-neutral'
+}
+
+const INSTANCE_LIST_METRICS_CHUNK = 5
+
+type InstanceListMetrics =
+  | { status: 'ready'; summary: PerformanceSummary | null | undefined; sliced: Execution[] }
+  | { status: 'error' }
+
+/** Sortable metric columns (within each symbol group only). */
+type InstancesSortColumn = 'start' | 'end' | 'net' | 'real' | 'comm' | 'hold' | 'und' | 'ann' | 'exec'
+type InstancesSortDir = 'asc' | 'desc'
+
+function getInstanceSortNumericValue(
+  row: StrategyInstance,
+  m: InstanceListMetrics | undefined,
+  col: InstancesSortColumn,
+): number {
+  if (m == null || m.status !== 'ready') return Number.NaN
+  const { summary, sliced } = m
+  switch (col) {
+    case 'start': {
+      const s = reportDateStartEnd(sliced).start
+      if (s == null) return Number.NaN
+      const t = Date.parse(`${s}T12:00:00.000Z`)
+      return Number.isFinite(t) ? t : Number.NaN
+    }
+    case 'end': {
+      const s = reportDateStartEnd(sliced).end
+      if (s == null) return Number.NaN
+      const t = Date.parse(`${s}T12:00:00.000Z`)
+      return Number.isFinite(t) ? t : Number.NaN
+    }
+    case 'net':
+      return summary != null && summary.net_pnl != null ? Number(summary.net_pnl) : Number.NaN
+    case 'real':
+      return summary != null && summary.total_realized_pnl != null ? Number(summary.total_realized_pnl) : Number.NaN
+    case 'comm':
+      return summary != null && summary.total_commission != null ? Number(summary.total_commission) : Number.NaN
+    case 'hold': {
+      const d = holdTimeDaysFromReportDateSpan(sliced)
+      return d != null && Number.isFinite(d) ? d : Number.NaN
+    }
+    case 'und': {
+      const u = underlyingCostSellOptUsd(sliced)
+      return Number.isFinite(u) ? u : Number.NaN
+    }
+    case 'ann': {
+      if (summary == null) return Number.NaN
+      const a = annualReturnDetailFromNetAndExecutions(summary.net_pnl, sliced)
+      return a != null && Number.isFinite(a.annualReturnPct) ? a.annualReturnPct : Number.NaN
+    }
+    case 'exec': {
+      const n = row.executions_count
+      return n != null && Number.isFinite(Number(n)) ? Number(n) : Number.NaN
+    }
+    default:
+      return Number.NaN
+  }
+}
+
+function compareInstancesInGroup(
+  a: StrategyInstance,
+  b: StrategyInstance,
+  metrics: Map<number, InstanceListMetrics>,
+  col: InstancesSortColumn,
+  dir: InstancesSortDir,
+): number {
+  const va = getInstanceSortNumericValue(a, metrics.get(a.strategy_instance_id), col)
+  const vb = getInstanceSortNumericValue(b, metrics.get(b.strategy_instance_id), col)
+  const mul = dir === 'asc' ? 1 : -1
+  const aMissing = Number.isNaN(va)
+  const bMissing = Number.isNaN(vb)
+  if (aMissing && bMissing) return a.strategy_instance_id - b.strategy_instance_id
+  if (aMissing) return 1
+  if (bMissing) return -1
+  if (va === vb) return a.strategy_instance_id - b.strategy_instance_id
+  return va < vb ? -mul : mul
+}
+
+function SortableInstancesTh({
+  column,
+  className,
+  children,
+  sort,
+  onSort,
+}: {
+  column: InstancesSortColumn
+  className?: string
+  children: ReactNode
+  sort: { column: InstancesSortColumn; dir: InstancesSortDir } | null
+  onSort: (c: InstancesSortColumn) => void
+}) {
+  const active = sort?.column === column
+  const dir = sort?.dir
+  return (
+    <th
+      className={[className, active ? 'strategy-instances-th-sort-active' : ''].filter(Boolean).join(' ')}
+      aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
+      <button
+        type="button"
+        className="strategy-instances-sort-btn"
+        onClick={() => onSort(column)}
+        aria-pressed={active}
+        title={
+          active
+            ? `Sorted ${dir === 'asc' ? 'ascending' : 'descending'} within each symbol group. Click to reverse.`
+            : 'Sort within each symbol group by this column'
+        }
+      >
+        <span className="strategy-instances-sort-btn-label">{children}</span>
+        {active ? <span className="strategy-instances-sort-caret">{dir === 'asc' ? '↑' : '↓'}</span> : null}
+      </button>
+    </th>
+  )
+}
 
 export interface StrategyInstancesPageProps {
   status: StatusResponse | null
@@ -64,6 +193,8 @@ export function StrategyInstancesPage({
   const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; instanceId: number | null; label: string; deleting: boolean; error: string | null }>({
     open: false, instanceId: null, label: '', deleting: false, error: null,
   })
+  /** Per-instance performance summary + sliced executions (final book), for list PnL columns. */
+  const [instanceMetricsById, setInstanceMetricsById] = useState<Map<number, InstanceListMetrics>>(new Map())
   /** Symbol group key → collapsed (rows hidden). Default expanded when key absent. */
   const [collapsedSymbolGroups, setCollapsedSymbolGroups] = useState<Record<string, boolean>>({})
   /** Accordion: only one symbol group expanded at a time. Multi: several may stay open (same as Portfolio Open → Detail view). */
@@ -86,8 +217,6 @@ export function StrategyInstancesPage({
     return list
   })()
 
-  const [structures, setStructures] = useState<StrategyStructure[]>([])
-
   const loadOpportunities = useCallback(() => {
     fetchOpportunities(false)
       .then((r) => setOpportunities(r.items ?? []))
@@ -96,7 +225,6 @@ export function StrategyInstancesPage({
 
   useEffect(() => {
     loadOpportunities()
-    fetchStructures(false).then(r => setStructures(r.items ?? [])).catch(() => {})
   }, [loadOpportunities])
 
   const loadInstances = useCallback(() => {
@@ -118,6 +246,56 @@ export function StrategyInstancesPage({
     loadInstances()
   }, [loadInstances])
 
+  useEffect(() => {
+    if (items.length === 0) {
+      setInstanceMetricsById(new Map())
+      return
+    }
+    let cancelled = false
+    const ids = items.map((i) => i.strategy_instance_id)
+    const oneYearAgo = Math.floor(Date.now() / 1000) - 365 * 86400
+    const nowTs = Math.floor(Date.now() / 1000)
+    setInstanceMetricsById(new Map())
+    ;(async () => {
+      for (let i = 0; i < ids.length; i += INSTANCE_LIST_METRICS_CHUNK) {
+        if (cancelled) return
+        const chunk = ids.slice(i, i + INSTANCE_LIST_METRICS_CHUNK)
+        const chunkResults = await Promise.all(
+          chunk.map(async (id): Promise<[number, InstanceListMetrics]> => {
+            try {
+              const [perf, execRes] = await Promise.all([
+                fetchPerformance({
+                  since_ts: oneYearAgo,
+                  until_ts: nowTs,
+                  granularity: 'day',
+                  strategy_instance_id: id,
+                  summary_only: true,
+                }),
+                fetchExecutions(undefined, undefined, 500, false, undefined, id, 'performance_book'),
+              ])
+              const raw = execRes.executions ?? []
+              const sliced = raw
+                .map((ex) => sliceExecutionForInstanceOptView(ex, id))
+                .filter((row): row is Execution => row != null)
+              return [id, { status: 'ready', summary: perf.summary, sliced } as const]
+            } catch {
+              return [id, { status: 'error' } as const]
+            }
+          }),
+        )
+        if (cancelled) return
+        setInstanceMetricsById((prev) => {
+          const next = new Map(prev)
+          for (const [id, row] of chunkResults) next.set(id, row)
+          return next
+        })
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [items])
+
   const oppIdNum = opportunityIdFilter === '' ? null : Number(opportunityIdFilter)
   useEffect(() => {
     if (oppIdNum == null || !Number.isFinite(oppIdNum)) {
@@ -136,12 +314,6 @@ export function StrategyInstancesPage({
     }
     return m
   }, [opportunities])
-
-  const structuresById = useMemo(() => {
-    const m = new Map<number, StrategyStructure>()
-    for (const s of structures) m.set(s.strategy_structure_id, s)
-    return m
-  }, [structures])
 
   const getScopeSymbol = useCallback((row: StrategyInstance): string => {
     const opp = opportunitiesById.get(row.strategy_opportunity_id)
@@ -227,88 +399,6 @@ export function StrategyInstancesPage({
     return list
   }, [items, instStructureFilter, instSymbolFilter, instRightFilter, instExpiryFilter, getScopeSymbol, instancePositionMeta])
 
-  const instanceRiskMap = useMemo(() => {
-    const map = new Map<number, RiskProfile>()
-    type OptRow = IbPositionRow & { account_id: string }
-    const allPositions: OptRow[] = []
-    for (const acc of status?.portfolio?.accounts ?? []) {
-      const aid = (acc.account_id ?? '').trim()
-      for (const p of acc.positions ?? []) {
-        if ((p.secType ?? '').toUpperCase() !== 'OPT' || !(p.strategy_links ?? []).length) continue
-        allPositions.push({ ...p, account_id: aid })
-      }
-    }
-    const byInstance = new Map<number, OptRow[]>()
-    for (const pos of allPositions) {
-      for (const link of pos.strategy_links ?? []) {
-        const instId = link.strategy_instance_id
-        if (instId == null || !Number.isFinite(instId)) continue
-        const arr = byInstance.get(instId)
-        if (arr) arr.push(pos)
-        else byInstance.set(instId, [pos])
-      }
-    }
-    const pickWorse = (a: RiskProfile, b: RiskProfile) => {
-      if (a.naked_short_call_contracts !== b.naked_short_call_contracts) {
-        return a.naked_short_call_contracts > b.naked_short_call_contracts ? a : b
-      }
-      if (a.max_loss == null && b.max_loss != null) return a
-      if (a.max_loss != null && b.max_loss == null) return b
-      if (a.max_loss != null && b.max_loss != null && a.max_loss !== b.max_loss) {
-        return a.max_loss < b.max_loss ? a : b
-      }
-      return a
-    }
-    for (const [instId, opts] of byInstance) {
-      const inst = items.find(i => i.strategy_instance_id === instId)
-      if (!inst) continue
-      const opp = opportunitiesById.get(inst.strategy_opportunity_id)
-      const str = opp ? structuresById.get(opp.strategy_structure_id) : undefined
-      const hasUnderlying = str?.legs?.some(l => (l.role ?? '').toLowerCase() === 'underlying')
-      const byAcct = new Map<string, OptRow[]>()
-      for (const p of opts) {
-        const aid = p.account_id
-        if (!byAcct.has(aid)) byAcct.set(aid, [])
-        byAcct.get(aid)!.push(p)
-      }
-      let merged: RiskProfile | null = null
-      for (const [acct, optsA] of byAcct) {
-        const riskPos: RiskPosition[] = []
-        for (const p of optsA) {
-          const parsed = parseOptionContractKey(p.contract_key)
-          const r = parsed.right === 'C' || parsed.right === 'P' ? parsed.right : null
-          const strike = Number(p.strike) || 0
-          const avgRaw = p.avgCost != null ? Number(p.avgCost) : null
-          const avgCost = avgRaw != null && avgRaw >= 10 ? avgRaw / 100 : avgRaw
-          const qty = Number(p.position) || 0
-          if (r && avgCost != null && strike > 0 && qty !== 0) {
-            riskPos.push({ strike, right: r, qty, avg_cost: avgCost })
-          }
-        }
-        if (riskPos.length === 0) continue
-        let covShares = 0
-        let covAvgCost: number | null = null
-        if (hasUnderlying) {
-          const sym = (optsA[0]?.symbol ?? '').toUpperCase()
-          if (sym) {
-            const accRow = (status?.portfolio?.accounts ?? []).find(a => (a.account_id ?? '').trim() === acct)
-            const held = accRow?.positions?.find(
-              s => (s.secType ?? '').toUpperCase() !== 'OPT' && (s.symbol ?? '').toUpperCase() === sym,
-            )
-            if (held) {
-              covShares = Math.abs(Number(held.position) || 0)
-              covAvgCost = held.avgCost != null ? Number(held.avgCost) : null
-            }
-          }
-        }
-        const rp = computeRiskProfile(riskPos, covShares, covAvgCost)
-        merged = merged == null ? rp : pickWorse(merged, rp)
-      }
-      if (merged != null) map.set(instId, merged)
-    }
-    return map
-  }, [status?.portfolio?.accounts, items, opportunitiesById, structuresById])
-
   const groupedItems = useMemo(() => {
     const groups: Array<{ key: string; label: string; rows: StrategyInstance[] }> = []
     const groupIndexByKey = new Map<string, number>()
@@ -324,6 +414,24 @@ export function StrategyInstancesPage({
     }
     return groups
   }, [filteredItems, getScopeSymbol])
+
+  const [instancesSort, setInstancesSort] = useState<{ column: InstancesSortColumn; dir: InstancesSortDir } | null>(null)
+
+  const toggleInstancesSort = useCallback((column: InstancesSortColumn) => {
+    setInstancesSort((prev) => {
+      if (prev?.column !== column) return { column, dir: 'asc' }
+      return { column, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+    })
+  }, [])
+
+  const sortedGroupedItems = useMemo(() => {
+    if (instancesSort == null) return groupedItems
+    const { column, dir } = instancesSort
+    return groupedItems.map((g) => ({
+      ...g,
+      rows: [...g.rows].sort((a, b) => compareInstancesInGroup(a, b, instanceMetricsById, column, dir)),
+    }))
+  }, [groupedItems, instancesSort, instanceMetricsById])
 
   const toggleSymbolGroup = useCallback((key: string) => {
     setCollapsedSymbolGroups((prev) => {
@@ -365,29 +473,112 @@ export function StrategyInstancesPage({
     setConfirmDelete({ open: true, instanceId: row.strategy_instance_id, label: displayLabel, deleting: false, error: null })
   }, [])
 
+  const renderMetricsTds = useCallback((instanceId: number) => {
+    const m = instanceMetricsById.get(instanceId)
+    if (m == null) {
+      return Array.from({ length: 9 }, (_, j) => (
+        <td key={`m-${instanceId}-ph-${j}`} className="muted tabular-nums strategy-instance-metric-placeholder">
+          …
+        </td>
+      ))
+    }
+    if (m.status === 'error') {
+      return Array.from({ length: 9 }, (_, j) => (
+        <td key={`m-${instanceId}-err-${j}`} className="muted tabular-nums">
+          —
+        </td>
+      ))
+    }
+    const { summary, sliced } = m
+    const positionStatus = computeInstancePositionStatus(sliced)
+    const { start, end } = reportDateStartEnd(sliced)
+    const holdSpanDays = holdTimeDaysFromReportDateSpan(sliced)
+    const holdLabel = holdSpanDays != null ? formatHoldDaysRounded0(holdSpanDays) : '—'
+    const underlying = underlyingCostSellOptUsd(sliced)
+    const annual = summary != null ? annualReturnDetailFromNetAndExecutions(summary.net_pnl, sliced) : null
+
+    const statusChip = (
+      <span
+        className={`instance-detail-status-chip instance-detail-overview-status-chip ${
+          positionStatus === 'closed' ? 'is-flat' : positionStatus === 'open' ? 'is-open' : 'is-unknown'
+        }`}
+        title={
+          positionStatus === 'closed'
+            ? 'All contracts flat (buy and sell quantities net to zero per contract).'
+            : positionStatus === 'open'
+              ? 'At least one contract has non-zero net quantity.'
+              : 'No fills attributed to this instance in the final book.'
+        }
+      >
+        {positionStatus === 'no_fills' ? 'No fills' : positionStatus === 'closed' ? 'Closed' : 'Open'}
+      </span>
+    )
+
+    return [
+      <td key="st">{statusChip}</td>,
+      <td key="sd" className="tabular-nums strategy-instances-col-start">
+        {start ?? '—'}
+      </td>,
+      <td key="ed" className="tabular-nums strategy-instances-col-end">
+        {end ?? '—'}
+      </td>,
+      <td
+        key="np"
+        className={`tabular-nums instance-detail-pnl-value ${signedPnlClass(summary?.net_pnl != null ? Number(summary.net_pnl) : null)}`}
+      >
+        {summary ? fmtUsd(summary.net_pnl) : '—'}
+      </td>,
+      <td
+        key="tr"
+        className={`tabular-nums instance-detail-pnl-value ${signedPnlClass(
+          summary?.total_realized_pnl != null ? Number(summary.total_realized_pnl) : null,
+        )}`}
+      >
+        {summary ? fmtUsd(summary.total_realized_pnl) : '—'}
+      </td>,
+      <td key="cm" className="tabular-nums instance-detail-pnl-value is-commission">
+        {summary ? fmtUsd(summary.total_commission) : '—'}
+      </td>,
+      <td key="ht" className="tabular-nums">
+        {holdLabel}
+      </td>,
+      <td key="uc" className="tabular-nums">
+        {fmtUsd(underlying)}
+      </td>,
+      <td
+        key="ar"
+        className={`tabular-nums instance-detail-pnl-value ${annual != null ? signedPnlClass(annual.annualReturnPct) : 'is-neutral'}`}
+      >
+        {annual != null && Number.isFinite(annual.annualReturnPct)
+          ? `${annual.annualReturnPct >= 0 ? '+' : ''}${annual.annualReturnPct.toFixed(1)}%`
+          : '—'}
+      </td>,
+    ]
+  }, [instanceMetricsById])
+
   const instanceListTableBody = useMemo(() => {
     if (items.length === 0) {
       return (
         <tr>
-          <td colSpan={11}>No strategy instances found.</td>
+          <td colSpan={14}>No strategy instances found.</td>
         </tr>
       )
     }
     if (filteredItems.length === 0) {
       return (
         <tr>
-          <td colSpan={11}>No instances match the current filters.</td>
+          <td colSpan={14}>No instances match the current filters.</td>
         </tr>
       )
     }
     return (
       <>
-        {groupedItems.flatMap((group) => {
+        {sortedGroupedItems.flatMap((group) => {
           const collapsed = Boolean(collapsedSymbolGroups[group.key])
           const headerRow = (
             <tr key={`group-${group.key}`} className="strategy-instance-symbol-group-row">
               <td
-                colSpan={11}
+                colSpan={14}
                 style={{
                   fontWeight: 600,
                   background: 'var(--color-surface-elevated, rgba(255,255,255,0.03))',
@@ -430,65 +621,45 @@ export function StrategyInstancesPage({
           )
           if (collapsed) return [headerRow]
           const dataRows = group.rows.map((row) => {
-            const rp = instanceRiskMap.get(row.strategy_instance_id)
-            const riskCells = !rp ? (
-              <><td className="replay-muted">—</td><td className="replay-muted">—</td><td className="replay-muted">—</td></>
-            ) : (() => {
-              const rl = formatRiskLabel(rp)
-              return <>
-                <td><span className="risk-value-gain">{rl.gainLabel}</span></td>
-                <td><span className={rp.max_loss == null ? 'risk-value-loss risk-value-unlimited' : 'risk-value-loss'}>{rl.lossLabel}</span></td>
-                <td><span className={`coverage-status-badge ${rp.risk_type === 'defined' ? 'risk-badge-defined' : 'risk-badge-unlimited'}`}>{rl.riskBadge}</span></td>
-              </>
-            })()
             return (
               <tr key={row.strategy_instance_id}>
                 <td>{row.strategy_instance_id}</td>
-                <td>{row.strategy_opportunity_name ?? row.strategy_opportunity_id ?? '—'}</td>
+                <td className="strategy-instances-col-opp strategy-instances-cell-opp">
+                  {row.strategy_opportunity_name ?? row.strategy_opportunity_id ?? '—'}
+                </td>
                 <td>{row.account_id}</td>
-                <td>
-                  {row.opened_at_epoch != null
-                    ? fmtDate(row.opened_at_epoch)
-                    : row.opened_at && row.opened_at.length >= 10
-                      ? row.opened_at.slice(0, 10)
-                      : row.opened_at ?? '—'}
-                </td>
-                <td>
-                  {row.created_at_epoch != null
-                    ? fmtTsShort(row.created_at_epoch)
-                    : row.created_at ?? '—'}
-                </td>
-                <td>{row.executions_count != null ? row.executions_count : '—'}</td>
-                {riskCells}
-                <td>{row.label ?? '—'}</td>
-                <td style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-                  <a
-                    href={`#/strategies/instances/${row.strategy_instance_id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn btn-icon-small"
-                    title="View instance"
-                    aria-label="View instance"
-                  >
-                    <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                      <circle cx="12" cy="12" r="3" />
-                    </svg>
-                  </a>
-                  <button
-                    type="button"
-                    className="btn btn-icon-small btn-icon-danger"
-                    title="Delete instance"
-                    aria-label="Delete instance"
-                    onClick={() => openDeleteConfirm(row)}
-                  >
-                    <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6l-1 14H6L5 6" />
-                      <path d="M10 11v6M14 11v6" />
-                      <path d="M9 6V4h6v2" />
-                    </svg>
-                  </button>
+                {renderMetricsTds(row.strategy_instance_id)}
+                <td className="tabular-nums">{row.executions_count != null ? row.executions_count : '—'}</td>
+                <td className="strategy-instance-actions-cell">
+                  <div className="strategy-instance-actions-inner">
+                    <a
+                      href={`#/strategies/instances/${row.strategy_instance_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn btn-icon-small"
+                      title="View instance"
+                      aria-label="View instance"
+                    >
+                      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    </a>
+                    <button
+                      type="button"
+                      className="btn btn-icon-small btn-icon-danger"
+                      title="Delete instance"
+                      aria-label="Delete instance"
+                      onClick={() => openDeleteConfirm(row)}
+                    >
+                      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6l-1 14H6L5 6" />
+                        <path d="M10 11v6M14 11v6" />
+                        <path d="M9 6V4h6v2" />
+                      </svg>
+                    </button>
+                  </div>
                 </td>
               </tr>
             )
@@ -497,7 +668,15 @@ export function StrategyInstancesPage({
         })}
       </>
     )
-  }, [items, filteredItems, groupedItems, collapsedSymbolGroups, instanceRiskMap, toggleSymbolGroup, openDeleteConfirm])
+  }, [
+    items,
+    filteredItems,
+    sortedGroupedItems,
+    collapsedSymbolGroups,
+    renderMetricsTds,
+    toggleSymbolGroup,
+    openDeleteConfirm,
+  ])
 
   if (effectiveDetailId != null) {
     return (
@@ -838,20 +1017,88 @@ export function StrategyInstancesPage({
               </p>
             </div>
           )}
-          <table className="data-table">
+          <table className="data-table strategy-instances-table">
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Opportunity</th>
-                <th>Account</th>
-                <th>Opened at</th>
-                <th>Created at</th>
-                <th>Executions count</th>
-                <th>Max Gain</th>
-                <th>Max Loss</th>
-                <th>Risk</th>
-                <th>Label</th>
-                <th>Actions</th>
+                <th className="strategy-instances-col-opp">Opportunity</th>
+                <th>
+                  <abbr title="Account">Acct</abbr>
+                </th>
+                <th>Status</th>
+                <SortableInstancesTh
+                  column="start"
+                  className="strategy-instances-col-start"
+                  sort={instancesSort}
+                  onSort={toggleInstancesSort}
+                >
+                  <abbr title="Start date (min Report date)">Start</abbr>
+                </SortableInstancesTh>
+                <SortableInstancesTh
+                  column="end"
+                  className="strategy-instances-col-end"
+                  sort={instancesSort}
+                  onSort={toggleInstancesSort}
+                >
+                  <abbr title="End date (max Report date)">End</abbr>
+                </SortableInstancesTh>
+                <SortableInstancesTh
+                  column="net"
+                  className="strategy-instances-th-sort-num"
+                  sort={instancesSort}
+                  onSort={toggleInstancesSort}
+                >
+                  <abbr title="Net PnL">Net</abbr>
+                </SortableInstancesTh>
+                <SortableInstancesTh
+                  column="real"
+                  className="strategy-instances-th-sort-num"
+                  sort={instancesSort}
+                  onSort={toggleInstancesSort}
+                >
+                  <abbr title="Realized PnL">Real.</abbr>
+                </SortableInstancesTh>
+                <SortableInstancesTh
+                  column="comm"
+                  className="strategy-instances-th-sort-num"
+                  sort={instancesSort}
+                  onSort={toggleInstancesSort}
+                >
+                  <abbr title="Commission">Comm.</abbr>
+                </SortableInstancesTh>
+                <SortableInstancesTh
+                  column="hold"
+                  className="strategy-instances-th-sort-num"
+                  sort={instancesSort}
+                  onSort={toggleInstancesSort}
+                >
+                  <abbr title="Hold time">Hold</abbr>
+                </SortableInstancesTh>
+                <SortableInstancesTh
+                  column="und"
+                  className="strategy-instances-th-sort-num"
+                  sort={instancesSort}
+                  onSort={toggleInstancesSort}
+                >
+                  <abbr title="Underlying cost">Und.</abbr>
+                </SortableInstancesTh>
+                <SortableInstancesTh
+                  column="ann"
+                  className="strategy-instances-th-sort-num"
+                  sort={instancesSort}
+                  onSort={toggleInstancesSort}
+                >
+                  <abbr title="Annual return">Ann.</abbr>
+                </SortableInstancesTh>
+                <SortableInstancesTh
+                  column="exec"
+                  className="strategy-instances-th-sort-num"
+                  sort={instancesSort}
+                  onSort={toggleInstancesSort}
+                >
+                  <abbr title="Executions count">Exec</abbr>
+                </SortableInstancesTh>
+                <th className="strategy-instances-col-actions">Actions</th>
               </tr>
             </thead>
             <tbody>

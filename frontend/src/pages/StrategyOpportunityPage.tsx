@@ -14,6 +14,7 @@ import {
   type EntryConditionItem,
   type GateSafetySet,
 } from '../api'
+import { DraggableModal } from '../components/DraggableModal'
 import { InfoTooltip } from '../components/InfoTooltip'
 import {
   SCOPE_TYPES,
@@ -338,25 +339,22 @@ export function StrategyOpportunityPage({
 
   return (
     <div className="card process-section">
-      {availabilityError != null && (
-        <div
-          className="data-reset-modal-overlay"
-          onClick={() => setAvailabilityError(null)}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="opportunity-availability-error-modal-title"
-        >
-          <div className="data-reset-modal" onClick={(e) => e.stopPropagation()}>
-            <h3 id="opportunity-availability-error-modal-title">Cannot change availability</h3>
-            <p style={{ whiteSpace: 'pre-wrap', marginBottom: 'var(--space-3)' }}>{availabilityError}</p>
-            <div className="data-reset-modal-actions">
-              <button type="button" className="btn btn-primary" onClick={() => setAvailabilityError(null)}>
-                Close
-              </button>
-            </div>
+      <DraggableModal
+        open={availabilityError != null}
+        onBackdropClick={() => setAvailabilityError(null)}
+        title="Cannot change availability"
+        titleId="opportunity-availability-error-modal-title"
+        maxWidth="min(520px, calc(100vw - 24px))"
+        footer={
+          <div className="data-reset-modal-actions">
+            <button type="button" className="btn btn-primary" onClick={() => setAvailabilityError(null)}>
+              Close
+            </button>
           </div>
-        </div>
-      )}
+        }
+      >
+        <p style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{availabilityError}</p>
+      </DraggableModal>
 
       <h2 id="strategy-opportunity-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
         Strategy / {breadcrumbLabel}

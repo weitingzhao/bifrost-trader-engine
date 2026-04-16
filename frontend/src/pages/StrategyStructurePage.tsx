@@ -19,6 +19,7 @@ import {
   type StrategyTemplateDetail,
   type MetaParamItem,
 } from '../api'
+import { DraggableModal } from '../components/DraggableModal'
 import { InfoTooltip } from '../components/InfoTooltip'
 import {
   DEFAULT_STRUCTURE_PAYLOAD,
@@ -712,119 +713,139 @@ export function StrategyStructurePage({
   return (
     <div className="card process-section">
       {/* Availability toggle error modal: backend rejected the change (e.g. validation), list stays visible */}
-      {availabilityError != null && (
-        <div
-          className="data-reset-modal-overlay"
-          onClick={() => setAvailabilityError(null)}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="availability-error-modal-title"
-        >
-          <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
-            <h3 id="availability-error-modal-title">Cannot change availability</h3>
-            <p style={{ whiteSpace: 'pre-wrap', marginBottom: 'var(--space-3)' }}>{availabilityError}</p>
-            <p className="form-hint" style={{ marginBottom: 'var(--space-3)' }}>
-              The structure was not changed. Fix the issue in Option Type Config or Edit (e.g. meta) and try again.
-            </p>
-            <div className="data-reset-modal-actions">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => setAvailabilityError(null)}
-              >
-                Close
-              </button>
-            </div>
+      <DraggableModal
+        open={availabilityError != null}
+        onBackdropClick={() => setAvailabilityError(null)}
+        title="Cannot change availability"
+        titleId="availability-error-modal-title"
+        maxWidth="min(520px, calc(100vw - 24px))"
+        footer={
+          <div className="data-reset-modal-actions">
+            <button type="button" className="btn btn-primary" onClick={() => setAvailabilityError(null)}>
+              Close
+            </button>
           </div>
-        </div>
-      )}
+        }
+      >
+        <p style={{ whiteSpace: 'pre-wrap', marginBottom: 'var(--space-3)' }}>{availabilityError}</p>
+        <p className="form-hint" style={{ marginBottom: 0 }}>
+          The structure was not changed. Fix the issue in Option Type Config or Edit (e.g. meta) and try again.
+        </p>
+      </DraggableModal>
 
-      {nameConfirmDialog != null && (
-        <div
-          className="data-reset-modal-overlay"
-          onClick={() => setNameConfirmDialog(null)}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="name-confirm-modal-title"
-        >
-          <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
-            <h3 id="name-confirm-modal-title">Structure name will change</h3>
+      <DraggableModal
+        open={nameConfirmDialog != null}
+        onBackdropClick={() => setNameConfirmDialog(null)}
+        title="Structure name will change"
+        titleId="name-confirm-modal-title"
+        maxWidth="min(520px, calc(100vw - 24px))"
+        footer={
+          <div className="data-reset-modal-actions" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() =>
+                nameConfirmDialog &&
+                trySubmitWithVersionCheck(
+                  (nameConfirmDialog.editedName || '').trim() || nameConfirmDialog.suggestedName,
+                )
+              }
+              disabled={formLoading || nameConfirmDialog == null}
+            >
+              Use new name and save
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => originalEditName && trySubmitWithVersionCheck(originalEditName)}
+              disabled={formLoading}
+            >
+              Keep current name and save
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={() => setNameConfirmDialog(null)}>
+              Cancel
+            </button>
+          </div>
+        }
+      >
+        {nameConfirmDialog != null && (
+          <>
             <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>
               Current name: <strong>{nameConfirmDialog.originalName}</strong>
             </p>
             <p className="form-hint" style={{ marginBottom: 'var(--space-3)' }}>
-              The suggested new name (based on type and parameters) is below. You can keep it, edit it, or abandon the name change and save with the current name.
+              The suggested new name (based on type and parameters) is below. You can keep it, edit it, or abandon the
+              name change and save with the current name.
             </p>
-            <div className="gates-form-row" style={{ marginBottom: 'var(--space-3)' }}>
+            <div className="gates-form-row" style={{ marginBottom: 0 }}>
               <label htmlFor="name-confirm-new-name">New name</label>
               <input
                 id="name-confirm-new-name"
                 type="text"
                 value={nameConfirmDialog.editedName}
                 onChange={(e) =>
-                  setNameConfirmDialog((prev) =>
-                    prev ? { ...prev, editedName: e.target.value } : null
-                  )
+                  setNameConfirmDialog((prev) => (prev ? { ...prev, editedName: e.target.value } : null))
                 }
                 placeholder="Structure name"
                 style={{ width: '100%', maxWidth: '400px' }}
               />
             </div>
-            <div className="data-reset-modal-actions" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() =>
-                  trySubmitWithVersionCheck(
-                    (nameConfirmDialog.editedName || '').trim() || nameConfirmDialog.suggestedName
-                  )
-                }
-                disabled={formLoading}
-              >
-                Use new name and save
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => originalEditName && trySubmitWithVersionCheck(originalEditName)}
-                disabled={formLoading}
-              >
-                Keep current name and save
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setNameConfirmDialog(null)}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </DraggableModal>
 
-      {versionConfirmDialog != null && pendingSubmitName != null && originalEditVersion != null && (
-        <div
-          className="data-reset-modal-overlay"
-          onClick={() => {
-            setVersionConfirmDialog(null)
-            setPendingSubmitName(null)
-          }}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="version-confirm-modal-title"
-        >
-          <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
-            <h3 id="version-confirm-modal-title">Type, SubType, or Meta changed</h3>
+      <DraggableModal
+        open={versionConfirmDialog != null && pendingSubmitName != null && originalEditVersion != null}
+        onBackdropClick={() => {
+          setVersionConfirmDialog(null)
+          setPendingSubmitName(null)
+        }}
+        title="Type, SubType, or Meta changed"
+        titleId="version-confirm-modal-title"
+        maxWidth="min(520px, calc(100vw - 24px))"
+        footer={
+          <div className="data-reset-modal-actions" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() =>
+                pendingSubmitName != null &&
+                originalEditVersion != null &&
+                versionConfirmDialog &&
+                doWizardSubmit(
+                  pendingSubmitName,
+                  versionConfirmDialog.useNewVersion ? originalEditVersion + 1 : originalEditVersion,
+                )
+              }
+              disabled={formLoading || versionConfirmDialog == null}
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setVersionConfirmDialog(null)
+                setPendingSubmitName(null)
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        }
+      >
+        {versionConfirmDialog != null && (
+          <>
             <p className="form-hint" style={{ marginBottom: 'var(--space-3)' }}>
-              Use a new version (Version + 1) for this structure? If not, changes will be saved with the current version.
+              Use a new version (Version + 1) for this structure? If not, changes will be saved with the current
+              version.
             </p>
             <div
               className="gates-form-row"
               style={{
                 alignItems: 'center',
                 gap: 'var(--space-2)',
-                marginBottom: 'var(--space-3)',
+                marginBottom: 0,
               }}
             >
               <label
@@ -837,43 +858,16 @@ export function StrategyStructurePage({
                   type="checkbox"
                   checked={versionConfirmDialog.useNewVersion}
                   onChange={(e) =>
-                    setVersionConfirmDialog((prev) =>
-                      prev ? { ...prev, useNewVersion: e.target.checked } : null
-                    )
+                    setVersionConfirmDialog((prev) => (prev ? { ...prev, useNewVersion: e.target.checked } : null))
                   }
                   aria-label="Use new version (Version + 1)"
                 />
                 <span className="toggle-switch-caption">Use new version (Version + 1)</span>
               </label>
             </div>
-            <div className="data-reset-modal-actions" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() =>
-                  doWizardSubmit(
-                    pendingSubmitName,
-                    versionConfirmDialog.useNewVersion ? originalEditVersion + 1 : originalEditVersion
-                  )
-                }
-                disabled={formLoading}
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => {
-                  setVersionConfirmDialog(null)
-                  setPendingSubmitName(null)
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </DraggableModal>
 
       <h2 id="strategy-structure-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
         Strategy / {breadcrumbLabel}

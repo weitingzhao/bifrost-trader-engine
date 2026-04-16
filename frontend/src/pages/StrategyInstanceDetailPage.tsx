@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { StrategyInstance, StatusResponse, Execution, PerformanceResponse } from '../types'
 import type { StrategyStructure } from '../api'
-import { fetchStrategyInstance, fetchPerformance, fetchExecutions, updateStrategyInstance, fetchStructure } from '../api'
-import { fmtUsd, unixToDatetimeLocal, parseOptionContractKey } from '../utils/format'
+import { fetchStrategyInstance, fetchPerformance, fetchExecutions, fetchStructure } from '../api'
+import { fmtUsd, parseOptionContractKey } from '../utils/format'
 import { RiskProfileDl } from '../components/RiskProfileDl'
 import { computeRiskProfile, formatRiskHedgedBreakdown } from '../utils/riskProfile'
 import type { RiskPosition, RiskProfile } from '../utils/riskProfile'
@@ -12,9 +12,9 @@ import {
 } from './portfolio/ledgerOptHelpers'
 import { InstanceDetailHeader } from './strategy/instanceDetail/InstanceDetailHeader'
 import { InstanceOverviewCard } from './strategy/instanceDetail/InstanceOverviewCard'
+import { InstanceStructureCard } from './strategy/instanceDetail/InstanceStructureCard'
 import { InstancePnLStrip } from './strategy/instanceDetail/InstancePnLStrip'
 import { InstanceExecutionsPanel } from './strategy/instanceDetail/InstanceExecutionsPanel'
-import type { HoldingAnchorKind } from './strategy/instanceDetail/instanceHoldingTooltip'
 
 export interface StrategyInstanceDetailPageProps {
   strategyInstanceId: number
@@ -33,9 +33,6 @@ export function StrategyInstanceDetailPage({
   const [executionsFinal, setExecutionsFinal] = useState<Execution[]>([])
   const [executionsTwsRaw, setExecutionsTwsRaw] = useState<Execution[]>([])
   const [executionsLoading, setExecutionsLoading] = useState(true)
-  const [openedAtEdit, setOpenedAtEdit] = useState('')
-  const [openedAtSaving, setOpenedAtSaving] = useState(false)
-  const [openedAtError, setOpenedAtError] = useState<string | null>(null)
   const [structure, setStructure] = useState<StrategyStructure | null>(null)
   const [structureLoading, setStructureLoading] = useState(false)
   const [structureError, setStructureError] = useState<string | null>(null)
@@ -115,22 +112,6 @@ export function StrategyInstanceDetailPage({
     }
   }, [instance?.strategy_structure_id, loadStructure])
 
-  useEffect(() => {
-    if (instance?.opened_at_epoch != null) {
-      setOpenedAtEdit(unixToDatetimeLocal(instance.opened_at_epoch).slice(0, 10))
-    } else if (instance?.opened_at != null && typeof instance.opened_at === 'string') {
-      try {
-        const ts = new Date(instance.opened_at).getTime() / 1000
-        if (Number.isFinite(ts)) setOpenedAtEdit(unixToDatetimeLocal(ts).slice(0, 10))
-      } catch {
-        setOpenedAtEdit('')
-      }
-    } else {
-      setOpenedAtEdit('')
-    }
-    setOpenedAtError(null)
-  }, [instance?.opened_at_epoch, instance?.opened_at])
-
   const executionsFinalForInstance = useMemo(() => {
     return executionsFinal
       .map((ex) => sliceExecutionForInstanceOptView(ex, strategyInstanceId))
@@ -157,63 +138,6 @@ export function StrategyInstanceDetailPage({
     }
     return m
   }, [executionsFinal, strategyInstanceId])
-
-  const oldestExecution =
-    executionsFinalForInstance.length > 0
-      ? executionsFinalForInstance.reduce((a, b) => {
-          const at = a.time != null && Number.isFinite(a.time) ? a.time : Infinity
-          const bt = b.time != null && Number.isFinite(b.time) ? b.time : Infinity
-          return at <= bt ? a : b
-        })
-      : null
-  const canQuickSet = oldestExecution != null
-
-  /** Anchor for hold time (PnL annualization): Opened at, else oldest final-book execution. */
-  const holdingPeriodMeta = useMemo((): { epoch: number | null; anchor: HoldingAnchorKind | null } => {
-    if (instance == null) return { epoch: null, anchor: null }
-    if (instance.opened_at_epoch != null && Number.isFinite(instance.opened_at_epoch)) {
-      return { epoch: instance.opened_at_epoch, anchor: 'opened_at_epoch' }
-    }
-    if (instance.opened_at != null && typeof instance.opened_at === 'string') {
-      try {
-        const t = new Date(instance.opened_at).getTime() / 1000
-        if (Number.isFinite(t)) return { epoch: t, anchor: 'opened_at_field' }
-      } catch {
-        /* ignore */
-      }
-    }
-    if (oldestExecution?.time != null && Number.isFinite(oldestExecution.time)) {
-      return { epoch: oldestExecution.time, anchor: 'oldest_fill' }
-    }
-    return { epoch: null, anchor: null }
-  }, [instance, oldestExecution])
-
-  const handleQuickSetOpenedAt = useCallback(() => {
-    if (!canQuickSet || oldestExecution == null) return
-    const tradeDate = oldestExecution.trade_date?.trim()
-    const dateStr =
-      tradeDate && tradeDate.length >= 10
-        ? tradeDate.slice(0, 10)
-        : oldestExecution.time != null && Number.isFinite(oldestExecution.time)
-          ? unixToDatetimeLocal(oldestExecution.time).slice(0, 10)
-          : ''
-    if (dateStr) setOpenedAtEdit(dateStr)
-  }, [canQuickSet, oldestExecution])
-
-  const handleSaveOpenedAt = useCallback(async () => {
-    if (instance == null || !openedAtEdit.trim()) return
-    setOpenedAtSaving(true)
-    setOpenedAtError(null)
-    try {
-      const iso = openedAtEdit.trim() + 'T12:00:00.000Z'
-      await updateStrategyInstance(instance.strategy_instance_id, { opened_at: iso })
-      await loadInstance()
-    } catch (e) {
-      setOpenedAtError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setOpenedAtSaving(false)
-    }
-  }, [instance, openedAtEdit, loadInstance])
 
   const riskProfile = useMemo(() => {
     if (!executionsFinalForInstance.length) return null
@@ -303,24 +227,19 @@ export function StrategyInstanceDetailPage({
           <div className="instance-detail-main-grid">
             <InstanceOverviewCard
               instance={instance}
+              executionsForPosition={executionsFinalForInstance}
+              executionsLoading={executionsLoading}
+            />
+            <InstanceStructureCard
+              instance={instance}
               structure={structure}
               structureLoading={structureLoading}
               structureError={structureError}
-              openedAtEdit={openedAtEdit}
-              onOpenedAtChange={setOpenedAtEdit}
-              onQuickSet={handleQuickSetOpenedAt}
-              onSaveOpenedAt={handleSaveOpenedAt}
-              canQuickSet={canQuickSet}
-              openedAtSaving={openedAtSaving}
-              openedAtError={openedAtError}
             />
             <div className="instance-detail-pnl-column">
-              <h3 className="instance-detail-section-title">PnL (this instance)</h3>
               <InstancePnLStrip
                 loading={performanceLoading}
                 performance={performance}
-                holdingStartEpochSec={holdingPeriodMeta.epoch}
-                holdingAnchor={holdingPeriodMeta.anchor}
                 executionsForNotional={executionsFinalForInstance}
               />
             </div>

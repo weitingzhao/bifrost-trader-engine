@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import type { StatusResponse } from '../../../types'
+import { DraggableModal } from '../../../components/DraggableModal'
 import { InfoTooltip } from '../../../components/InfoTooltip'
 import { STRATEGY_METRIC_LABEL_COMPACT } from '../statusLabels'
 
@@ -89,48 +90,46 @@ export function StatusStrategyPanel({
     }
   }, [onFlatten])
 
-  const flattenModal =
-    flattenDialogOpen ? (
-      <div
-        className="data-reset-modal-overlay"
-        onClick={() => {
-          if (!flattenDialogBusy) setFlattenDialogOpen(false)
-        }}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="strategy-flatten-confirm-title"
-      >
-        <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
-          <h3 id="strategy-flatten-confirm-title">Emergency flatten</h3>
-          <p>
-            You are about to request a <strong>flatten</strong> of strategy hedge exposure. The monitor writes{' '}
-            <code>flatten</code> to the daemon control channel; the daemon is meant to consume it and work toward
-            closing or reducing hedge exposure (actual execution depends on daemon and broker state).
-          </p>
-          <p className="settings-page-msg settings-page-msg--error" style={{ marginTop: 'var(--space-2)' }} role="alert">
-            High risk — only confirm in a real emergency when you accept possible market and account impact.
-          </p>
-          <div className="data-reset-modal-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setFlattenDialogOpen(false)}
-              disabled={flattenDialogBusy}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn-shutdown-all"
-              onClick={() => void confirmFlatten()}
-              disabled={flattenDialogBusy}
-            >
-              {flattenDialogBusy ? 'Sending…' : 'Confirm'}
-            </button>
-          </div>
+  const flattenModal = (
+    <DraggableModal
+      open={flattenDialogOpen}
+      onBackdropClick={() => {
+        if (!flattenDialogBusy) setFlattenDialogOpen(false)
+      }}
+      backdropLocked={flattenDialogBusy}
+      title="Emergency flatten"
+      titleId="strategy-flatten-confirm-title"
+      footer={
+        <div className="data-reset-modal-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setFlattenDialogOpen(false)}
+            disabled={flattenDialogBusy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-shutdown-all"
+            onClick={() => void confirmFlatten()}
+            disabled={flattenDialogBusy}
+          >
+            {flattenDialogBusy ? 'Sending…' : 'Confirm'}
+          </button>
         </div>
-      </div>
-    ) : null
+      }
+    >
+      <p>
+        You are about to request a <strong>flatten</strong> of strategy hedge exposure. The monitor writes{' '}
+        <code>flatten</code> to the daemon control channel; the daemon is meant to consume it and work toward
+        closing or reducing hedge exposure (actual execution depends on daemon and broker state).
+      </p>
+      <p className="settings-page-msg settings-page-msg--error" style={{ marginTop: 'var(--space-2)' }} role="alert">
+        High risk — only confirm in a real emergency when you accept possible market and account impact.
+      </p>
+    </DraggableModal>
+  )
 
   const emergencyFlattenButton = (
     <button

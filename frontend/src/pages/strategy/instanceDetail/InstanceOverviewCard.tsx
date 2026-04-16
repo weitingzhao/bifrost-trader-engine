@@ -1,36 +1,69 @@
-import type { StrategyInstance } from '../../../types'
-import type { StrategyStructure } from '../../../api'
+import { useMemo } from 'react'
+import type { Execution, StrategyInstance } from '../../../types'
 import { fmtTs } from '../../../utils/format'
-import { summarizeLegs, summarizeConstraints, getStructureTypeLabel } from '../strategyFormUtils'
+import { computeInstancePositionStatus } from './instanceDetailPnlMetrics'
+
+function formatInstanceOpenedAt(instance: StrategyInstance): string {
+  if (instance.opened_at_epoch != null && Number.isFinite(Number(instance.opened_at_epoch))) {
+    return fmtTs(instance.opened_at_epoch)
+  }
+  if (instance.opened_at != null && typeof instance.opened_at === 'string' && instance.opened_at.trim() !== '') {
+    const ms = Date.parse(instance.opened_at)
+    if (Number.isFinite(ms)) return fmtTs(ms / 1000)
+  }
+  return '—'
+}
 
 export function InstanceOverviewCard({
   instance,
-  structure,
-  structureLoading,
-  structureError,
-  openedAtEdit,
-  onOpenedAtChange,
-  onQuickSet,
-  onSaveOpenedAt,
-  canQuickSet,
-  openedAtSaving,
-  openedAtError,
+  executionsForPosition,
+  executionsLoading,
 }: {
   instance: StrategyInstance
-  structure: StrategyStructure | null
-  structureLoading: boolean
-  structureError: string | null
-  openedAtEdit: string
-  onOpenedAtChange: (v: string) => void
-  onQuickSet: () => void
-  onSaveOpenedAt: () => void
-  canQuickSet: boolean
-  openedAtSaving: boolean
-  openedAtError: string | null
+  executionsForPosition: Execution[]
+  executionsLoading: boolean
 }) {
+  const positionStatus = useMemo(
+    () => computeInstancePositionStatus(executionsForPosition),
+    [executionsForPosition],
+  )
+
+  const statusChip =
+    executionsLoading ? (
+      <span className="muted instance-detail-overview-status-loading" aria-hidden>
+        …
+      </span>
+    ) : positionStatus === 'no_fills' ? (
+      <span
+        className="instance-detail-status-chip instance-detail-overview-status-chip is-unknown"
+        title="No attributed fills in the performance book for this instance yet."
+      >
+        No fills
+      </span>
+    ) : (
+      <span
+        className={`instance-detail-status-chip instance-detail-overview-status-chip ${
+          positionStatus === 'closed' ? 'is-flat' : 'is-open'
+        }`}
+        title={
+          positionStatus === 'closed'
+            ? 'All contracts: buy quantity matches sell quantity (flat net) for this instance.'
+            : 'At least one contract has open net quantity (buy and sell counts do not net to zero).'
+        }
+      >
+        {positionStatus === 'closed' ? 'Closed' : 'Open'}
+      </span>
+    )
+
   return (
-    <section className="instance-detail-overview-card detail-block">
-      <h3 className="instance-detail-section-title">Overview</h3>
+    <section
+      className="instance-detail-overview-card detail-block"
+      aria-label="Instance overview"
+    >
+      <h3 className="instance-detail-section-title instance-detail-overview-head">
+        <span>Overview</span>
+        {statusChip}
+      </h3>
       <dl className="info-dl instance-detail-info-dl">
         <dt>Structure</dt>
         <dd>
@@ -46,37 +79,7 @@ export function InstanceOverviewCard({
           )}
         </dd>
         <dt>Opened at</dt>
-        <dd>
-          <span className="instance-detail-opened-at-row">
-            <input
-              type="date"
-              value={openedAtEdit}
-              onChange={(e) => onOpenedAtChange(e.target.value)}
-              className="create-instance-input"
-              aria-label="Opened at (editable)"
-            />
-            <button
-              type="button"
-              className="btn btn-small btn-secondary"
-              onClick={onQuickSet}
-              disabled={!canQuickSet}
-              title="Set Opened at to the Trade date of the oldest execution below"
-            >
-              Quick Set
-            </button>
-            <button
-              type="button"
-              className="btn btn-small btn-primary"
-              onClick={onSaveOpenedAt}
-              disabled={openedAtSaving || !openedAtEdit.trim()}
-            >
-              {openedAtSaving ? 'Saving…' : 'Save'}
-            </button>
-            {openedAtError != null && (
-              <span className="section-hint replay-form-error instance-detail-opened-at-error">{openedAtError}</span>
-            )}
-          </span>
-        </dd>
+        <dd>{formatInstanceOpenedAt(instance)}</dd>
         <dt>Created at</dt>
         <dd>
           {instance.created_at_epoch != null ? fmtTs(instance.created_at_epoch) : instance.created_at ?? '—'}
@@ -90,47 +93,6 @@ export function InstanceOverviewCard({
           </>
         )}
       </dl>
-
-      {instance.strategy_structure_id != null && (
-        <div className="instance-detail-structure-embed">
-          <h4 className="instance-detail-subheading">Strategy structure</h4>
-          {structureLoading ? (
-            <p className="muted">Loading structure…</p>
-          ) : structureError != null ? (
-            <p className="error-message">{structureError}</p>
-          ) : structure != null ? (
-            <dl className="info-dl instance-detail-info-dl">
-              <dt>Name</dt>
-              <dd>
-                {structure.name}
-                <span className="muted" style={{ marginLeft: '0.25rem' }}>
-                  ({structure.strategy_structure_id})
-                </span>
-              </dd>
-              <dt>Type</dt>
-              <dd>{getStructureTypeLabel(structure.structure_type)}</dd>
-              {structure.structure_subtype != null && structure.structure_subtype !== '' && (
-                <>
-                  <dt>Subtype</dt>
-                  <dd>{structure.structure_subtype_label ?? structure.structure_subtype}</dd>
-                </>
-              )}
-              {structure.template_display_name != null && structure.template_display_name !== '' && (
-                <>
-                  <dt>Template</dt>
-                  <dd>{structure.template_display_name}</dd>
-                </>
-              )}
-              <dt>Legs</dt>
-              <dd title={summarizeLegs(structure.legs)}>{summarizeLegs(structure.legs)}</dd>
-              <dt>Constraints</dt>
-              <dd title={summarizeConstraints(structure.constraints)}>{summarizeConstraints(structure.constraints)}</dd>
-            </dl>
-          ) : (
-            <p className="muted">Structure not found.</p>
-          )}
-        </div>
-      )}
     </section>
   )
 }

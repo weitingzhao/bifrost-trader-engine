@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { DraggableModal } from '../components/DraggableModal'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { OpsHostEnvPillBadge } from '../components/OpsHostEnvPillBadge'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
@@ -953,57 +953,56 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           : 'Workers do not cover every supported queue'
   const showInitialSkeleton = loading && workers.length === 0
 
-  const confirmDialog =
-    confirmState.open &&
-    createPortal(
-      <div
-        className="data-reset-modal-overlay celery-control-confirm-overlay"
-        onClick={() => !confirmState.confirming && resetConfirmDialog()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="celery-control-confirm-title"
-      >
-        <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
-          <h3 id="celery-control-confirm-title">{confirmState.title}</h3>
-          <p>{confirmState.message}</p>
-          {confirmVariant === 'scale-remove' && (
-            <label className="celery-control-force-remove">
-              <input
-                type="checkbox"
-                checked={scaleRemoveForce}
-                onChange={e => {
-                  scaleRemoveForceRef.current = e.target.checked
-                  setScaleRemoveForce(e.target.checked)
-                }}
-                disabled={confirmState.confirming}
-              />
-              <span>
-                Force kill stuck worker (SIGKILL) if it is still active after graceful stop
-              </span>
-            </label>
-          )}
-          <div className="data-reset-modal-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => resetConfirmDialog()}
-              disabled={confirmState.confirming}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn-shutdown-all"
-              onClick={() => void confirmState.action?.()}
-              disabled={confirmState.confirming}
-            >
-              {confirmState.confirming ? 'Executing…' : (confirmState.confirmLabel ?? 'Confirm')}
-            </button>
-          </div>
+  const confirmDialog = (
+    <DraggableModal
+      open={confirmState.open}
+      onBackdropClick={() => {
+        if (!confirmState.confirming) resetConfirmDialog()
+      }}
+      backdropLocked={confirmState.confirming}
+      title={confirmState.title}
+      titleId="celery-control-confirm-title"
+      overlayClassName="celery-control-confirm-overlay"
+      footer={
+        <div className="data-reset-modal-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => resetConfirmDialog()}
+            disabled={confirmState.confirming}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-shutdown-all"
+            onClick={() => void confirmState.action?.()}
+            disabled={confirmState.confirming}
+          >
+            {confirmState.confirming ? 'Executing…' : (confirmState.confirmLabel ?? 'Confirm')}
+          </button>
         </div>
-      </div>,
-      document.body,
-    )
+      }
+    >
+      <p>{confirmState.message}</p>
+      {confirmVariant === 'scale-remove' && (
+        <label className="celery-control-force-remove">
+          <input
+            type="checkbox"
+            checked={scaleRemoveForce}
+            onChange={e => {
+              scaleRemoveForceRef.current = e.target.checked
+              setScaleRemoveForce(e.target.checked)
+            }}
+            disabled={confirmState.confirming}
+          />
+          <span>
+            Force kill stuck worker (SIGKILL) if it is still active after graceful stop
+          </span>
+        </label>
+      )}
+    </DraggableModal>
+  )
 
   return (
     <div

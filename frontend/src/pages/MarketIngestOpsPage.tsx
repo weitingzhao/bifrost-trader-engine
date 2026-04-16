@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { StatusResponse } from '../types'
+import { DraggableModal } from '../components/DraggableModal'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { AggregatedLogConsolePanel } from '../components/AggregatedLogConsolePanel'
 import { useSocketServicesUnifiedLogConsole } from '../components/useSocketServicesUnifiedLogConsole'
@@ -1221,49 +1222,46 @@ export function MarketIngestOpsPage({
 
   return (
     <div id="settings-ws-connector" className={cardClass}>
-      {confirmState.open ? (
-        <div
-          className="data-reset-modal-overlay"
-          onClick={() => {
-            if (!confirmState.confirming) setConfirmState(INITIAL_CONFIRM)
-          }}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="ws-connector-confirm-title"
-        >
-          <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
-            <h3 id="ws-connector-confirm-title">{confirmState.title}</h3>
-            <p>{confirmState.message}</p>
-            {confirmState.error ? (
-              <p
-                className="settings-page-msg settings-page-msg--error"
-                style={{ marginTop: 'var(--space-2)' }}
-                role="alert"
-              >
-                {confirmState.error}
-              </p>
-            ) : null}
-            <div className="data-reset-modal-actions">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setConfirmState(INITIAL_CONFIRM)}
-                disabled={confirmState.confirming}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn-shutdown-all"
-                onClick={() => confirmState.action?.()}
-                disabled={confirmState.confirming}
-              >
-                {confirmState.confirming ? 'Executing…' : 'Confirm'}
-              </button>
-            </div>
+      <DraggableModal
+        open={confirmState.open}
+        onBackdropClick={() => {
+          if (!confirmState.confirming) setConfirmState(INITIAL_CONFIRM)
+        }}
+        backdropLocked={confirmState.confirming}
+        title={confirmState.title}
+        titleId="ws-connector-confirm-title"
+        footer={
+          <div className="data-reset-modal-actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setConfirmState(INITIAL_CONFIRM)}
+              disabled={confirmState.confirming}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-shutdown-all"
+              onClick={() => confirmState.action?.()}
+              disabled={confirmState.confirming}
+            >
+              {confirmState.confirming ? 'Executing…' : 'Confirm'}
+            </button>
           </div>
-        </div>
-      ) : null}
+        }
+      >
+        <p>{confirmState.message}</p>
+        {confirmState.error ? (
+          <p
+            className="settings-page-msg settings-page-msg--error"
+            style={{ marginTop: 'var(--space-2)' }}
+            role="alert"
+          >
+            {confirmState.error}
+          </p>
+        ) : null}
+      </DraggableModal>
 
       <div className="settings-page-header settings-page-header--celery">
         <div className="settings-page-title-group">

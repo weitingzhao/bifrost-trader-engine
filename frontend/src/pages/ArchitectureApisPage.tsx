@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { DraggableModal } from '../components/DraggableModal'
 import {
   fetchDocsApiHealth,
   fetchDocsCapabilities,
@@ -334,137 +334,134 @@ export function ArchitectureApisPage({ embeddedInSettings }: ArchitectureApisPag
     ? 'settings-page-card massive-api-status-page massive-api-status-page--embedded architecture-apis-page'
     : 'settings-page-card massive-api-status-page architecture-apis-page'
 
-  const docsDialog =
-    shutdownDocs.open &&
-    createPortal(
-      <div
-        className="data-reset-modal-overlay celery-control-confirm-overlay"
-        onClick={() => !shutdownDocs.busy && setShutdownDocs(INITIAL_SHUTDOWN)}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="arch-docs-shutdown-title"
-      >
-        <div className="data-reset-modal" onClick={(e) => e.stopPropagation()}>
-          <h3 id="arch-docs-shutdown-title">Shut down Docs API</h3>
-          <p>
-            This will terminate the Docs FastAPI process (run_server_docs.py). Merged OpenAPI docs on
-            this host will be unavailable until you restart the process on the server.
-          </p>
-          {shutdownDocs.error ? (
-            <div className="msg err" role="alert" style={{ marginBottom: '0.75rem' }}>
-              {shutdownDocs.error}
-            </div>
-          ) : null}
-          <div className="data-reset-modal-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setShutdownDocs(INITIAL_SHUTDOWN)}
-              disabled={shutdownDocs.busy}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn-shutdown-all"
-              onClick={() => void runShutdown('docs')}
-              disabled={shutdownDocs.busy}
-            >
-              {shutdownDocs.busy ? 'Executing…' : 'Confirm'}
-            </button>
-          </div>
+  const docsDialog = (
+    <DraggableModal
+      open={shutdownDocs.open}
+      onBackdropClick={() => {
+        if (!shutdownDocs.busy) setShutdownDocs(INITIAL_SHUTDOWN)
+      }}
+      backdropLocked={shutdownDocs.busy}
+      title="Shut down Docs API"
+      titleId="arch-docs-shutdown-title"
+      overlayClassName="celery-control-confirm-overlay"
+      footer={
+        <div className="data-reset-modal-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShutdownDocs(INITIAL_SHUTDOWN)}
+            disabled={shutdownDocs.busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-shutdown-all"
+            onClick={() => void runShutdown('docs')}
+            disabled={shutdownDocs.busy}
+          >
+            {shutdownDocs.busy ? 'Executing…' : 'Confirm'}
+          </button>
         </div>
-      </div>,
-      document.body,
-    )
+      }
+    >
+      <p>
+        This will terminate the Docs FastAPI process (run_server_docs.py). Merged OpenAPI docs on
+        this host will be unavailable until you restart the process on the server.
+      </p>
+      {shutdownDocs.error ? (
+        <div className="msg err" role="alert" style={{ marginBottom: '0.75rem' }}>
+          {shutdownDocs.error}
+        </div>
+      ) : null}
+    </DraggableModal>
+  )
 
-  const monitorDialog =
-    shutdownMonitor.open &&
-    createPortal(
-      <div
-        className="data-reset-modal-overlay celery-control-confirm-overlay"
-        onClick={() => !shutdownMonitor.busy && setShutdownMonitor(INITIAL_SHUTDOWN)}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="arch-monitor-shutdown-title"
-      >
-        <div className="data-reset-modal" onClick={(e) => e.stopPropagation()}>
-          <h3 id="arch-monitor-shutdown-title">Shut down Monitor API</h3>
-          <p>
-            This will terminate the bifrost-server process (run_server.py). The management UI, status API, and
-            proxied logs on this host will be unavailable until you restart the process on the server.
-          </p>
-          {shutdownMonitor.error ? (
-            <div className="msg err" role="alert" style={{ marginBottom: '0.75rem' }}>
-              {shutdownMonitor.error}
-            </div>
-          ) : null}
-          <div className="data-reset-modal-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setShutdownMonitor(INITIAL_SHUTDOWN)}
-              disabled={shutdownMonitor.busy}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn-shutdown-all"
-              onClick={() => void runShutdown('monitor')}
-              disabled={shutdownMonitor.busy}
-            >
-              {shutdownMonitor.busy ? 'Executing…' : 'Confirm'}
-            </button>
-          </div>
+  const monitorDialog = (
+    <DraggableModal
+      open={shutdownMonitor.open}
+      onBackdropClick={() => {
+        if (!shutdownMonitor.busy) setShutdownMonitor(INITIAL_SHUTDOWN)
+      }}
+      backdropLocked={shutdownMonitor.busy}
+      title="Shut down Monitor API"
+      titleId="arch-monitor-shutdown-title"
+      overlayClassName="celery-control-confirm-overlay"
+      footer={
+        <div className="data-reset-modal-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShutdownMonitor(INITIAL_SHUTDOWN)}
+            disabled={shutdownMonitor.busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-shutdown-all"
+            onClick={() => void runShutdown('monitor')}
+            disabled={shutdownMonitor.busy}
+          >
+            {shutdownMonitor.busy ? 'Executing…' : 'Confirm'}
+          </button>
         </div>
-      </div>,
-      document.body,
-    )
+      }
+    >
+      <p>
+        This will terminate the bifrost-server process (run_server.py). The management UI, status API, and
+        proxied logs on this host will be unavailable until you restart the process on the server.
+      </p>
+      {shutdownMonitor.error ? (
+        <div className="msg err" role="alert" style={{ marginBottom: '0.75rem' }}>
+          {shutdownMonitor.error}
+        </div>
+      ) : null}
+    </DraggableModal>
+  )
 
-  const opsDialog =
-    shutdownOps.open &&
-    createPortal(
-      <div
-        className="data-reset-modal-overlay celery-control-confirm-overlay"
-        onClick={() => !shutdownOps.busy && setShutdownOps(INITIAL_SHUTDOWN)}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="arch-ops-shutdown-title"
-      >
-        <div className="data-reset-modal" onClick={(e) => e.stopPropagation()}>
-          <h3 id="arch-ops-shutdown-title">Shut down Ops API</h3>
-          <p>
-            This will terminate the Ops FastAPI process (run_server_ops.py). Worker control and other Ops
-            endpoints on this host will be unavailable until you restart the process on the server.
-          </p>
-          {shutdownOps.error ? (
-            <div className="msg err" role="alert" style={{ marginBottom: '0.75rem' }}>
-              {shutdownOps.error}
-            </div>
-          ) : null}
-          <div className="data-reset-modal-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setShutdownOps(INITIAL_SHUTDOWN)}
-              disabled={shutdownOps.busy}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn-shutdown-all"
-              onClick={() => void runShutdown('ops')}
-              disabled={shutdownOps.busy}
-            >
-              {shutdownOps.busy ? 'Executing…' : 'Confirm'}
-            </button>
-          </div>
+  const opsDialog = (
+    <DraggableModal
+      open={shutdownOps.open}
+      onBackdropClick={() => {
+        if (!shutdownOps.busy) setShutdownOps(INITIAL_SHUTDOWN)
+      }}
+      backdropLocked={shutdownOps.busy}
+      title="Shut down Ops API"
+      titleId="arch-ops-shutdown-title"
+      overlayClassName="celery-control-confirm-overlay"
+      footer={
+        <div className="data-reset-modal-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShutdownOps(INITIAL_SHUTDOWN)}
+            disabled={shutdownOps.busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-shutdown-all"
+            onClick={() => void runShutdown('ops')}
+            disabled={shutdownOps.busy}
+          >
+            {shutdownOps.busy ? 'Executing…' : 'Confirm'}
+          </button>
         </div>
-      </div>,
-      document.body,
-    )
+      }
+    >
+      <p>
+        This will terminate the Ops FastAPI process (run_server_ops.py). Worker control and other Ops
+        endpoints on this host will be unavailable until you restart the process on the server.
+      </p>
+      {shutdownOps.error ? (
+        <div className="msg err" role="alert" style={{ marginBottom: '0.75rem' }}>
+          {shutdownOps.error}
+        </div>
+      ) : null}
+    </DraggableModal>
+  )
 
   return (
     <div className={wrapClass}>

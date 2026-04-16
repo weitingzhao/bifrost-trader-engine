@@ -1,6 +1,6 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { DraggableModal } from '../components/DraggableModal'
 import { fetchHealth } from '../api'
 import {
   fetchMarketCapabilities,
@@ -424,137 +424,134 @@ export function ResearchApisPage({ embeddedInSettings }: ResearchApisPageProps) 
     }
   }
 
-  const researchDialog =
-    shutdownResearch.open &&
-    createPortal(
-      <div
-        className="data-reset-modal-overlay celery-control-confirm-overlay"
-        onClick={() => !shutdownResearch.busy && setShutdownResearch(INITIAL_SHUTDOWN)}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="research-shutdown-title"
-      >
-        <div className="data-reset-modal" onClick={(e) => e.stopPropagation()}>
-          <h3 id="research-shutdown-title">Shut down Research API</h3>
-          <p>
-            This will terminate the Research FastAPI process (run_server_research.py). Option discovery and max pain
-            endpoints on this host will be unavailable until you restart the process on the server.
-          </p>
-          {shutdownResearch.error ? (
-            <div className="msg err" role="alert" style={{ marginBottom: '0.75rem' }}>
-              {shutdownResearch.error}
-            </div>
-          ) : null}
-          <div className="data-reset-modal-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setShutdownResearch(INITIAL_SHUTDOWN)}
-              disabled={shutdownResearch.busy}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn-shutdown-all"
-              onClick={() => void runShutdown('research')}
-              disabled={shutdownResearch.busy}
-            >
-              {shutdownResearch.busy ? 'Executing…' : 'Confirm'}
-            </button>
-          </div>
+  const researchDialog = (
+    <DraggableModal
+      open={shutdownResearch.open}
+      onBackdropClick={() => {
+        if (!shutdownResearch.busy) setShutdownResearch(INITIAL_SHUTDOWN)
+      }}
+      backdropLocked={shutdownResearch.busy}
+      title="Shut down Research API"
+      titleId="research-shutdown-title"
+      overlayClassName="celery-control-confirm-overlay"
+      footer={
+        <div className="data-reset-modal-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShutdownResearch(INITIAL_SHUTDOWN)}
+            disabled={shutdownResearch.busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-shutdown-all"
+            onClick={() => void runShutdown('research')}
+            disabled={shutdownResearch.busy}
+          >
+            {shutdownResearch.busy ? 'Executing…' : 'Confirm'}
+          </button>
         </div>
-      </div>,
-      document.body,
-    )
+      }
+    >
+      <p>
+        This will terminate the Research FastAPI process (run_server_research.py). Option discovery and max pain
+        endpoints on this host will be unavailable until you restart the process on the server.
+      </p>
+      {shutdownResearch.error ? (
+        <div className="msg err" role="alert" style={{ marginBottom: '0.75rem' }}>
+          {shutdownResearch.error}
+        </div>
+      ) : null}
+    </DraggableModal>
+  )
 
-  const strategyDialog =
-    shutdownStrategy.open &&
-    createPortal(
-      <div
-        className="data-reset-modal-overlay celery-control-confirm-overlay"
-        onClick={() => !shutdownStrategy.busy && setShutdownStrategy(INITIAL_SHUTDOWN)}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="strategy-shutdown-title"
-      >
-        <div className="data-reset-modal" onClick={(e) => e.stopPropagation()}>
-          <h3 id="strategy-shutdown-title">Shut down Strategy API</h3>
-          <p>
-            This will terminate the Strategy FastAPI process (run_server_strategy.py). Strategy structures, instances,
-            and related endpoints on this host will be unavailable until you restart the process on the server.
-          </p>
-          {shutdownStrategy.error ? (
-            <div className="msg err" role="alert" style={{ marginBottom: '0.75rem' }}>
-              {shutdownStrategy.error}
-            </div>
-          ) : null}
-          <div className="data-reset-modal-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setShutdownStrategy(INITIAL_SHUTDOWN)}
-              disabled={shutdownStrategy.busy}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn-shutdown-all"
-              onClick={() => void runShutdown('strategy')}
-              disabled={shutdownStrategy.busy}
-            >
-              {shutdownStrategy.busy ? 'Executing…' : 'Confirm'}
-            </button>
-          </div>
+  const strategyDialog = (
+    <DraggableModal
+      open={shutdownStrategy.open}
+      onBackdropClick={() => {
+        if (!shutdownStrategy.busy) setShutdownStrategy(INITIAL_SHUTDOWN)
+      }}
+      backdropLocked={shutdownStrategy.busy}
+      title="Shut down Strategy API"
+      titleId="strategy-shutdown-title"
+      overlayClassName="celery-control-confirm-overlay"
+      footer={
+        <div className="data-reset-modal-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShutdownStrategy(INITIAL_SHUTDOWN)}
+            disabled={shutdownStrategy.busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-shutdown-all"
+            onClick={() => void runShutdown('strategy')}
+            disabled={shutdownStrategy.busy}
+          >
+            {shutdownStrategy.busy ? 'Executing…' : 'Confirm'}
+          </button>
         </div>
-      </div>,
-      document.body,
-    )
+      }
+    >
+      <p>
+        This will terminate the Strategy FastAPI process (run_server_strategy.py). Strategy structures, instances,
+        and related endpoints on this host will be unavailable until you restart the process on the server.
+      </p>
+      {shutdownStrategy.error ? (
+        <div className="msg err" role="alert" style={{ marginBottom: '0.75rem' }}>
+          {shutdownStrategy.error}
+        </div>
+      ) : null}
+    </DraggableModal>
+  )
 
-  const marketDialog =
-    shutdownMarket.open &&
-    createPortal(
-      <div
-        className="data-reset-modal-overlay celery-control-confirm-overlay"
-        onClick={() => !shutdownMarket.busy && setShutdownMarket(INITIAL_SHUTDOWN)}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="market-shutdown-title"
-      >
-        <div className="data-reset-modal" onClick={(e) => e.stopPropagation()}>
-          <h3 id="market-shutdown-title">Shut down Market API</h3>
-          <p>
-            This will terminate the Market FastAPI process (run_server_market.py). Quotes, bars, and watchlist
-            endpoints on this host will be unavailable until you restart the process on the server.
-          </p>
-          {shutdownMarket.error ? (
-            <div className="msg err" role="alert" style={{ marginBottom: '0.75rem' }}>
-              {shutdownMarket.error}
-            </div>
-          ) : null}
-          <div className="data-reset-modal-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setShutdownMarket(INITIAL_SHUTDOWN)}
-              disabled={shutdownMarket.busy}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn-shutdown-all"
-              onClick={() => void runShutdown('market')}
-              disabled={shutdownMarket.busy}
-            >
-              {shutdownMarket.busy ? 'Executing…' : 'Confirm'}
-            </button>
-          </div>
+  const marketDialog = (
+    <DraggableModal
+      open={shutdownMarket.open}
+      onBackdropClick={() => {
+        if (!shutdownMarket.busy) setShutdownMarket(INITIAL_SHUTDOWN)
+      }}
+      backdropLocked={shutdownMarket.busy}
+      title="Shut down Market API"
+      titleId="market-shutdown-title"
+      overlayClassName="celery-control-confirm-overlay"
+      footer={
+        <div className="data-reset-modal-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShutdownMarket(INITIAL_SHUTDOWN)}
+            disabled={shutdownMarket.busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-shutdown-all"
+            onClick={() => void runShutdown('market')}
+            disabled={shutdownMarket.busy}
+          >
+            {shutdownMarket.busy ? 'Executing…' : 'Confirm'}
+          </button>
         </div>
-      </div>,
-      document.body,
-    )
+      }
+    >
+      <p>
+        This will terminate the Market FastAPI process (run_server_market.py). Quotes, bars, and watchlist
+        endpoints on this host will be unavailable until you restart the process on the server.
+      </p>
+      {shutdownMarket.error ? (
+        <div className="msg err" role="alert" style={{ marginBottom: '0.75rem' }}>
+          {shutdownMarket.error}
+        </div>
+      ) : null}
+    </DraggableModal>
+  )
 
   const wrapClass = embeddedInSettings
     ? 'settings-page-card massive-api-status-page massive-api-status-page--embedded architecture-apis-page'

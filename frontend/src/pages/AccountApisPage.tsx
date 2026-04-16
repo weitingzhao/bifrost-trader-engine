@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { DraggableModal } from '../components/DraggableModal'
 import {
   fetchHealth,
   fetchPortfolioCapabilities,
@@ -377,93 +377,91 @@ export function AccountApisPage({ embeddedInSettings }: AccountApisPageProps) {
     }
   }
 
-  const tradingDialog =
-    shutdownTrading.open &&
-    createPortal(
-      <div
-        className="data-reset-modal-overlay celery-control-confirm-overlay"
-        onClick={() => !shutdownTrading.busy && setShutdownTrading(INITIAL_SHUTDOWN)}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="account-trading-shutdown-title"
-      >
-        <div className="data-reset-modal" onClick={(e) => e.stopPropagation()}>
-          <h3 id="account-trading-shutdown-title">Shut down Trading API</h3>
-          <p>
-            This will terminate the Trading FastAPI process (run_server_trading.py). Order execution and related
-            endpoints on this host will be unavailable until you restart the process on the server.
-          </p>
-          {shutdownTrading.error ? (
-            <div className="msg err" role="alert" style={{ marginBottom: '0.75rem' }}>
-              {shutdownTrading.error}
-            </div>
-          ) : null}
-          <div className="data-reset-modal-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setShutdownTrading(INITIAL_SHUTDOWN)}
-              disabled={shutdownTrading.busy}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn-shutdown-all"
-              onClick={() => void runShutdown('trading')}
-              disabled={shutdownTrading.busy}
-            >
-              {shutdownTrading.busy ? 'Executing…' : 'Confirm'}
-            </button>
-          </div>
+  const tradingDialog = (
+    <DraggableModal
+      open={shutdownTrading.open}
+      onBackdropClick={() => {
+        if (!shutdownTrading.busy) setShutdownTrading(INITIAL_SHUTDOWN)
+      }}
+      backdropLocked={shutdownTrading.busy}
+      title="Shut down Trading API"
+      titleId="account-trading-shutdown-title"
+      overlayClassName="celery-control-confirm-overlay"
+      footer={
+        <div className="data-reset-modal-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShutdownTrading(INITIAL_SHUTDOWN)}
+            disabled={shutdownTrading.busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-shutdown-all"
+            onClick={() => void runShutdown('trading')}
+            disabled={shutdownTrading.busy}
+          >
+            {shutdownTrading.busy ? 'Executing…' : 'Confirm'}
+          </button>
         </div>
-      </div>,
-      document.body,
-    )
+      }
+    >
+      <p>
+        This will terminate the Trading FastAPI process (run_server_trading.py). Order execution and related
+        endpoints on this host will be unavailable until you restart the process on the server.
+      </p>
+      {shutdownTrading.error ? (
+        <div className="msg err" role="alert" style={{ marginBottom: '0.75rem' }}>
+          {shutdownTrading.error}
+        </div>
+      ) : null}
+    </DraggableModal>
+  )
 
-  const portfolioDialog =
-    shutdownPortfolio.open &&
-    createPortal(
-      <div
-        className="data-reset-modal-overlay celery-control-confirm-overlay"
-        onClick={() => !shutdownPortfolio.busy && setShutdownPortfolio(INITIAL_SHUTDOWN)}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="account-portfolio-shutdown-title"
-      >
-        <div className="data-reset-modal" onClick={(e) => e.stopPropagation()}>
-          <h3 id="account-portfolio-shutdown-title">Shut down Portfolio API</h3>
-          <p>
-            This will terminate the Portfolio FastAPI process (run_server_portfolio.py). Portfolio model and
-            configuration endpoints on this host will be unavailable until you restart the process on the server.
-          </p>
-          {shutdownPortfolio.error ? (
-            <div className="msg err" role="alert" style={{ marginBottom: '0.75rem' }}>
-              {shutdownPortfolio.error}
-            </div>
-          ) : null}
-          <div className="data-reset-modal-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setShutdownPortfolio(INITIAL_SHUTDOWN)}
-              disabled={shutdownPortfolio.busy}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn-shutdown-all"
-              onClick={() => void runShutdown('portfolio')}
-              disabled={shutdownPortfolio.busy}
-            >
-              {shutdownPortfolio.busy ? 'Executing…' : 'Confirm'}
-            </button>
-          </div>
+  const portfolioDialog = (
+    <DraggableModal
+      open={shutdownPortfolio.open}
+      onBackdropClick={() => {
+        if (!shutdownPortfolio.busy) setShutdownPortfolio(INITIAL_SHUTDOWN)
+      }}
+      backdropLocked={shutdownPortfolio.busy}
+      title="Shut down Portfolio API"
+      titleId="account-portfolio-shutdown-title"
+      overlayClassName="celery-control-confirm-overlay"
+      footer={
+        <div className="data-reset-modal-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShutdownPortfolio(INITIAL_SHUTDOWN)}
+            disabled={shutdownPortfolio.busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-shutdown-all"
+            onClick={() => void runShutdown('portfolio')}
+            disabled={shutdownPortfolio.busy}
+          >
+            {shutdownPortfolio.busy ? 'Executing…' : 'Confirm'}
+          </button>
         </div>
-      </div>,
-      document.body,
-    )
+      }
+    >
+      <p>
+        This will terminate the Portfolio FastAPI process (run_server_portfolio.py). Portfolio model and
+        configuration endpoints on this host will be unavailable until you restart the process on the server.
+      </p>
+      {shutdownPortfolio.error ? (
+        <div className="msg err" role="alert" style={{ marginBottom: '0.75rem' }}>
+          {shutdownPortfolio.error}
+        </div>
+      ) : null}
+    </DraggableModal>
+  )
 
   const wrapClass = embeddedInSettings
     ? 'settings-page-card massive-api-status-page massive-api-status-page--embedded architecture-apis-page'
