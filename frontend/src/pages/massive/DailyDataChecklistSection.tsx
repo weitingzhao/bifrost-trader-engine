@@ -98,7 +98,14 @@ function canBackfillDim(dimKey: DimKey, block: MassiveDailyDimBlock | undefined)
   return false
 }
 
-export function DailyDataChecklistSection({ configured }: { configured: boolean }) {
+export function DailyDataChecklistSection({
+  configured,
+  onChecklistRefreshed,
+}: {
+  configured: boolean
+  /** Called after a successful checklist load (initial, Refresh, or after a cell backfill reload). */
+  onChecklistRefreshed?: () => void
+}) {
   const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>([])
   const [tradeDate, setTradeDate] = useState(() => nyCalendarDateIso())
   const [rows, setRows] = useState<Record<string, MassiveDailyChecklistDims>>({})
@@ -136,6 +143,7 @@ export function DailyDataChecklistSection({ configured }: { configured: boolean 
     if (stkSymbols.length === 0) {
       setRows({})
       setResolvedTradeDate(null)
+      onChecklistRefreshed?.()
       return
     }
     setLoading(true)
@@ -150,6 +158,7 @@ export function DailyDataChecklistSection({ configured }: { configured: boolean 
       }
       setRows(res.symbols ?? {})
       setResolvedTradeDate(res.trade_date ?? tradeDate)
+      onChecklistRefreshed?.()
     } catch (e) {
       setLoadErr(e instanceof Error ? e.message : 'Failed to load daily checklist')
       setRows({})
@@ -157,7 +166,7 @@ export function DailyDataChecklistSection({ configured }: { configured: boolean 
     } finally {
       setLoading(false)
     }
-  }, [stkSymbols, tradeDate])
+  }, [stkSymbols, tradeDate, onChecklistRefreshed])
 
   useEffect(() => {
     void loadChecklist()

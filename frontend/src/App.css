@@ -8467,6 +8467,41 @@ th {
   font-size: var(--text-caption);
 }
 
+/* Option Discovery: manual symbol + Apply (no default load until Apply / chip) */
+.od-underlying-manual-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.65rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.od-underlying-manual-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.od-underlying-manual-input {
+  flex: 1 1 140px;
+  min-width: 0;
+  max-width: 12rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.od-underlying-apply-btn {
+  flex-shrink: 0;
+}
+
+.od-underlying-bubbles--below-manual {
+  margin-top: 0.55rem;
+}
+
 /* Underlying: compact horizontal chips (replaces table) */
 .od-underlying-bubbles {
   display: flex;

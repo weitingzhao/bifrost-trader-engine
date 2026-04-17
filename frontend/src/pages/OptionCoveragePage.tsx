@@ -8,6 +8,7 @@ import {
   fetchOptionSnapshotsPg,
   fetchOptionExpirations,
   fetchGreeksCoverage,
+  fetchDbCoverageSummary,
 } from '../api'
 import type {
   MassiveStatusResponse,
@@ -18,12 +19,65 @@ import type {
 import { InfoTooltip } from '../components/InfoTooltip'
 import { DailyDataChecklistSection } from './massive/DailyDataChecklistSection'
 import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
+import { COVERAGE_OVERVIEW_SUBSECTION } from './settings/settingsConstants'
 
 interface OptionCoveragePageProps {
   status: StatusResponse | null
 }
 
+function OptionCoverageDbSummaryInline({ refreshKey }: { refreshKey: number }) {
+  const [line, setLine] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setLine(null)
+    void fetchDbCoverageSummary()
+      .then(res => {
+        if (cancelled) return
+        setLoading(false)
+        if (!res.ok) {
+          setLine(res.error ?? 'Could not load DB summary')
+          return
+        }
+        const parts = (res.tables ?? [])
+          .filter(t => !t.error)
+          .map(t => `${t.table_name} ${t.distinct_symbols ?? '—'}`)
+        setLine(parts.length > 0 ? parts.join(' · ') : 'No tables returned')
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoading(false)
+          setLine('Could not load DB summary')
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [refreshKey])
+
+  if (loading && line == null) {
+    return (
+      <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)' }}>
+        Loading PostgreSQL coverage snapshot…
+      </p>
+    )
+  }
+  if (!line) return null
+  return (
+    <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)', lineHeight: 1.5 }}>
+      <strong style={{ color: 'var(--color-text-muted)' }}>DB snapshot:</strong> {line}
+    </p>
+  )
+}
+
 export function OptionCoveragePage(_props: OptionCoveragePageProps) {
+  const [dbSummaryRefreshKey, setDbSummaryRefreshKey] = useState(0)
+  const onDailyChecklistRefreshed = useCallback(() => {
+    setDbSummaryRefreshKey(k => k + 1)
+  }, [])
+
   const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
   const [, setJobs] = useState<MassiveJobApiRow[]>([])
 
@@ -286,7 +340,26 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
         <InfoTooltip text="Daily option pipeline status, then Greeks/IV and coverage metrics from Massive snapshot endpoints. Massive data is delayed (~15 minutes). Chain snapshots persist to PostgreSQL; contract and unified return data without writing." />
       </h2>
 
-      <DailyDataChecklistSection configured={Boolean(configured)} />
+      <section className="replay-section" aria-labelledby="option-coverage-pipeline-head">
+        <h3 id="option-coverage-pipeline-head" className="page-title-with-tooltip">
+          Research tables (PostgreSQL)
+          <InfoTooltip text="Distinct symbol counts and freshness for option research and shared stock_day. Full table with domains is on Data Overview." />
+        </h3>
+        <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)', maxWidth: '52rem', lineHeight: 1.5 }}>
+          Screener and Greeks tooling read option_contracts, option_snapshots, report_option_atm_iv_daily, and stock_day. Refresh Daily Data Status below to reload the snapshot line after sync jobs.
+        </p>
+        <OptionCoverageDbSummaryInline refreshKey={dbSummaryRefreshKey} />
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          style={{ marginBottom: 'var(--space-3)' }}
+          onClick={() => { window.location.hash = `#${COVERAGE_OVERVIEW_SUBSECTION.id}` }}
+        >
+          Open Data Overview
+        </button>
+      </section>
+
+      <DailyDataChecklistSection configured={Boolean(configured)} onChecklistRefreshed={onDailyChecklistRefreshed} />
 
       <section className="replay-section" aria-labelledby="option-coverage-greeks-head">
         <h3 id="option-coverage-greeks-head" className="page-title-with-tooltip">

@@ -50,6 +50,7 @@ import { isMassiveStockFeedHash } from './pages/massive/feedMassiveStockTabUtils
 import { SettingsSidebarLampGlyph } from './pages/settings/settingsSidebarLampGlyphs'
 import type { SettingsSidebarLampGlyphId } from './pages/settings/settingsSidebarLampGlyphs'
 import {
+  COVERAGE_OVERVIEW_SUBSECTION,
   COVERAGE_OPTION_SUBSECTION,
   COVERAGE_STOCK_GROUP_LABEL,
   COVERAGE_STOCK_SUBSECTIONS,
@@ -317,6 +318,10 @@ function isSocketSettingsHash(hash: string): boolean {
 function isCelerySettingsHash(hash: string): boolean {
   const h = settingsHashKey(hash)
   return h === 'settings-celery' || h === 'settings-system-celery' || h === 'settings-dashboard-celery'
+}
+
+function isCoverageOverviewHash(hash: string): boolean {
+  return settingsHashKey(hash) === COVERAGE_OVERVIEW_SUBSECTION.id
 }
 
 function isCoverageOptionHash(hash: string): boolean {
@@ -1486,6 +1491,16 @@ export default function App() {
               <button
                 type="button"
                 role="menuitem"
+                className={`app-header-menu-item ${activeTab === 'settings' && isCoverageOverviewHash(urlHash) ? 'active' : ''}`}
+                onClick={() => { openSettingsSectionById(COVERAGE_OVERVIEW_SUBSECTION.id); setHeaderMenuOpen(false) }}
+                title={`Settings → Data Coverage → ${COVERAGE_OVERVIEW_SUBSECTION.label}`}
+              >
+                <SettingsSectionIcon name={COVERAGE_OVERVIEW_SUBSECTION.icon} />
+                {COVERAGE_OVERVIEW_SUBSECTION.label}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
                 className={`app-header-menu-item ${activeTab === 'settings' && isCoverageOptionHash(urlHash) ? 'active' : ''}`}
                 onClick={() => { openSettingsSectionById(COVERAGE_OPTION_SUBSECTION.id); setHeaderMenuOpen(false) }}
                 title={`Settings → Data Coverage → ${COVERAGE_OPTION_SUBSECTION.label}`}
@@ -1743,13 +1758,9 @@ export default function App() {
         <OptionScreenerPage
           status={status}
           onGoToScreener={() => setResearchView('screener')}
-          onOpenMassiveFeed={() => {
+          onOpenOptionCoverage={() => {
             setActiveTab('settings')
-            window.location.hash = `#${FEED_MASSIVE_OPTION_ID}`
-          }}
-          onOpenMassiveDelay={() => {
-            setActiveTab('settings')
-            window.location.hash = '#coverage-massive-stock'
+            window.location.hash = `#${COVERAGE_OVERVIEW_SUBSECTION.id}`
           }}
           breadcrumbLabel="Screener"
         />

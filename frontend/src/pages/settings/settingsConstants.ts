@@ -23,6 +23,13 @@ export const CONFIG_SECTIONS = [
   { id: 'settings-holidays', label: 'US market holidays', icon: 'calendar' as const },
 ] as const
 
+/** Data Coverage → Overview (PostgreSQL summary). */
+export const COVERAGE_OVERVIEW_SUBSECTION = {
+  id: 'coverage-overview' as const,
+  label: 'Overview' as const,
+  icon: 'coverage-overview' as const,
+}
+
 /** Data Coverage → Option (top-level). */
 export const COVERAGE_OPTION_SUBSECTION = {
   id: 'coverage-option' as const,

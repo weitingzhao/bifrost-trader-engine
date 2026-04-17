@@ -17,6 +17,7 @@ _project_root = _here.parent.parent  # src/massive -> project root
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
+from src.persistence.postgres.stock_ohlc_massive import timespan_to_stock_period
 from src.workers.celery_app import app  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -1069,9 +1070,11 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 if payload.get("order"):
                     chain_kwargs["order"] = str(payload["order"])
 
-                snap = client.fetch_options_snapshot(u, **chain_kwargs)
-                if snap.get("error"):
-                    raise RuntimeError(str(snap.get("error")))
+                pg = client.fetch_options_snapshot_all_pages(u, **chain_kwargs)
+                if pg.get("error"):
+                    raise RuntimeError(str(pg.get("error")))
+                snap = {"results": pg.get("results") or []}
+                pages_fetched = int(pg.get("pages") or 0)
                 count = _apply_snapshot(conn, u, snap)
                 conn.commit()
                 if count > 0:
@@ -1105,6 +1108,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 rows_with_iv = 0
                 rows_with_any_greeks = 0
                 rows_with_full_greeks = 0
+                merged_count = len(raw_results)
                 for _item in raw_results:
                     if not isinstance(_item, dict):
                         continue
@@ -1124,12 +1128,14 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     "rows_written": count,
                     "massive_request_id": snap.get("request_id"),
                     "massive_status": snap.get("status"),
-                    "next_url": snap.get("next_url"),
+                    "next_url": None,
                     "summary": {
                         "underlying": u,
-                        "results_count": len(raw_results),
+                        "results_count": merged_count,
+                        "merged_results_count": merged_count,
+                        "pages": pages_fetched,
                         "rows_written": count,
-                        "has_next_page": bool(snap.get("next_url")),
+                        "has_next_page": bool(pg.get("truncated")),
                         "filters": dict(chain_kwargs) if chain_kwargs else {},
                         "rows_with_iv": rows_with_iv,
                         "rows_with_any_greeks": rows_with_any_greeks,
@@ -1581,8 +1587,6 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 exp = (payload.get("expiry") or "").strip()
                 strike = float(payload.get("strike") or 0)
                 opt_right = (payload.get("option_right") or "C").strip()
-                period_map = {"minute": "1 min", "second": "1 sec", "hour": "1 hour"}
-                period = period_map.get(ts, "1 min")
                 if not start_ms or not end_ms:
                     raise ValueError("start_ms and end_ms required")
                 ts_norm = ts.lower()
@@ -1593,6 +1597,8 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                         raise RuntimeError(str(aggs.get("error")))
                     count = _apply_option_day_aggs(conn, sym, exp, strike, opt_right, aggs)
                 else:
+                    # Align option_min.period with Massive multiplier (e.g. 5 + minute → "5 mins", not "1 min").
+                    period = timespan_to_stock_period(ts, mult)
                     aggs = client.fetch_option_aggs(ot, mult, ts, start_ms, end_ms)
                     if aggs.get("error"):
                         raise RuntimeError(str(aggs.get("error")))

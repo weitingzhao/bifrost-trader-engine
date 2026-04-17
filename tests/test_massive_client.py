@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+import json
+from unittest.mock import MagicMock, patch
 
 from src.vendor.massive.client import MassiveClient
 
@@ -136,3 +137,30 @@ class TestFetchStockAggs:
         ):
             out = _client().fetch_stock_aggs("I:DJI", 1, "day", 1_000, 2_000)
         assert out.get("error")
+
+
+class TestFetchOptionsSnapshotAllPages:
+    """Chain snapshot pagination merges all pages (Option Discovery worker)."""
+
+    @patch("src.vendor.massive.client.time.sleep", lambda *_a, **_k: None)
+    @patch("src.vendor.massive.client.urlopen")
+    def test_merges_second_page(self, mock_urlopen: MagicMock) -> None:
+        page2 = {"results": [{"details": {"ticker": "O:SECOND"}}], "next_url": None}
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(page2).encode()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        page1 = {
+            "results": [{"details": {"ticker": "O:FIRST"}}],
+            "next_url": "https://api.polygon.io/v3/snapshot/options/NVDA?cursor=x",
+            "status": "OK",
+        }
+        with patch.object(MassiveClient, "_get", return_value=(200, page1)):
+            out = _client().fetch_options_snapshot_all_pages("NVDA", expiration_date="2026-04-22")
+
+        assert not out.get("error")
+        assert out.get("pages") == 2
+        assert len(out["results"]) == 2
+        assert out["results"][0]["details"]["ticker"] == "O:FIRST"
+        assert out["results"][1]["details"]["ticker"] == "O:SECOND"

@@ -108,6 +108,9 @@ export function OptionDiscoveryContractChartPanel({
       } else if (period === '1 hour') {
         timespan = 'hour'
         multiplier = 1
+      } else if (period === '5 mins') {
+        timespan = 'minute'
+        multiplier = 5
       } else {
         timespan = 'minute'
         multiplier = 1
@@ -133,8 +136,8 @@ export function OptionDiscoveryContractChartPanel({
         return
       }
       if (period === '5 mins') {
-        setSyncHint('Backfill wrote 1-minute bars. Chart period set to 1 min to match.')
-        setPeriod('1 min')
+        setSyncHint('Backfill wrote 5-minute bars (option_min, period=5 mins). Reloading bars from PostgreSQL.')
+        await load()
       } else {
         setSyncHint(isDaily ? 'Daily backfill finished (option_day, ~2y window). Reloading bars from PostgreSQL.' : 'Backfill finished. Reloading bars from PostgreSQL.')
         await load()

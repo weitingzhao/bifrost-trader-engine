@@ -137,6 +137,8 @@ export {
   fetchLiquiditySummary,
   fetchRelativeValue,
   fetchMassiveDailyChecklist,
+  fetchDbCoverageSummary,
+  fetchWatchlistDbCoverage,
   fetchMaxPainCompute,
   fetchMaxPainComputeHistory,
   fetchIvTermStructure,
@@ -173,6 +175,11 @@ export type {
   LiquiditySummaryResponse,
   RelativeValueResponse,
   OptionSnapshotsPgResult,
+  DbCoverageSummaryRow,
+  DbCoverageSummaryResponse,
+  WatchlistDbCoverageOptionContracts,
+  WatchlistDbCoverageSymbolRow,
+  WatchlistDbCoverageResponse,
 } from './research/research'
 export {
   fetchTradingCapabilities,

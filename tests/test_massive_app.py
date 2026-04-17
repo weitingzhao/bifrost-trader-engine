@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 
 from starlette.testclient import TestClient
 
@@ -94,6 +95,62 @@ class TestMassiveHealth:
         body = r.json()
         assert body.get("ok") is False
         assert "PostgreSQL" in str(body.get("error", ""))
+
+    def test_db_coverage_summary_requires_postgres(self):
+        client = _make_client()
+        r = client.get("/research/massive/db-coverage-summary")
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is False
+        assert "PostgreSQL" in str(body.get("error", ""))
+
+    def test_watchlist_db_coverage_requires_postgres(self):
+        client = _make_client()
+        r = client.get("/research/massive/watchlist-db-coverage")
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is False
+        assert "PostgreSQL" in str(body.get("error", ""))
+
+    @patch("psycopg2.connect")
+    @patch("src.vendor.massive.reader.get_watchlist_optionable_stk_symbols", return_value=["NVDA"])
+    @patch("src.persistence.postgres.connection._get_conn_params", return_value={})
+    @patch("backend.massive.routers.routes._db_config", return_value={"host": "h", "database": "d"})
+    def test_watchlist_db_coverage_option_contracts_json_shape(self, _mock_db, _gp, _syms, mock_connect):
+        """When PostgreSQL returns aggregates, option_contracts includes coverage + age fields."""
+        newest = datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+        cur = MagicMock()
+        cur.fetchall.side_effect = [
+            [("NVDA", 100, newest, 90, 80, 2, 4, 12)],
+            [("NVDA", newest)],
+            [("NVDA", newest.date(), newest)],
+            [("NVDA", newest, newest)],
+        ]
+        cursor_cm = MagicMock()
+        cursor_cm.__enter__.return_value = cur
+        cursor_cm.__exit__.return_value = None
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor_cm
+        mock_connect.return_value = mock_conn
+
+        client = _make_client()
+        r = client.get("/research/massive/watchlist-db-coverage")
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is True
+        syms = body.get("symbols") or []
+        assert len(syms) == 1
+        oc = syms[0]["option_contracts"]
+        assert oc["has_data"] is True
+        assert oc["row_count"] == 100
+        assert oc["ticker_pct"] == 90.0
+        assert oc["identity_pct"] == 80.0
+        assert oc["mapping_mismatch_count"] == 2
+        assert oc["distinct_expirations"] == 4
+        assert oc["distinct_strikes"] == 12
+        assert oc["newest_created_at"] is not None
+        assert oc["contracts_last_at"] == oc["newest_created_at"]
+        assert isinstance(oc.get("age_seconds"), int)
 
 
 class TestMassiveDocs:

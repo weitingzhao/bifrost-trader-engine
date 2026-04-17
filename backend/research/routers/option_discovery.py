@@ -45,6 +45,55 @@ MAX_OPTION_SNAPSHOT_CONTRACTS = 20
 MAX_OPTION_SNAPSHOT_CONTRACTS_EXTENDED = 60  # when frontend sends many strikes (e.g. 30)
 
 
+def _mark_from_snapshot_row(row: Dict[str, Any]) -> Optional[float]:
+    """Display premium: mid, else (bid+ask)/2, else last, else day_close (matches UI effectiveQuotePremium)."""
+    mid = row.get("mid")
+    if mid is not None:
+        try:
+            m = float(mid)
+            if math.isfinite(m) and m >= 0:
+                return m
+        except (TypeError, ValueError):
+            pass
+    bid, ask = row.get("bid"), row.get("ask")
+    if bid is not None and ask is not None:
+        try:
+            b, a = float(bid), float(ask)
+            if math.isfinite(b) and math.isfinite(a):
+                return (b + a) / 2.0
+        except (TypeError, ValueError):
+            pass
+    last = row.get("last")
+    if last is not None:
+        try:
+            l = float(last)
+            if math.isfinite(l) and l >= 0:
+                return l
+        except (TypeError, ValueError):
+            pass
+    day_close = row.get("day_close")
+    if day_close is not None:
+        try:
+            d = float(day_close)
+            if math.isfinite(d) and d >= 0:
+                return d
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def _snapshot_ts_iso(row: Dict[str, Any]) -> Optional[str]:
+    """Serialize snapshot_ts for JSON (ISO 8601)."""
+    ts = row.get("snapshot_ts")
+    if ts is None:
+        return None
+    if isinstance(ts, datetime):
+        if ts.tzinfo is None:
+            return ts.replace(tzinfo=timezone.utc).isoformat()
+        return ts.isoformat()
+    return str(ts)
+
+
 def _db_config(request: Request) -> Optional[dict]:
     return request.app.state.control_via_db or getattr(request.app.state, "status_cfg_for_read", None)
 
@@ -461,6 +510,8 @@ def get_option_snapshots_pg(
             {
                 "strike": strike,
                 "right": right,
+                "snapshot_ts": _snapshot_ts_iso(row),
+                "mark": _mark_from_snapshot_row(row),
                 "bid": row.get("bid"),
                 "ask": row.get("ask"),
                 "last": row.get("last"),

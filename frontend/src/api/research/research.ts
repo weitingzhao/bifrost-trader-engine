@@ -102,6 +102,13 @@ export async function fetchOptionExpirations(
 export interface OptionSnapshotRow {
   strike: number
   right: string
+  /** Latest snapshot row timestamp from PostgreSQL (ISO 8601) */
+  snapshot_ts?: string | null
+  /**
+   * Display premium from API: mid, else (bid+ask)/2, else last, else day_close.
+   * Aligns with chain mid cell fallback when NBBO is absent.
+   */
+  mark?: number | null
   bid: number | null
   ask: number | null
   last: number | null
@@ -493,6 +500,93 @@ export async function fetchMassiveDailyChecklist(params: {
     trade_date: typeof j.trade_date === 'string' ? j.trade_date : undefined,
     symbols: symMap,
   }
+}
+
+/** Row from GET /research/massive/db-coverage-summary */
+export interface DbCoverageSummaryRow {
+  id: string
+  table_name: string
+  dataset_label: string
+  domain: string
+  drill_down_hash: string
+  distinct_symbols: number | null
+  newest_activity: string | null
+  newest_trade_date?: string | null
+  error?: string | null
+}
+
+export interface DbCoverageSummaryResponse {
+  ok: boolean
+  error?: string
+  generated_at?: string
+  tables?: DbCoverageSummaryRow[]
+}
+
+export async function fetchDbCoverageSummary(): Promise<DbCoverageSummaryResponse> {
+  const r = await fetch(massiveUrl('/research/massive/db-coverage-summary'))
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}`,
+    }
+  }
+  return j as DbCoverageSummaryResponse
+}
+
+/** GET /research/massive/watchlist-db-coverage — per-symbol rows for optionable STK watchlist (max 80). */
+export interface WatchlistDbCoverageOptionContracts {
+  has_data: boolean
+  /** Row count in option_contracts for this symbol; null when has_data is false. */
+  row_count: number | null
+  /** Max(created_at) ISO; last row write time (not a dedicated sync-job timestamp). */
+  newest_created_at: string | null
+  age_seconds: number | null
+  ticker_pct: number | null
+  identity_pct: number | null
+  mapping_mismatch_count: number | null
+  distinct_expirations: number | null
+  distinct_strikes: number | null
+  /** Same as newest_created_at; kept for backward compatibility. */
+  contracts_last_at: string | null
+}
+
+export interface WatchlistDbCoverageSymbolRow {
+  symbol: string
+  option_contracts: WatchlistDbCoverageOptionContracts
+  option_snapshots: { has_data: boolean; snapshots_last_ts: string | null }
+  report_option_atm_iv_daily: {
+    has_data: boolean
+    atm_iv_last_trade_date: string | null
+    atm_iv_last_created_at: string | null
+  }
+  stock_day: {
+    has_data: boolean
+    stock_day_last_bar: string | null
+    stock_day_last_created_at: string | null
+  }
+}
+
+export interface WatchlistDbCoverageResponse {
+  ok: boolean
+  error?: string
+  generated_at?: string
+  universe?: string
+  symbols_count?: number
+  symbols?: WatchlistDbCoverageSymbolRow[]
+  message?: string
+}
+
+export async function fetchWatchlistDbCoverage(): Promise<WatchlistDbCoverageResponse> {
+  const r = await fetch(massiveUrl('/research/massive/watchlist-db-coverage'))
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}`,
+    }
+  }
+  return j as WatchlistDbCoverageResponse
 }
 
 /** Live Max Pain from EOD OI (GET /research/max-pain/compute) — not persisted. */
@@ -923,6 +1017,8 @@ export async function fetchOptionSnapshotsPg(
     ? j.rows.map((row: Record<string, unknown>) => ({
         strike: Number(row.strike),
         right: String(row.right ?? ''),
+        snapshot_ts: typeof row.snapshot_ts === 'string' ? row.snapshot_ts : null,
+        mark: row.mark != null && Number.isFinite(Number(row.mark)) ? Number(row.mark) : null,
         bid: row.bid != null && Number.isFinite(Number(row.bid)) ? Number(row.bid) : null,
         ask: row.ask != null && Number.isFinite(Number(row.ask)) ? Number(row.ask) : null,
         last: row.last != null && Number.isFinite(Number(row.last)) ? Number(row.last) : null,

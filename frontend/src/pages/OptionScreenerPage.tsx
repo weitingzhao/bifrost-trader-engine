@@ -13,8 +13,8 @@ import { SCREENER_STRUCTURE_TYPES } from './strategy/strategyFormUtils'
 interface OptionScreenerPageProps {
   status?: StatusResponse | null
   onGoToScreener?: () => void
-  onOpenMassiveFeed?: () => void
-  onOpenMassiveDelay?: () => void
+  /** Opens Settings → Data Coverage → Option (Screener data pipeline tables). */
+  onOpenOptionCoverage?: () => void
   breadcrumbLabel?: string
 }
 
@@ -123,107 +123,29 @@ function scoreBar(score: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// DataSourcesPanel
+// Data pipeline summary (details live under Settings → Data Coverage → Option)
 // ---------------------------------------------------------------------------
 
-interface DataSourcesPanelProps {
-  result: ScreenerResponse | null
-  onOpenMassiveFeed?: () => void
-  onOpenMassiveDelay?: () => void
-}
-
-function DataSourcesPanel({ result, onOpenMassiveFeed, onOpenMassiveDelay }: DataSourcesPanelProps) {
-  const hasWarnings = result != null && Object.keys(result.warnings).length > 0
-  const [open, setOpen] = useState(true)
-
-  // Auto-expand when warnings appear
-  useEffect(() => {
-    if (hasWarnings) setOpen(true)
-  }, [hasWarnings])
-
-  const btnStyle = (active: boolean): React.CSSProperties => ({
-    padding: '3px 10px', borderRadius: 4, fontSize: 11, cursor: 'pointer', border: 'none',
-    background: active ? '#3b82f6' : 'rgba(255,255,255,0.08)',
-    color: active ? '#fff' : '#a0aec0',
-    fontWeight: active ? 600 : 400,
-    whiteSpace: 'nowrap' as const,
-  })
-
-  const rows: { icon: string; table: string; desc: string; action?: () => void; actionLabel?: string; isAuto?: boolean }[] = [
-    {
-      icon: '⚡', table: 'option_contracts', desc: '到期日列表',
-      action: onOpenMassiveFeed, actionLabel: 'Feed / Massive / Option',
-    },
-    {
-      icon: '⚡', table: 'option_snapshots', desc: '报价快照（bid/ask/iv/delta）',
-      action: onOpenMassiveFeed, actionLabel: 'Feed / Massive / Option',
-    },
-    {
-      icon: '○', table: 'report_atm_iv_daily', desc: 'IV 历史百分位',
-      isAuto: true,
-    },
-    {
-      icon: '⚡', table: 'stock_day', desc: '现货价格',
-      action: onOpenMassiveDelay, actionLabel: 'Coverage / Massive Delay',
-    },
-  ]
-
+function ScreenerPipelineSummary({ onOpenOptionCoverage }: { onOpenOptionCoverage?: () => void }) {
   return (
     <div style={{
       border: '1px solid var(--color-border, #2a3040)',
-      borderRadius: 8, marginBottom: 18, overflow: 'hidden',
+      borderRadius: 8, marginBottom: 18, padding: '14px 18px',
       background: 'var(--color-surface2, #252d3b)',
     }}>
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-          padding: '9px 16px', background: 'none', border: 'none',
-          cursor: 'pointer', color: 'inherit', textAlign: 'left',
-        }}
-      >
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#a0aec0', letterSpacing: 0.5 }}>
-          DATA SOURCES
-        </span>
-        {hasWarnings && (
-          <span style={{
-            background: 'rgba(245,158,11,0.2)', border: '1px solid rgba(245,158,11,0.4)',
-            borderRadius: 4, padding: '1px 7px', fontSize: 11, color: '#fcd34d',
-          }}>
-            {Object.keys(result!.warnings).length} warning{Object.keys(result!.warnings).length !== 1 ? 's' : ''}
-          </span>
-        )}
-        <span style={{ marginLeft: 'auto', fontSize: 13, color: '#4a5568' }}>{open ? '▲' : '▼'}</span>
-      </button>
-
-      {open && (
-        <div style={{ borderTop: '1px solid var(--color-border, #2a3040)', padding: '10px 16px' }}>
-          {rows.map(row => (
-            <div key={row.table} style={{
-              display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0',
-              borderBottom: '1px solid rgba(255,255,255,0.04)',
-            }}>
-              <span style={{ fontSize: 14, minWidth: 18, textAlign: 'center' }}>{row.icon}</span>
-              <code style={{ fontSize: 12, color: '#93c5fd', minWidth: 200 }}>{row.table}</code>
-              <span style={{ fontSize: 12, color: '#718096', flex: 1 }}>{row.desc}</span>
-              {row.isAuto ? (
-                <span style={{ fontSize: 11, color: '#4a5568', fontStyle: 'italic' }}>
-                  ⓘ Celery 自动
-                </span>
-              ) : row.action ? (
-                <button
-                  type="button"
-                  onClick={row.action}
-                  style={btnStyle(hasWarnings)}
-                >
-                  → {row.actionLabel}
-                </button>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      )}
+      <div style={{ fontSize: 12, fontWeight: 600, color: '#a0aec0', letterSpacing: 0.5, marginBottom: 8 }}>
+        DATA PIPELINE
+      </div>
+      <p style={{ fontSize: 13, color: '#cbd5e0', lineHeight: 1.55, margin: '0 0 12px' }}>
+        Scores use PostgreSQL rows from Massive option sync and stock OHLC, plus derived daily ATM IV for percentiles. See{' '}
+        <strong style={{ color: '#e2e8f0' }}>Settings → Data Coverage → Overview</strong>
+        {' '}for coverage metrics and detail links.
+      </p>
+      {onOpenOptionCoverage ? (
+        <button type="button" className="btn btn-secondary btn-sm" onClick={onOpenOptionCoverage}>
+          View data pipeline & tables
+        </button>
+      ) : null}
     </div>
   )
 }
@@ -723,8 +645,7 @@ function FilterRow({ enabled, onToggle, label, children }: FilterRowProps) {
 
 export function OptionScreenerPage({
   onGoToScreener,
-  onOpenMassiveFeed,
-  onOpenMassiveDelay,
+  onOpenOptionCoverage,
   breadcrumbLabel = 'Screener',
 }: OptionScreenerPageProps) {
   const [filters, setFilters] = useState<ScreenerFilters>(loadFilters)
@@ -830,17 +751,10 @@ export function OptionScreenerPage({
         )}
       </h2>
       <p className="section-hint" style={{ marginBottom: 16 }}>
-        Screen option contracts by strategy structure and scoring criteria. Data from Massive sync (option_snapshots + report_option_atm_iv_daily).
+        Screen option contracts by strategy structure and scoring criteria (V1: cash-secured puts).
       </p>
 
-      {/* ----------------------------------------------------------------- */}
-      {/* Data Sources Panel                                                 */}
-      {/* ----------------------------------------------------------------- */}
-      <DataSourcesPanel
-        result={result}
-        onOpenMassiveFeed={onOpenMassiveFeed}
-        onOpenMassiveDelay={onOpenMassiveDelay}
-      />
+      <ScreenerPipelineSummary onOpenOptionCoverage={onOpenOptionCoverage} />
 
       {/* ----------------------------------------------------------------- */}
       {/* Filter Panel                                                       */}
@@ -1078,32 +992,55 @@ export function OptionScreenerPage({
       {/* ----------------------------------------------------------------- */}
       {/* Results summary                                                    */}
       {/* ----------------------------------------------------------------- */}
-      {result && result.ok && (
+      {result && result.ok && (() => {
+        const warnings = result.warnings ?? {}
+        const scanned = result.symbols_scanned?.length ?? 0
+        const failed = result.symbols_failed?.length ?? 0
+        const withMatches = result.groups.length
+        const totalC = result.total_contracts ?? 0
+        return (
         <>
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+            display: 'flex', flexDirection: 'column', gap: 8,
             marginBottom: 16,
           }}>
-            <span style={{ fontSize: 13, color: '#a0aec0' }}>
-              {result.total_contracts} contract{result.total_contracts !== 1 ? 's' : ''}
-              {' across '}
-              {result.groups.length} symbol{result.groups.length !== 1 ? 's' : ''}
-              {result.groups.length > 0 && (
-                <> · best score <strong style={{ color: '#e2e8f0' }}>{result.groups[0].best_score.toFixed(1)}</strong></>
-              )}
-            </span>
-            <span style={{ color: '#4a5568', fontSize: 12 }}>
-              {result.scan_ts}
-            </span>
+            {scanned > 0 && (
+              <span style={{ fontSize: 12, color: '#718096' }}>
+                Scan: {scanned} symbol{scanned !== 1 ? 's' : ''} requested
+                {withMatches > 0 ? ` · ${withMatches} with matching contracts` : ''}
+                {failed > 0 ? ` · ${failed} with no qualifying row` : ''}
+                {onOpenOptionCoverage && failed > 0 ? (
+                  <>
+                    {' '}
+                    <button type="button" className="page-title-breadcrumb-link" style={{ fontSize: 12, padding: 0, verticalAlign: 'baseline' }} onClick={onOpenOptionCoverage}>
+                      Check data coverage
+                    </button>
+                  </>
+                ) : null}
+              </span>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, color: '#a0aec0' }}>
+                {totalC} contract{totalC !== 1 ? 's' : ''}
+                {' across '}
+                {withMatches} symbol{withMatches !== 1 ? 's' : ''}
+                {withMatches > 0 && (
+                  <> · best score <strong style={{ color: '#e2e8f0' }}>{result.groups[0].best_score.toFixed(1)}</strong></>
+                )}
+              </span>
+              {result.scan_ts ? (
+                <span style={{ color: '#4a5568', fontSize: 12 }}>{result.scan_ts}</span>
+              ) : null}
+            </div>
           </div>
 
           {/* Warnings */}
-          {Object.keys(result.warnings).length > 0 && (
+          {Object.keys(warnings).length > 0 && (
             <div style={{
               background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)',
               borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 12,
             }}>
-              {Object.entries(result.warnings).map(([sym, msg]) => (
+              {Object.entries(warnings).map(([sym, msg]) => (
                 <div key={sym} style={{ color: '#fcd34d' }}>
                   <strong>{sym}:</strong> {msg}
                 </div>
@@ -1127,7 +1064,8 @@ export function OptionScreenerPage({
             />
           ))}
         </>
-      )}
+        )
+      })()}
 
       {/* ----------------------------------------------------------------- */}
       {/* Save Modal                                                         */}

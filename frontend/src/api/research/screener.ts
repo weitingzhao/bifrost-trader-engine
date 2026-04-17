@@ -57,13 +57,13 @@ export interface ScreenerSymbolGroup {
 export interface ScreenerResponse {
   ok: boolean
   error?: string
-  structure_type: string
+  structure_type?: string
   groups: ScreenerSymbolGroup[]
-  total_contracts: number
-  symbols_scanned: string[]
-  symbols_failed: string[]
-  warnings: Record<string, string>
-  scan_ts: string
+  total_contracts?: number
+  symbols_scanned?: string[]
+  symbols_failed?: string[]
+  warnings?: Record<string, string>
+  scan_ts?: string
 }
 
 export async function runScreener(filters: ScreenerFilters): Promise<ScreenerResponse> {

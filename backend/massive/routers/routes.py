@@ -367,6 +367,378 @@ def get_massive_contracts_coverage(
         return {"ok": False, "error": str(exc)}
 
 
+@router.get("/research/massive/db-coverage-summary")
+def get_db_coverage_summary(request: Request) -> Dict[str, Any]:
+    """Aggregated PostgreSQL coverage: distinct underlyings and freshness per research table."""
+    from datetime import date, datetime, timezone
+
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+
+    def _iso(dt: Any) -> Optional[str]:
+        if dt is None:
+            return None
+        if isinstance(dt, datetime):
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc).isoformat()
+            return dt.isoformat()
+        if isinstance(dt, date):
+            return dt.isoformat()
+        return str(dt)
+
+    def _append_table(
+        rows_out: List[Dict[str, Any]],
+        *,
+        id_: str,
+        table_name: str,
+        dataset_label: str,
+        domain: str,
+        drill_down_hash: str,
+        cur: Any,
+        sql: str,
+        args: Optional[tuple] = None,
+    ) -> None:
+        try:
+            cur.execute(sql, args or ())
+            one = cur.fetchone()
+            if not one:
+                rows_out.append(
+                    {
+                        "id": id_,
+                        "table_name": table_name,
+                        "dataset_label": dataset_label,
+                        "domain": domain,
+                        "drill_down_hash": drill_down_hash,
+                        "distinct_symbols": 0,
+                        "newest_activity": None,
+                        "newest_trade_date": None,
+                        "error": None,
+                    }
+                )
+                return
+            distinct = int(one[0] or 0)
+            newest = one[1] if len(one) > 1 else None
+            newest_trade = one[2] if len(one) > 2 else None
+            rows_out.append(
+                {
+                    "id": id_,
+                    "table_name": table_name,
+                    "dataset_label": dataset_label,
+                    "domain": domain,
+                    "drill_down_hash": drill_down_hash,
+                    "distinct_symbols": distinct,
+                    "newest_activity": _iso(newest),
+                    "newest_trade_date": _iso(newest_trade) if newest_trade is not None else None,
+                    "error": None,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 — return per-table error for admin UI
+            rows_out.append(
+                {
+                    "id": id_,
+                    "table_name": table_name,
+                    "dataset_label": dataset_label,
+                    "domain": domain,
+                    "drill_down_hash": drill_down_hash,
+                    "distinct_symbols": None,
+                    "newest_activity": None,
+                    "newest_trade_date": None,
+                    "error": str(exc),
+                }
+            )
+
+    tables: List[Dict[str, Any]] = []
+    try:
+        params = _get_conn_params(db)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                _append_table(
+                    tables,
+                    id_="option_contracts",
+                    table_name="option_contracts",
+                    dataset_label="Option contract reference",
+                    domain="Option",
+                    drill_down_hash="coverage-option",
+                    cur=cur,
+                    sql="""
+                        SELECT COUNT(DISTINCT UPPER(TRIM(symbol)))::bigint,
+                               MAX(created_at),
+                               NULL::date
+                        FROM option_contracts
+                        """,
+                )
+                _append_table(
+                    tables,
+                    id_="option_snapshots",
+                    table_name="option_snapshots",
+                    dataset_label="Option snapshots (greeks / IV)",
+                    domain="Option",
+                    drill_down_hash="coverage-option",
+                    cur=cur,
+                    sql="""
+                        SELECT COUNT(DISTINCT UPPER(TRIM(split_part(contract_key, '|', 1))))::bigint,
+                               MAX(snapshot_ts),
+                               NULL::date
+                        FROM option_snapshots
+                        WHERE position('|' IN contract_key) > 0
+                        """,
+                )
+                _append_table(
+                    tables,
+                    id_="report_option_atm_iv_daily",
+                    table_name="report_option_atm_iv_daily",
+                    dataset_label="ATM IV daily rollup",
+                    domain="Option",
+                    drill_down_hash="coverage-option",
+                    cur=cur,
+                    sql="""
+                        SELECT COUNT(DISTINCT UPPER(TRIM(symbol)))::bigint,
+                               MAX(created_at),
+                               MAX(trade_date)
+                        FROM report_option_atm_iv_daily
+                        """,
+                )
+                _append_table(
+                    tables,
+                    id_="stock_day",
+                    table_name="stock_day",
+                    dataset_label="Stock daily bars (underlying spot)",
+                    domain="Shared",
+                    drill_down_hash="coverage-massive-stock",
+                    cur=cur,
+                    sql="""
+                        SELECT COUNT(DISTINCT UPPER(TRIM(symbol)))::bigint,
+                               MAX(created_at),
+                               MAX(bar_time)
+                        FROM stock_day
+                        """,
+                )
+        finally:
+            conn.close()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+    return {
+        "ok": True,
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "tables": tables,
+    }
+
+
+@router.get("/research/massive/watchlist-db-coverage")
+def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
+    """Per-symbol PostgreSQL coverage for watchlist STK rows with optionable=true (max 80 symbols).
+
+    option_contracts.* uses row ``created_at`` as last-write proxy (not a dedicated sync-job timestamp).
+    """
+    from datetime import date, datetime, timezone
+
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.vendor.massive.reader import get_watchlist_optionable_stk_symbols
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+
+    def _iso(dt: Any) -> Optional[str]:
+        if dt is None:
+            return None
+        if isinstance(dt, datetime):
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc).isoformat()
+            return dt.isoformat()
+        if isinstance(dt, date):
+            return dt.isoformat()
+        return str(dt)
+
+    def _age_seconds(newest: Any) -> Optional[int]:
+        if newest is None:
+            return None
+        if not isinstance(newest, datetime):
+            return None
+        now = datetime.now(timezone.utc)
+        ts = newest if newest.tzinfo else newest.replace(tzinfo=timezone.utc)
+        return max(0, int((now - ts).total_seconds()))
+
+    syms = get_watchlist_optionable_stk_symbols(db)[:80]
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not syms:
+        return {
+            "ok": True,
+            "generated_at": generated_at,
+            "universe": "watchlist_optionable_stk",
+            "symbols_count": 0,
+            "symbols": [],
+            "message": "No optionable STK symbols on watchlist.",
+        }
+
+    contracts_map: Dict[str, Dict[str, Any]] = {}
+    snapshots_map: Dict[str, Optional[datetime]] = {}
+    atm_map: Dict[str, tuple] = {}  # sym -> (max trade_date, max created_at)
+    stock_map: Dict[str, tuple] = {}  # sym -> (max bar_time, max created_at)
+
+    try:
+        params = _get_conn_params(db)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        UPPER(TRIM(symbol)) AS u,
+                        COUNT(*)::bigint AS total,
+                        MAX(created_at) AS newest_ts,
+                        COUNT(massive_option_ticker) AS with_ticker,
+                        COUNT(CASE WHEN symbol != '' AND expiry != ''
+                                      AND option_right != '' THEN 1 END) AS with_complete_identity,
+                        COUNT(CASE WHEN massive_option_ticker IS NOT NULL
+                                    AND massive_option_ticker != ''
+                                    AND contract_key NOT LIKE '%%' || symbol || '%%' THEN 1 END) AS mapping_mismatch,
+                        COUNT(DISTINCT expiry)::bigint AS distinct_expirations,
+                        COUNT(DISTINCT strike)::bigint AS distinct_strikes
+                    FROM option_contracts
+                    WHERE UPPER(TRIM(symbol)) = ANY(%s)
+                    GROUP BY UPPER(TRIM(symbol))
+                    """,
+                    (syms,),
+                )
+                for row in cur.fetchall() or []:
+                    if not row or not row[0]:
+                        continue
+                    u = str(row[0]).strip().upper()
+                    total = int(row[1] or 0)
+                    newest_ts = row[2]
+                    w_ticker = int(row[3] or 0)
+                    w_identity = int(row[4] or 0)
+                    mismatch = int(row[5] or 0)
+                    dist_exp = int(row[6] or 0)
+                    dist_strikes = int(row[7] or 0)
+                    pct = lambda n: round(n / total * 100, 1) if total else 0.0  # noqa: E731
+                    contracts_map[u] = {
+                        "row_count": total,
+                        "newest_created_at": _iso(newest_ts),
+                        "age_seconds": _age_seconds(newest_ts),
+                        "ticker_pct": pct(w_ticker),
+                        "identity_pct": pct(w_identity),
+                        "mapping_mismatch_count": mismatch,
+                        "distinct_expirations": dist_exp,
+                        "distinct_strikes": dist_strikes,
+                    }
+
+                cur.execute(
+                    """
+                    SELECT UPPER(TRIM(SPLIT_PART(contract_key, '|', 1))) AS u, MAX(snapshot_ts)
+                    FROM option_snapshots
+                    WHERE POSITION('|' IN contract_key) > 0
+                      AND UPPER(TRIM(SPLIT_PART(contract_key, '|', 1))) = ANY(%s)
+                    GROUP BY UPPER(TRIM(SPLIT_PART(contract_key, '|', 1)))
+                    """,
+                    (syms,),
+                )
+                for row in cur.fetchall() or []:
+                    if row and row[0]:
+                        snapshots_map[str(row[0]).strip().upper()] = row[1]
+
+                cur.execute(
+                    """
+                    SELECT UPPER(TRIM(symbol)) AS u, MAX(trade_date), MAX(created_at)
+                    FROM report_option_atm_iv_daily
+                    WHERE UPPER(TRIM(symbol)) = ANY(%s)
+                    GROUP BY UPPER(TRIM(symbol))
+                    """,
+                    (syms,),
+                )
+                for row in cur.fetchall() or []:
+                    if row and row[0]:
+                        atm_map[str(row[0]).strip().upper()] = (row[1], row[2])
+
+                cur.execute(
+                    """
+                    SELECT UPPER(TRIM(symbol)) AS u, MAX(bar_time), MAX(created_at)
+                    FROM stock_day
+                    WHERE UPPER(TRIM(symbol)) = ANY(%s)
+                    GROUP BY UPPER(TRIM(symbol))
+                    """,
+                    (syms,),
+                )
+                for row in cur.fetchall() or []:
+                    if row and row[0]:
+                        stock_map[str(row[0]).strip().upper()] = (row[1], row[2])
+        finally:
+            conn.close()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+    out_symbols: List[Dict[str, Any]] = []
+    for sym in syms:
+        ca = contracts_map.get(sym)
+        sn = snapshots_map.get(sym)
+        atm = atm_map.get(sym)
+        sd = stock_map.get(sym)
+        if ca:
+            oc_payload = {
+                "has_data": True,
+                "row_count": ca["row_count"],
+                "newest_created_at": ca["newest_created_at"],
+                "age_seconds": ca["age_seconds"],
+                "ticker_pct": ca["ticker_pct"],
+                "identity_pct": ca["identity_pct"],
+                "mapping_mismatch_count": ca["mapping_mismatch_count"],
+                "distinct_expirations": ca["distinct_expirations"],
+                "distinct_strikes": ca["distinct_strikes"],
+                "contracts_last_at": ca["newest_created_at"],
+            }
+        else:
+            oc_payload = {
+                "has_data": False,
+                "row_count": None,
+                "newest_created_at": None,
+                "age_seconds": None,
+                "ticker_pct": None,
+                "identity_pct": None,
+                "mapping_mismatch_count": None,
+                "distinct_expirations": None,
+                "distinct_strikes": None,
+                "contracts_last_at": None,
+            }
+        out_symbols.append(
+            {
+                "symbol": sym,
+                "option_contracts": oc_payload,
+                "option_snapshots": {
+                    "has_data": sn is not None,
+                    "snapshots_last_ts": _iso(sn),
+                },
+                "report_option_atm_iv_daily": {
+                    "has_data": atm is not None,
+                    "atm_iv_last_trade_date": _iso(atm[0]) if atm else None,
+                    "atm_iv_last_created_at": _iso(atm[1]) if atm else None,
+                },
+                "stock_day": {
+                    "has_data": sd is not None,
+                    "stock_day_last_bar": _iso(sd[0]) if sd else None,
+                    "stock_day_last_created_at": _iso(sd[1]) if sd else None,
+                },
+            }
+        )
+
+    return {
+        "ok": True,
+        "generated_at": generated_at,
+        "universe": "watchlist_optionable_stk",
+        "symbols_count": len(out_symbols),
+        "symbols": out_symbols,
+    }
+
+
 # ── Market Ops (REST-only, read-only) ────────────────────────────────────────
 
 @router.get("/research/massive/market-ops/conditions")

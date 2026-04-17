@@ -31,6 +31,7 @@ import {
   IB_CONNECTION_SUBSECTIONS,
   SETTINGS_SECTIONS,
   CONFIG_SECTIONS,
+  COVERAGE_OVERVIEW_SUBSECTION,
   COVERAGE_OPTION_SUBSECTION,
   COVERAGE_STOCK_GROUP_LABEL,
   COVERAGE_STOCK_SUBSECTIONS,
@@ -95,6 +96,7 @@ import { MarketIngestOpsPage } from './MarketIngestOpsPage'
 import { ApiHealthOverviewPage, computeApiHealthAggregateLamp } from './ApiHealthOverviewPage'
 import { SettingsShell } from './settings/SettingsShell'
 import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
+import { DataOverviewPage } from './DataOverviewPage'
 import { OptionCoveragePage } from './OptionCoveragePage'
 import { StockCoveragePage } from './StockCoveragePage'
 import { MassiveStockCoveragePage } from './MassiveStockCoveragePage'
@@ -822,6 +824,13 @@ export function SettingsPage({
         <div className="settings-sidebar-inline-split" role="presentation" aria-hidden />
         <div className="settings-sidebar-group-label">Data Coverage</div>
         <a
+          href={`#${COVERAGE_OVERVIEW_SUBSECTION.id}`}
+          className={`settings-sidebar-link ${isCoverageSection && currentHash === COVERAGE_OVERVIEW_SUBSECTION.id ? 'active' : ''}`}
+        >
+          <SettingsSectionIcon name={COVERAGE_OVERVIEW_SUBSECTION.icon} />
+          {COVERAGE_OVERVIEW_SUBSECTION.label}
+        </a>
+        <a
           href={`#${COVERAGE_OPTION_SUBSECTION.id}`}
           className={`settings-sidebar-link ${isCoverageSection && (currentHash === COVERAGE_OPTION_SUBSECTION.id || currentHash === FEED_MASSIVE_DAILY_DATA_ID) ? 'active' : ''
             }`}
@@ -1261,7 +1270,9 @@ export function SettingsPage({
           <ApiHealthOverviewPage embeddedInSettings />
         )
       ) : isCoverageSection ? (
-        currentHash === 'coverage-stock' ? (
+        currentHash === COVERAGE_OVERVIEW_SUBSECTION.id ? (
+          <DataOverviewPage status={status} />
+        ) : currentHash === 'coverage-stock' ? (
           <StockCoveragePage status={status} />
         ) : currentHash === 'coverage-massive-stock' ? (
           <MassiveStockCoveragePage status={status} />

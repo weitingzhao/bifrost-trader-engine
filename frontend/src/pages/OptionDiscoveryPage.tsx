@@ -90,7 +90,7 @@ const DEFAULT_CHAIN_COLUMN_VISIBILITY: Record<ChainColumnId, boolean> = {
   ask: true,
   last: true,
   mid: true,
-  day_close: false,
+  day_close: true,
   day_vol: false,
   iv: true,
   delta: true,
@@ -327,6 +327,13 @@ function effectiveQuotePremium(row: OptionSnapshotRow): number | null {
   return null
 }
 
+/** Chain table Mid column: prefer API mark, else same priority as effectiveQuotePremium. */
+function chainDisplayMid(row: OptionSnapshotRow): string {
+  const v =
+    row.mark != null && Number.isFinite(row.mark) ? row.mark : effectiveQuotePremium(row)
+  return v != null && Number.isFinite(v) ? fmtUsd(v) : '—'
+}
+
 function computeDerivedMetrics(
   row: OptionSnapshotRow,
   underlying: number | null,
@@ -549,6 +556,8 @@ export function OptionDiscoveryPage({
     () => ({ ...DEFAULT_CHAIN_COLUMN_VISIBILITY }),
   )
   const [symbolDailyPrices, setSymbolDailyPrices] = useState<Record<string, number | null>>({})
+  /** Draft text for underlying; `selectedSymbol` updates only on Apply / Enter or chip click. */
+  const [underlyingInput, setUnderlyingInput] = useState('')
   const otmCallWrapRef = useRef<HTMLDivElement>(null)
 
   // P0–P3: Contract detail panel state
@@ -712,31 +721,35 @@ export function OptionDiscoveryPage({
   }, [computedStrikes, selectedSymbol])
 
   useEffect(() => {
-    if (stkSymbols.length > 0 && !selectedSymbol.trim()) setSelectedSymbol(stkSymbols[0])
-  }, [stkSymbols.join(','), selectedSymbol])
+    setUnderlyingInput(selectedSymbol.trim().toUpperCase())
+  }, [selectedSymbol])
 
   useEffect(() => {
-    if (stkSymbols.length === 0) {
+    const sym = selectedSymbol.trim().toUpperCase()
+    if (!sym) {
       setSymbolDailyPrices({})
       return
     }
     let cancelled = false
-    fetchBarsBenchmark(stkSymbols)
+    fetchBarsBenchmark([sym])
       .then(({ benchmarks }) => {
         if (cancelled) return
-        const next: Record<string, number | null> = {}
-        for (const sym of stkSymbols) {
-          const b = benchmarks[sym]
-          const close = b?.close != null && Number.isFinite(b.close) ? b.close : null
-          next[sym] = close ?? null
-        }
-        setSymbolDailyPrices(next)
+        const b = benchmarks[sym]
+        const close = b?.close != null && Number.isFinite(b.close) ? b.close : null
+        setSymbolDailyPrices({ [sym]: close ?? null })
       })
       .catch(() => {
         if (!cancelled) setSymbolDailyPrices({})
       })
-    return () => { cancelled = true }
-  }, [stkSymbols.join(',')])
+    return () => {
+      cancelled = true
+    }
+  }, [selectedSymbol])
+
+  const applyUnderlyingFromInput = useCallback(() => {
+    const next = underlyingInput.trim().toUpperCase()
+    setSelectedSymbol(next)
+  }, [underlyingInput])
 
   const loadExpirations = useCallback(async (symbol: string) => {
     const s = (symbol || '').trim()
@@ -1300,11 +1313,14 @@ export function OptionDiscoveryPage({
     return computeDerivedMetrics(selectedRow, underlyingPrice)
   }, [selectedRow, underlyingPrice])
 
-  /** Mid column: stored mid, or estimated from bid/ask/last when mid is null in DB. */
+  /** Mid column: stored mid, else API mark / estimated from bid/ask/last/day close. */
   const overviewMidDisplay = useMemo(() => {
     if (!selectedRow) return { primary: '—' as string, est: false }
     if (selectedRow.mid != null && Number.isFinite(selectedRow.mid)) {
       return { primary: fmtUsd(selectedRow.mid), est: false }
+    }
+    if (selectedRow.mark != null && Number.isFinite(selectedRow.mark)) {
+      return { primary: fmtUsd(selectedRow.mark), est: true }
     }
     const m = effectiveQuotePremium(selectedRow)
     if (m == null) return { primary: '—', est: false }
@@ -1375,7 +1391,7 @@ export function OptionDiscoveryPage({
               cell = row.last != null ? fmtUsd(row.last) : '—'
               break
             case 'mid':
-              cell = row.mid != null ? fmtUsd(row.mid) : '—'
+              cell = chainDisplayMid(row)
               break
             case 'day_close':
               cell = row.day_close != null ? fmtUsd(row.day_close) : '—'
@@ -1418,7 +1434,7 @@ export function OptionDiscoveryPage({
           </td>
         )
       }),
-    [chainColumnList, underlyingPrice, selectedContractIdx, setSelectedContractIdx],
+    [chainColumnList, selectedContractIdx, setSelectedContractIdx],
   )
 
   const chainFilterColumnIds = useMemo((): ChainColumnId[] => {
@@ -1522,14 +1538,39 @@ export function OptionDiscoveryPage({
               <div className="option-discovery-controls" aria-label="Underlying selection">
                 <section className="replay-section option-discovery-underlying" aria-label="Underlying">
                   <div className="option-discovery-underlying-body">
-                    {stkSymbols.length === 0 ? (
-                      <p className="section-hint od-underlying-empty-hint" role="status">
-                        Add STK in Watchlist and turn on Option? for symbols that have options.
-                      </p>
-                    ) : (
-                      <div className="od-underlying-bubbles">
+                    <div className="od-underlying-manual-row">
+                      <label className="od-underlying-manual-label" htmlFor="od-underlying-manual-input">
+                        Symbol
+                      </label>
+                      <input
+                        id="od-underlying-manual-input"
+                        type="text"
+                        className="form-control od-underlying-manual-input"
+                        autoComplete="off"
+                        spellCheck={false}
+                        placeholder="e.g. NVDA"
+                        value={underlyingInput}
+                        onChange={e => setUnderlyingInput(e.target.value.toUpperCase())}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            applyUnderlyingFromInput()
+                          }
+                        }}
+                        aria-label="Underlying symbol"
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm od-underlying-apply-btn"
+                        onClick={() => applyUnderlyingFromInput()}
+                      >
+                        Apply
+                      </button>
+                    </div>
+                    {stkSymbols.length > 0 ? (
+                      <div className="od-underlying-bubbles od-underlying-bubbles--below-manual">
                         <span className="od-underlying-bubbles-label" id="od-underlying-bubbles-label">
-                          Underlying
+                          Wishlist
                         </span>
                         <div
                           className="od-underlying-bubble-row"
@@ -1537,20 +1578,22 @@ export function OptionDiscoveryPage({
                           aria-labelledby="od-underlying-bubbles-label"
                         >
                           {stkSymbols.map(sym => {
-                            const px = symbolDailyPrices[sym]
+                            const symU = sym.toUpperCase()
+                            const px = symbolDailyPrices[symU] ?? symbolDailyPrices[sym]
                             const priceLabel = px != null ? fmtUsd(px) : '—'
+                            const active = selectedSymbol.trim().toUpperCase() === symU
                             return (
                               <button
                                 key={sym}
                                 type="button"
-                                className={`od-underlying-chip ${selectedSymbol === sym ? 'od-underlying-chip--active' : ''}`}
-                                onClick={() => setSelectedSymbol(sym)}
-                                aria-pressed={selectedSymbol === sym}
-                                aria-label={`${sym}, daily price ${priceLabel}`}
-                                title={`${sym} · ${priceLabel} (daily)`}
+                                className={`od-underlying-chip ${active ? 'od-underlying-chip--active' : ''}`}
+                                onClick={() => setSelectedSymbol(symU)}
+                                aria-pressed={active}
+                                aria-label={`${symU}, daily price ${priceLabel}`}
+                                title={`${symU} · ${priceLabel} (daily)`}
                               >
                                 <span className="od-underlying-chip-line">
-                                  <span className="od-underlying-chip-symbol">{sym}</span>
+                                  <span className="od-underlying-chip-symbol">{symU}</span>
                                   <span className="od-underlying-chip-sep" aria-hidden>
                                     {' '}
                                     ·{' '}
@@ -1562,6 +1605,10 @@ export function OptionDiscoveryPage({
                           })}
                         </div>
                       </div>
+                    ) : (
+                      <p className="section-hint od-underlying-empty-hint" role="status">
+                        Add optionable STK symbols to Watchlist for quick picks, or type a symbol above and Apply.
+                      </p>
                     )}
                   </div>
                 </section>
@@ -2337,9 +2384,15 @@ export function OptionDiscoveryPage({
                 <div className="od-card-section">
                   <div className="od-card-section-title od-card-section-title--with-hint">
                     Price
-                    <InfoTooltip text="Bid, ask, mid, and last come from the latest PostgreSQL option_snapshots row (Massive chain snapshot). When your plan does not include last_quote/last_trade, the worker stores Massive day bar fields (e.g. day close) and uses them to fill last/mid for display. Underlying price for decomposition uses underlying_price from the snapshot or stock day fallback when missing." />
+                    <InfoTooltip text="Bid and ask require live NBBO (last_quote) when your data plan includes it. Mid uses stored mid, else mark (mid / bid-ask midpoint / last / day close). Last prefers last trade; without last_trade the worker may store day close as last. Underlying price for decomposition uses snapshot underlying_price or stock day fallback." />
                   </div>
                   <div className="od-kv-grid">
+                    {selectedRow.snapshot_ts && (
+                      <>
+                        <span className="od-kv-k">Snapshot</span>
+                        <span className="od-kv-v od-kv-dim">{new Date(selectedRow.snapshot_ts).toLocaleString()}</span>
+                      </>
+                    )}
                     <span className="od-kv-k">Bid</span><span className="od-kv-v">{selectedRow.bid != null ? fmtUsd(selectedRow.bid) : '—'}</span>
                     <span className="od-kv-k">Ask</span><span className="od-kv-v">{selectedRow.ask != null ? fmtUsd(selectedRow.ask) : '—'}</span>
                     <span className="od-kv-k">Last</span><span className="od-kv-v">{selectedRow.last != null ? fmtUsd(selectedRow.last) : '—'}</span>
@@ -2533,8 +2586,17 @@ export function OptionDiscoveryPage({
                   {lastTradeAge != null && lastTradeAge > 3600 && (
                     <span className="od-exec-chip od-exec-chip--warn">Stale tape — last trade &gt;1h</span>
                   )}
-                  {selectedRow.bid == null && selectedRow.ask == null && (
-                    <span className="od-exec-chip od-exec-chip--danger">No bid/ask — market closed or illiquid</span>
+                  {selectedRow.bid == null &&
+                    selectedRow.ask == null &&
+                    effectiveQuotePremium(selectedRow) != null && (
+                    <span className="od-exec-chip od-exec-chip--warn">
+                      No live NBBO — mark uses mid/day-bar fallback (not a live quote)
+                    </span>
+                  )}
+                  {selectedRow.bid == null &&
+                    selectedRow.ask == null &&
+                    effectiveQuotePremium(selectedRow) == null && (
+                    <span className="od-exec-chip od-exec-chip--danger">No bid/ask or day bar — illiquid or no data</span>
                   )}
                   {tradability.score >= 60 && selectedDerived?.spreadPct != null && selectedDerived.spreadPct <= 5 && (
                     <span className="od-exec-chip od-exec-chip--ok">Good tradability</span>
