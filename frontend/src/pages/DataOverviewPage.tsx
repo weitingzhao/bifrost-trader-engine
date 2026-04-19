@@ -6,6 +6,7 @@ import {
   fetchMassiveJobsList,
   fetchMassiveJobsSummary,
   fetchOptionContractsReferenceGap,
+  fetchOptionSnapshotsContractsGap,
   fetchWatchlistDbCoverage,
 } from '../api'
 import type {
@@ -14,6 +15,7 @@ import type {
   MassiveCeleryBeatEntry,
   MassiveJobApiRow,
   OptionContractsReferenceGapResult,
+  OptionSnapshotsContractsGapResult,
   WatchlistDbCoverageSymbolRow,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
@@ -123,6 +125,12 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
   const [refGapLoading, setRefGapLoading] = useState(false)
   const [refGapError, setRefGapError] = useState<string | null>(null)
 
+  const [snapshotGapBySymbol, setSnapshotGapBySymbol] = useState<
+    Record<string, OptionSnapshotsContractsGapResult>
+  >({})
+  const [snapshotGapLoading, setSnapshotGapLoading] = useState(false)
+  const [snapshotGapError, setSnapshotGapError] = useState<string | null>(null)
+
   /** Uppercase symbols in By symbol → option_contracts compare / enqueue pool (click Symbol column to toggle). */
   const [comparePool, setComparePool] = useState<string[]>([])
   /** Option jobs sheet (By symbol bar) — button next to Refresh when that bar is visible. */
@@ -138,6 +146,8 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
     setJobsListError(null)
     setRefGapBySymbol({})
     setRefGapError(null)
+    setSnapshotGapBySymbol({})
+    setSnapshotGapError(null)
     setComparePool([])
 
     const settled = await Promise.allSettled([
@@ -312,6 +322,60 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
     [wlRows],
   )
 
+  const handleCompareSnapshotGap = useCallback(
+    async (
+      symbols: string[],
+      progress?: {
+        onSymbolStart?: (symbol: string) => void
+        onSymbolDone?: (symbol: string, result: OptionSnapshotsContractsGapResult) => void
+        onSymbolError?: (symbol: string, message: string) => void
+      },
+    ) => {
+      setSnapshotGapLoading(true)
+      setSnapshotGapError(null)
+      try {
+        const raw = symbols.map(s => s.trim().toUpperCase()).filter(Boolean)
+        const seen = new Set<string>()
+        const unique = raw.filter(s => (seen.has(s) ? false : (seen.add(s), true)))
+        const eligible = unique.filter(u => {
+          const row = wlRows.find(r => r.symbol.trim().toUpperCase() === u)
+          return row?.option_contracts.has_data
+        })
+        if (eligible.length === 0) {
+          setSnapshotGapError(
+            unique.length === 0
+              ? 'Add symbols to the compare pool (click Symbol in the matrix).'
+              : 'No pool symbols have option_contracts rows yet.',
+          )
+          return
+        }
+        for (const sym of eligible) {
+          progress?.onSymbolStart?.(sym)
+          try {
+            const res = await fetchOptionSnapshotsContractsGap(sym)
+            if (!res.ok) {
+              const msg = typeof res.error === 'string' ? res.error : 'Check failed'
+              progress?.onSymbolError?.(sym, msg)
+              continue
+            }
+            setSnapshotGapBySymbol(prev => ({ ...prev, [sym]: res }))
+            progress?.onSymbolDone?.(sym, res)
+          } catch (err) {
+            progress?.onSymbolError?.(
+              sym,
+              err instanceof Error ? err.message : 'Check failed',
+            )
+          }
+        }
+      } catch (e) {
+        setSnapshotGapError(e instanceof Error ? e.message : 'Check failed')
+      } finally {
+        setSnapshotGapLoading(false)
+      }
+    },
+    [wlRows],
+  )
+
   const toggleComparePool = useCallback((symbol: string) => {
     const u = symbol.trim().toUpperCase()
     if (!u) return
@@ -429,6 +493,10 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
                 onCompareMassiveReference={handleCompareMassiveReference}
                 refGapLoading={refGapLoading}
                 refGapError={refGapError}
+                snapshotGapBySymbol={snapshotGapBySymbol}
+                onCompareSnapshotGap={handleCompareSnapshotGap}
+                snapshotGapLoading={snapshotGapLoading}
+                snapshotGapError={snapshotGapError}
                 comparePool={comparePool}
                 onToggleComparePool={toggleComparePool}
                 onSelectAllComparePool={selectAllComparePool}

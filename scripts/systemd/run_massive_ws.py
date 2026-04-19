@@ -276,6 +276,13 @@ class PgSampler:
                             iv, delta, gamma, theta, vega, open_interest,
                             source, created_at
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'massive_ws', now())
+                        ON CONFLICT (contract_key, snapshot_ts) DO UPDATE SET
+                          iv = COALESCE(EXCLUDED.iv, option_snapshots.iv),
+                          delta = COALESCE(EXCLUDED.delta, option_snapshots.delta),
+                          gamma = COALESCE(EXCLUDED.gamma, option_snapshots.gamma),
+                          theta = COALESCE(EXCLUDED.theta, option_snapshots.theta),
+                          vega = COALESCE(EXCLUDED.vega, option_snapshots.vega),
+                          open_interest = COALESCE(EXCLUDED.open_interest, option_snapshots.open_interest)
                         """,
                         (
                             contract_key,

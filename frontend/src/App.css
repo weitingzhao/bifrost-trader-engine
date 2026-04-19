@@ -20624,6 +20624,30 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   color: #0369a1;
 }
 
+.data-overview-wl-matrix__sym-detail-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0 0.15rem;
+  margin: 0 0 0 0.1rem;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: var(--color-muted, #64748b);
+  cursor: pointer;
+  border-radius: 3px;
+  vertical-align: middle;
+  opacity: 0.6;
+}
+.data-overview-wl-matrix__sym-detail-btn:hover {
+  opacity: 1;
+  color: var(--color-link, #38bdf8);
+}
+.data-overview-wl-matrix__sym-detail-btn:focus-visible {
+  outline: 2px solid var(--color-link, #38bdf8);
+  outline-offset: 2px;
+  opacity: 1;
+}
+
 /* Data Overview — Focus dataset: compact chip grid (radios, no dropdown) */
 .data-overview-focus-chips {
   margin: 0;

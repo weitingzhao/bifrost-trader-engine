@@ -485,7 +485,7 @@
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
-| option_snapshots_id | bigserial | 自增主键 |
+| option_snapshots_id | bigint | 序列自增，**非主键**（稳定行引用/排序） |
 | contract_key | text NOT NULL | 合约唯一键 |
 | snapshot_ts | timestamptz NOT NULL | 快照时间戳 |
 | iv | double precision | 隐含波动率（可空；API `implied_volatility` 或 `greeks.iv`） |
@@ -504,9 +504,11 @@
 | source | text NOT NULL DEFAULT 'ib' | 数据来源：`ib` 或 `massive` |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
-- **主键**：`PRIMARY KEY (option_snapshots_id, snapshot_ts)`（分区表要求主键包含分区键）。
+- **主键**：`PRIMARY KEY (contract_key, snapshot_ts)`（业务自然键即主键；分区表主键须含分区键 `snapshot_ts`）。`option_snapshots_id` 为序列列，不参与主键。
+- **存量迁移**：若旧库仍为 `PRIMARY KEY (option_snapshots_id, snapshot_ts)` 且另有 `UNIQUE (contract_key, snapshot_ts)`，`pg_ddl` 在无重复 `(contract_key, snapshot_ts)` 时会删除旧主键与冗余 UNIQUE，并建立新主键 `(contract_key, snapshot_ts)`。若仍有重复，须先运行 `scripts/db/dedupe_option_snapshots.py --apply`，再执行 schema 刷新。
 - **分区**：`PARTITION BY RANGE (snapshot_ts)` 按月分区（命名如 `option_snapshots_y2026m03`）。`pg_ddl` 自动创建当月 + 未来 3 个月分区及 default 分区。已有非分区表的库在 `db_refresh_schema.py` 时自动迁移。
-- **索引**：`(contract_key, snapshot_ts DESC)`；可选 `(underlying_ticker, day_last_updated_day)` 供 join。
+- **索引**：主键在 `(contract_key, snapshot_ts)` 上提供唯一索引（替代原非唯一索引 `option_snapshots_contract_key_ts`）；可选 `(underlying_ticker, day_last_updated_day)` 供 join。
+- **写入合并**：Massive 链快照与 WS 采样均使用 `INSERT ... ON CONFLICT (contract_key, snapshot_ts) DO UPDATE` — 链快照以新 API 响应覆盖各列；WS 路径仅合并 Greeks/OI 等字段，对可空列使用 `COALESCE(EXCLUDED.*, option_snapshots.*)`，避免覆盖链快照已填充的 `day_*` / `underlying_ticker` 等列。
 - **保留策略**：保留最近 **90 天**热数据；早于 90 天的月份分区 `ALTER TABLE ... DETACH PARTITION` 后归档（`pg_dump` / `COPY` 到冷存储）或 `DROP`。运维步骤见 `scripts/db/archive_option_snapshots.sh`（占位模板）。
 
 #### 视图 `option_snapshots_with_underlying_day`
@@ -1515,6 +1517,8 @@ python scripts/db/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-04-16 Massive chain snapshot 全量落库 | `option_contracts` 恢复 `exercise_style`、`shares_per_contract`（可空）。`option_snapshots` 增加 `underlying_ticker`、`day_*`（OHLC/量能/vwap/last_updated）、`break_even_price`、`fmv`/`fmv_last_updated`；`iv` 列语义对应 API `implied_volatility`。物化视图 `option_snapshots_latest` 列集同步；迁移路径在 `migrate_opt` 末尾按基表与 MV 差异重建 MV。Massive Worker 写入与 Research API / Option Discovery 读路径扩展。§2.16.1–2.16.2。 | Massive / Option Discovery |
 | 2026-04-17 option_snapshots 收窄 + 标的视图 | 删除列 `last`、`bid`、`ask`、`mid`、`underlying_price`、`break_even_price`、`fmv`、`fmv_last_updated`；新增生成列 `day_last_updated_day`。新增视图 `option_snapshots_with_underlying_day`（左连 `stock_day`，`source=massive`，`underlying_price` = `stock_day.close`）。`option_snapshots_latest` 与 EOD 读路径（`get_option_snapshots_eod_per_day`）同步。§2.16.2。 | Massive / Option Discovery |
 | 2026-04-18 option_contracts 列级覆盖与参考对拍 | §2.16.1 增补「Massive 字段与写入路径」与 L1/L2/L3 说明。`watchlist-db-coverage` / `contracts-coverage` 增加 `exercise_style`/`shares_per_contract` 非空计数与占比；新增 `GET/POST .../option-contracts-reference-column-parity`（L2，与 reference 分页上限一致）。无表结构变更。 | 研究 / Massive |
+| 2026-04-18 option_snapshots 主键、幂等写入 | §2.16.2：主键为 `PRIMARY KEY (contract_key, snapshot_ts)`（`option_snapshots_id` 为序列列）；存量库由 `pg_ddl` 从旧 `(option_snapshots_id, snapshot_ts)` + 可选 `UNIQUE` 迁移；`DROP` 冗余索引 `option_snapshots_contract_key_ts`。去重脚本 `dedupe_option_snapshots.py`；链快照与 WS 为 `ON CONFLICT (contract_key, snapshot_ts) DO UPDATE`。 | Massive / Option Discovery |
+| 2026-04-19 option_day 池化补齐任务 | `job_massive_backfill` 在 `kind=aggregates` 下支持 `option_day_pool_row_gap`（v2 日线 aggs 补「有合约无 bar」）与 `option_day_pool_column_fill`（v1 open-close 刷新不完整行，可选再补 vwap）；`mode=open_close` 在 `persist=true` 时可 `UPDATE option_day`。无新表；环境变量 `BIFROST_OPTION_DAY_ROW_LOOKBACK_DAYS` 控制默认回溯窗口。 | Massive / Data Overview |
 
 ---
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -127,3 +128,68 @@ def test_apply_option_day_aggs_skips_bad_rows() -> None:
     n = _apply_option_day_aggs(mock_conn, "NVDA", "20251219", 180.0, "C", aggs)
     assert n == 0
     mock_cur.execute.assert_not_called()
+
+
+def test_apply_option_day_open_close_update_executes() -> None:
+    from src.massive.tasks import _apply_option_day_open_close_update
+
+    mock_cur = MagicMock()
+    mock_cur.rowcount = 1
+    cm = MagicMock()
+    cm.__enter__.return_value = mock_cur
+    cm.__exit__.return_value = None
+    mock_conn = MagicMock()
+    mock_conn.cursor.return_value = cm
+
+    bt = datetime(2024, 1, 2, 21, 0, tzinfo=timezone.utc)
+    data = {"open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 99.0}
+    n = _apply_option_day_open_close_update(
+        mock_conn, "NVDA", "20251219", 180.0, "C", bt, data
+    )
+    assert n == 1
+    mock_cur.execute.assert_called_once()
+    sql = mock_cur.execute.call_args[0][0]
+    assert "UPDATE option_day" in sql
+    params = mock_cur.execute.call_args[0][1]
+    assert params[9] == bt
+
+
+def test_ny_day_bounds_ms_ordering() -> None:
+    from src.massive.tasks import _ny_day_bounds_ms
+
+    a, b = _ny_day_bounds_ms("2024-06-15")
+    assert a < b
+    # NY calendar day span in ms (24h except DST fold; keep loose)
+    assert 86_300_000 <= (b - a) <= 90_100_000
+
+
+def test_option_day_pool_row_gap_no_targets() -> None:
+    from src.massive.option_day_pool_fill import run_option_day_pool_aggregates
+
+    mock_cur = MagicMock()
+    mock_cur.fetchall.return_value = []
+    cm = MagicMock()
+    cm.__enter__.return_value = mock_cur
+    cm.__exit__.return_value = None
+    mock_conn = MagicMock()
+    mock_conn.cursor.return_value = cm
+
+    client = MagicMock()
+    out = run_option_day_pool_aggregates(
+        mock_conn,
+        client,
+        {
+            "underlying": "NVDA",
+            "row_lookback_days": 730,
+            "max_contracts": 10,
+            "max_expiries": 60,
+        },
+        mode="option_day_pool_row_gap",
+        apply_open_close_update=lambda *a, **k: 0,
+        apply_option_day_aggs=lambda *a, **k: 0,
+        patch_vwap=lambda *a, **k: 0,
+        rest_throttle=lambda: None,
+    )
+    assert out.get("ok") is True
+    assert out["summary"]["contracts_processed"] == 0
+    client.fetch_option_aggs.assert_not_called()

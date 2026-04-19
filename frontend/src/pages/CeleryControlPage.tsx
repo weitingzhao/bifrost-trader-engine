@@ -42,7 +42,7 @@ import {
 } from '../api/ops/ops'
 import { parseCeleryQueueFromHash } from '../utils/celeryQueueDeepLink'
 import { CeleryJobQueuesSection, type CeleryJobQueuesSectionHandle } from './celery/CeleryJobQueuesSection'
-import { CeleryTopQueueSummary } from './celery/CeleryTopQueueSummary'
+import { CeleryTopQueueSummary, formatQueueLabel } from './celery/CeleryTopQueueSummary'
 import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
 import { computeCeleryRuntimeLamp, supportedQueueNamesFromSummary } from '../utils/celeryRuntime'
 import { opsHostEnvFromConfigProfile } from '../utils/opsHostEnvPill'
@@ -54,6 +54,9 @@ export interface CeleryControlPageProps {
 }
 
 type LampColor = 'green' | 'yellow' | 'red' | 'none'
+
+/** Bubble value: all profiles — show bulk actions (Add all / Reset all / Remove all), hide single Add Instance. */
+const SCALE_SELECTION_ALL = '__celery_scale_all__'
 
 function workerLamp(status: string): LampColor {
   if (status === 'running_healthy') return 'green'
@@ -136,6 +139,172 @@ function workerIdToInstanceId(workerId: string): string | null {
 function instanceIdFromWorkerUnit(unit: string): string | null {
   const m = unit.trim().match(/^bifrost-celery-worker@(.+)\.service$/i)
   return m ? m[1] : null
+}
+
+/** Ops allocates IDs as `{profile_key}-{seq}` (e.g. `bars-2`). */
+function parseCeleryWorkerInstanceId(instanceId: string): { profileKey: string; cycle: number } | null {
+  const m = instanceId.trim().match(/^([a-zA-Z0-9_]+)-(\d+)$/)
+  if (!m) return null
+  return { profileKey: m[1], cycle: parseInt(m[2], 10) }
+}
+
+function workerProfileForInstanceUnit(
+  unit: string,
+  profiles: WorkerProfileInfo[],
+): WorkerProfileInfo | undefined {
+  const instanceId = instanceIdFromWorkerUnit(unit)
+  if (!instanceId) return undefined
+  const parts = parseCeleryWorkerInstanceId(instanceId)
+  if (parts) {
+    const p = profiles.find(x => x.key === parts.profileKey)
+    if (p) return p
+  }
+  return profiles.find(p => p.key === instanceId)
+}
+
+function instanceConsumesCeleryQueue(
+  unit: string,
+  celeryQueue: string,
+  profiles: WorkerProfileInfo[],
+): boolean {
+  const p = workerProfileForInstanceUnit(unit, profiles)
+  if (!p?.queues?.length) return false
+  return p.queues.some(q => q === celeryQueue)
+}
+
+function systemdInstanceStatusLabel(inst: SystemdInstance): string {
+  const a = inst.active?.trim() ?? ''
+  const s = inst.sub?.trim() ?? ''
+  if (a && s) return `${a} (${s})`
+  return a || s || '—'
+}
+
+function IcoWorkerScaleAddAll() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={18}
+      height={18}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <polygon points="12 2 2 7 12 12 22 7 12 2" />
+      <polyline points="2 17 12 22 22 17" />
+      <polyline points="2 12 12 17 22 12" />
+    </svg>
+  )
+}
+
+/** Single instance add — one stack layer plus mark (distinct from Add all layers). */
+function IcoWorkerInstanceAdd() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={18}
+      height={18}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <polyline points="2 17 12 22 22 17" />
+      <line x1="12" y1="4" x2="12" y2="12" />
+      <line x1="8" y1="8" x2="16" y2="8" />
+    </svg>
+  )
+}
+
+function IcoWorkerScaleReset() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={18}
+      height={18}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+      <path d="M16 16h5v5" />
+    </svg>
+  )
+}
+
+/** Per-row Recreate (same glyph as bulk Reset — force remove then add). */
+function IcoWorkerInstanceRecreate() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={18}
+      height={18}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+      <path d="M16 16h5v5" />
+    </svg>
+  )
+}
+
+function IcoWorkerInstanceRemove() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={18}
+      height={18}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+      <line x1="10" x2="10" y1="11" y2="17" />
+      <line x1="14" x2="14" y1="11" y2="17" />
+    </svg>
+  )
+}
+
+function IcoWorkerScaleRemoveAll() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={18}
+      height={18}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+      <line x1="10" x2="10" y1="11" y2="17" />
+      <line x1="14" x2="14" y1="11" y2="17" />
+    </svg>
+  )
 }
 
 type ConfirmDialogState = {
@@ -301,11 +470,11 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   const [error, setError] = useState<string | null>(null)
   const [confirmState, setConfirmState] = useState<ConfirmDialogState>(INITIAL_CONFIRM)
   const [confirmVariant, setConfirmVariant] = useState<'default' | 'scale-remove'>('default')
-  const [scaleRemoveForce, setScaleRemoveForce] = useState(false)
-  const scaleRemoveForceRef = useRef(false)
+  const [scaleRemoveForce, setScaleRemoveForce] = useState(true)
+  const scaleRemoveForceRef = useRef(true)
   /** Bulk "Remove all instances": pass force to each scale remove (SIGKILL after graceful stop). */
-  const [scaleRemoveAllForce, setScaleRemoveAllForce] = useState(false)
-  const scaleRemoveAllForceRef = useRef(false)
+  const [scaleRemoveAllForce, setScaleRemoveAllForce] = useState(true)
+  const scaleRemoveAllForceRef = useRef(true)
 
   const resetConfirmDialog = useCallback(() => {
     setConfirmState(INITIAL_CONFIRM)
@@ -325,7 +494,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   // Worker scaling
   const [instances, setInstances] = useState<SystemdInstance[]>([])
   const [workerProfiles, setWorkerProfiles] = useState<WorkerProfileInfo[]>([])
-  const [scaleWorkerType, setScaleWorkerType] = useState('')
+  const [scaleWorkerType, setScaleWorkerType] = useState(SCALE_SELECTION_ALL)
   const [scaleBusy, setScaleBusy] = useState(false)
   const [scaleMsg, setScaleMsg] = useState<{ text: string; isErr: boolean }>({ text: '', isErr: false })
   const [snapshotRefreshBusy, setSnapshotRefreshBusy] = useState(false)
@@ -347,8 +516,12 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   const [tokenInput, setTokenInput] = useState('')
   const [authPanelOpen, setAuthPanelOpen] = useState(false)
 
-  /** Main sections: job DB queues first; workers conditions (instances, broker, console, runtime snapshot). */
-  const [celerySectionTab, setCelerySectionTab] = useState<'overview' | 'jobs'>('jobs')
+  /** Main sections: queues + instances (job DB + scaling + broker), or console + runtime snapshot. */
+  const [celerySectionTab, setCelerySectionTab] = useState<
+    'queues_instances' | 'console_runtime'
+  >('queues_instances')
+  /** Set when navigating from Queue summary — filter Worker Instances to profiles that consume this queue. */
+  const [workerInstancesQueueFilter, setWorkerInstancesQueueFilter] = useState<string | null>(null)
 
   /** Coalesce concurrent /ops/workers (Celery inspect) calls — 5s poll + void refresh must not stack. */
   const workersRefreshPromiseRef = useRef<Promise<void> | null>(null)
@@ -477,7 +650,11 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           }
           if (pRes.ok && pRes.profiles.length > 0) {
             setWorkerProfiles(pRes.profiles)
-            setScaleWorkerType(prev => prev || pRes.profiles[0].key)
+            setScaleWorkerType(prev => {
+              if (prev === SCALE_SELECTION_ALL) return prev
+              if (prev && pRes.profiles.some(p => p.key === prev)) return prev
+              return SCALE_SELECTION_ALL
+            })
           }
           setError(null)
         } catch (e) {
@@ -533,14 +710,61 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   void tick
 
   // ── Scaling handlers ──────────────────────────────────────────────────
+  /** Force-remove this unit, then add a new instance for the same worker profile key. */
+  const onScaleRecreate = (instanceId: string, workerTypeKey: string) => {
+    setConfirmVariant('default')
+    setConfirmState({
+      open: true,
+      title: `Recreate worker instance ${instanceId}?`,
+      message: `This will force-remove bifrost-celery-worker@${instanceId}.service on this Ops host, then start a new instance with worker type "${workerTypeKey}".`,
+      confirming: false,
+      confirmLabel: 'Confirm',
+      action: async () => {
+        setConfirmState(prev => ({ ...prev, confirming: true }))
+        setScaleBusy(true)
+        try {
+          const rem = await scaleWorker({ action: 'remove', instance_id: instanceId, force: true })
+          if (!rem.ok) {
+            setScaleMsg({ text: rem.error ?? 'Remove failed', isErr: true })
+            return
+          }
+          await loadAll()
+          await refreshOpsWorkersSnapshot({ forceRefresh: true })
+          const add = await scaleWorker({ action: 'add', worker_type: workerTypeKey })
+          if (!add.ok) {
+            setScaleMsg({
+              text: `Instance removed, but add failed: ${add.error ?? 'Failed'}`,
+              isErr: true,
+            })
+            await loadAll()
+            await refreshOpsWorkersSnapshot({ forceRefresh: true })
+            return
+          }
+          const iid = add.instance_id ?? add.unit ?? workerTypeKey
+          setScaleMsg({
+            text: `Recreated: new instance ${iid} (${workerTypeKey}).`,
+            isErr: false,
+          })
+          await loadAll()
+          await refreshOpsWorkersSnapshot({ forceRefresh: true })
+        } catch (e) {
+          setScaleMsg({ text: e instanceof Error ? e.message : 'Error', isErr: true })
+        } finally {
+          setScaleBusy(false)
+          resetConfirmDialog()
+        }
+      },
+    })
+  }
+
   const onScaleRemove = (instanceId: string) => {
-    scaleRemoveForceRef.current = false
-    setScaleRemoveForce(false)
+    scaleRemoveForceRef.current = true
+    setScaleRemoveForce(true)
     setConfirmVariant('scale-remove')
     setConfirmState({
       open: true,
       title: `Remove worker instance ${instanceId}?`,
-      message: `This will stop bifrost-celery-worker@${instanceId}.service (graceful stop first). If the process is stuck, enable force kill below.`,
+      message: `This will stop bifrost-celery-worker@${instanceId}.service (graceful stop first). Force kill after graceful stop is on below; uncheck to only send graceful stop.`,
       confirming: false,
       confirmLabel: 'Confirm delete',
       action: async () => {
@@ -572,8 +796,8 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   }
 
   const onScaleAdd = async () => {
-    if (!scaleWorkerType) {
-      setScaleMsg({ text: 'Select a worker type', isErr: true })
+    if (!scaleWorkerType || scaleWorkerType === SCALE_SELECTION_ALL) {
+      setScaleMsg({ text: 'Select a worker profile', isErr: true })
       return
     }
     setScaleBusy(true)
@@ -593,6 +817,22 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
     }
   }
 
+  /** One add call per profile; shared by Add all profiles and Reset. */
+  const scaleAddAllProfilesLoop = useCallback(async () => {
+    const okParts: string[] = []
+    const errParts: string[] = []
+    for (const p of workerProfiles) {
+      const res = await scaleWorker({ action: 'add', worker_type: p.key })
+      if (res.ok) {
+        const iid = res.instance_id ?? res.unit ?? p.key
+        okParts.push(`${p.key} → ${iid}`)
+      } else {
+        errParts.push(`${p.key}: ${res.error ?? 'Failed'}`)
+      }
+    }
+    return { okParts, errParts }
+  }, [workerProfiles])
+
   /** One new instance per configured profile (same as choosing each type and clicking Add). */
   const onScaleAddAll = async () => {
     if (workerProfiles.length === 0) {
@@ -600,18 +840,8 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
       return
     }
     setScaleBusy(true)
-    const okParts: string[] = []
-    const errParts: string[] = []
     try {
-      for (const p of workerProfiles) {
-        const res = await scaleWorker({ action: 'add', worker_type: p.key })
-        if (res.ok) {
-          const iid = res.instance_id ?? res.unit ?? p.key
-          okParts.push(`${p.key} → ${iid}`)
-        } else {
-          errParts.push(`${p.key}: ${res.error ?? 'Failed'}`)
-        }
-      }
+      const { okParts, errParts } = await scaleAddAllProfilesLoop()
       if (errParts.length === 0) {
         setScaleMsg({
           text: `Started ${okParts.length} instance(s). ${okParts.join('; ')}`,
@@ -646,7 +876,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
     }
     const forceAll = scaleRemoveAllForceRef.current
     setConfirmVariant('default')
-    setScaleRemoveForce(false)
+    setScaleRemoveForce(true)
     setConfirmState({
       open: true,
       title: 'Remove all worker instances?',
@@ -674,6 +904,82 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                 : `Stopped with ${errors.length} error(s): ${errors.join('; ')}`,
             isErr: errors.length > 0,
           })
+        } catch (e) {
+          setScaleMsg({ text: e instanceof Error ? e.message : 'Error', isErr: true })
+        } finally {
+          setScaleBusy(false)
+          resetConfirmDialog()
+        }
+      },
+    })
+  }
+
+  /** Force-remove every instance on this host, then start one per profile (same as Remove all with Force on + Add all). */
+  const onScaleResetClick = () => {
+    const ids = [
+      ...new Set(
+        instances
+          .map(inst => instanceIdFromWorkerUnit(inst.unit))
+          .filter((x): x is string => x != null),
+      ),
+    ]
+    if (ids.length === 0 && workerProfiles.length === 0) {
+      setScaleMsg({ text: 'No instances to remove and no profiles to add', isErr: true })
+      return
+    }
+    setConfirmVariant('default')
+    setConfirmState({
+      open: true,
+      title: 'Reset worker instances?',
+      message:
+        ids.length > 0
+          ? `This will force-remove ${ids.length} worker unit(s) on this Ops host (${ids.join(', ')}), then start one instance per configured profile. Force remove uses graceful stop first, then SIGKILL if a unit is still active. Workers on other machines using the same broker are not affected.`
+          : 'There are no worker units to remove on this host. One instance will be started for each configured profile.',
+      confirming: false,
+      confirmLabel: 'Confirm',
+      action: async () => {
+        setConfirmState(prev => ({ ...prev, confirming: true }))
+        setScaleBusy(true)
+        const removeErrors: string[] = []
+        try {
+          const force = true
+          for (const instanceId of ids) {
+            const res = await scaleWorker({ action: 'remove', instance_id: instanceId, force })
+            if (!res.ok) removeErrors.push(`${instanceId}: ${res.error ?? 'Failed'}`)
+          }
+          await loadAll()
+          await refreshOpsWorkersSnapshot({ forceRefresh: true })
+          if (removeErrors.length > 0) {
+            setScaleMsg({
+              text: `Reset: failed to remove some instance(s): ${removeErrors.join('; ')}. Add-all was skipped.`,
+              isErr: true,
+            })
+            return
+          }
+          if (workerProfiles.length === 0) {
+            setScaleMsg({
+              text:
+                ids.length > 0
+                  ? `Stopped ${ids.length} instance(s). No worker profiles configured to start.`
+                  : 'Nothing to start.',
+              isErr: false,
+            })
+            return
+          }
+          const { okParts, errParts } = await scaleAddAllProfilesLoop()
+          await loadAll()
+          if (errParts.length === 0) {
+            setScaleMsg({
+              text: `Reset complete. Started ${okParts.length} instance(s). ${okParts.join('; ')}`,
+              isErr: false,
+            })
+            await refreshOpsWorkersSnapshot({ forceRefresh: true })
+          } else {
+            setScaleMsg({
+              text: `Removed all instances; ${errParts.length} add(s) failed: ${errParts.join(' | ')}. Started ${okParts.length}: ${okParts.join('; ')}`,
+              isErr: true,
+            })
+          }
         } catch (e) {
           setScaleMsg({ text: e instanceof Error ? e.message : 'Error', isErr: true })
         } finally {
@@ -723,14 +1029,14 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   }
 
   // ── Console handlers ──────────────────────────────────────────────────
-  /** Opens a console stream from Runtime Snapshot cards; switches to Workers conditions and scrolls to Console. */
+  /** Opens a console stream from Runtime Snapshot cards; switches to Console & Runtime tab and scrolls to Console. */
   const selectConsole = useCallback((target: ConsoleTarget) => {
     if (target === 'none') {
       setConsoleTarget('none')
       setConsoleUrl('')
       return
     }
-    setCelerySectionTab('overview')
+    setCelerySectionTab('console_runtime')
     setConsoleTarget(target)
     if (target === 'broker') {
       setConsoleUrl(brokerConsoleUrl())
@@ -745,7 +1051,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
     })
   }, [])
 
-  /** Queue summary Status lamp → Workers conditions + Console (worker for queue, else broker). */
+  /** Queue summary Status lamp → Console & Runtime tab + Console (worker for queue, else broker). */
   const navigateToConsoleForQueueCoverage = useCallback(
     (celeryQueue: string) => {
       const q = String(celeryQueue).trim()
@@ -770,7 +1076,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
       return
     }
     if (target !== 'none') {
-      setCelerySectionTab('overview')
+      setCelerySectionTab('console_runtime')
     }
     setConsoleTarget(target)
     if (target === 'broker') {
@@ -820,14 +1126,16 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   const refreshAfterJobMutation = useCallback(() => void loadAll(), [loadAll])
 
   const navigateToJobQueueFromSummary = useCallback((celeryQueue: string) => {
-    setCelerySectionTab('jobs')
+    const q = String(celeryQueue).trim()
+    setWorkerInstancesQueueFilter(q)
+    setCelerySectionTab('queues_instances')
     queueMicrotask(() => {
-      jobQueuesNavRef.current?.navigateToQueue(celeryQueue)
-      document.getElementById('celery-panel-jobs')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      jobQueuesNavRef.current?.navigateToQueue(q)
+      document.getElementById('celery-panel-queues-instances')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     })
   }, [])
 
-  /** Deep link: `#settings-celery-queue-<name>` opens Job queues tab and selects that Celery queue. */
+  /** Deep link: `#settings-celery-queue-<name>` opens Queues & Instances tab and selects that Celery queue. */
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined
     const applyQueueHash = () => {
@@ -848,10 +1156,12 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
 
   const navigateToJobQueueStatusFromSummary = useCallback(
     (celeryQueue: string, status: 'pending' | 'running' | 'done' | 'failed') => {
-      setCelerySectionTab('jobs')
+      const q = String(celeryQueue).trim()
+      setWorkerInstancesQueueFilter(q)
+      setCelerySectionTab('queues_instances')
       queueMicrotask(() => {
-        jobQueuesNavRef.current?.navigateToQueueWithStatus(celeryQueue, status)
-        document.getElementById('celery-panel-jobs')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        jobQueuesNavRef.current?.navigateToQueueWithStatus(q, status)
+        document.getElementById('celery-panel-queues-instances')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       })
     },
     [],
@@ -895,6 +1205,30 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           const r = await deleteAllBarsJobs('failed')
           if (!r.ok) throw new Error(r.error ?? 'Delete failed')
           setFlashMsg({ text: `Deleted ${r.deleted} failed job(s).`, isErr: false })
+        }
+        await loadAll()
+        jobListReloadRef.current?.(row.celery_queue)
+      } catch (e) {
+        setFlashMsg({ text: e instanceof Error ? e.message : 'Operation failed', isErr: true })
+      } finally {
+        setTopQueueActionBusy(null)
+      }
+    },
+    [loadAll],
+  )
+
+  const executeDeletePendingTop = useCallback(
+    async (row: AggregatedJobQueueSummaryRow) => {
+      setTopQueueActionBusy(row.celery_queue)
+      try {
+        if (row.pipeline === 'massive') {
+          const r = await deleteAllMassiveJobs('pending', row.celery_queue)
+          if (!r.ok) throw new Error(r.error ?? 'Delete failed')
+          setFlashMsg({ text: `Deleted ${r.deleted} pending job(s).`, isErr: false })
+        } else {
+          const r = await deleteAllBarsJobs('pending')
+          if (!r.ok) throw new Error(r.error ?? 'Delete failed')
+          setFlashMsg({ text: `Deleted ${r.deleted} pending job(s).`, isErr: false })
         }
         await loadAll()
         jobListReloadRef.current?.(row.celery_queue)
@@ -952,6 +1286,12 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           ? 'Broker only — no inspect workers'
           : 'Workers do not cover every supported queue'
   const showInitialSkeleton = loading && workers.length === 0
+
+  const filteredWorkerInstances = useMemo(() => {
+    const q = workerInstancesQueueFilter?.trim()
+    if (!q) return instances
+    return instances.filter(inst => instanceConsumesCeleryQueue(inst.unit, q, workerProfiles))
+  }, [instances, workerInstancesQueueFilter, workerProfiles])
 
   const confirmDialog = (
     <DraggableModal
@@ -1022,11 +1362,11 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               <SettingsSidebarLampGlyph id="celery" />
             </span>
             Celery
-            <InfoTooltip text="Queue summary (above tabs): broker + PostgreSQL job counts for every queue; same on all tabs. Job queues: PostgreSQL job tables per Celery queue. Workers conditions: worker instances, Redis control, live consoles, and runtime snapshot." />
+            <InfoTooltip text="Queue summary (above tabs): broker + PostgreSQL job counts for every queue; same on all tabs. Queues & Instances: PostgreSQL job queues plus systemd worker instances and Redis/broker. Console & Runtime: live consoles and Celery inspect snapshot." />
           </h2>
           <p className="settings-page-subtitle">
-            Queue summary at the top applies to all tabs. Job queues lists PostgreSQL jobs per Celery queue. Workers
-            conditions includes worker instances, Redis, console, and runtime snapshot.
+            Queue summary at the top applies to all tabs. Main sections: Queues & Instances (job tables + workers and
+            broker), or Console & Runtime (streams and inspect snapshot).
           </p>
         </div>
         <div className="dashboard-auth-bar dashboard-auth-bar--celery-header">
@@ -1111,12 +1451,14 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
         runtimeCeleryLamp={runtimeCeleryLamp}
         runtimeCeleryStatusText={runtimeCeleryStatusText}
         onClearDone={executeClearDoneTop}
+        onDeletePending={executeDeletePendingTop}
         onDeleteFailed={executeDeleteFailedTop}
         onResetFailed={executeResetFailedTop}
         onNavigateToJobQueue={navigateToJobQueueFromSummary}
         onNavigateToJobQueueStatus={navigateToJobQueueStatusFromSummary}
         onNavigateQueueCoverageConsole={navigateToConsoleForQueueCoverage}
         onNavigateAggregateCoverageConsole={navigateToBrokerConsoleFromQueueSummary}
+        highlightQueueName={workerInstancesQueueFilter}
       />
 
       <div
@@ -1127,35 +1469,35 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
         <button
           type="button"
           role="tab"
-          id="celery-tab-jobs"
-          aria-selected={celerySectionTab === 'jobs'}
-          tabIndex={celerySectionTab === 'jobs' ? 0 : -1}
-          className={`dashboard-celery-main-tab ${celerySectionTab === 'jobs' ? 'dashboard-celery-main-tab--active' : ''}`}
-          onClick={() => setCelerySectionTab('jobs')}
+          id="celery-tab-queues-instances"
+          aria-selected={celerySectionTab === 'queues_instances'}
+          tabIndex={celerySectionTab === 'queues_instances' ? 0 : -1}
+          className={`dashboard-celery-main-tab ${celerySectionTab === 'queues_instances' ? 'dashboard-celery-main-tab--active' : ''}`}
+          onClick={() => setCelerySectionTab('queues_instances')}
         >
-          Job queues
+          Queues &amp; Instances
         </button>
         <button
           type="button"
           role="tab"
-          id="celery-tab-workers-conditions"
-          aria-selected={celerySectionTab === 'overview'}
-          tabIndex={celerySectionTab === 'overview' ? 0 : -1}
-          className={`dashboard-celery-main-tab ${celerySectionTab === 'overview' ? 'dashboard-celery-main-tab--active' : ''}`}
-          onClick={() => setCelerySectionTab('overview')}
+          id="celery-tab-console-runtime"
+          aria-selected={celerySectionTab === 'console_runtime'}
+          tabIndex={celerySectionTab === 'console_runtime' ? 0 : -1}
+          className={`dashboard-celery-main-tab ${celerySectionTab === 'console_runtime' ? 'dashboard-celery-main-tab--active' : ''}`}
+          onClick={() => setCelerySectionTab('console_runtime')}
         >
-          Workers conditions
+          Console &amp; Runtime
         </button>
       </div>
 
       <div className="dashboard-grid settings-page-groups">
           <div className="dashboard-celery-group">
-          {/* ── Tab: Job queues ── */}
+          {/* ── Tab: Queues & Instances (job DB + systemd workers + broker) ── */}
           <div
             role="tabpanel"
-            id="celery-panel-jobs"
-            aria-labelledby="celery-tab-jobs"
-            hidden={celerySectionTab !== 'jobs'}
+            id="celery-panel-queues-instances"
+            aria-labelledby="celery-tab-queues-instances"
+            hidden={celerySectionTab !== 'queues_instances'}
             className="dashboard-celery-tab-panel"
           >
             <CeleryJobQueuesSection
@@ -1163,143 +1505,311 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               onJobCountsChanged={refreshAfterJobMutation}
               onProvideJobListReload={captureJobListReload}
             />
-          </div>
-
-          {/* ── Tab: Workers conditions — instances + broker, console, runtime snapshot ── */}
-          <div
-            role="tabpanel"
-            id="celery-panel-workers-conditions"
-            aria-labelledby="celery-tab-workers-conditions"
-            hidden={celerySectionTab !== 'overview'}
-            className="dashboard-celery-tab-panel"
-          >
           <div className="dashboard-celery-instances-broker-row">
             {/* ── Worker Scaling ─────────────────────────────────── */}
             <section className="replay-section dashboard-section dashboard-scaling" aria-labelledby="dashboard-scale-head">
               <h3 id="dashboard-scale-head" className="page-title-with-tooltip">
                 Worker Instances
-                <InfoTooltip text="Add Instance adds one worker for the selected profile (each Massive-related profile binds to a single Celery queue — no multi-queue sharing). Add all profiles starts one instance per profile in config. Remove all instances stops every unit listed below on this Ops host (confirmation required). Row chip = Ops host profile (GET /ops/health). If Runtime Snapshot still shows a worker after remove, check hostname on the worker card — another machine may share the same broker." />
+                <InfoTooltip text="Each profile consumes a single Celery queue; instance IDs are profile_key-sequence (Cycle). Queue summary: click a queue name or a Pending/Running/Done/Failed cell to jump here and filter rows to instances for that queue. Bubble ALL: Add all and Reset all are always available (with no instances, Reset confirms starting one worker per profile). Remove all appears only when at least one instance exists on this host. Pick a profile: Add Instance adds one worker for that profile. Per row: Recreate force-removes that unit then adds the same worker type again; Remove stops the unit (confirmation + optional Force). Row chip = Ops host profile (GET /ops/health)." />
               </h3>
               {scaleMsg.text && (
                 <span className={`settings-page-msg ${scaleMsg.isErr ? 'msg-error' : 'msg-ok'}`}>{scaleMsg.text}</span>
               )}
+              {instances.length > 0 && workerInstancesQueueFilter != null && workerInstancesQueueFilter.trim() !== '' && (
+                <div className="dashboard-worker-instances-filter-bar" role="status">
+                  <span className="dashboard-worker-instances-filter-label">
+                    Showing instances for queue{' '}
+                    <strong>{formatQueueLabel(workerInstancesQueueFilter.trim())}</strong>
+                    <code className="dashboard-worker-instances-filter-key">{workerInstancesQueueFilter.trim()}</code>
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary dashboard-worker-instances-filter-clear"
+                    onClick={() => setWorkerInstancesQueueFilter(null)}
+                  >
+                    Show all instances
+                  </button>
+                </div>
+              )}
               {instances.length > 0 && (
-                <div className="dashboard-instances-list">
-                  {instances.map(inst => (
-                    <div key={inst.unit} className="dashboard-instance-row">
-                      <span className={`dashboard-instance-lamp ${inst.active === 'active' ? 'green' : 'red'}`}>●</span>
-                      <OpsHostEnvPillBadge
-                        pill={opsHostEnvPill}
-                        className="dashboard-celery-env-pill"
-                        title={opsHostEnvPillTitle}
-                      />
-                      <span className="dashboard-instance-unit">{inst.unit}</span>
-                      <span className="dashboard-instance-sub">{inst.sub}</span>
-                      <button
-                        type="button"
-                        className="dashboard-svc-stop-btn"
-                        onClick={() => {
+                <div className="dashboard-instances-sheet-wrap">
+                  <table
+                    className="table-operations dashboard-worker-instances-table"
+                    role="grid"
+                    aria-label="Worker instances on this Ops host"
+                  >
+                    <thead>
+                      <tr>
+                        <th scope="col">Status</th>
+                        <th scope="col">Host</th>
+                        <th scope="col">Queue</th>
+                        <th scope="col" title="Sequence number within the worker profile (e.g. bars-3 → 3).">
+                          Cycle
+                        </th>
+                        <th scope="col" className="dashboard-worker-instances-th-action">
+                          Action
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredWorkerInstances.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="dashboard-worker-instances-empty-filter">
+                            {`No worker instance on this host for queue “${workerInstancesQueueFilter?.trim() ?? ''}”. Clear the filter or start an instance whose profile consumes this queue.`}
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredWorkerInstances.map(inst => {
+                          const profile = workerProfileForInstanceUnit(inst.unit, workerProfiles)
+                          const statusOk = inst.active === 'active'
                           const iid = instanceIdFromWorkerUnit(inst.unit)
-                          if (iid) {
-                            onScaleRemove(iid)
-                          } else {
-                            setScaleMsg({
-                              text: `Cannot parse instance id from unit name: ${inst.unit}`,
-                              isErr: true,
-                            })
-                          }
-                        }}
-                        disabled={scaleBusy || !canOperate}
-                        title={canOperate ? `Stop and remove ${inst.unit}` : 'Requires operator role'}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
+                          const idParts = iid ? parseCeleryWorkerInstanceId(iid) : null
+                          const rawQueues = profile?.queues ?? []
+                          const rawQueue = rawQueues[0] ?? null
+                          const queueTitle =
+                            rawQueues.length > 1 ? rawQueues.join(', ') : (rawQueue ?? inst.unit)
+                          const queueDisplay = rawQueue ? formatQueueLabel(rawQueue) : '—'
+                          const cycleDisplay = idParts != null ? String(idParts.cycle) : '—'
+                          const workerTypeKey = idParts?.profileKey ?? profile?.key ?? null
+                          const rowLabel =
+                            rawQueue && idParts != null
+                              ? `${formatQueueLabel(rawQueue)} #${idParts.cycle}`
+                              : (iid ?? inst.unit)
+                          return (
+                            <tr key={inst.unit} className="dashboard-worker-instances-row">
+                              <td className="dashboard-worker-instances-td-status">
+                                <span className="dashboard-worker-instances-status-inner">
+                                  <span
+                                    className={`dashboard-instance-lamp ${statusOk ? 'green' : 'red'}`}
+                                    title={systemdInstanceStatusLabel(inst)}
+                                    aria-hidden
+                                  >
+                                    ●
+                                  </span>
+                                  <span className="dashboard-instance-status-text">
+                                    {systemdInstanceStatusLabel(inst)}
+                                  </span>
+                                </span>
+                              </td>
+                              <td className="dashboard-worker-instances-td-host">
+                                <OpsHostEnvPillBadge
+                                  pill={opsHostEnvPill}
+                                  className="dashboard-celery-env-pill"
+                                  title={opsHostEnvPillTitle}
+                                />
+                              </td>
+                              <td className="dashboard-worker-instances-td-queue">
+                                <span className="dashboard-instance-queue-display" title={queueTitle}>
+                                  {queueDisplay}
+                                </span>
+                              </td>
+                              <td className="dashboard-worker-instances-td-cycle">
+                                <span className="dashboard-instance-cycle-text" title={iid ?? inst.unit}>
+                                  {cycleDisplay}
+                                </span>
+                              </td>
+                              <td className="dashboard-worker-instances-td-action">
+                                <div className="dashboard-worker-instances-action-buttons">
+                                  <button
+                                    type="button"
+                                    className="celery-queue-icon-btn celery-queue-icon-btn--instance-recreate"
+                                    onClick={() => {
+                                      if (iid && workerTypeKey) {
+                                        onScaleRecreate(iid, workerTypeKey)
+                                      } else {
+                                        setScaleMsg({
+                                          text: `Cannot resolve worker profile for unit: ${inst.unit}`,
+                                          isErr: true,
+                                        })
+                                      }
+                                    }}
+                                    disabled={scaleBusy || !canOperate}
+                                    title={
+                                      canOperate
+                                        ? `Recreate: force-remove this unit, then add worker type ${workerTypeKey ?? '?'}`
+                                        : 'Requires operator role'
+                                    }
+                                    aria-label={`Recreate worker instance ${rowLabel}`}
+                                  >
+                                    <IcoWorkerInstanceRecreate />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="celery-queue-icon-btn celery-queue-icon-btn--instance-remove"
+                                    onClick={() => {
+                                      if (iid) {
+                                        onScaleRemove(iid)
+                                      } else {
+                                        setScaleMsg({
+                                          text: `Cannot parse instance id from unit name: ${inst.unit}`,
+                                          isErr: true,
+                                        })
+                                      }
+                                    }}
+                                    disabled={scaleBusy || !canOperate}
+                                    title={canOperate ? `Remove worker instance ${inst.unit}` : 'Requires operator role'}
+                                    aria-label={`Remove worker instance ${rowLabel}`}
+                                  >
+                                    <IcoWorkerInstanceRemove />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               )}
               <div className="dashboard-scale-add-row">
-                <select
-                  className="dashboard-ctrl-input"
-                  value={scaleWorkerType}
-                  onChange={e => setScaleWorkerType(e.target.value)}
-                  disabled={scaleBusy || workerProfiles.length === 0}
-                >
-                  {workerProfiles.length === 0 && <option value="">No profiles</option>}
-                  {workerProfiles.map(p => (
-                    <option key={p.key} value={p.key}>
-                      {p.label} ({p.queues.join(', ')})
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  className="btn-resume dashboard-btn dashboard-btn--start"
-                  onClick={onScaleAdd}
-                  disabled={scaleBusy || !scaleWorkerType || !canOperate}
-                >
-                  {scaleBusy ? 'Working…' : 'Add Instance'}
-                </button>
+                {workerProfiles.length === 0 ? (
+                  <span className="dashboard-empty-inline">No profiles</span>
+                ) : (
+                  <div
+                    className="replay-bubble-switch instance-sheet-bubble-switch--wrap dashboard-scale-add-profile-bubbles"
+                    role="radiogroup"
+                    aria-label="Worker profile or ALL"
+                  >
+                    <button
+                      type="button"
+                      className={`replay-bubble-switch-btn ${scaleWorkerType === SCALE_SELECTION_ALL ? 'active' : ''}`}
+                      role="radio"
+                      aria-checked={scaleWorkerType === SCALE_SELECTION_ALL}
+                      disabled={scaleBusy}
+                      title="All profiles — Add all and Reset all below; Remove all only when instances exist on this host"
+                      onClick={() => setScaleWorkerType(SCALE_SELECTION_ALL)}
+                    >
+                      ALL
+                    </button>
+                    {workerProfiles.map(p => {
+                      const queuesHint = p.queues.length ? p.queues.join(', ') : '—'
+                      const selected = scaleWorkerType === p.key
+                      return (
+                        <button
+                          key={p.key}
+                          type="button"
+                          className={`replay-bubble-switch-btn ${selected ? 'active' : ''}`}
+                          role="radio"
+                          aria-checked={selected}
+                          disabled={scaleBusy}
+                          title={queuesHint}
+                          onClick={() => setScaleWorkerType(p.key)}
+                        >
+                          {p.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+                {scaleWorkerType !== SCALE_SELECTION_ALL && (
+                  <button
+                    type="button"
+                    className="celery-queue-icon-btn celery-queue-icon-btn--scale-add-all celery-queue-icon-btn--with-label dashboard-scale-add-instance-btn"
+                    onClick={onScaleAdd}
+                    disabled={scaleBusy || !scaleWorkerType || !canOperate}
+                    title="Add one worker instance for the selected profile"
+                    aria-label={scaleBusy ? 'Working' : 'Add Instance: start one worker for the selected profile'}
+                  >
+                    <IcoWorkerInstanceAdd />
+                    <span className="celery-queue-icon-btn__label">
+                      {scaleBusy ? 'Working…' : 'Add Instance'}
+                    </span>
+                  </button>
+                )}
               </div>
+              {scaleWorkerType === SCALE_SELECTION_ALL && workerProfiles.length > 0 && (
               <div className="dashboard-scale-bulk-row">
-                <button
-                  type="button"
-                  className="btn btn-secondary dashboard-btn"
-                  onClick={() => void onScaleAddAll()}
-                  disabled={scaleBusy || workerProfiles.length === 0 || !canOperate}
-                  title="Start one worker instance for each profile in config (ops.worker_profiles)"
-                >
-                  {scaleBusy ? 'Working…' : 'Add all profiles'}
-                </button>
                 <div
-                  className="dashboard-scale-remove-all-group"
+                  className="dashboard-scale-bulk-icons"
                   role="group"
-                  aria-label="Remove all worker instances"
+                  aria-label="Bulk worker instance actions"
                 >
                   <button
                     type="button"
-                    className="btn btn-danger dashboard-btn"
-                    onClick={onScaleRemoveAllClick}
-                    disabled={scaleBusy || instances.length === 0 || !canOperate}
-                    title="Stop every listed worker unit on this host"
+                    className="celery-queue-icon-btn celery-queue-icon-btn--scale-add-all celery-queue-icon-btn--with-label"
+                    onClick={() => void onScaleAddAll()}
+                    disabled={scaleBusy || workerProfiles.length === 0 || !canOperate}
+                    title="Add all profiles — start one worker instance for each profile in config (ops.worker_profiles)"
+                    aria-label="Add all profiles: start one instance per configured worker profile"
                   >
-                    Remove all instances
+                    <IcoWorkerScaleAddAll />
+                    <span className="celery-queue-icon-btn__label">Add all</span>
                   </button>
-                  <span className="dashboard-scale-remove-all-force-label" id="celery-remove-all-force-label">
-                    Force
-                  </span>
+                  <button
+                    type="button"
+                    className="celery-queue-icon-btn celery-queue-icon-btn--scale-reset celery-queue-icon-btn--with-label"
+                    onClick={onScaleResetClick}
+                    disabled={scaleBusy || !canOperate}
+                    title={
+                      instances.length > 0
+                        ? 'Reset all — force-remove all worker instances on this host, then add one per profile'
+                        : 'Reset all — start one worker instance for each configured profile (none on this host yet)'
+                    }
+                    aria-label={
+                      instances.length > 0
+                        ? 'Reset all: force-remove all worker instances on this host, then add one instance per profile'
+                        : 'Reset all: start one instance per configured profile'
+                    }
+                  >
+                    <IcoWorkerScaleReset />
+                    <span className="celery-queue-icon-btn__label">Reset all</span>
+                  </button>
+                </div>
+                {instances.length > 0 && (
                   <div
-                    className="replay-bubble-switch dashboard-celery-remove-all-force-switch"
+                    className="dashboard-scale-remove-all-group"
                     role="group"
-                    aria-labelledby="celery-remove-all-force-label"
+                    aria-label="Remove all worker instances"
                   >
                     <button
                       type="button"
-                      className={`replay-bubble-switch-btn ${!scaleRemoveAllForce ? 'active' : ''}`}
-                      onClick={() => {
-                        scaleRemoveAllForceRef.current = false
-                        setScaleRemoveAllForce(false)
-                      }}
-                      disabled={scaleBusy || instances.length === 0 || !canOperate}
-                      title="Graceful stop only (default)"
+                      className="celery-queue-icon-btn celery-queue-icon-btn--scale-remove-all celery-queue-icon-btn--with-label"
+                      onClick={onScaleRemoveAllClick}
+                      disabled={scaleBusy || !canOperate}
+                      title="Remove all instances — stop every listed worker unit on this host (respects Force switch)"
+                      aria-label="Remove all worker instances on this host"
                     >
-                      Off
+                      <IcoWorkerScaleRemoveAll />
+                      <span className="celery-queue-icon-btn__label">Remove all</span>
                     </button>
-                    <button
-                      type="button"
-                      className={`replay-bubble-switch-btn ${scaleRemoveAllForce ? 'active' : ''}`}
-                      onClick={() => {
-                        scaleRemoveAllForceRef.current = true
-                        setScaleRemoveAllForce(true)
-                      }}
-                      disabled={scaleBusy || instances.length === 0 || !canOperate}
-                      title="After graceful stop, SIGKILL if the unit is still active on this host"
+                    <span className="dashboard-scale-remove-all-force-label" id="celery-remove-all-force-label">
+                      Force
+                    </span>
+                    <div
+                      className="replay-bubble-switch dashboard-celery-remove-all-force-switch"
+                      role="group"
+                      aria-labelledby="celery-remove-all-force-label"
                     >
-                      On
-                    </button>
+                      <button
+                        type="button"
+                        className={`replay-bubble-switch-btn ${!scaleRemoveAllForce ? 'active' : ''}`}
+                        onClick={() => {
+                          scaleRemoveAllForceRef.current = false
+                          setScaleRemoveAllForce(false)
+                        }}
+                        disabled={scaleBusy || !canOperate}
+                        title="Graceful stop only"
+                      >
+                        Off
+                      </button>
+                      <button
+                        type="button"
+                        className={`replay-bubble-switch-btn ${scaleRemoveAllForce ? 'active' : ''}`}
+                        onClick={() => {
+                          scaleRemoveAllForceRef.current = true
+                          setScaleRemoveAllForce(true)
+                        }}
+                        disabled={scaleBusy || !canOperate}
+                        title="After graceful stop, SIGKILL if the unit is still active on this host (default)"
+                      >
+                        On
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
+              )}
             </section>
 
             {/* ── Broker Control ─────────────────────────────────── */}
@@ -1368,8 +1878,17 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               )}
             </section>
           </div>
+          </div>
 
-          {/* ── Console (below worker instances + broker) ── */}
+          {/* ── Tab: Console & Runtime ── */}
+          <div
+            role="tabpanel"
+            id="celery-panel-console-runtime"
+            aria-labelledby="celery-tab-console-runtime"
+            hidden={celerySectionTab !== 'console_runtime'}
+            className="dashboard-celery-tab-panel"
+          >
+          {/* ── Console ── */}
           <section
             ref={consoleSectionRef}
             id="dashboard-console-section"

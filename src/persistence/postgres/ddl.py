@@ -910,7 +910,7 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                     ) STORED,
                     source text NOT NULL DEFAULT 'ib',
                     created_at timestamptz DEFAULT now(),
-                    PRIMARY KEY (option_snapshots_id, snapshot_ts)
+                    PRIMARY KEY (contract_key, snapshot_ts)
                 ) PARTITION BY RANGE (snapshot_ts);
                 ALTER SEQUENCE option_snapshots_option_snapshots_id_seq OWNED BY option_snapshots.option_snapshots_id;
                 -- Create default partition for current month and next 3 months
@@ -995,7 +995,7 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                     ) STORED,
                     source text NOT NULL DEFAULT 'ib',
                     created_at timestamptz DEFAULT now(),
-                    PRIMARY KEY (option_snapshots_id, snapshot_ts)
+                    PRIMARY KEY (contract_key, snapshot_ts)
                 ) PARTITION BY RANGE (snapshot_ts);
 
                 -- 2. Create monthly partitions covering existing data + future
@@ -1113,8 +1113,60 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             """
         )
         cur.execute(
-            "CREATE INDEX IF NOT EXISTS option_snapshots_contract_key_ts ON option_snapshots (contract_key, snapshot_ts DESC)"
+            """
+            DO $option_snapshots_pk$
+            DECLARE
+              dup_groups bigint;
+              old_surrogate_pk boolean;
+              pk_conname name;
+              has_natural_pk boolean;
+            BEGIN
+              IF to_regclass('public.option_snapshots') IS NULL THEN
+                RETURN;
+              END IF;
+              SELECT EXISTS (
+                SELECT 1 FROM pg_constraint c
+                WHERE c.conrelid = 'public.option_snapshots'::regclass
+                  AND c.contype = 'p'
+                  AND pg_get_constraintdef(c.oid) LIKE '%option_snapshots_id%'
+              ) INTO old_surrogate_pk;
+              IF NOT old_surrogate_pk THEN
+                RETURN;
+              END IF;
+              SELECT COUNT(*)::bigint INTO dup_groups FROM (
+                SELECT 1 FROM option_snapshots
+                GROUP BY contract_key, snapshot_ts
+                HAVING COUNT(*) > 1
+              ) d;
+              IF dup_groups > 0 THEN
+                RAISE NOTICE 'option_snapshots: duplicate (contract_key, snapshot_ts) groups exist — run scripts/db/dedupe_option_snapshots.py --apply then re-run schema refresh to migrate PRIMARY KEY to (contract_key, snapshot_ts).';
+                RETURN;
+              END IF;
+              ALTER TABLE option_snapshots DROP CONSTRAINT IF EXISTS option_snapshots_contract_snapshot_uniq;
+              SELECT c.conname INTO pk_conname
+              FROM pg_constraint c
+              WHERE c.conrelid = 'public.option_snapshots'::regclass
+                AND c.contype = 'p'
+                AND pg_get_constraintdef(c.oid) LIKE '%option_snapshots_id%'
+              LIMIT 1;
+              IF pk_conname IS NOT NULL THEN
+                EXECUTE format('ALTER TABLE option_snapshots DROP CONSTRAINT %I', pk_conname);
+              END IF;
+              SELECT EXISTS (
+                SELECT 1 FROM pg_constraint c
+                WHERE c.conrelid = 'public.option_snapshots'::regclass
+                  AND c.contype = 'p'
+                  AND pg_get_constraintdef(c.oid) LIKE '%contract_key%'
+                  AND pg_get_constraintdef(c.oid) LIKE '%snapshot_ts%'
+                  AND pg_get_constraintdef(c.oid) NOT LIKE '%option_snapshots_id%'
+              ) INTO has_natural_pk;
+              IF NOT has_natural_pk THEN
+                ALTER TABLE option_snapshots ADD CONSTRAINT option_snapshots_pkey PRIMARY KEY (contract_key, snapshot_ts);
+              END IF;
+            END $option_snapshots_pk$;
+            """
         )
+        cur.execute("DROP INDEX IF EXISTS option_snapshots_contract_key_ts")
 
         _log("option_snapshots_latest materialized view (created after migrate_opt when base columns exist)")
         _log("migrate option_* tables for Massive (R-A6): source column, snapshots greeks")
@@ -1204,6 +1256,12 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                   WHERE table_schema = 'public' AND table_name = 'option_contracts' AND column_name = 'primary_exchange'
                 ) THEN
                   ALTER TABLE option_contracts DROP COLUMN primary_exchange;
+                END IF;
+                IF EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'option_contracts' AND column_name = 'updated_at'
+                ) THEN
+                  ALTER TABLE option_contracts DROP COLUMN updated_at;
                 END IF;
               END IF;
 

@@ -568,9 +568,12 @@ export interface WatchlistDbCoverageOptionContracts {
   has_data: boolean
   /** Row count in option_contracts for this symbol; null when has_data is false. */
   row_count: number | null
-  /** Max(created_at) ISO; last row write time (not a dedicated sync-job timestamp). */
+  /** Max(created_at) ISO; age since the most recent newly inserted contract row. */
   newest_created_at: string | null
   age_seconds: number | null
+  /** ISO timestamp of last option_contracts sync run (from job_ticker_reference_state). */
+  last_check_at: string | null
+  last_check_age_seconds: number | null
   ticker_pct: number | null
   identity_pct: number | null
   /** L1: share of rows with non-empty exercise_style (often filled after chain snapshot, not reference-only). */
@@ -595,6 +598,13 @@ export interface WatchlistDbCoverageOptionBars {
   row_count: number | null
   last_bar_time: string | null
   last_created_at: string | null
+  ohlc_complete_pct: number | null
+  volume_pct: number | null
+  vwap_pct: number | null
+  /** avg(volume_pct, vwap_pct) — second completeness segment. */
+  optional_avg_pct: number | null
+  distinct_expirations: number | null
+  distinct_contracts: number | null
 }
 
 export interface WatchlistDbCoverageSnapshotsWithUd {
@@ -624,10 +634,27 @@ export interface WatchlistDbCoverageReportDaily {
   last_created_at: string | null
 }
 
+/** Per-symbol rollup for option_snapshots (Massive source, latest row per contract_key). */
+export interface WatchlistDbCoverageOptionSnapshots {
+  has_data: boolean
+  /** Distinct contract_key count (latest snapshot per key). */
+  row_count: number | null
+  /** Max(snapshot_ts) ISO. */
+  snapshots_last_ts: string | null
+  age_seconds: number | null
+  iv_pct: number | null
+  full_greeks_pct: number | null
+  open_interest_pct: number | null
+  /** Average of full_greeks_pct and open_interest_pct (matrix second segment). */
+  optional_data_fill_avg_pct: number | null
+  /** Latest rows older than 24h (same rule as Feed Massive Option stale hint). */
+  stale_snapshot_rows: number | null
+}
+
 export interface WatchlistDbCoverageSymbolRow {
   symbol: string
   option_contracts: WatchlistDbCoverageOptionContracts
-  option_snapshots: { has_data: boolean; snapshots_last_ts: string | null }
+  option_snapshots: WatchlistDbCoverageOptionSnapshots
   report_option_atm_iv_daily: {
     has_data: boolean
     atm_iv_last_trade_date: string | null
@@ -746,6 +773,237 @@ export async function postOptionContractsReferenceGapBatch(
     }
   }
   return j as OptionContractsReferenceGapBatchResponse
+}
+
+/** GET /research/massive/option-snapshots-contracts-gap — PG vs Massive GET /v3/snapshot/options/{underlying} (per expiry, vs option_contracts). */
+export type OptionSnapshotsContractsGapResult = OptionContractsReferenceGapResult
+
+export async function fetchOptionSnapshotsContractsGap(
+  symbol: string,
+): Promise<OptionSnapshotsContractsGapResult> {
+  const s = (symbol || '').trim().toUpperCase()
+  if (!s) return { ok: false, error: 'symbol is required' }
+  const r = await fetch(
+    massiveUrl(`/research/massive/option-snapshots-contracts-gap?symbol=${encodeURIComponent(s)}`),
+  )
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}`,
+    }
+  }
+  return j as OptionSnapshotsContractsGapResult
+}
+
+export interface OptionSnapshotsContractsGapBatchResponse {
+  ok: boolean
+  error?: string
+  results?: Record<string, OptionSnapshotsContractsGapResult>
+}
+
+/** POST /research/massive/option-snapshots-contracts-gap/batch — max 10 symbols. */
+export async function postOptionSnapshotsContractsGapBatch(
+  symbols: string[],
+): Promise<OptionSnapshotsContractsGapBatchResponse> {
+  const uniq = [...new Set(symbols.map(x => (x || '').trim().toUpperCase()).filter(Boolean))]
+  if (uniq.length === 0) return { ok: false, error: 'symbols is required' }
+  const r = await fetch(massiveUrl('/research/massive/option-snapshots-contracts-gap/batch'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbols: uniq }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}`,
+    }
+  }
+  return j as OptionSnapshotsContractsGapBatchResponse
+}
+
+/** GET /research/massive/option-bars-contracts-gap — option_day/option_min vs option_contracts (local). */
+export type OptionBarsContractsGapResult = OptionContractsReferenceGapResult
+
+export async function fetchOptionBarsContractsGap(
+  symbol: string,
+  table: 'option_day' | 'option_min',
+  period?: string,
+): Promise<OptionBarsContractsGapResult> {
+  const s = (symbol || '').trim().toUpperCase()
+  if (!s) return { ok: false, error: 'symbol is required' }
+  const q = new URLSearchParams({ symbol: s, table })
+  if (period) q.set('period', period)
+  const r = await fetch(massiveUrl(`/research/massive/option-bars-contracts-gap?${q}`))
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return { ok: false, error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}` }
+  }
+  return j as OptionBarsContractsGapResult
+}
+
+export interface OptionBarsContractsGapBatchResponse {
+  ok: boolean
+  error?: string
+  results?: Record<string, OptionBarsContractsGapResult>
+}
+
+/** POST /research/massive/option-bars-contracts-gap/batch — max 10 symbols, no external API. */
+export async function postOptionBarsContractsGapBatch(
+  symbols: string[],
+  table: 'option_day' | 'option_min',
+  period?: string,
+): Promise<OptionBarsContractsGapBatchResponse> {
+  const uniq = [...new Set(symbols.map(x => (x || '').trim().toUpperCase()).filter(Boolean))]
+  if (uniq.length === 0) return { ok: false, error: 'symbols is required' }
+  const r = await fetch(massiveUrl('/research/massive/option-bars-contracts-gap/batch'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbols: uniq, table, ...(period ? { period } : {}) }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return { ok: false, error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}` }
+  }
+  return j as OptionBarsContractsGapBatchResponse
+}
+
+/** POST /research/massive/option-min-fill-eligibility — row/column fill flags per symbol (local PG). */
+export interface OptionMinFillEligibilityRow {
+  needs_row_fill: boolean
+  needs_column_fill: boolean
+  gap?: number | null
+  coverage_pct?: number | null
+}
+
+export async function postOptionMinFillEligibility(
+  symbols: string[],
+  period: string,
+  lookbackDays?: number,
+): Promise<{
+  ok: boolean
+  error?: string
+  period?: string
+  lookback_days?: number
+  results?: Record<string, OptionMinFillEligibilityRow>
+}> {
+  const uniq = [...new Set(symbols.map(x => (x || '').trim().toUpperCase()).filter(Boolean))]
+  if (uniq.length === 0) return { ok: false, error: 'symbols is required' }
+  const body: Record<string, unknown> = { symbols: uniq, period: (period || '').trim() }
+  if (lookbackDays != null && lookbackDays > 0) body.lookback_days = lookbackDays
+  const r = await fetch(massiveUrl('/research/massive/option-min-fill-eligibility'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return { ok: false, error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}` }
+  }
+  return j as {
+    ok: boolean
+    error?: string
+    period?: string
+    lookback_days?: number
+    results?: Record<string, OptionMinFillEligibilityRow>
+  }
+}
+
+/** POST /research/massive/option-day-fill-eligibility — option_day row/column fill flags per symbol (local PG). */
+export interface OptionDayFillEligibilityRow {
+  needs_row_fill: boolean
+  needs_column_fill: boolean
+  gap?: number | null
+  coverage_pct?: number | null
+}
+
+export async function postOptionDayFillEligibility(
+  symbols: string[],
+  columnLookbackDays?: number,
+): Promise<{
+  ok: boolean
+  error?: string
+  column_lookback_days?: number
+  results?: Record<string, OptionDayFillEligibilityRow>
+}> {
+  const uniq = [...new Set(symbols.map(x => (x || '').trim().toUpperCase()).filter(Boolean))]
+  if (uniq.length === 0) return { ok: false, error: 'symbols is required' }
+  const body: Record<string, unknown> = { symbols: uniq }
+  if (columnLookbackDays != null && columnLookbackDays > 0) body.column_lookback_days = columnLookbackDays
+  const r = await fetch(massiveUrl('/research/massive/option-day-fill-eligibility'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return { ok: false, error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}` }
+  }
+  return j as {
+    ok: boolean
+    error?: string
+    column_lookback_days?: number
+    results?: Record<string, OptionDayFillEligibilityRow>
+  }
+}
+
+/** GET /research/massive/bar-quality-detail — per-day / per-expiry / per-period breakdown. */
+export interface BarQualityDailyRow {
+  bar_day: string
+  contract_count: number
+  ohlc_pct: number | null
+  volume_pct: number | null
+  vwap_pct: number | null
+}
+
+export interface BarQualityExpiryRow {
+  expiry: string
+  dte: number | null
+  contract_count: number
+  ohlc_pct: number | null
+  volume_pct: number | null
+  vwap_pct: number | null
+}
+
+export interface BarQualityPeriodRow {
+  period: string
+  row_count: number
+  last_bar_time: string | null
+  ohlc_pct: number | null
+  volume_pct: number | null
+  vwap_pct: number | null
+}
+
+export interface BarQualityDetailResponse {
+  ok: boolean
+  symbol: string
+  table: string
+  latest_date: string | null
+  daily: BarQualityDailyRow[]
+  expiries: BarQualityExpiryRow[]
+  periods: BarQualityPeriodRow[]
+  error?: string
+}
+
+export async function fetchBarQualityDetail(
+  symbol: string,
+  table: 'option_day' | 'option_min',
+  period?: string,
+  days?: number,
+): Promise<BarQualityDetailResponse> {
+  const s = (symbol || '').trim().toUpperCase()
+  if (!s) return { ok: false, symbol: '', table, latest_date: null, daily: [], expiries: [], periods: [], error: 'symbol is required' }
+  const q = new URLSearchParams({ symbol: s, table })
+  if (period) q.set('period', period)
+  if (days) q.set('days', String(days))
+  const r = await fetch(massiveUrl(`/research/massive/bar-quality-detail?${q}`))
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return { ok: false, symbol: s, table, latest_date: null, daily: [], expiries: [], periods: [],
+      error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}` }
+  }
+  return j as BarQualityDetailResponse
 }
 
 /** GET /research/massive/option-contracts-reference-column-parity — L2 ref-owned columns vs PG. */
@@ -2533,5 +2791,69 @@ export async function fetchIvVolatilityCone(
     points: pts,
     warning: j.warning != null ? String(j.warning) : undefined,
     error: errMsg,
+  }
+}
+
+// ── Snapshot quality detail ────────────────────────────────────────────────
+
+export interface SnapshotQualityDailyRow {
+  snap_day: string
+  contract_count: number
+  iv_pct: number | null
+  full_greeks_pct: number | null
+  oi_pct: number | null
+  day_price_pct: number | null
+}
+
+export interface SnapshotQualityExpiryRow {
+  expiry: string
+  dte: number | null
+  contract_count: number
+  iv_pct: number | null
+  full_greeks_pct: number | null
+  oi_pct: number | null
+  day_price_pct: number | null
+}
+
+export interface SnapshotQualityDetailResponse {
+  ok: boolean
+  symbol: string
+  source: string
+  latest_date: string | null
+  daily: SnapshotQualityDailyRow[]
+  expiries: SnapshotQualityExpiryRow[]
+  error?: string
+}
+
+export async function fetchSnapshotQualityDetail(
+  symbol: string,
+  source = 'massive',
+  days = 30,
+): Promise<SnapshotQualityDetailResponse> {
+  const s = (symbol || '').trim().toUpperCase()
+  if (!s) {
+    return { ok: false, symbol: '', source, latest_date: null, daily: [], expiries: [], error: 'symbol is required' }
+  }
+  try {
+    const r = await fetch(
+      massiveUrl(
+        `/research/massive/snapshot-quality-detail?symbol=${encodeURIComponent(s)}&source=${encodeURIComponent(source)}&days=${days}`,
+      ),
+    )
+    const j = await r.json().catch(() => ({}))
+    return {
+      ok: Boolean(j.ok),
+      symbol: j.symbol ?? s,
+      source: j.source ?? source,
+      latest_date: j.latest_date ?? null,
+      daily: Array.isArray(j.daily) ? (j.daily as SnapshotQualityDailyRow[]) : [],
+      expiries: Array.isArray(j.expiries) ? (j.expiries as SnapshotQualityExpiryRow[]) : [],
+      error: j.error != null ? String(j.error) : undefined,
+    }
+  } catch (e) {
+    return {
+      ok: false, symbol: s, source, latest_date: null, daily: [], expiries: [],
+      error: e instanceof Error ? e.message : 'fetch failed',
+    }
   }
 }

@@ -8,10 +8,15 @@ import {
   useState,
 } from 'react'
 import {
+  fetchBarQualityDetail,
   postMassiveSync,
+  postOptionDayFillEligibility,
+  postOptionMinFillEligibility,
   subscribeMassiveJobEvents,
   type MassiveJobApiRow,
   type OptionContractsReferenceGapResult,
+  type OptionSnapshotsContractsGapResult,
+  type WatchlistDbCoverageOptionBars,
   type WatchlistDbCoverageOptionContracts,
 } from '../../api'
 import {
@@ -19,6 +24,7 @@ import {
   summarizeRefJobResult,
 } from '../massive/stockReferenceJobHelpers'
 import type { OptionsFocusDataset } from './optionFocusDataset'
+import { DEFAULT_OPTION_MIN_PERIOD, OPTION_MIN_INTRADAY_PERIODS } from '../../utils/optionBarPeriods'
 
 /** Watchlist optionable symbols max 80; batch chain jobs need headroom. */
 const MAX_TRACKED = 96
@@ -51,6 +57,12 @@ function optionContractsNeedsColumnBackfill(
     (spc != null && spc < OPTION_CONTRACTS_COLUMN_HEALTH_PCT) ||
     (optAvg != null && optAvg < OPTION_CONTRACTS_COLUMN_HEALTH_PCT)
   )
+}
+
+function optionDayNeedsColumnBackfill(od: WatchlistDbCoverageOptionBars | undefined): boolean {
+  if (!od?.has_data) return false
+  const parts = [od.ohlc_complete_pct, od.volume_pct, od.vwap_pct, od.optional_avg_pct]
+  return parts.some(p => p != null && p < OPTION_CONTRACTS_COLUMN_HEALTH_PCT)
 }
 
 const ico = 'data-overview-ctl__ico'
@@ -525,10 +537,34 @@ export type DataOverviewOptionJobsBarProps = {
   ) => void | Promise<void>
   refGapLoading?: boolean
   refGapError?: string | null
+  snapshotGapBySymbol?: Record<string, OptionSnapshotsContractsGapResult>
+  onCompareSnapshotGap?: (
+    symbols: string[],
+    progress?: {
+      onSymbolStart?: (symbol: string) => void
+      onSymbolDone?: (symbol: string, result: OptionSnapshotsContractsGapResult) => void
+      onSymbolError?: (symbol: string, message: string) => void
+    },
+  ) => void | Promise<void>
+  snapshotGapLoading?: boolean
+  snapshotGapError?: string | null
+  barsGapBySymbol?: Record<string, OptionContractsReferenceGapResult>
+  onCompareBarsGap?: (
+    symbols: string[],
+    progress?: {
+      onSymbolStart?: (symbol: string) => void
+      onSymbolDone?: (symbol: string, result: OptionContractsReferenceGapResult) => void
+      onSymbolError?: (symbol: string, message: string) => void
+    },
+  ) => void | Promise<void>
+  barsGapLoading?: boolean
+  barsGapError?: string | null
   /** option_contracts: uppercase symbols chosen in the matrix (Symbol column). */
   comparePool?: string[]
   /** Per-symbol option_contracts coverage (watchlist matrix); used to target column backfill. */
   optionContractsBySymbol?: Record<string, WatchlistDbCoverageOptionContracts>
+  /** Per-symbol option_day coverage (watchlist matrix); used for option_day Fill column gating. */
+  optionDayBySymbol?: Record<string, WatchlistDbCoverageOptionBars>
   onSelectAllComparePool?: () => void
   onClearComparePool?: () => void
   jobsSheetOpen: boolean
@@ -537,6 +573,9 @@ export type DataOverviewOptionJobsBarProps = {
   onOpenAllGapsSheet?: () => void
   /** option_contracts: open Gap scope explanation sheet only. */
   onOpenGapExplainSheet?: () => void
+  /** option_min: bar period label (matches option_min.period in PostgreSQL). */
+  optionMinPeriod?: string
+  onOptionMinPeriodChange?: (period: string) => void
 }
 
 export const DataOverviewOptionJobsBar = forwardRef<
@@ -552,14 +591,25 @@ export const DataOverviewOptionJobsBar = forwardRef<
     onCompareMassiveReference,
     refGapLoading = false,
     refGapError = null,
+    snapshotGapBySymbol = {},
+    onCompareSnapshotGap,
+    snapshotGapLoading = false,
+    snapshotGapError = null,
+    barsGapBySymbol = {},
+    onCompareBarsGap,
+    barsGapLoading = false,
+    barsGapError = null,
     comparePool = [],
     optionContractsBySymbol = {},
+    optionDayBySymbol = {},
     onSelectAllComparePool,
     onClearComparePool,
     jobsSheetOpen,
     onJobsSheetOpenChange,
     onOpenAllGapsSheet,
     onOpenGapExplainSheet,
+    optionMinPeriod: optionMinPeriodProp = DEFAULT_OPTION_MIN_PERIOD,
+    onOptionMinPeriodChange,
   },
   ref,
 ) {
@@ -568,7 +618,21 @@ export const DataOverviewOptionJobsBar = forwardRef<
   const [enqueueBusy, setEnqueueBusy] = useState(false)
   /** option_contracts pool: row vs column batch fill (mutually exclusive). */
   const [contractsFillBatch, setContractsFillBatch] = useState<'row' | 'column' | null>(null)
+  /** option_min pool: Massive /v2/aggs orchestration jobs. */
+  const [optionMinFillBatch, setOptionMinFillBatch] = useState<'row' | 'column' | null>(null)
+  /** option_day pool: row/column fill jobs. */
+  const [optionDayFillBatch, setOptionDayFillBatch] = useState<'row' | 'column' | null>(null)
+  const [optionMinEligibility, setOptionMinEligibility] = useState<
+    Record<string, { needs_row_fill: boolean; needs_column_fill: boolean }>
+  >({})
+  const [optionMinEligibilityLoading, setOptionMinEligibilityLoading] = useState(false)
+  const [optionDayEligibility, setOptionDayEligibility] = useState<
+    Record<string, { needs_row_fill: boolean; needs_column_fill: boolean }>
+  >({})
+  const [optionDayEligibilityLoading, setOptionDayEligibilityLoading] = useState(false)
   const [enqueueErr, setEnqueueErr] = useState<string | null>(null)
+
+  const optionMinPeriod = optionMinPeriodProp
 
   const sseClosersRef = useRef<Map<string, () => void>>(new Map())
   const refreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -746,6 +810,10 @@ export const DataOverviewOptionJobsBar = forwardRef<
   )
 
   const isContractsFocus = focusDataset === 'option_contracts'
+  const isSnapshotsFocus = focusDataset === 'option_snapshots'
+  const isBarsFocus = focusDataset === 'option_day' || focusDataset === 'option_min'
+  const isMinFocus = focusDataset === 'option_min'
+  const isDayFocus = focusDataset === 'option_day'
 
   const poolUpper = useMemo(
     () => comparePool.map(s => s.trim().toUpperCase()).filter(Boolean),
@@ -767,6 +835,96 @@ export const DataOverviewOptionJobsBar = forwardRef<
       return optionContractsNeedsColumnBackfill(oc)
     })
   }, [isContractsFocus, poolUpper, refGapBySymbol, optionContractsBySymbol])
+
+  /** option_min: pooled symbols with Check done and non-zero Gap (same rule as option_contracts row fill). */
+  const optionMinRowFillTargets = useMemo(() => {
+    if (!isMinFocus) return [] as string[]
+    return poolUpper.filter(sym => {
+      if (!hasRefCompareDone(barsGapBySymbol[sym])) return false
+      return symbolHasRowGapIssue(barsGapBySymbol[sym])
+    })
+  }, [isMinFocus, poolUpper, barsGapBySymbol])
+
+  /** option_min: pooled symbols with Check done and incomplete OHLC/volume/vwap rows in lookback. */
+  const optionMinColumnFillTargets = useMemo(() => {
+    if (!isMinFocus) return [] as string[]
+    return poolUpper.filter(sym => {
+      if (!hasRefCompareDone(barsGapBySymbol[sym])) return false
+      return Boolean(optionMinEligibility[sym]?.needs_column_fill)
+    })
+  }, [isMinFocus, poolUpper, barsGapBySymbol, optionMinEligibility])
+
+  /** option_day: same gap rule as option_min row fill (bars vs contracts Check). */
+  const optionDayRowFillTargets = useMemo(() => {
+    if (!isDayFocus) return [] as string[]
+    return poolUpper.filter(sym => {
+      if (!hasRefCompareDone(barsGapBySymbol[sym])) return false
+      return symbolHasRowGapIssue(barsGapBySymbol[sym])
+    })
+  }, [isDayFocus, poolUpper, barsGapBySymbol])
+
+  /** option_day: watchlist metrics below 97% or PG incomplete rows in lookback. */
+  const optionDayColumnFillTargets = useMemo(() => {
+    if (!isDayFocus) return [] as string[]
+    return poolUpper.filter(sym => {
+      if (!hasRefCompareDone(barsGapBySymbol[sym])) return false
+      const od = optionDayBySymbol[sym]
+      const elig = optionDayEligibility[sym]?.needs_column_fill
+      return optionDayNeedsColumnBackfill(od) || Boolean(elig)
+    })
+  }, [isDayFocus, poolUpper, barsGapBySymbol, optionDayBySymbol, optionDayEligibility])
+
+  useEffect(() => {
+    if (!isMinFocus || poolUpper.length === 0) {
+      setOptionMinEligibility({})
+      return
+    }
+    if (barsGapLoading) return
+    let cancelled = false
+    setOptionMinEligibilityLoading(true)
+    void postOptionMinFillEligibility(poolUpper, optionMinPeriod, 7).then(res => {
+      if (cancelled || !res.ok || !res.results) return
+      const next: Record<string, { needs_row_fill: boolean; needs_column_fill: boolean }> = {}
+      for (const [k, v] of Object.entries(res.results)) {
+        next[k.trim().toUpperCase()] = {
+          needs_row_fill: Boolean(v.needs_row_fill),
+          needs_column_fill: Boolean(v.needs_column_fill),
+        }
+      }
+      setOptionMinEligibility(next)
+    }).finally(() => {
+      if (!cancelled) setOptionMinEligibilityLoading(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [isMinFocus, poolUpper, optionMinPeriod, barsGapLoading])
+
+  useEffect(() => {
+    if (!isDayFocus || poolUpper.length === 0) {
+      setOptionDayEligibility({})
+      return
+    }
+    if (barsGapLoading) return
+    let cancelled = false
+    setOptionDayEligibilityLoading(true)
+    void postOptionDayFillEligibility(poolUpper, 30).then(res => {
+      if (cancelled || !res.ok || !res.results) return
+      const next: Record<string, { needs_row_fill: boolean; needs_column_fill: boolean }> = {}
+      for (const [k, v] of Object.entries(res.results)) {
+        next[k.trim().toUpperCase()] = {
+          needs_row_fill: Boolean(v.needs_row_fill),
+          needs_column_fill: Boolean(v.needs_column_fill),
+        }
+      }
+      setOptionDayEligibility(next)
+    }).finally(() => {
+      if (!cancelled) setOptionDayEligibilityLoading(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [isDayFocus, poolUpper, barsGapLoading])
 
   const handleEnqueueRowGap = useCallback(async () => {
     setEnqueueErr(null)
@@ -930,6 +1088,350 @@ export const DataOverviewOptionJobsBar = forwardRef<
     }
   }, [columnFillTargets, onJobsSheetOpenChange, scheduleWatchlistRefresh, startJobStream])
 
+  const handleEnqueueOptionMinRowGap = useCallback(async () => {
+    setEnqueueErr(null)
+    const pool = optionMinRowFillTargets
+    if (pool.length === 0) {
+      setEnqueueErr(
+        'Run Check on the pool first. Fill row gap only enqueues symbols with a Compare result and a non-zero Gap.',
+      )
+      return
+    }
+    setOptionMinFillBatch('row')
+    const batchId = Date.now()
+    try {
+      setItems(prev =>
+        trimJobs([
+          ...prev,
+          ...pool.map((sym, i) => ({
+            trackKey: `opt-min-row-${batchId}-${sym}`,
+            kindLabel: `Fill option_min row gap · ${sym}`,
+            status: 'Enqueueing…',
+            enqueuedAt: batchId + i,
+          })),
+        ]),
+      )
+      onJobsSheetOpenChange(true)
+      let nOk = 0
+      for (let i = 0; i < pool.length; i++) {
+        const sym = pool[i]!
+        const tk = `opt-min-row-${batchId}-${sym}`
+        const res = await postMassiveSync('aggregates', {
+          mode: 'option_min_pool_row_gap',
+          underlying: sym,
+          period: optionMinPeriod,
+          lookback_days: 7,
+          max_contracts: 300,
+        })
+        if (!res.ok) {
+          const msg = res.error ?? res.message ?? `Enqueue failed for ${sym}`
+          setEnqueueErr(msg)
+          setItems(prev =>
+            prev.map(row =>
+              row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row,
+            ),
+          )
+          break
+        }
+        const jid = res.job_id
+        if (!jid) {
+          const msg = `No job_id for ${sym}`
+          setEnqueueErr(msg)
+          setItems(prev =>
+            prev.map(row =>
+              row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row,
+            ),
+          )
+          break
+        }
+        const dedup = Boolean(res.deduplicated)
+        const st = dedup ? 'deduplicated (waiting)' : 'enqueued'
+        setItems(prev =>
+          prev.map(row =>
+            row.trackKey === tk
+              ? { ...row, jobId: jid, deduplicated: dedup, status: st, kindLabel: `Fill option_min row gap · ${sym}` }
+              : row,
+          ),
+        )
+        startJobStream(jid)
+        nOk += 1
+        if (i < pool.length - 1) await delayMs(75)
+      }
+      if (nOk > 0) scheduleWatchlistRefresh()
+    } catch (e) {
+      setEnqueueErr(e instanceof Error ? e.message : 'Enqueue failed')
+    } finally {
+      setOptionMinFillBatch(null)
+    }
+  }, [
+    optionMinRowFillTargets,
+    optionMinPeriod,
+    onJobsSheetOpenChange,
+    scheduleWatchlistRefresh,
+    startJobStream,
+  ])
+
+  const handleEnqueueOptionMinColumnData = useCallback(async () => {
+    setEnqueueErr(null)
+    const pool = optionMinColumnFillTargets
+    if (pool.length === 0) {
+      setEnqueueErr(
+        'Run Check on the pool first. Fill column data re-fetches Massive /v2/aggs for symbols with incomplete OHLC, volume, or VWAP in option_min.',
+      )
+      return
+    }
+    setOptionMinFillBatch('column')
+    const batchId = Date.now()
+    try {
+      setItems(prev =>
+        trimJobs([
+          ...prev,
+          ...pool.map((sym, i) => ({
+            trackKey: `opt-min-col-${batchId}-${sym}`,
+            kindLabel: `Fill option_min column data · ${sym}`,
+            status: 'Enqueueing…',
+            enqueuedAt: batchId + i,
+          })),
+        ]),
+      )
+      onJobsSheetOpenChange(true)
+      let nOk = 0
+      for (let i = 0; i < pool.length; i++) {
+        const sym = pool[i]!
+        const tk = `opt-min-col-${batchId}-${sym}`
+        const res = await postMassiveSync('aggregates', {
+          mode: 'option_min_pool_column_fill',
+          underlying: sym,
+          period: optionMinPeriod,
+          lookback_days: 7,
+          max_contracts: 300,
+        })
+        if (!res.ok) {
+          const msg = res.error ?? res.message ?? `Enqueue failed for ${sym}`
+          setEnqueueErr(msg)
+          setItems(prev =>
+            prev.map(row =>
+              row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row,
+            ),
+          )
+          break
+        }
+        const jid = res.job_id
+        if (!jid) {
+          const msg = `No job_id for ${sym}`
+          setEnqueueErr(msg)
+          setItems(prev =>
+            prev.map(row =>
+              row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row,
+            ),
+          )
+          break
+        }
+        const dedup = Boolean(res.deduplicated)
+        const st = dedup ? 'deduplicated (waiting)' : 'enqueued'
+        setItems(prev =>
+          prev.map(row =>
+            row.trackKey === tk
+              ? { ...row, jobId: jid, deduplicated: dedup, status: st, kindLabel: `Fill option_min column data · ${sym}` }
+              : row,
+          ),
+        )
+        startJobStream(jid)
+        nOk += 1
+        if (i < pool.length - 1) await delayMs(75)
+      }
+      if (nOk > 0) scheduleWatchlistRefresh()
+    } catch (e) {
+      setEnqueueErr(e instanceof Error ? e.message : 'Enqueue failed')
+    } finally {
+      setOptionMinFillBatch(null)
+    }
+  }, [
+    optionMinColumnFillTargets,
+    optionMinPeriod,
+    onJobsSheetOpenChange,
+    scheduleWatchlistRefresh,
+    startJobStream,
+  ])
+
+  const handleEnqueueOptionDayRowGap = useCallback(async () => {
+    setEnqueueErr(null)
+    const pool = optionDayRowFillTargets
+    if (pool.length === 0) {
+      setEnqueueErr(
+        'Run Check on the pool first. Fill row gap only enqueues symbols with a Compare result and a non-zero Gap.',
+      )
+      return
+    }
+    setOptionDayFillBatch('row')
+    const batchId = Date.now()
+    try {
+      setItems(prev =>
+        trimJobs([
+          ...prev,
+          ...pool.map((sym, i) => ({
+            trackKey: `opt-day-row-${batchId}-${sym}`,
+            kindLabel: `Fill option_day row gap · ${sym}`,
+            status: 'Enqueueing…',
+            enqueuedAt: batchId + i,
+          })),
+        ]),
+      )
+      onJobsSheetOpenChange(true)
+      let nOk = 0
+      for (let i = 0; i < pool.length; i++) {
+        const sym = pool[i]!
+        const tk = `opt-day-row-${batchId}-${sym}`
+        const res = await postMassiveSync('aggregates', {
+          mode: 'option_day_pool_row_gap',
+          underlying: sym,
+          row_lookback_days: 730,
+          max_contracts: 300,
+          max_expiries: 60,
+        })
+        if (!res.ok) {
+          const msg = res.error ?? res.message ?? `Enqueue failed for ${sym}`
+          setEnqueueErr(msg)
+          setItems(prev =>
+            prev.map(row =>
+              row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row,
+            ),
+          )
+          break
+        }
+        const jid = res.job_id
+        if (!jid) {
+          const msg = `No job_id for ${sym}`
+          setEnqueueErr(msg)
+          setItems(prev =>
+            prev.map(row =>
+              row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row,
+            ),
+          )
+          break
+        }
+        const dedup = Boolean(res.deduplicated)
+        const st = dedup ? 'deduplicated (waiting)' : 'enqueued'
+        setItems(prev =>
+          prev.map(row =>
+            row.trackKey === tk
+              ? { ...row, jobId: jid, deduplicated: dedup, status: st, kindLabel: `Fill option_day row gap · ${sym}` }
+              : row,
+          ),
+        )
+        startJobStream(jid)
+        nOk += 1
+        if (i < pool.length - 1) await delayMs(75)
+      }
+      if (nOk > 0) scheduleWatchlistRefresh()
+    } catch (e) {
+      setEnqueueErr(e instanceof Error ? e.message : 'Enqueue failed')
+    } finally {
+      setOptionDayFillBatch(null)
+    }
+  }, [
+    optionDayRowFillTargets,
+    onJobsSheetOpenChange,
+    scheduleWatchlistRefresh,
+    startJobStream,
+  ])
+
+  const handleEnqueueOptionDayColumnData = useCallback(async () => {
+    setEnqueueErr(null)
+    const pool = optionDayColumnFillTargets
+    if (pool.length === 0) {
+      setEnqueueErr(
+        'Run Check on the pool first. Fill column data targets symbols with watchlist option_day health below 97% or incomplete OHLC/volume/VWAP rows in PostgreSQL.',
+      )
+      return
+    }
+    setOptionDayFillBatch('column')
+    const batchId = Date.now()
+    try {
+      setItems(prev =>
+        trimJobs([
+          ...prev,
+          ...pool.map((sym, i) => ({
+            trackKey: `opt-day-col-${batchId}-${sym}`,
+            kindLabel: `Fill option_day column data · ${sym}`,
+            status: 'Enqueueing…',
+            enqueuedAt: batchId + i,
+          })),
+        ]),
+      )
+      onJobsSheetOpenChange(true)
+      let nOk = 0
+      for (let i = 0; i < pool.length; i++) {
+        const sym = pool[i]!
+        const tk = `opt-day-col-${batchId}-${sym}`
+        let priority_dates: string[] | undefined
+        try {
+          const bq = await fetchBarQualityDetail(sym, 'option_day', undefined, 60)
+          const badDays = (bq.daily ?? []).filter(
+            r =>
+              (r.ohlc_pct != null && r.ohlc_pct < OPTION_CONTRACTS_COLUMN_HEALTH_PCT) ||
+              (r.volume_pct != null && r.volume_pct < OPTION_CONTRACTS_COLUMN_HEALTH_PCT) ||
+              (r.vwap_pct != null && r.vwap_pct < OPTION_CONTRACTS_COLUMN_HEALTH_PCT),
+          )
+          priority_dates = badDays.map(r => r.bar_day).slice(0, 40)
+          if (priority_dates.length === 0) priority_dates = undefined
+        } catch {
+          priority_dates = undefined
+        }
+        const res = await postMassiveSync('aggregates', {
+          mode: 'option_day_pool_column_fill',
+          underlying: sym,
+          column_lookback_days: 30,
+          max_rows: 300,
+          ...(priority_dates ? { priority_dates } : {}),
+        })
+        if (!res.ok) {
+          const msg = res.error ?? res.message ?? `Enqueue failed for ${sym}`
+          setEnqueueErr(msg)
+          setItems(prev =>
+            prev.map(row =>
+              row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row,
+            ),
+          )
+          break
+        }
+        const jid = res.job_id
+        if (!jid) {
+          const msg = `No job_id for ${sym}`
+          setEnqueueErr(msg)
+          setItems(prev =>
+            prev.map(row =>
+              row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row,
+            ),
+          )
+          break
+        }
+        const dedup = Boolean(res.deduplicated)
+        const st = dedup ? 'deduplicated (waiting)' : 'enqueued'
+        setItems(prev =>
+          prev.map(row =>
+            row.trackKey === tk
+              ? { ...row, jobId: jid, deduplicated: dedup, status: st, kindLabel: `Fill option_day column data · ${sym}` }
+              : row,
+          ),
+        )
+        startJobStream(jid)
+        nOk += 1
+        if (i < pool.length - 1) await delayMs(75)
+      }
+      if (nOk > 0) scheduleWatchlistRefresh()
+    } catch (e) {
+      setEnqueueErr(e instanceof Error ? e.message : 'Enqueue failed')
+    } finally {
+      setOptionDayFillBatch(null)
+    }
+  }, [
+    optionDayColumnFillTargets,
+    onJobsSheetOpenChange,
+    scheduleWatchlistRefresh,
+    startJobStream,
+  ])
+
   const handleEnqueue = useCallback(async () => {
     setEnqueueErr(null)
     if (focusDataset === 'option_contracts') {
@@ -1010,6 +1512,50 @@ export const DataOverviewOptionJobsBar = forwardRef<
     [poolUpper, symbolsWithOptionContractsData],
   )
 
+  const poolGapRollup = useMemo(() => {
+    if (poolUpper.length < 2) return null
+    let pg = 0
+    let refTot = 0
+    let gapSum = 0
+    let allCompared = true
+    let comparedAt: string | undefined
+    for (const su of poolUpper) {
+      const g = refGapBySymbol[su]
+      if (!g?.ok || !g.compared_at) {
+        allCompared = false
+        break
+      }
+      if (g.pg_total != null) pg += g.pg_total
+      if (g.massive_total != null) refTot += g.massive_total
+      if (typeof g.gap === 'number') gapSum += g.gap
+      comparedAt = g.compared_at
+    }
+    if (!allCompared) return { kind: 'partial' as const, n: poolUpper.length }
+    return { kind: 'sum' as const, n: poolUpper.length, pg, refTot, gapSum, comparedAt }
+  }, [poolUpper, refGapBySymbol])
+
+  const poolSnapshotGapRollup = useMemo(() => {
+    if (poolUpper.length < 2) return null
+    let pg = 0
+    let refTot = 0
+    let gapSum = 0
+    let allCompared = true
+    let comparedAt: string | undefined
+    for (const su of poolUpper) {
+      const g = snapshotGapBySymbol[su]
+      if (!g?.ok || !g.compared_at) {
+        allCompared = false
+        break
+      }
+      if (g.pg_total != null) pg += g.pg_total
+      if (g.massive_total != null) refTot += g.massive_total
+      if (typeof g.gap === 'number') gapSum += g.gap
+      comparedAt = g.compared_at
+    }
+    if (!allCompared) return { kind: 'partial' as const, n: poolUpper.length }
+    return { kind: 'sum' as const, n: poolUpper.length, pg, refTot, gapSum, comparedAt }
+  }, [poolUpper, snapshotGapBySymbol])
+
   const runCompareWithSheetTracking = useCallback(async () => {
     if (!onCompareMassiveReference || compareEligible.length === 0) return
     const batchId = Date.now()
@@ -1062,6 +1608,110 @@ export const DataOverviewOptionJobsBar = forwardRef<
     })
   }, [onCompareMassiveReference, compareEligible, comparePool])
 
+  const runCompareSnapshotWithSheetTracking = useCallback(async () => {
+    if (!onCompareSnapshotGap || compareEligible.length === 0) return
+    const batchId = Date.now()
+    const syms = [...compareEligible]
+    setItems(prev =>
+      trimJobs([
+        ...prev,
+        ...syms.map((sym, i) => ({
+          trackKey: `snap-check-${batchId}-${sym}`,
+          kindLabel: `Snapshot gap · ${sym}`,
+          status: 'Running…',
+          enqueuedAt: batchId + i,
+        })),
+      ]),
+    )
+
+    await onCompareSnapshotGap(comparePool, {
+      onSymbolStart: sym => {
+        setItems(prev =>
+          prev.map(r =>
+            r.trackKey === `snap-check-${batchId}-${sym}` ? { ...r, status: 'Running…' } : r,
+          ),
+        )
+      },
+      onSymbolDone: (sym, result) => {
+        const gap = result.ok && typeof result.gap === 'number' ? result.gap : null
+        const activitySummary =
+          result.ok && gap != null
+            ? `Gap ${gap > 0 ? `+${gap.toLocaleString()}` : gap.toLocaleString()}`
+            : result.ok
+              ? 'OK'
+              : '—'
+        setItems(prev =>
+          prev.map(r =>
+            r.trackKey === `snap-check-${batchId}-${sym}`
+              ? { ...r, status: 'done', activitySummary }
+              : r,
+          ),
+        )
+      },
+      onSymbolError: (sym, message) => {
+        setItems(prev =>
+          prev.map(r =>
+            r.trackKey === `snap-check-${batchId}-${sym}`
+              ? { ...r, status: 'failed', streamError: message }
+              : r,
+          ),
+        )
+      },
+    })
+  }, [onCompareSnapshotGap, compareEligible, comparePool])
+
+  const runCompareBarsGapWithSheetTracking = useCallback(async () => {
+    if (!onCompareBarsGap || poolUpper.length === 0) return
+    const batchId = Date.now()
+    const syms = [...poolUpper]
+    setItems(prev =>
+      trimJobs([
+        ...prev,
+        ...syms.map((sym, i) => ({
+          trackKey: `bars-check-${batchId}-${sym}`,
+          kindLabel: `Bars gap · ${sym}`,
+          status: 'Running…',
+          enqueuedAt: batchId + i,
+        })),
+      ]),
+    )
+
+    await onCompareBarsGap(comparePool, {
+      onSymbolStart: sym => {
+        setItems(prev =>
+          prev.map(r =>
+            r.trackKey === `bars-check-${batchId}-${sym}` ? { ...r, status: 'Running…' } : r,
+          ),
+        )
+      },
+      onSymbolDone: (sym, result) => {
+        const gap = result.ok && typeof result.gap === 'number' ? result.gap : null
+        const activitySummary =
+          result.ok && gap != null
+            ? `Gap ${gap > 0 ? `+${gap.toLocaleString()}` : gap.toLocaleString()}`
+            : result.ok
+              ? 'OK'
+              : '—'
+        setItems(prev =>
+          prev.map(r =>
+            r.trackKey === `bars-check-${batchId}-${sym}`
+              ? { ...r, status: 'done', activitySummary }
+              : r,
+          ),
+        )
+      },
+      onSymbolError: (sym, message) => {
+        setItems(prev =>
+          prev.map(r =>
+            r.trackKey === `bars-check-${batchId}-${sym}`
+              ? { ...r, status: 'failed', streamError: message }
+              : r,
+          ),
+        )
+      },
+    })
+  }, [onCompareBarsGap, poolUpper, comparePool])
+
   /** Single-symbol strip (pool size 1) or non-contracts unused strip path. */
   const selectedRefGap = useMemo(() => {
     if (isContractsFocus) {
@@ -1073,27 +1723,30 @@ export const DataOverviewOptionJobsBar = forwardRef<
     return refGapBySymbol[u]
   }, [isContractsFocus, poolUpper, refGapBySymbol, selectedSymbol])
 
-  const poolGapRollup = useMemo(() => {
-    if (poolUpper.length < 2) return null
-    let pg = 0
-    let refTot = 0
-    let gapSum = 0
-    let allCompared = true
-    let comparedAt: string | undefined
-    for (const su of poolUpper) {
-      const g = refGapBySymbol[su]
-      if (!g?.ok || !g.compared_at) {
-        allCompared = false
-        break
-      }
-      if (g.pg_total != null) pg += g.pg_total
-      if (g.massive_total != null) refTot += g.massive_total
-      if (typeof g.gap === 'number') gapSum += g.gap
-      comparedAt = g.compared_at
-    }
-    if (!allCompared) return { kind: 'partial' as const, n: poolUpper.length }
-    return { kind: 'sum' as const, n: poolUpper.length, pg, refTot, gapSum, comparedAt }
-  }, [poolUpper, refGapBySymbol])
+  const selectedSnapshotGap = useMemo(() => {
+    if (!isSnapshotsFocus) return undefined
+    if (poolUpper.length === 1) return snapshotGapBySymbol[poolUpper[0]!]
+    const u = selectedSymbol.trim().toUpperCase()
+    if (!u) return undefined
+    return snapshotGapBySymbol[u]
+  }, [isSnapshotsFocus, poolUpper, snapshotGapBySymbol, selectedSymbol])
+
+  const selectedBarsGap = useMemo(() => {
+    if (!isBarsFocus) return undefined
+    if (poolUpper.length === 1) return barsGapBySymbol[poolUpper[0]!]
+    const u = selectedSymbol.trim().toUpperCase()
+    if (!u) return undefined
+    return barsGapBySymbol[u]
+  }, [isBarsFocus, poolUpper, barsGapBySymbol, selectedSymbol])
+
+  const activeGapRollup = isContractsFocus
+    ? poolGapRollup
+    : isSnapshotsFocus
+      ? poolSnapshotGapRollup
+      : null
+  const selectedActiveGap: OptionContractsReferenceGapResult | OptionSnapshotsContractsGapResult | undefined =
+    isContractsFocus ? selectedRefGap : isSnapshotsFocus ? selectedSnapshotGap : isBarsFocus ? selectedBarsGap : undefined
+  const gapLoading = (isContractsFocus && refGapLoading) || (isSnapshotsFocus && snapshotGapLoading) || (isBarsFocus && barsGapLoading)
 
   /** Every pooled symbol has finished Check with gap 0 — row-level reference upsert not needed. */
   const poolFullyClosed = useMemo(() => {
@@ -1148,19 +1801,169 @@ export const DataOverviewOptionJobsBar = forwardRef<
     return `Nullable columns: enqueue ${columnFillTargets.length} detail backfill job(s) for exercise_style and shares_per_contract (max 5000 contracts per symbol). Only symbols with Check complete and column metrics below 97%. Rows need non-empty massive_option_ticker for detail calls.`
   }, [isContractsFocus, contractsFillBusy, poolUpper, columnFillTargets.length, refGapBySymbol])
 
+  const optionMinFillBusy = optionMinFillBatch != null
+  const optionDayFillBusy = optionDayFillBatch != null
+  const canEnqueueOptionMinRow =
+    isMinFocus &&
+    !optionMinFillBusy &&
+    !optionDayFillBusy &&
+    !barsGapLoading &&
+    optionMinRowFillTargets.length > 0
+  const canEnqueueOptionMinColumn =
+    isMinFocus &&
+    !optionMinFillBusy &&
+    !optionDayFillBusy &&
+    !barsGapLoading &&
+    !optionMinEligibilityLoading &&
+    optionMinColumnFillTargets.length > 0
+
+  const canEnqueueOptionDayRow =
+    isDayFocus &&
+    !optionDayFillBusy &&
+    !optionMinFillBusy &&
+    !barsGapLoading &&
+    optionDayRowFillTargets.length > 0
+  const canEnqueueOptionDayColumn =
+    isDayFocus &&
+    !optionDayFillBusy &&
+    !optionMinFillBusy &&
+    !barsGapLoading &&
+    !optionDayEligibilityLoading &&
+    optionDayColumnFillTargets.length > 0
+
+  const fillOptionMinRowGapButtonTitle = useMemo(() => {
+    if (!isMinFocus) return ''
+    if (optionMinFillBusy) return 'Another fill batch is in progress.'
+    if (barsGapLoading) return 'Wait for Check to finish.'
+    if (poolUpper.length === 0) {
+      return 'Add symbols to the compare pool (click Symbol in the matrix), or use Select all.'
+    }
+    if (optionMinRowFillTargets.length === 0) {
+      const anyUnchecked = poolUpper.some(s => !hasRefCompareDone(barsGapBySymbol[s]))
+      if (anyUnchecked) {
+        return 'Run Check on the pool first. Fill row gap only enqueues symbols with a non-zero Gap (option_min vs option_contracts for this period).'
+      }
+      return 'Every checked symbol has Gap 0 for this period — no intraday aggregates backfill is needed.'
+    }
+    return `Enqueue Massive /v2/aggs (option_min_pool_row_gap) for up to 300 missing contracts per symbol (${optionMinPeriod}, 7-day window).`
+  }, [
+    isMinFocus,
+    optionMinFillBusy,
+    barsGapLoading,
+    poolUpper,
+    optionMinRowFillTargets.length,
+    barsGapBySymbol,
+    optionMinPeriod,
+  ])
+
+  const fillOptionMinColumnDataButtonTitle = useMemo(() => {
+    if (!isMinFocus) return ''
+    if (optionMinFillBusy) return 'Another fill batch is in progress.'
+    if (barsGapLoading) return 'Wait for Check to finish.'
+    if (optionMinEligibilityLoading) return 'Loading column health…'
+    if (poolUpper.length === 0) {
+      return 'Add symbols to the compare pool (click Symbol in the matrix), or use Select all.'
+    }
+    if (optionMinColumnFillTargets.length === 0) {
+      const anyUnchecked = poolUpper.some(s => !hasRefCompareDone(barsGapBySymbol[s]))
+      if (anyUnchecked) {
+        return 'Run Check on the pool first. Fill column data re-fetches /v2/aggs for symbols with NULL OHLC, volume, or VWAP rows in the lookback window.'
+      }
+      return 'No pooled symbols need column refresh — incomplete bar rows are absent for this period in the lookback window.'
+    }
+    return `Enqueue Massive /v2/aggs (option_min_pool_column_fill) for up to 300 contracts per symbol (${optionMinPeriod}, 7-day window).`
+  }, [
+    isMinFocus,
+    optionMinFillBusy,
+    barsGapLoading,
+    optionMinEligibilityLoading,
+    poolUpper,
+    optionMinColumnFillTargets.length,
+    barsGapBySymbol,
+    optionMinPeriod,
+  ])
+
+  const fillOptionDayRowGapButtonTitle = useMemo(() => {
+    if (!isDayFocus) return ''
+    if (optionDayFillBusy) return 'Another fill batch is in progress.'
+    if (optionMinFillBusy) return 'Wait for the other bars fill batch to finish.'
+    if (barsGapLoading) return 'Wait for Check to finish.'
+    if (poolUpper.length === 0) {
+      return 'Add symbols to the compare pool (click Symbol in the matrix), or use Select all.'
+    }
+    if (optionDayRowFillTargets.length === 0) {
+      const anyUnchecked = poolUpper.some(s => !hasRefCompareDone(barsGapBySymbol[s]))
+      if (anyUnchecked) {
+        return 'Run Check on the pool first. Fill row gap only enqueues symbols with a non-zero Gap (option_day vs option_contracts).'
+      }
+      return 'Every checked symbol has Gap 0 — no daily aggregates backfill is needed for missing contract coverage.'
+    }
+    return 'Enqueue Celery option_day_pool_row_gap: Massive GET /v2/aggs (daily) up to 300 contracts per symbol (~2y window).'
+  }, [
+    isDayFocus,
+    optionDayFillBusy,
+    optionMinFillBusy,
+    barsGapLoading,
+    poolUpper,
+    optionDayRowFillTargets.length,
+    barsGapBySymbol,
+  ])
+
+  const fillOptionDayColumnDataButtonTitle = useMemo(() => {
+    if (!isDayFocus) return ''
+    if (optionDayFillBusy) return 'Another fill batch is in progress.'
+    if (optionMinFillBusy) return 'Wait for the other bars fill batch to finish.'
+    if (barsGapLoading) return 'Wait for Check to finish.'
+    if (optionDayEligibilityLoading) return 'Loading column health…'
+    if (poolUpper.length === 0) {
+      return 'Add symbols to the compare pool (click Symbol in the matrix), or use Select all.'
+    }
+    if (optionDayColumnFillTargets.length === 0) {
+      const anyUnchecked = poolUpper.some(s => !hasRefCompareDone(barsGapBySymbol[s]))
+      if (anyUnchecked) {
+        return 'Run Check on the pool first. Fill column data uses GET /v1/open-close plus optional VWAP from day aggs for incomplete rows.'
+      }
+      return 'No pooled symbols need column refresh at this threshold.'
+    }
+    return 'Enqueue option_day_pool_column_fill: open-close per trading day (30d lookback, max 300 rows), prioritizing bar-quality days below 97% when available.'
+  }, [
+    isDayFocus,
+    optionDayFillBusy,
+    optionMinFillBusy,
+    barsGapLoading,
+    optionDayEligibilityLoading,
+    poolUpper,
+    optionDayColumnFillTargets.length,
+    barsGapBySymbol,
+  ])
+
   const canCompareSelected =
     isContractsFocus && !refGapLoading && compareEligible.length > 0 && Boolean(onCompareMassiveReference)
 
+  const canCompareSnapshotSelected =
+    isSnapshotsFocus &&
+    !snapshotGapLoading &&
+    compareEligible.length > 0 &&
+    Boolean(onCompareSnapshotGap)
+
+  const canCompareBarsSelected =
+    isBarsFocus &&
+    !barsGapLoading &&
+    !optionMinFillBusy &&
+    !optionDayFillBusy &&
+    poolUpper.length > 0 &&
+    Boolean(onCompareBarsGap)
+
   const selectedGapNumClass =
-    selectedRefGap?.ok === true && typeof selectedRefGap.gap === 'number'
-      ? selectedRefGap.gap === 0
+    selectedActiveGap?.ok === true && typeof selectedActiveGap.gap === 'number'
+      ? selectedActiveGap.gap === 0
         ? 'data-overview-ref-strip__gap-num data-overview-ref-strip__gap-num--ok'
         : 'data-overview-ref-strip__gap-num data-overview-ref-strip__gap-num--warn'
       : 'data-overview-ref-strip__gap-num'
 
   const rollupGapNumClass =
-    poolGapRollup?.kind === 'sum' && typeof poolGapRollup.gapSum === 'number'
-      ? poolGapRollup.gapSum === 0
+    activeGapRollup?.kind === 'sum' && typeof activeGapRollup.gapSum === 'number'
+      ? activeGapRollup.gapSum === 0
         ? 'data-overview-ref-strip__gap-num data-overview-ref-strip__gap-num--ok'
         : 'data-overview-ref-strip__gap-num data-overview-ref-strip__gap-num--warn'
       : 'data-overview-ref-strip__gap-num'
@@ -1169,11 +1972,17 @@ export const DataOverviewOptionJobsBar = forwardRef<
     !plan.ok ||
     !plan.needsSymbol ||
     wlSymbols.length === 0 ||
-    (isContractsFocus ? contractsFillBusy : enqueueBusy)
+    (isContractsFocus
+      ? contractsFillBusy
+      : isSnapshotsFocus
+        ? snapshotGapLoading
+        : isBarsFocus
+          ? barsGapLoading || optionMinFillBusy || optionDayFillBusy
+          : enqueueBusy)
 
   return (
     <div className="data-overview-option-jobs-bar">
-      {!isContractsFocus ? (
+      {!isContractsFocus && !isSnapshotsFocus && !isBarsFocus ? (
         <>
           <div className="data-overview-option-jobs-bar__row">
             <div className="data-overview-option-jobs-bar__actions">
@@ -1219,12 +2028,42 @@ export const DataOverviewOptionJobsBar = forwardRef<
             </p>
           )}
         </>
-      ) : (
-        <section className="data-overview-contracts-panel" aria-label="Reference gap pool and actions">
+      ) : isContractsFocus || isSnapshotsFocus || isBarsFocus ? (
+        <section
+          className="data-overview-contracts-panel"
+          aria-label={
+            isContractsFocus ? 'Reference gap pool and actions' :
+            isSnapshotsFocus ? 'Snapshot gap pool and actions' :
+            'Bars gap pool and actions'
+          }
+        >
           {!plan.ok && poolUpper.length > 0 ? (
             <p className="data-overview-option-jobs-bar__hint data-overview-option-jobs-bar__hint--err" role="status">
               {plan.error}
             </p>
+          ) : null}
+          {isMinFocus ? (
+            <div
+              className="data-overview-contracts-panel__option-min-period"
+              style={{ marginBottom: 'var(--space-2)' }}
+            >
+              <label className="data-overview-option-jobs-bar__sym" style={{ alignItems: 'center', gap: '0.5rem' }}>
+                <span className="data-overview-option-jobs-bar__sym-label">Bar period</span>
+                <select
+                  className="form-input data-overview-option-jobs-bar__sym-select"
+                  value={optionMinPeriod}
+                  disabled={optionMinFillBusy || optionDayFillBusy || barsGapLoading}
+                  onChange={e => onOptionMinPeriodChange?.(e.target.value)}
+                  aria-label="option_min bar period for Check and Fill actions"
+                >
+                  {OPTION_MIN_INTRADAY_PERIODS.map(p => (
+                    <option key={p.value} value={p.value}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           ) : null}
           <div className="data-overview-contracts-panel__toolbar">
             <div className="data-overview-contracts-panel__toolbar-left">
@@ -1233,14 +2072,14 @@ export const DataOverviewOptionJobsBar = forwardRef<
                   {activeCount} active
                 </span>
               ) : null}
-              {refGapLoading ? (
+              {gapLoading ? (
                 <button
                   type="button"
                   className="data-overview-check-run-pill"
                   onClick={() => onJobsSheetOpenChange(true)}
                   title="Open Option coverage jobs to see Check progress and per-symbol rows."
                 >
-                  Checking reference gaps…
+                  {isSnapshotsFocus ? 'Checking snapshot gaps…' : isBarsFocus ? 'Checking bars gaps…' : 'Checking reference gaps…'}
                 </button>
               ) : null}
               <div className="data-overview-contracts-panel__pool" aria-label="Compare pool">
@@ -1279,7 +2118,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
               </div>
             </div>
             <div className="data-overview-contracts-panel__toolbar-right" aria-label="Reference gap">
-              {onOpenGapExplainSheet ? (
+              {(isContractsFocus || isSnapshotsFocus || isDayFocus) && onOpenGapExplainSheet ? (
                 <button
                   type="button"
                   className="data-overview-ctl data-overview-ctl--plain"
@@ -1289,7 +2128,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
                   <span>Gap scope</span>
                 </button>
               ) : null}
-              {onOpenAllGapsSheet ? (
+              {isContractsFocus && onOpenAllGapsSheet ? (
                 <button
                   type="button"
                   className="data-overview-ctl data-overview-ctl--plain"
@@ -1302,100 +2141,170 @@ export const DataOverviewOptionJobsBar = forwardRef<
               <button
                 type="button"
                 className="data-overview-ctl data-overview-ctl--check"
-                disabled={!canCompareSelected}
-                title="Compare Massive reference vs PG for pooled symbols that already have option_contracts rows (batched, 10 per request)."
-                onClick={() => void runCompareWithSheetTracking()}
+                disabled={isContractsFocus ? !canCompareSelected : isSnapshotsFocus ? !canCompareSnapshotSelected : !canCompareBarsSelected}
+                title={
+                  isSnapshotsFocus
+                    ? 'Compare Massive GET /v3/snapshot/options vs PG option_snapshots for pooled symbols with option_contracts (one symbol per request).'
+                    : isBarsFocus
+                      ? 'Compare option_day / option_min bar coverage vs option_contracts (purely local, no external API call).'
+                      : 'Compare Massive reference vs PG for pooled symbols that already have option_contracts rows (batched, 10 per request).'
+                }
+                onClick={() =>
+                  void (isContractsFocus ? runCompareWithSheetTracking() : isSnapshotsFocus ? runCompareSnapshotWithSheetTracking() : runCompareBarsGapWithSheetTracking())
+                }
               >
                 <IcoRefCheck className={ico} />
-                <span>{refGapLoading ? 'Checking…' : 'Check'}</span>
+                <span>{gapLoading ? 'Checking…' : 'Check'}</span>
               </button>
-              <button
-                type="button"
-                className="data-overview-ctl data-overview-ctl--fill"
-                disabled={!canEnqueueRow}
-                title={fillRowGapButtonTitle}
-                onClick={() => void handleEnqueueRowGap()}
-                aria-label="Fill row gap"
-              >
-                <IcoFillGap className={ico} />
-                <span>
-                  {contractsFillBatch === 'row' ? 'Filling…' : 'Fill row gap'}
-                </span>
-              </button>
-              <button
-                type="button"
-                className="data-overview-ctl data-overview-ctl--fill data-overview-ctl--fill-column"
-                disabled={!canEnqueueColumn}
-                title={fillColumnDataButtonTitle}
-                onClick={() => void handleEnqueueColumnData()}
-                aria-label="Fill column data"
-              >
-                <IcoFillGap className={ico} />
-                <span>
-                  {contractsFillBatch === 'column' ? 'Filling…' : 'Fill column data'}
-                </span>
-              </button>
+              {isContractsFocus ? (
+                <>
+                  <button
+                    type="button"
+                    className="data-overview-ctl data-overview-ctl--fill"
+                    disabled={!canEnqueueRow}
+                    title={fillRowGapButtonTitle}
+                    onClick={() => void handleEnqueueRowGap()}
+                    aria-label="Fill row gap"
+                  >
+                    <IcoFillGap className={ico} />
+                    <span>
+                      {contractsFillBatch === 'row' ? 'Filling…' : 'Fill row gap'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="data-overview-ctl data-overview-ctl--fill data-overview-ctl--fill-column"
+                    disabled={!canEnqueueColumn}
+                    title={fillColumnDataButtonTitle}
+                    onClick={() => void handleEnqueueColumnData()}
+                    aria-label="Fill column data"
+                  >
+                    <IcoFillGap className={ico} />
+                    <span>
+                      {contractsFillBatch === 'column' ? 'Filling…' : 'Fill column data'}
+                    </span>
+                  </button>
+                </>
+              ) : isDayFocus ? (
+                <>
+                  <button
+                    type="button"
+                    className="data-overview-ctl data-overview-ctl--fill"
+                    disabled={!canEnqueueOptionDayRow}
+                    title={fillOptionDayRowGapButtonTitle}
+                    onClick={() => void handleEnqueueOptionDayRowGap()}
+                    aria-label="Fill row gap for option_day"
+                  >
+                    <IcoFillGap className={ico} />
+                    <span>
+                      {optionDayFillBatch === 'row' ? 'Filling…' : 'Fill row gap'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="data-overview-ctl data-overview-ctl--fill data-overview-ctl--fill-column"
+                    disabled={!canEnqueueOptionDayColumn}
+                    title={fillOptionDayColumnDataButtonTitle}
+                    onClick={() => void handleEnqueueOptionDayColumnData()}
+                    aria-label="Fill column data for option_day"
+                  >
+                    <IcoFillGap className={ico} />
+                    <span>
+                      {optionDayFillBatch === 'column' ? 'Filling…' : 'Fill column data'}
+                    </span>
+                  </button>
+                </>
+              ) : isMinFocus ? (
+                <>
+                  <button
+                    type="button"
+                    className="data-overview-ctl data-overview-ctl--fill"
+                    disabled={!canEnqueueOptionMinRow}
+                    title={fillOptionMinRowGapButtonTitle}
+                    onClick={() => void handleEnqueueOptionMinRowGap()}
+                    aria-label="Fill row gap for option_min"
+                  >
+                    <IcoFillGap className={ico} />
+                    <span>
+                      {optionMinFillBatch === 'row' ? 'Filling…' : 'Fill row gap'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="data-overview-ctl data-overview-ctl--fill data-overview-ctl--fill-column"
+                    disabled={!canEnqueueOptionMinColumn}
+                    title={fillOptionMinColumnDataButtonTitle}
+                    onClick={() => void handleEnqueueOptionMinColumnData()}
+                    aria-label="Fill column data for option_min"
+                  >
+                    <IcoFillGap className={ico} />
+                    <span>
+                      {optionMinFillBatch === 'column' ? 'Filling…' : 'Fill column data'}
+                    </span>
+                  </button>
+                </>
+              ) : null}
             </div>
           </div>
 
           <div className="data-overview-contracts-panel__summary" aria-live="polite">
-            {poolUpper.length >= 2 && poolGapRollup?.kind === 'sum' ? (
+            {poolUpper.length >= 2 && activeGapRollup?.kind === 'sum' ? (
               <span className="data-overview-ref-strip__meta">
-                <strong>{poolGapRollup.n} symbols</strong>
+                <strong>{activeGapRollup.n} symbols</strong>
                 {' · '}
-                PG {poolGapRollup.pg.toLocaleString()}
+                PG {activeGapRollup.pg.toLocaleString()}
                 {' · '}
-                Ref {poolGapRollup.refTot.toLocaleString()}
+                Ref {activeGapRollup.refTot.toLocaleString()}
                 {' · '}
                 Gap{' '}
                 <span className={rollupGapNumClass}>
-                  {poolGapRollup.gapSum > 0
-                    ? `+${poolGapRollup.gapSum.toLocaleString()}`
-                    : poolGapRollup.gapSum.toLocaleString()}
+                  {activeGapRollup.gapSum > 0
+                    ? `+${activeGapRollup.gapSum.toLocaleString()}`
+                    : activeGapRollup.gapSum.toLocaleString()}
                 </span>
                 <span className="data-overview-ref-strip__time" title="compared_at (UTC, last symbol in batch)">
                   {' '}
-                  · {poolGapRollup.comparedAt}
+                  · {activeGapRollup.comparedAt}
                 </span>
               </span>
-            ) : selectedRefGap?.ok && selectedRefGap.compared_at ? (
+            ) : selectedActiveGap?.ok && selectedActiveGap.compared_at ? (
               <span className="data-overview-ref-strip__meta">
                 <strong>{poolUpper.length === 1 ? poolUpper[0] : selectedSymbol.trim().toUpperCase() || '—'}</strong>
                 {' · '}
-                PG {selectedRefGap.pg_total != null ? selectedRefGap.pg_total.toLocaleString() : '—'}
+                PG {selectedActiveGap.pg_total != null ? selectedActiveGap.pg_total.toLocaleString() : '—'}
                 {' · '}
-                Ref {selectedRefGap.massive_total != null ? selectedRefGap.massive_total.toLocaleString() : '—'}
+                Ref {selectedActiveGap.massive_total != null ? selectedActiveGap.massive_total.toLocaleString() : '—'}
                 {' · '}
                 Gap{' '}
                 <span className={selectedGapNumClass}>
-                  {selectedRefGap.gap != null
-                    ? selectedRefGap.gap > 0
-                      ? `+${selectedRefGap.gap.toLocaleString()}`
-                      : selectedRefGap.gap.toLocaleString()
+                  {selectedActiveGap.gap != null
+                    ? selectedActiveGap.gap > 0
+                      ? `+${selectedActiveGap.gap.toLocaleString()}`
+                      : selectedActiveGap.gap.toLocaleString()
                     : '—'}
                 </span>
-                {selectedRefGap.coverage_pct != null ? (
+                {selectedActiveGap.coverage_pct != null ? (
                   <>
                     {' · '}
                     <span
                       className={
-                        selectedRefGap.coverage_pct === 100
+                        selectedActiveGap.coverage_pct === 100
                           ? 'data-overview-ref-strip__cov-pct data-overview-ref-strip__cov-pct--ok'
                           : 'data-overview-ref-strip__cov-pct data-overview-ref-strip__cov-pct--warn'
                       }
                     >
-                      {selectedRefGap.coverage_pct}%
+                      {selectedActiveGap.coverage_pct}%
                     </span>
                   </>
                 ) : null}
                 <span className="data-overview-ref-strip__time" title="compared_at (UTC)">
                   {' '}
-                  · {selectedRefGap.compared_at}
+                  · {selectedActiveGap.compared_at}
                 </span>
               </span>
-            ) : poolUpper.length >= 2 && poolGapRollup?.kind === 'partial' ? (
+            ) : poolUpper.length >= 2 && activeGapRollup?.kind === 'partial' ? (
               <span className="data-overview-ref-strip__meta data-overview-ref-strip__meta--muted">
-                {poolGapRollup.n} symbols — run <strong>Check</strong> for Ref / Gap.
+                {activeGapRollup.n} symbols — run <strong>Check</strong> for Ref / Gap.
               </span>
             ) : poolUpper.length > 0 ? (
               <span className="data-overview-ref-strip__meta data-overview-ref-strip__meta--muted">
@@ -1406,26 +2315,74 @@ export const DataOverviewOptionJobsBar = forwardRef<
             )}
           </div>
 
-          <details className="data-overview-contracts-panel__conclusion">
-            <summary className="data-overview-contracts-panel__conclusion-sum">
-              Pool & actions — summary
-            </summary>
-            <div className="data-overview-contracts-panel__conclusion-body">
-              <p className="data-overview-contracts-panel__guide-text">
-                <span className="data-overview-contracts-panel__em">Pool:</span> <strong>Symbol</strong> column,{' '}
-                <strong>Select all</strong>, or <strong>Clear</strong>.{' '}
-                <span className="data-overview-contracts-panel__em">Check</span> vs PG.{' '}
-                <span className="data-overview-contracts-panel__em">Fill row gap</span> is available only after{' '}
-                <strong>Check</strong> and enqueues reference upsert only for pooled symbols that still have a{' '}
-                <strong>non-zero Gap</strong> (full underlying; list API + <code>massive_option_ticker</code>).{' '}
-                <span className="data-overview-contracts-panel__em">Fill column data</span> also requires Check and enqueues
-                detail backfill only for symbols whose watchlist <code>option_contracts</code> metrics are still below{' '}
-                <strong>97%</strong> (ticker / nullable averages). Per-column actions also live under{' '}
-                <span className="data-overview-contracts-panel__em">All gaps</span>. <strong>Gap scope</strong> defines Ref,
-                Gap, Cov%, and per-expiry sections.
-              </p>
-            </div>
-          </details>
+          {isContractsFocus ? (
+            <details className="data-overview-contracts-panel__conclusion">
+              <summary className="data-overview-contracts-panel__conclusion-sum">
+                Pool & actions — summary
+              </summary>
+              <div className="data-overview-contracts-panel__conclusion-body">
+                <p className="data-overview-contracts-panel__guide-text">
+                  <span className="data-overview-contracts-panel__em">Pool:</span> <strong>Symbol</strong> column,{' '}
+                  <strong>Select all</strong>, or <strong>Clear</strong>.{' '}
+                  <span className="data-overview-contracts-panel__em">Check</span> vs PG.{' '}
+                  <span className="data-overview-contracts-panel__em">Fill row gap</span> is available only after{' '}
+                  <strong>Check</strong> and enqueues reference upsert only for pooled symbols that still have a{' '}
+                  <strong>non-zero Gap</strong> (full underlying; list API + <code>massive_option_ticker</code>).{' '}
+                  <span className="data-overview-contracts-panel__em">Fill column data</span> also requires Check and enqueues
+                  detail backfill only for symbols whose watchlist <code>option_contracts</code> metrics are still below{' '}
+                  <strong>97%</strong> (ticker / nullable averages). Per-column actions also live under{' '}
+                  <span className="data-overview-contracts-panel__em">All gaps</span>. <strong>Gap scope</strong> defines Ref,
+                  Gap, Cov%, and per-expiry sections.
+                </p>
+              </div>
+            </details>
+          ) : isSnapshotsFocus ? (
+            <details className="data-overview-contracts-panel__conclusion">
+              <summary className="data-overview-contracts-panel__conclusion-sum">
+                Pool & snapshot Check
+              </summary>
+              <div className="data-overview-contracts-panel__conclusion-body">
+                <p className="data-overview-contracts-panel__guide-text">
+                  <span className="data-overview-contracts-panel__em">Check</span> calls Massive{' '}
+                  <code>GET /v3/snapshot/options/&#123;underlying&#125;</code> per expiry (see <strong>Gap scope</strong>). Ref counts
+                  contracts returned by that API that map to <code>option_contracts.contract_key</code>. Requires{' '}
+                  <code>option_contracts</code> rows for the symbol.
+                </p>
+              </div>
+            </details>
+          ) : isBarsFocus ? (
+            <details className="data-overview-contracts-panel__conclusion">
+              <summary className="data-overview-contracts-panel__conclusion-sum">
+                Pool & bars Check
+              </summary>
+              <div className="data-overview-contracts-panel__conclusion-body">
+                <p className="data-overview-contracts-panel__guide-text">
+                  <span className="data-overview-contracts-panel__em">Check</span> compares{' '}
+                  <code>{focusDataset === 'option_min' ? 'option_min' : 'option_day'}</code> bar coverage against{' '}
+                  <code>option_contracts</code> (purely local — no external API). Ref = distinct (expiry, strike, right) in{' '}
+                  <code>option_contracts</code>. Gap = contracts with no bar. Click <strong>↗</strong> on a symbol for daily / expiry quality breakdown.
+                  {isDayFocus ? (
+                    <>
+                      {' '}
+                      For <code>option_day</code>, <strong>Fill row gap</strong> enqueues <code>option_day_pool_row_gap</code>{' '}
+                      (Massive GET /v2/aggs daily, ~2y window, capped contracts per run). <strong>Fill column data</strong> runs{' '}
+                      <code>option_day_pool_column_fill</code> using GET /v1/open-close for incomplete rows; bar-quality days
+                      below 97% are prioritized when enqueuing column fill.
+                    </>
+                  ) : null}
+                  {isMinFocus ? (
+                    <>
+                      {' '}
+                      For <code>option_min</code>, pick <strong>Bar period</strong> to match <code>option_min.period</code>{' '}
+                      (e.g. 5 mins). <strong>Fill row gap</strong> enqueues Celery <code>option_min_pool_row_gap</code> (Massive
+                      GET /v2/aggs, up to 300 contracts per run, 7-day window). <strong>Fill column data</strong> runs{' '}
+                      <code>option_min_pool_column_fill</code> to refresh rows with missing OHLC, volume, or VWAP.
+                    </>
+                  ) : null}
+                </p>
+              </div>
+            </details>
+          ) : null}
 
           {poolFullyClosed ? (
             <p className="data-overview-contracts-panel__gate" role="status">
@@ -1434,13 +2391,23 @@ export const DataOverviewOptionJobsBar = forwardRef<
               <strong>Fill column data</strong> (when enabled) or <strong>All gaps</strong>.
             </p>
           ) : null}
-          {refGapError ? (
+          {isContractsFocus && refGapError ? (
             <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-2)' }}>
               {refGapError}
             </p>
           ) : null}
+          {isSnapshotsFocus && snapshotGapError ? (
+            <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-2)' }}>
+              {snapshotGapError}
+            </p>
+          ) : null}
+          {isBarsFocus && barsGapError ? (
+            <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-2)' }}>
+              {barsGapError}
+            </p>
+          ) : null}
         </section>
-      )}
+      ) : null}
 
       {enqueueErr ? (
         <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-2)' }}>

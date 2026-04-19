@@ -7,7 +7,7 @@ import logging
 import os
 import sys
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from zoneinfo import ZoneInfo
@@ -137,6 +137,21 @@ REST_GAP_SEC = 0.2
 
 def _rest_throttle() -> None:
     time.sleep(REST_GAP_SEC)
+
+
+def _nullable_column_backfill_gap_sec() -> float:
+    """Delay between Massive GET /v3/reference/options/contracts/{{ticker}} in nullable backfill.
+
+    Default 0.1s is ~2× faster than the global REST gap (0.2s) while staying conservative for vendor limits.
+    Override with env ``BIFROST_NULLABLE_BACKFILL_GAP_SEC`` (clamped 0.02–0.5).
+    """
+    raw = (os.environ.get("BIFROST_NULLABLE_BACKFILL_GAP_SEC") or "").strip()
+    if not raw:
+        return 0.1
+    try:
+        return max(0.02, min(0.5, float(raw)))
+    except ValueError:
+        return 0.1
 
 
 def _eod_trade_date_str_et(payload: Dict[str, Any]) -> str:
@@ -627,6 +642,26 @@ def _apply_snapshot(
                   %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                   'massive', now()
                 )
+                ON CONFLICT (contract_key, snapshot_ts) DO UPDATE SET
+                  iv = EXCLUDED.iv,
+                  delta = EXCLUDED.delta,
+                  gamma = EXCLUDED.gamma,
+                  theta = EXCLUDED.theta,
+                  vega = EXCLUDED.vega,
+                  open_interest = EXCLUDED.open_interest,
+                  underlying_ticker = EXCLUDED.underlying_ticker,
+                  day_open = EXCLUDED.day_open,
+                  day_high = EXCLUDED.day_high,
+                  day_low = EXCLUDED.day_low,
+                  day_close = EXCLUDED.day_close,
+                  day_previous_close = EXCLUDED.day_previous_close,
+                  day_change = EXCLUDED.day_change,
+                  day_change_percent = EXCLUDED.day_change_percent,
+                  day_volume = EXCLUDED.day_volume,
+                  day_vwap = EXCLUDED.day_vwap,
+                  day_last_updated = EXCLUDED.day_last_updated,
+                  source = EXCLUDED.source,
+                  created_at = EXCLUDED.created_at
                 """,
                 (
                     ck,
@@ -821,6 +856,117 @@ def _apply_option_day_aggs(
             )
             n += 1
     return n
+
+
+def _ny_day_bounds_ms(date_str: str) -> Tuple[int, int]:
+    """Start/end ms (UTC epoch) for calendar date ``date_str`` in America/New_York."""
+    d = date.fromisoformat((date_str or "")[:10])
+    z = ZoneInfo("America/New_York")
+    start = datetime.combine(d, time.min, tzinfo=z)
+    end = start + timedelta(days=1)
+    return int(start.timestamp() * 1000), int(end.timestamp() * 1000)
+
+
+def _apply_option_day_open_close_update(
+    conn: Any,
+    symbol: str,
+    expiry: str,
+    strike: float,
+    option_right: str,
+    bar_time: Any,
+    data: Dict[str, Any],
+) -> int:
+    """Update one option_day row from GET /v1/open-close body (top-level open/high/low/close/volume)."""
+    exp = _norm_expiry(expiry)
+    r = option_right.strip().upper()
+    if r in ("CALL",):
+        r = "C"
+    if r in ("PUT",):
+        r = "P"
+    o = data.get("open")
+    h = data.get("high")
+    l = data.get("low")
+    c = data.get("close")
+    v = data.get("volume")
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE option_day SET
+              open = %s,
+              high = %s,
+              low = %s,
+              close = %s,
+              volume = %s
+            WHERE UPPER(TRIM(symbol)) = %s
+              AND expiry = %s
+              AND strike = %s
+              AND option_right = %s
+              AND bar_time = %s
+              AND source = 'massive'
+            """,
+            (
+                float(o) if o is not None else None,
+                float(h) if h is not None else None,
+                float(l) if l is not None else None,
+                float(c) if c is not None else None,
+                float(v) if v is not None else None,
+                symbol.upper(),
+                exp,
+                float(strike),
+                r,
+                bar_time,
+            ),
+        )
+        return int(cur.rowcount or 0)
+
+
+def _option_day_patch_vwap_from_day_aggs(
+    conn: Any,
+    client: Any,
+    options_ticker: str,
+    symbol: str,
+    expiry: str,
+    strike: float,
+    option_right: str,
+    bar_time: Any,
+    date_str: str,
+) -> int:
+    """Set vwap on existing option_day row from /v2/aggs day bucket (single NY session day)."""
+    exp = _norm_expiry(expiry)
+    ort = option_right.strip().upper()
+    if ort in ("CALL",):
+        ort = "C"
+    if ort in ("PUT",):
+        ort = "P"
+    start_ms, end_ms = _ny_day_bounds_ms(date_str)
+    aggs = client.fetch_option_aggs(options_ticker, 1, "day", start_ms, end_ms)
+    if aggs.get("error"):
+        return 0
+    bars = aggs.get("results") or []
+    if not isinstance(bars, list) or not bars:
+        return 0
+    bar = bars[0] if isinstance(bars[0], dict) else {}
+    vw = bar.get("vw")
+    if vw is None:
+        return 0
+    try:
+        vw_f = float(vw)
+    except (TypeError, ValueError):
+        return 0
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE option_day SET vwap = %s
+            WHERE UPPER(TRIM(symbol)) = %s
+              AND expiry = %s
+              AND strike = %s
+              AND option_right = %s
+              AND bar_time = %s
+              AND source = 'massive'
+            """,
+            (vw_f, symbol.upper(), exp, float(strike), ort, bar_time),
+        )
+        return int(cur.rowcount or 0)
 
 
 def _apply_corporate_actions(
@@ -1501,7 +1647,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     data = client.fetch_option_open_close(ot, date_str)
                     if data.get("error"):
                         raise RuntimeError(str(data["error"]))
-                    result = {
+                    result: Dict[str, Any] = {
                         "ok": True, "kind": kind, "mode": mode,
                         "endpoint": f"/v1/open-close/{ot}/{date_str}",
                         "summary": {
@@ -1514,6 +1660,44 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                         },
                         "content": data,
                     }
+                    persist = bool(payload.get("persist"))
+                    if persist:
+                        sym_p = (payload.get("symbol") or "").strip().upper()
+                        exp_p = (payload.get("expiry") or "").strip()
+                        strike_p = float(payload.get("strike") or 0)
+                        ort_p = (payload.get("option_right") or "C").strip()
+                        bt_raw = payload.get("bar_time")
+                        rows_u = 0
+                        if sym_p and exp_p and bt_raw is not None:
+                            if isinstance(bt_raw, str):
+                                btr = bt_raw.strip()
+                                if btr.endswith("Z"):
+                                    bar_time_val = datetime.fromisoformat(btr.replace("Z", "+00:00"))
+                                else:
+                                    bar_time_val = datetime.fromisoformat(btr)
+                            else:
+                                bar_time_val = bt_raw
+                            rows_u = _apply_option_day_open_close_update(
+                                conn, sym_p, exp_p, strike_p, ort_p, bar_time_val, data
+                            )
+                            conn.commit()
+                        result["rows_updated"] = rows_u
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
+                if mode in ("option_day_pool_row_gap", "option_day_pool_column_fill"):
+                    from src.massive.option_day_pool_fill import run_option_day_pool_aggregates
+
+                    result = run_option_day_pool_aggregates(
+                        conn,
+                        client,
+                        payload,
+                        mode=mode,
+                        apply_open_close_update=_apply_option_day_open_close_update,
+                        apply_option_day_aggs=_apply_option_day_aggs,
+                        patch_vwap=_option_day_patch_vwap_from_day_aggs,
+                        rest_throttle=_rest_throttle,
+                    )
                     update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                     return result
 
@@ -1539,6 +1723,15 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                         },
                         "content": data,
                     }
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
+                if mode in ("option_min_pool_row_gap", "option_min_pool_column_fill"):
+                    from src.massive.option_min_pool_fill import run_option_min_pool_aggregates
+
+                    result = run_option_min_pool_aggregates(
+                        conn, client, payload, mode=mode
+                    )
                     update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                     return result
 
@@ -1766,13 +1959,35 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     upd_ex = 0
                     upd_sh = 0
                     err_sample: List[str] = []
+                    _gap_bf = _nullable_column_backfill_gap_sec()
+                    _commit_every = 40
+                    _rows_uncommitted = 0
+                    _total_cand = len(rows_bf)
                     for crow in rows_bf:
                         ck = crow[0]
                         ot = (crow[1] or "").strip()
                         if not ck or not ot:
                             continue
-                        _rest_throttle()
+                        time.sleep(_gap_bf)
                         n_api += 1
+                        if _total_cand > 0 and n_api % 250 == 0:
+                            update_job_massive_backfill_result(
+                                status_cfg,
+                                job_id,
+                                "running",
+                                {
+                                    "ok": True,
+                                    "kind": kind,
+                                    "phase": "running",
+                                    "summary": {
+                                        "mode": "nullable_column_backfill",
+                                        "underlying": u,
+                                        "processed_detail_calls": n_api,
+                                        "total_candidates": _total_cand,
+                                        "pct": round(100.0 * n_api / _total_cand, 2),
+                                    },
+                                },
+                            )
                         data = client.fetch_option_contract_detail(ot)
                         if data.get("error"):
                             if len(err_sample) < 15:
@@ -1813,6 +2028,11 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                                         (shares_i, ck),
                                     )
                                     upd_sh += int(cur.rowcount)
+                        _rows_uncommitted += 1
+                        if _rows_uncommitted >= _commit_every:
+                            conn.commit()
+                            _rows_uncommitted = 0
+                    if _rows_uncommitted:
                         conn.commit()
                     result = {
                         "ok": True,

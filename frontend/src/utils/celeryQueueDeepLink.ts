@@ -1,4 +1,4 @@
-/** Hash deep link: Settings → Celery → Job queues tab → select queue (see CeleryControlPage). */
+/** Hash deep link: Settings → Celery → Queues & Instances tab → select queue (see CeleryControlPage). */
 export const CELERY_QUEUE_HASH_PREFIX = 'settings-celery-queue-'
 
 export function celeryQueueHash(celeryQueue: string): string {

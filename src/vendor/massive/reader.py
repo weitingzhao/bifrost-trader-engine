@@ -1843,6 +1843,18 @@ def upsert_option_contracts_from_reference_rows(
                         (ck, underlying, ed, strike, ort, ticker),
                     )
                     n += 1
+                # Record that the contracts sync ran for this symbol, regardless of
+                # whether any new rows were inserted (all conflicts = no new created_at).
+                cur.execute(
+                    """
+                    INSERT INTO job_ticker_reference_state (sync_kind, last_cursor, status, updated_at)
+                    VALUES (%s, NULL, 'done', now())
+                    ON CONFLICT (sync_kind) DO UPDATE SET
+                      status = 'done',
+                      updated_at = now()
+                    """,
+                    (f"option_contracts:{underlying}",),
+                )
             conn.commit()
         finally:
             conn.close()

@@ -5,13 +5,7 @@ import { BarsCandlestickChart, finiteVwap } from '../data/BarsCandlestickChart'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import { OdChartExpandOnHover } from './OdChartExpandOnHover'
 import { buildPolygonOptionsTicker } from '../../utils/polygonOptionsTicker'
-
-const OPTION_BAR_PERIODS = [
-  { value: '1 D', label: 'Daily' },
-  { value: '1 hour', label: '1 hour' },
-  { value: '5 mins', label: '5 min' },
-  { value: '1 min', label: '1 min' },
-] as const
+import { OPTION_BAR_PERIODS } from '../../utils/optionBarPeriods'
 
 /** Option Discovery chart always reads Massive-backed rows in PostgreSQL (option_min / option_day). */
 const BAR_SOURCE: 'massive' = 'massive'

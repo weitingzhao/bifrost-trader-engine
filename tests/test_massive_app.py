@@ -134,7 +134,7 @@ class TestMassiveHealth:
         cur = MagicMock()
         cur.fetchall.side_effect = [
             [("NVDA", 100, newest, 90, 80, 2, 50, 45, 4, 12)],
-            [("NVDA", newest)],
+            [("NVDA", 50, newest, 45, 40, 30, 3)],
             [("NVDA", newest.date(), newest)],
             [("NVDA", newest, newest)],
             [],
@@ -173,6 +173,15 @@ class TestMassiveHealth:
         assert oc["newest_created_at"] is not None
         assert oc["contracts_last_at"] == oc["newest_created_at"]
         assert isinstance(oc.get("age_seconds"), int)
+        osnap = syms[0]["option_snapshots"]
+        assert osnap["has_data"] is True
+        assert osnap["row_count"] == 50
+        assert osnap["iv_pct"] == 90.0
+        assert osnap["full_greeks_pct"] == 80.0
+        assert osnap["open_interest_pct"] == 60.0
+        assert osnap["optional_data_fill_avg_pct"] == 70.0
+        assert osnap["stale_snapshot_rows"] == 3
+        assert isinstance(osnap.get("age_seconds"), int)
         row0 = syms[0]
         assert row0.get("option_day", {}).get("has_data") is False
         assert row0.get("report_option_max_pain_daily", {}).get("has_data") is False
@@ -261,6 +270,95 @@ class TestMassiveHealth:
         }
         client = _make_client()
         r = client.get("/research/massive/option-contracts-reference-gap?symbol=NVDA")
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is False
+        assert "API key" in str(body.get("error", ""))
+
+    @patch("src.vendor.massive.snapshots_contracts_gap.compute_option_snapshots_contracts_gap")
+    @patch("psycopg2.connect")
+    @patch("backend.massive.routers.routes._db_config", return_value={"host": "h", "database": "d"})
+    def test_option_snapshots_contracts_gap_get_ok(self, _mock_db, mock_connect, mock_compute):
+        mock_compute.return_value = {
+            "ok": True,
+            "symbol": "NVDA",
+            "has_rows": True,
+            "db_row_count": 8,
+            "pg_total": 8,
+            "massive_total": 10,
+            "gap": 2,
+            "coverage_pct": 80.0,
+            "compared_at": "2026-01-01T00:00:00Z",
+            "expiries": [],
+            "truncated": False,
+            "expiries_truncated": False,
+        }
+        cur = MagicMock()
+        cursor_cm = MagicMock()
+        cursor_cm.__enter__.return_value = cur
+        cursor_cm.__exit__.return_value = None
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor_cm
+        mock_connect.return_value = mock_conn
+
+        client = _make_client(reader_config={"massive": {"api_key": "test-key"}})
+        r = client.get("/research/massive/option-snapshots-contracts-gap?symbol=NVDA")
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is True
+        assert body.get("symbol") == "NVDA"
+        assert body.get("gap") == 2
+        mock_compute.assert_called_once()
+
+    @patch("src.vendor.massive.snapshots_contracts_gap.compute_option_snapshots_contracts_gap")
+    @patch("psycopg2.connect")
+    @patch("backend.massive.routers.routes._db_config", return_value={"host": "h", "database": "d"})
+    def test_option_snapshots_contracts_gap_batch_ok(self, _mock_db, mock_connect, mock_compute):
+        mock_compute.side_effect = [
+            {"ok": True, "symbol": "NVDA", "has_rows": True, "pg_total": 1, "massive_total": 1, "gap": 0},
+            {"ok": True, "symbol": "AAPL", "has_rows": True, "pg_total": 2, "massive_total": 3, "gap": 1},
+        ]
+        cur = MagicMock()
+        cursor_cm = MagicMock()
+        cursor_cm.__enter__.return_value = cur
+        cursor_cm.__exit__.return_value = None
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor_cm
+        mock_connect.return_value = mock_conn
+
+        client = _make_client(reader_config={"massive": {"api_key": "test-key"}})
+        r = client.post(
+            "/research/massive/option-snapshots-contracts-gap/batch",
+            json={"symbols": ["NVDA", "AAPL"]},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is True
+        res = body.get("results") or {}
+        assert res.get("NVDA", {}).get("gap") == 0
+        assert res.get("AAPL", {}).get("gap") == 1
+        assert mock_compute.call_count == 2
+
+    def test_option_snapshots_contracts_gap_requires_postgres(self):
+        client = _make_client()
+        r = client.get("/research/massive/option-snapshots-contracts-gap?symbol=NVDA")
+        assert r.status_code == 200
+        assert r.json().get("ok") is False
+        assert "PostgreSQL" in str(r.json().get("error", ""))
+
+    @patch("src.vendor.massive.config.get_massive_settings")
+    @patch("backend.massive.routers.routes._db_config", return_value={"host": "h", "database": "d"})
+    def test_option_snapshots_contracts_gap_requires_api_key(self, _mock_db, mock_ms):
+        mock_ms.return_value = {
+            "api_key": "",
+            "rest_base": "https://api.polygon.io",
+            "tier": "starter",
+            "ws_url": "wss://x",
+            "trades_enabled": False,
+            "daily_full_backfill_years": 5.0,
+        }
+        client = _make_client()
+        r = client.get("/research/massive/option-snapshots-contracts-gap?symbol=NVDA")
         assert r.status_code == 200
         body = r.json()
         assert body.get("ok") is False

@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { postOptionBarsContractsGapBatch } from '../../api'
 import type {
+  OptionBarsContractsGapResult,
   OptionContractsReferenceGapResult,
+  OptionSnapshotsContractsGapResult,
   WatchlistDbCoverageExpirationCache,
   WatchlistDbCoverageOiDaily,
   WatchlistDbCoverageOptionBars,
@@ -11,21 +14,32 @@ import type {
 } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import { DataOverviewAllGapsSheet } from './DataOverviewAllGapsSheet'
+import { DataOverviewBarQualitySheet } from './DataOverviewBarQualitySheet'
 import { DataOverviewGapExplainSheet } from './DataOverviewGapExplainSheet'
+import { DataOverviewSnapshotQualitySheet } from './DataOverviewSnapshotQualitySheet'
 import { DataOverviewOptionJobsBar, type DataOverviewOptionJobsBarHandle } from './DataOverviewOptionJobsBar'
 import {
-  OPTIONS_DATASET_COUNT,
   OPTIONS_FOCUS_TABLE_IDS,
   type OptionsFocusDataset,
   type OptionsFocusTableId,
   showFocusTable,
 } from './optionFocusDataset'
+import {
+  DEFAULT_OPTION_MIN_PERIOD,
+  type OptionMinIntradayPeriodValue,
+} from '../../utils/optionBarPeriods'
 
 const EMPTY_BARS: WatchlistDbCoverageOptionBars = {
   has_data: false,
   row_count: null,
   last_bar_time: null,
   last_created_at: null,
+  ohlc_complete_pct: null,
+  volume_pct: null,
+  vwap_pct: null,
+  optional_avg_pct: null,
+  distinct_expirations: null,
+  distinct_contracts: null,
 }
 
 const EMPTY_SUV: WatchlistDbCoverageSnapshotsWithUd = {
@@ -115,32 +129,34 @@ function snapshotStale(ts: string | null): boolean {
   return Date.now() - t > SNAPSHOT_STALE_MS
 }
 
-function formatMassiveRefCell(g: OptionContractsReferenceGapResult | undefined): string {
+type RefGapLike = OptionContractsReferenceGapResult | OptionSnapshotsContractsGapResult | OptionBarsContractsGapResult
+
+function formatMassiveRefCell(g: RefGapLike | undefined): string {
   if (!g?.ok || g.massive_total == null) return '—'
   return g.massive_total.toLocaleString()
 }
 
-function formatGapCell(g: OptionContractsReferenceGapResult | undefined): string {
+function formatGapCell(g: RefGapLike | undefined): string {
   if (!g?.ok || g.gap == null) return '—'
   const n = g.gap
   return n > 0 ? `+${n.toLocaleString()}` : n.toLocaleString()
 }
 
-function gapCellHighlightClass(g: OptionContractsReferenceGapResult | undefined): string {
+function gapCellHighlightClass(g: RefGapLike | undefined): string {
   if (!g?.ok || g.gap == null) return ''
   return g.gap === 0
     ? 'data-overview-wl-matrix__gapnum data-overview-wl-matrix__gapnum--ok'
     : 'data-overview-wl-matrix__gapnum data-overview-wl-matrix__gapnum--warn'
 }
 
-function covPctCellHighlightClass(g: OptionContractsReferenceGapResult | undefined): string {
+function covPctCellHighlightClass(g: RefGapLike | undefined): string {
   if (!g?.ok || g.coverage_pct == null) return ''
   return g.coverage_pct === 100
     ? 'data-overview-wl-matrix__covpct data-overview-wl-matrix__covpct--ok'
     : 'data-overview-wl-matrix__covpct data-overview-wl-matrix__covpct--warn'
 }
 
-function formatCovPctCell(g: OptionContractsReferenceGapResult | undefined): string {
+function formatCovPctCell(g: RefGapLike | undefined): string {
   if (!g?.ok || g.coverage_pct == null) return '—'
   return `${g.coverage_pct}%`
 }
@@ -157,27 +173,17 @@ function mismatchHighlightClass(hasData: boolean, count: number | null | undefin
     : 'data-overview-wl-matrix__gapnum data-overview-wl-matrix__gapnum--warn'
 }
 
+function formatStaleSnapshotRows(hasData: boolean, count: number | null | undefined): string {
+  if (!hasData || count == null) return '—'
+  return count.toLocaleString()
+}
+
 /** Reference/identity and nullable segments: higher % = healthier (same bands as All gaps nullable fill). */
 function completenessPctHealthClass(pct: number): string {
   const base = 'data-overview-wl-matrix__completeness-pct'
   if (pct >= 97) return `${base} ${base}--ok`
   if (pct >= 85) return `${base} ${base}--warn`
   return `${base} ${base}--bad`
-}
-
-/** How many of the nine option datasets have data for this symbol. */
-function optionDatasetsWithData(r: WatchlistDbCoverageSymbolRow): number {
-  let n = 0
-  if (r.option_contracts.has_data) n++
-  if (r.option_snapshots.has_data) n++
-  if (rowOptionDay(r).has_data) n++
-  if (rowOptionMin(r).has_data) n++
-  if (rowSuv(r).has_data) n++
-  if (rowOec(r).has_data) n++
-  if (rowOid(r).has_data) n++
-  if (r.report_option_atm_iv_daily.has_data) n++
-  if (rowMp(r).has_data) n++
-  return n
 }
 
 const FOCUS_DATASET_RADIO_NAME = 'data-overview-wl-focus-dataset'
@@ -549,6 +555,18 @@ export interface DataOverviewWatchlistOptionsProps {
   ) => void | Promise<void>
   refGapLoading?: boolean
   refGapError?: string | null
+  /** Per-symbol GET option-snapshots-contracts-gap after Check (option_snapshots focus). */
+  snapshotGapBySymbol?: Record<string, OptionSnapshotsContractsGapResult>
+  onCompareSnapshotGap?: (
+    symbols: string[],
+    progress?: {
+      onSymbolStart?: (symbol: string) => void
+      onSymbolDone?: (symbol: string, result: OptionSnapshotsContractsGapResult) => void
+      onSymbolError?: (symbol: string, message: string) => void
+    },
+  ) => void | Promise<void>
+  snapshotGapLoading?: boolean
+  snapshotGapError?: string | null
   /** option_contracts focus: symbols selected via Symbol column (toggle). */
   comparePool?: string[]
   onToggleComparePool?: (symbol: string) => void
@@ -567,6 +585,10 @@ export function DataOverviewWatchlistOptions({
   onCompareMassiveReference,
   refGapLoading = false,
   refGapError = null,
+  snapshotGapBySymbol = {},
+  onCompareSnapshotGap,
+  snapshotGapLoading = false,
+  snapshotGapError = null,
   comparePool = [],
   onToggleComparePool,
   onSelectAllComparePool,
@@ -580,16 +602,71 @@ export function DataOverviewWatchlistOptions({
   const jobsBarRef = useRef<DataOverviewOptionJobsBarHandle | null>(null)
   const [allGapsSheetOpen, setAllGapsSheetOpen] = useState(false)
   const [gapExplainSheetOpen, setGapExplainSheetOpen] = useState(false)
+  const [snapshotQualitySymbol, setSnapshotQualitySymbol] = useState<string | null>(null)
+
+  /** Bars gap (option_day / option_min) — local state, no external prop required. */
+  const [barsGapBySymbol, setBarsGapBySymbol] = useState<Record<string, OptionBarsContractsGapResult>>({})
+  const [barsGapLoading, setBarsGapLoading] = useState(false)
+  const [barsGapError, setBarsGapError] = useState<string | null>(null)
+
+  /** Detail sheet for bar-quality breakdown. */
+  const [barQualitySymbol, setBarQualitySymbol] = useState<string | null>(null)
+  const [barQualityTable, setBarQualityTable] = useState<'option_day' | 'option_min'>('option_day')
+  const [optionMinPeriod, setOptionMinPeriod] = useState<OptionMinIntradayPeriodValue>(DEFAULT_OPTION_MIN_PERIOD)
+
+  const BARS_DATASETS = useMemo(() => new Set<OptionsFocusDataset>(['option_day', 'option_min']), [])
+
+  const handleCompareBarsGap = useCallback(async (
+    symbols: string[],
+    progress?: {
+      onSymbolStart?: (s: string) => void
+      onSymbolDone?: (s: string, r: OptionBarsContractsGapResult) => void
+      onSymbolError?: (s: string, msg: string) => void
+    },
+  ) => {
+    const table = (focusDataset === 'option_min' ? 'option_min' : 'option_day') as 'option_day' | 'option_min'
+    const period = focusDataset === 'option_min' ? optionMinPeriod : undefined
+    setBarsGapLoading(true)
+    setBarsGapError(null)
+    try {
+      for (const sym of symbols) {
+        progress?.onSymbolStart?.(sym)
+        try {
+          const res = await postOptionBarsContractsGapBatch([sym], table, period)
+          const r: OptionBarsContractsGapResult = res.results?.[sym] ?? { ok: false, error: 'No result' }
+          setBarsGapBySymbol(prev => ({ ...prev, [sym]: r }))
+          progress?.onSymbolDone?.(sym, r)
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          setBarsGapBySymbol(prev => ({ ...prev, [sym]: { ok: false, error: msg } }))
+          progress?.onSymbolError?.(sym, msg)
+        }
+      }
+    } finally {
+      setBarsGapLoading(false)
+    }
+  }, [focusDataset, optionMinPeriod])
 
   useEffect(() => {
-    if (prevFocusRef.current === 'option_contracts' && focusDataset !== 'option_contracts') {
+    const prev = prevFocusRef.current
+    const prevBars = BARS_DATASETS.has(prev)
+    const curBars = BARS_DATASETS.has(focusDataset)
+    if (
+      (prev === 'option_contracts' && focusDataset !== 'option_contracts') ||
+      (prev === 'option_snapshots' && focusDataset !== 'option_snapshots') ||
+      (prevBars && !curBars)
+    ) {
       onClearComparePool?.()
     }
+    // Reset bars gap state when changing between option_day and option_min
+    if (prevBars && curBars && prev !== focusDataset) {
+      setBarsGapBySymbol({})
+    }
     prevFocusRef.current = focusDataset
-  }, [focusDataset, onClearComparePool])
+  }, [focusDataset, onClearComparePool, BARS_DATASETS])
 
   useEffect(() => {
-    if (focusDataset !== 'option_contracts') {
+    if (focusDataset !== 'option_contracts' && focusDataset !== 'option_snapshots') {
       setAllGapsSheetOpen(false)
       setGapExplainSheetOpen(false)
     }
@@ -609,6 +686,15 @@ export function DataOverviewWatchlistOptions({
     const m: Record<string, WatchlistDbCoverageOptionContracts> = {}
     for (const r of wlRows) {
       m[r.symbol.trim().toUpperCase()] = r.option_contracts
+    }
+    return m
+  }, [wlRows])
+
+  const optionDayBySymbol = useMemo(() => {
+    const m: Record<string, WatchlistDbCoverageOptionBars> = {}
+    for (const r of wlRows) {
+      const od = r.option_day
+      if (od) m[r.symbol.trim().toUpperCase()] = od
     }
     return m
   }, [wlRows])
@@ -695,19 +781,45 @@ export function DataOverviewWatchlistOptions({
             onCompareMassiveReference={onCompareMassiveReference}
             refGapLoading={refGapLoading}
             refGapError={refGapError}
+            snapshotGapBySymbol={snapshotGapBySymbol}
+            onCompareSnapshotGap={onCompareSnapshotGap}
+            snapshotGapLoading={snapshotGapLoading}
+            snapshotGapError={snapshotGapError}
+            barsGapBySymbol={barsGapBySymbol}
+            onCompareBarsGap={handleCompareBarsGap}
+            barsGapLoading={barsGapLoading}
+            barsGapError={barsGapError}
             comparePool={comparePool}
             optionContractsBySymbol={optionContractsBySymbol}
+            optionDayBySymbol={optionDayBySymbol}
             onSelectAllComparePool={onSelectAllComparePool}
             onClearComparePool={onClearComparePool}
             jobsSheetOpen={jobsSheetOpen}
             onJobsSheetOpenChange={onJobsSheetOpenChange}
             onOpenAllGapsSheet={focusDataset === 'option_contracts' ? () => setAllGapsSheetOpen(true) : undefined}
-            onOpenGapExplainSheet={focusDataset === 'option_contracts' ? () => setGapExplainSheetOpen(true) : undefined}
+            onOpenGapExplainSheet={
+              focusDataset === 'option_contracts' ||
+              focusDataset === 'option_snapshots' ||
+              focusDataset === 'option_day'
+                ? () => setGapExplainSheetOpen(true)
+                : undefined
+            }
+            optionMinPeriod={optionMinPeriod}
+            onOptionMinPeriodChange={(p: string) =>
+              setOptionMinPeriod(p as OptionMinIntradayPeriodValue)
+            }
           />
 
           <DataOverviewGapExplainSheet
             open={gapExplainSheetOpen}
             onClose={() => setGapExplainSheetOpen(false)}
+            variant={
+              focusDataset === 'option_snapshots'
+                ? 'snapshots'
+                : focusDataset === 'option_day'
+                  ? 'option_day_bars'
+                  : 'contracts'
+            }
           />
 
           <DataOverviewAllGapsSheet
@@ -719,6 +831,19 @@ export function DataOverviewWatchlistOptions({
             fillApiRef={jobsBarRef}
           />
 
+          <DataOverviewSnapshotQualitySheet
+            open={snapshotQualitySymbol !== null}
+            onClose={() => setSnapshotQualitySymbol(null)}
+            symbol={snapshotQualitySymbol}
+          />
+
+          <DataOverviewBarQualitySheet
+            open={barQualitySymbol !== null}
+            onClose={() => setBarQualitySymbol(null)}
+            symbol={barQualitySymbol}
+            table={barQualityTable}
+          />
+
           <div className="replay-section data-overview-wl-matrix" style={{ marginBottom: 'var(--space-3)' }}>
             <div className="feed-massive-table-wrap">
               <table className="data-table data-overview-wl-matrix__table">
@@ -726,16 +851,16 @@ export function DataOverviewWatchlistOptions({
                   <tr>
                     <th className="data-overview-wl-matrix__sticky-col" rowSpan={2} scope="col">Symbol</th>
                     {show('option_contracts') ? (
-                      <th colSpan={7} scope="colgroup"><code>option_contracts</code></th>
+                      <th colSpan={8} scope="colgroup"><code>option_contracts</code></th>
                     ) : null}
                     {show('option_snapshots') ? (
-                      <th colSpan={2} scope="colgroup"><code>option_snapshots</code></th>
+                      <th colSpan={7} scope="colgroup"><code>option_snapshots</code></th>
                     ) : null}
                     {show('option_day') ? (
-                      <th colSpan={3} scope="colgroup"><code>option_day</code></th>
+                      <th colSpan={7} scope="colgroup"><code>option_day</code></th>
                     ) : null}
                     {show('option_min') ? (
-                      <th colSpan={3} scope="colgroup"><code>option_min</code></th>
+                      <th colSpan={7} scope="colgroup"><code>option_min</code></th>
                     ) : null}
                     {show('option_snapshots_with_underlying_day') ? (
                       <th colSpan={3} scope="colgroup"><code>option_snapshots_with_underlying_day</code></th>
@@ -758,7 +883,11 @@ export function DataOverviewWatchlistOptions({
                       <>
                         <th scope="col">
                           Age since last row
-                          <InfoTooltip text="Based on max(created_at) in option_contracts — a last row activity proxy, same semantics as Contracts coverage newest_ts. Not a dedicated Celery job completion time." />
+                          <InfoTooltip text="Based on max(created_at) in option_contracts — time since the most recently inserted contract row." />
+                        </th>
+                        <th scope="col">
+                          Last Check
+                          <InfoTooltip text="Time since the last option_contracts sync run for this symbol (from job_ticker_reference_state). Updates every time the contracts service runs, even when no new rows are inserted." />
                         </th>
                         <th scope="col">
                           Completeness
@@ -782,25 +911,89 @@ export function DataOverviewWatchlistOptions({
                     ) : null}
                     {show('option_snapshots') ? (
                       <>
-                        <th scope="col">Last snapshot</th>
                         <th scope="col">
-                          Datasets OK
-                          <InfoTooltip text={`Count of the nine option datasets with data for this symbol, out of ${OPTIONS_DATASET_COUNT}.`} />
+                          Age since last snapshot
+                          <InfoTooltip text="Based on max(snapshot_ts) over latest row per contract_key (Massive source). Same semantics as snapshot_ts in coverage APIs." />
+                        </th>
+                        <th scope="col">
+                          Completeness
+                          <InfoTooltip text="First: avg(IV %, full greeks %). Full greeks = all of delta, gamma, theta, vega on latest row per contract. Second: avg of full greeks % and open interest % (nullable-style fields). ≥97% green, 85–96.9% amber, &lt;85% red." />
+                        </th>
+                        <th scope="col">Rows</th>
+                        <th scope="col">
+                          Ref
+                          <InfoTooltip text="After Check: summed Ref from Massive GET /v3/snapshot/options/{underlying} intersected with option_contracts.contract_key per expiry. Run Check in the bar above." />
+                        </th>
+                        <th scope="col">
+                          Gap
+                          <InfoTooltip text="Pair snapshot gap / stale. Left: Ref − PG distinct contract_keys with option_snapshots after Check. Right: latest rows older than 24h (per contract)." />
+                        </th>
+                        <th scope="col">
+                          Cov%
+                          <InfoTooltip text="100 × PG matched ÷ Ref for the chain snapshot comparison. Never above 100% for this definition." />
+                        </th>
+                        <th scope="col">
+                          OC exp / stk
+                          <InfoTooltip text="Distinct expiries and strikes in option_contracts for this symbol (reference shape)." />
                         </th>
                       </>
                     ) : null}
                     {show('option_day') ? (
                       <>
+                        <th scope="col">
+                          Age
+                          <InfoTooltip text="Time since most recent bar in option_day (Massive source)." />
+                        </th>
+                        <th scope="col">
+                          Completeness
+                          <InfoTooltip text="First: OHLC complete % (all four non-null). Second: avg(volume %, VWAP %). ≥97% green, 85–96.9% amber, &lt;85% red." />
+                        </th>
                         <th scope="col">Rows</th>
-                        <th scope="col">Last bar</th>
-                        <th scope="col">Last created</th>
+                        <th scope="col">
+                          Ref
+                          <InfoTooltip text="After Check: distinct (expiry, strike, right) combinations in option_contracts for this symbol (reference shape). Run Check in the bar above." />
+                        </th>
+                        <th scope="col">
+                          Gap
+                          <InfoTooltip text="Ref − covered. Covered = option_day has ≥1 bar for that (expiry, strike, right) key. Green when 0." />
+                        </th>
+                        <th scope="col">
+                          Cov%
+                          <InfoTooltip text="100 × covered ÷ Ref after Check. Never above 100% for this definition." />
+                        </th>
+                        <th scope="col">
+                          Exp / Contracts
+                          <InfoTooltip text="Distinct expiries / distinct (expiry, strike, right) keys in option_day for this symbol." />
+                        </th>
                       </>
                     ) : null}
                     {show('option_min') ? (
                       <>
+                        <th scope="col">
+                          Age
+                          <InfoTooltip text="Time since most recent bar in option_min (Massive source)." />
+                        </th>
+                        <th scope="col">
+                          Completeness
+                          <InfoTooltip text="First: OHLC complete % (all four non-null). Second: avg(volume %, VWAP %). ≥97% green, 85–96.9% amber, &lt;85% red." />
+                        </th>
                         <th scope="col">Rows</th>
-                        <th scope="col">Last bar</th>
-                        <th scope="col">Last created</th>
+                        <th scope="col">
+                          Ref
+                          <InfoTooltip text="After Check: distinct (expiry, strike, right) combinations in option_contracts for this symbol (reference shape). Run Check in the bar above." />
+                        </th>
+                        <th scope="col">
+                          Gap
+                          <InfoTooltip text="Ref − covered. Covered = option_min has ≥1 bar for that (expiry, strike, right) key. Green when 0." />
+                        </th>
+                        <th scope="col">
+                          Cov%
+                          <InfoTooltip text="100 × covered ÷ Ref after Check. Never above 100% for this definition." />
+                        </th>
+                        <th scope="col">
+                          Exp / Contracts
+                          <InfoTooltip text="Distinct expiries / distinct (expiry, strike, right) keys in option_min for this symbol." />
+                        </th>
                       </>
                     ) : null}
                     {show('option_snapshots_with_underlying_day') ? (
@@ -864,29 +1057,76 @@ export function DataOverviewWatchlistOptions({
                         ? `First ${refMergedPct}%: avg(ticker, identity). Identity columns include contract_key, symbol, expiry, strike, option_right (DB NOT NULL). Second ${dataAvgPct != null ? `${dataAvgPct}%` : '—'}: nullable data (exercise_style, shares_per_contract). Column groups: All gaps (once).`
                         : undefined
                     const st = r.option_snapshots.snapshots_last_ts
-                    const stale = snapshotStale(st)
-                    const ok = optionDatasetsWithData(r)
                     const symU = r.symbol.trim().toUpperCase()
                     const refG = refGapBySymbol[symU]
+                    const snapG = snapshotGapBySymbol[symU]
+                    const os = r.option_snapshots
+                    const ivp = os.iv_pct
+                    const fgp = os.full_greeks_pct
+                    const snapRefMerged =
+                      os.has_data && ivp != null && fgp != null
+                        ? Math.round(((ivp + fgp) / 2) * 10) / 10
+                        : null
+                    const snapDataAvg = os.optional_data_fill_avg_pct ?? null
+                    const snapCompletenessTitle =
+                      os.has_data && snapRefMerged != null
+                        ? `First ${snapRefMerged}%: avg(IV, full greeks). Second ${snapDataAvg != null ? `${snapDataAvg}%` : '—'}: avg(full greeks %, OI %) on latest per contract.`
+                        : undefined
                     const inPool = comparePool.includes(symU)
+                    const isPoolableDataset =
+                      focusDataset === 'option_contracts' ||
+                      focusDataset === 'option_snapshots' ||
+                      focusDataset === 'option_day' ||
+                      focusDataset === 'option_min'
                     const symToggle =
-                      focusDataset === 'option_contracts' && onToggleComparePool ? (
-                        <button
-                          type="button"
-                          className={`data-overview-wl-matrix__sym-btn${inPool ? ' data-overview-wl-matrix__sym-btn--on' : ''}`}
-                          onClick={() => onToggleComparePool(r.symbol)}
-                          aria-pressed={inPool}
-                          title={inPool ? 'Remove from compare pool' : 'Add to compare pool'}
-                        >
-                          {r.symbol}
-                        </button>
+                      isPoolableDataset && onToggleComparePool ? (
+                        <>
+                          <button
+                            type="button"
+                            className={`data-overview-wl-matrix__sym-btn${inPool ? ' data-overview-wl-matrix__sym-btn--on' : ''}`}
+                            onClick={() => onToggleComparePool(r.symbol)}
+                            aria-pressed={inPool}
+                            title={inPool ? 'Remove from compare pool' : 'Add to compare pool'}
+                          >
+                            {r.symbol}
+                          </button>
+                          {focusDataset === 'option_snapshots' ? (
+                            <button
+                              type="button"
+                              className="data-overview-wl-matrix__sym-detail-btn"
+                              onClick={() => setSnapshotQualitySymbol(r.symbol)}
+                              title="Open snapshot quality detail"
+                              aria-label={`Snapshot quality detail for ${r.symbol}`}
+                            >
+                              ↗
+                            </button>
+                          ) : null}
+                          {(focusDataset === 'option_day' || focusDataset === 'option_min') ? (
+                            <button
+                              type="button"
+                              className="data-overview-wl-matrix__sym-detail-btn"
+                              onClick={() => {
+                                setBarQualityTable(focusDataset)
+                                setBarQualitySymbol(r.symbol)
+                              }}
+                              title="Open bar quality detail"
+                              aria-label={`Bar quality detail for ${r.symbol}`}
+                            >
+                              ↗
+                            </button>
+                          ) : null}
+                        </>
                       ) : (
                         <strong>{r.symbol}</strong>
                       )
                     return (
                       <tr
                         key={r.symbol}
-                        className={inPool && focusDataset === 'option_contracts' ? 'data-overview-wl-matrix__row--pool' : undefined}
+                        className={
+                          inPool && isPoolableDataset
+                            ? 'data-overview-wl-matrix__row--pool'
+                            : undefined
+                        }
                       >
                         <th className="data-overview-wl-matrix__sticky-col" scope="row">{symToggle}</th>
                         {show('option_contracts') ? (
@@ -896,6 +1136,12 @@ export function DataOverviewWatchlistOptions({
                               title={oc.newest_created_at ? `newest_created_at: ${oc.newest_created_at}` : undefined}
                             >
                               {fmtAgeSeconds(oc.age_seconds)}
+                            </td>
+                            <td
+                              style={{ fontSize: 'var(--text-caption)' }}
+                              title={oc.last_check_at ? `last_check_at: ${oc.last_check_at}` : 'No check recorded yet'}
+                            >
+                              {fmtAgeSeconds(oc.last_check_age_seconds)}
                             </td>
                             <td style={{ fontSize: 'var(--text-caption)' }} title={completenessTitle}>
                               {oc.has_data && refMergedPct != null ? (
@@ -948,39 +1194,139 @@ export function DataOverviewWatchlistOptions({
                         {show('option_snapshots') ? (
                           <>
                             <td
-                              style={{
-                                fontSize: 'var(--text-caption)',
-                                color: stale ? '#fbbf24' : undefined,
-                              }}
-                              title={stale ? 'Snapshot older than 24h' : undefined}
+                              style={{ fontSize: 'var(--text-caption)' }}
+                              title={os.snapshots_last_ts ? `snapshot_ts max: ${os.snapshots_last_ts}` : undefined}
                             >
-                              {r.option_snapshots.has_data ? fmtTs(r.option_snapshots.snapshots_last_ts) : '—'}
+                              {fmtAgeSeconds(os.age_seconds ?? (st ? isoAgeSeconds(st) : null))}
                             </td>
-                            <td>{ok}/{OPTIONS_DATASET_COUNT}</td>
+                            <td style={{ fontSize: 'var(--text-caption)' }} title={snapCompletenessTitle}>
+                              {os.has_data && snapRefMerged != null ? (
+                                snapDataAvg != null ? (
+                                  <>
+                                    <span className={completenessPctHealthClass(snapRefMerged)}>
+                                      {snapRefMerged}%
+                                    </span>
+                                    <span className="data-overview-wl-matrix__completeness-sep" aria-hidden="true">
+                                      {' '}
+                                      ·{' '}
+                                    </span>
+                                    <span className={completenessPctHealthClass(snapDataAvg)}>{snapDataAvg}%</span>
+                                  </>
+                                ) : (
+                                  <span className={completenessPctHealthClass(snapRefMerged)}>{snapRefMerged}%</span>
+                                )
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                            <td>{os.has_data && os.row_count != null ? os.row_count : '—'}</td>
+                            <td className="data-overview-wl-matrix__refcell">{formatMassiveRefCell(snapG)}</td>
+                            <td
+                              className="data-overview-wl-matrix__refcell"
+                              title="Snapshot gap / stale rows (after Check for left value)"
+                            >
+                              <span className="data-overview-wl-matrix__gap-mm">
+                                <span className={gapCellHighlightClass(snapG)}>{formatGapCell(snapG)}</span>
+                                <span className="data-overview-wl-matrix__gap-mm__sep" aria-hidden="true">
+                                  /
+                                </span>
+                                <span className={mismatchHighlightClass(os.has_data, os.stale_snapshot_rows)}>
+                                  {formatStaleSnapshotRows(os.has_data, os.stale_snapshot_rows)}
+                                </span>
+                              </span>
+                            </td>
+                            <td className="data-overview-wl-matrix__refcell">
+                              <span className={covPctCellHighlightClass(snapG)}>{formatCovPctCell(snapG)}</span>
+                            </td>
+                            <td style={{ fontSize: 'var(--text-caption)' }}>
+                              {oc.has_data && oc.distinct_expirations != null && oc.distinct_strikes != null
+                                ? `${oc.distinct_expirations} / ${oc.distinct_strikes}`
+                                : '—'}
+                            </td>
                           </>
                         ) : null}
-                        {show('option_day') ? (
-                          <>
-                            <td>{od.has_data && od.row_count != null ? od.row_count : '—'}</td>
-                            <td style={{ fontSize: 'var(--text-caption)' }}>
-                              {od.has_data ? fmtTs(od.last_bar_time) : '—'}
-                            </td>
-                            <td style={{ fontSize: 'var(--text-caption)' }}>
-                              {od.has_data ? fmtTs(od.last_created_at) : '—'}
-                            </td>
-                          </>
-                        ) : null}
-                        {show('option_min') ? (
-                          <>
-                            <td>{om.has_data && om.row_count != null ? om.row_count : '—'}</td>
-                            <td style={{ fontSize: 'var(--text-caption)' }}>
-                              {om.has_data ? fmtTs(om.last_bar_time) : '—'}
-                            </td>
-                            <td style={{ fontSize: 'var(--text-caption)' }}>
-                              {om.has_data ? fmtTs(om.last_created_at) : '—'}
-                            </td>
-                          </>
-                        ) : null}
+                        {show('option_day') ? (() => {
+                          const odBarsGap = barsGapBySymbol[symU]
+                          const odAge = od.has_data ? isoAgeSeconds(od.last_bar_time ?? od.last_created_at) : null
+                          const odOhlc = od.ohlc_complete_pct
+                          const odOptAvg = od.optional_avg_pct
+                          return (
+                            <>
+                              <td style={{ fontSize: 'var(--text-caption)' }}
+                                title={od.last_bar_time ? `last_bar_time: ${od.last_bar_time}` : undefined}
+                              >
+                                {fmtAgeSeconds(odAge)}
+                              </td>
+                              <td style={{ fontSize: 'var(--text-caption)' }}>
+                                {od.has_data && odOhlc != null ? (
+                                  odOptAvg != null ? (
+                                    <>
+                                      <span className={completenessPctHealthClass(odOhlc)}>{odOhlc}%</span>
+                                      <span className="data-overview-wl-matrix__completeness-sep" aria-hidden="true"> · </span>
+                                      <span className={completenessPctHealthClass(odOptAvg)}>{odOptAvg}%</span>
+                                    </>
+                                  ) : (
+                                    <span className={completenessPctHealthClass(odOhlc)}>{odOhlc}%</span>
+                                  )
+                                ) : '—'}
+                              </td>
+                              <td>{od.has_data && od.row_count != null ? od.row_count.toLocaleString() : '—'}</td>
+                              <td className="data-overview-wl-matrix__refcell">{formatMassiveRefCell(odBarsGap)}</td>
+                              <td className="data-overview-wl-matrix__refcell">
+                                <span className={gapCellHighlightClass(odBarsGap)}>{formatGapCell(odBarsGap)}</span>
+                              </td>
+                              <td className="data-overview-wl-matrix__refcell">
+                                <span className={covPctCellHighlightClass(odBarsGap)}>{formatCovPctCell(odBarsGap)}</span>
+                              </td>
+                              <td style={{ fontSize: 'var(--text-caption)' }}>
+                                {od.has_data && od.distinct_expirations != null && od.distinct_contracts != null
+                                  ? `${od.distinct_expirations} / ${od.distinct_contracts.toLocaleString()}`
+                                  : '—'}
+                              </td>
+                            </>
+                          )
+                        })() : null}
+                        {show('option_min') ? (() => {
+                          const omBarsGap = barsGapBySymbol[symU]
+                          const omAge = om.has_data ? isoAgeSeconds(om.last_bar_time ?? om.last_created_at) : null
+                          const omOhlc = om.ohlc_complete_pct
+                          const omOptAvg = om.optional_avg_pct
+                          return (
+                            <>
+                              <td style={{ fontSize: 'var(--text-caption)' }}
+                                title={om.last_bar_time ? `last_bar_time: ${om.last_bar_time}` : undefined}
+                              >
+                                {fmtAgeSeconds(omAge)}
+                              </td>
+                              <td style={{ fontSize: 'var(--text-caption)' }}>
+                                {om.has_data && omOhlc != null ? (
+                                  omOptAvg != null ? (
+                                    <>
+                                      <span className={completenessPctHealthClass(omOhlc)}>{omOhlc}%</span>
+                                      <span className="data-overview-wl-matrix__completeness-sep" aria-hidden="true"> · </span>
+                                      <span className={completenessPctHealthClass(omOptAvg)}>{omOptAvg}%</span>
+                                    </>
+                                  ) : (
+                                    <span className={completenessPctHealthClass(omOhlc)}>{omOhlc}%</span>
+                                  )
+                                ) : '—'}
+                              </td>
+                              <td>{om.has_data && om.row_count != null ? om.row_count.toLocaleString() : '—'}</td>
+                              <td className="data-overview-wl-matrix__refcell">{formatMassiveRefCell(omBarsGap)}</td>
+                              <td className="data-overview-wl-matrix__refcell">
+                                <span className={gapCellHighlightClass(omBarsGap)}>{formatGapCell(omBarsGap)}</span>
+                              </td>
+                              <td className="data-overview-wl-matrix__refcell">
+                                <span className={covPctCellHighlightClass(omBarsGap)}>{formatCovPctCell(omBarsGap)}</span>
+                              </td>
+                              <td style={{ fontSize: 'var(--text-caption)' }}>
+                                {om.has_data && om.distinct_expirations != null && om.distinct_contracts != null
+                                  ? `${om.distinct_expirations} / ${om.distinct_contracts.toLocaleString()}`
+                                  : '—'}
+                              </td>
+                            </>
+                          )
+                        })() : null}
                         {show('option_snapshots_with_underlying_day') ? (
                           <>
                             <td>
