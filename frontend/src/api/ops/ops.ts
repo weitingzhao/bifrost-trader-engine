@@ -239,6 +239,51 @@ export async function fetchOpsWorkerDetail(workerId: string): Promise<{
   return parseJsonResponse(r)
 }
 
+/** Celery task registry name and default queue from ``task_routes`` (same app as workers). */
+export interface CelerySupportedTaskRow {
+  name: string
+  default_queue: string
+  /** Same as ``default_queue``: queue when ``apply_async`` omits ``queue=`` (Celery ``task_routes``). */
+  task_route_default_queue?: string
+}
+
+export async function fetchCelerySupportedTasks(): Promise<{
+  ok: boolean
+  tasks: CelerySupportedTaskRow[]
+  count: number
+  error?: string
+}> {
+  const r = await fetch(`${opsBase()}/ops/celery/supported-tasks`, { headers: authHeaders() })
+  return parseJsonResponse(r)
+}
+
+/** One row of the ``run_massive_job`` kind/mode matrix (broker queues from ``celery_queue_for_massive_job``). */
+export interface RunMassiveJobMatrixRow {
+  kind: string
+  mode: string | null
+  mode_source: string
+  broker_queue_standard: string
+  broker_queue_high: string
+}
+
+export interface CeleryBeatTaskRow {
+  name: string
+  note: string
+}
+
+export async function fetchCeleryCapabilities(): Promise<{
+  ok: boolean
+  registered_tasks: CelerySupportedTaskRow[]
+  count: number
+  canonical_broker_queues: string[]
+  run_massive_job_matrix: RunMassiveJobMatrixRow[]
+  beat_tasks: CeleryBeatTaskRow[]
+  error?: string
+}> {
+  const r = await fetch(`${opsBase()}/ops/celery/capabilities`, { headers: authHeaders() })
+  return parseJsonResponse(r)
+}
+
 // ── Audit ────────────────────────────────────────────────────────────────────
 
 export async function fetchOpsAudit(limit = 100): Promise<{

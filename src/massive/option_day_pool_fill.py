@@ -41,36 +41,62 @@ def _fetch_option_day_row_gap_targets(
     sym: str,
     max_expiries: int,
     max_contracts: int,
+    *,
+    expiration_date: Optional[str] = None,
 ) -> List[Tuple[str, str, str, float, str]]:
     """Contracts in option_contracts (newest expiries) with ticker but no option_day row (source=massive)."""
-    cur.execute(
-        """
-        WITH expiries AS (
-            SELECT DISTINCT expiry
-            FROM option_contracts
-            WHERE UPPER(TRIM(symbol)) = %s
-            ORDER BY expiry DESC
+    exp = (expiration_date or "").strip()[:32] or None
+    if exp:
+        cur.execute(
+            """
+            SELECT oc.massive_option_ticker, oc.symbol, oc.expiry, oc.strike, oc.option_right
+            FROM option_contracts oc
+            WHERE UPPER(TRIM(oc.symbol)) = %s
+              AND oc.expiry = %s
+              AND oc.massive_option_ticker IS NOT NULL
+              AND TRIM(oc.massive_option_ticker) <> ''
+              AND NOT EXISTS (
+                SELECT 1 FROM option_day od
+                WHERE UPPER(TRIM(od.symbol)) = UPPER(TRIM(oc.symbol))
+                  AND od.expiry = oc.expiry
+                  AND od.strike = oc.strike
+                  AND od.option_right = oc.option_right
+                  AND od.source = 'massive'
+              )
+            ORDER BY oc.strike, oc.option_right
             LIMIT %s
+            """,
+            (sym, exp, max(1, int(max_contracts))),
         )
-        SELECT oc.massive_option_ticker, oc.symbol, oc.expiry, oc.strike, oc.option_right
-        FROM option_contracts oc
-        INNER JOIN expiries e ON oc.expiry = e.expiry
-        WHERE UPPER(TRIM(oc.symbol)) = %s
-          AND oc.massive_option_ticker IS NOT NULL
-          AND TRIM(oc.massive_option_ticker) <> ''
-          AND NOT EXISTS (
-            SELECT 1 FROM option_day od
-            WHERE UPPER(TRIM(od.symbol)) = UPPER(TRIM(oc.symbol))
-              AND od.expiry = oc.expiry
-              AND od.strike = oc.strike
-              AND od.option_right = oc.option_right
-              AND od.source = 'massive'
-          )
-        ORDER BY oc.expiry DESC, oc.strike, oc.option_right
-        LIMIT %s
-        """,
-        (sym, max(1, int(max_expiries)), sym, max(1, int(max_contracts))),
-    )
+    else:
+        cur.execute(
+            """
+            WITH expiries AS (
+                SELECT DISTINCT expiry
+                FROM option_contracts
+                WHERE UPPER(TRIM(symbol)) = %s
+                ORDER BY expiry DESC
+                LIMIT %s
+            )
+            SELECT oc.massive_option_ticker, oc.symbol, oc.expiry, oc.strike, oc.option_right
+            FROM option_contracts oc
+            INNER JOIN expiries e ON oc.expiry = e.expiry
+            WHERE UPPER(TRIM(oc.symbol)) = %s
+              AND oc.massive_option_ticker IS NOT NULL
+              AND TRIM(oc.massive_option_ticker) <> ''
+              AND NOT EXISTS (
+                SELECT 1 FROM option_day od
+                WHERE UPPER(TRIM(od.symbol)) = UPPER(TRIM(oc.symbol))
+                  AND od.expiry = oc.expiry
+                  AND od.strike = oc.strike
+                  AND od.option_right = oc.option_right
+                  AND od.source = 'massive'
+              )
+            ORDER BY oc.expiry DESC, oc.strike, oc.option_right
+            LIMIT %s
+            """,
+            (sym, max(1, int(max_expiries)), sym, max(1, int(max_contracts))),
+        )
     rows = cur.fetchall() or []
     out: List[Tuple[str, str, str, float, str]] = []
     for r in rows:
@@ -245,10 +271,13 @@ def run_option_day_pool_aggregates(
     rows_touched = 0
 
     if mode == "option_day_pool_row_gap":
+        exp_filter = (payload.get("expiration_date") or "").strip()[:32] or None
         contracts_processed = 0
         bars_upserted = 0
         with conn.cursor() as cur:
-            targets = _fetch_option_day_row_gap_targets(cur, sym, max_expiries, max_contracts)
+            targets = _fetch_option_day_row_gap_targets(
+                cur, sym, max_expiries, max_contracts, expiration_date=exp_filter
+            )
 
         for ot, u_sym, exp, strike, opt_right in targets:
             try:
@@ -275,6 +304,7 @@ def run_option_day_pool_aggregates(
         ok = len(errors) == 0
         summary = {
             "underlying": sym,
+            "expiration_date": exp_filter,
             "row_lookback_days": row_lookback_days,
             "start_ms": start_ms,
             "end_ms": end_ms,

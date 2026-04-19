@@ -15,17 +15,12 @@ from src.workers.celery_app import (
     CELERY_INSPECT_TIMEOUT_SEC,
     OPS_WORKER_PRESENCE_KEY_PREFIX,
 )
+from src.workers.celery_queue_names import CANONICAL_BROKER_QUEUE_NAMES
 
 logger = logging.getLogger(__name__)
 
-# Canonical Celery queues (see scripts/systemd/run_celery.py _DEFAULT_QUEUES, src/massive/celery_queues.py).
-SUPPORTED_CELERY_QUEUES: Tuple[str, ...] = (
-    "bars",
-    "massive_stocks_high",
-    "massive_stocks",
-    "massive_high",
-    "massive",
-)
+# Canonical Celery queues (see scripts/systemd/run_celery.py, src/workers/celery_queue_names.py).
+SUPPORTED_CELERY_QUEUES: Tuple[str, ...] = CANONICAL_BROKER_QUEUE_NAMES
 
 # Redis list keys that look like Celery broker queues (SCAN discovery; excludes streams / result keys).
 _CELERY_QUEUE_LIST_NAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,63}$")

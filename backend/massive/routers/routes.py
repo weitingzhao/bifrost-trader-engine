@@ -2816,6 +2816,7 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
     allowed = frozenset(
         {
             "aggregates",
+            "feed_option_snapshots",
             "snapshot",
             "oi",
             "reference",

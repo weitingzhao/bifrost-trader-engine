@@ -20,6 +20,7 @@ import {
 import type { AggregatedJobQueueSummaryRow } from '../api'
 import {
   fetchOpsWorkers,
+  fetchCeleryCapabilities,
   fetchOpsCapabilities,
   fetchQueueSummary,
   scaleWorker,
@@ -39,10 +40,14 @@ import {
   type OpsCapabilities,
   type WorkerProfileInfo,
   type QueueSummaryRow,
+  type CelerySupportedTaskRow,
+  type RunMassiveJobMatrixRow,
+  type CeleryBeatTaskRow,
 } from '../api/ops/ops'
 import { parseCeleryQueueFromHash } from '../utils/celeryQueueDeepLink'
 import { CeleryJobQueuesSection, type CeleryJobQueuesSectionHandle } from './celery/CeleryJobQueuesSection'
-import { CeleryTopQueueSummary, formatQueueLabel } from './celery/CeleryTopQueueSummary'
+import { CeleryTopQueueSummary } from './celery/CeleryTopQueueSummary'
+import { brokerQueueKeyTitle, formatQueueLabel } from '../utils/celeryQueueLabels'
 import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
 import { computeCeleryRuntimeLamp, supportedQueueNamesFromSummary } from '../utils/celeryRuntime'
 import { opsHostEnvFromConfigProfile } from '../utils/opsHostEnvPill'
@@ -518,8 +523,43 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
 
   /** Main sections: queues + instances (job DB + scaling + broker), or console + runtime snapshot. */
   const [celerySectionTab, setCelerySectionTab] = useState<
-    'queues_instances' | 'console_runtime'
+    'queues_instances' | 'console_runtime' | 'support_tasks'
   >('queues_instances')
+  const [supportTasks, setSupportTasks] = useState<CelerySupportedTaskRow[]>([])
+  const [runMassiveJobMatrix, setRunMassiveJobMatrix] = useState<RunMassiveJobMatrixRow[]>([])
+  const [beatTasks, setBeatTasks] = useState<CeleryBeatTaskRow[]>([])
+  const [supportTasksLoading, setSupportTasksLoading] = useState(false)
+  const [supportTasksError, setSupportTasksError] = useState<string | null>(null)
+  /** Broker Redis key: filter Task registry + Queue kind matrix (from Queue summary filter icon). */
+  const [supportTasksBrokerFilter, setSupportTasksBrokerFilter] = useState<string | null>(null)
+
+  /** Registered tasks sorted by name; Job style from beat_tasks list. */
+  const mergedTaskRegistryRows = useMemo(() => {
+    const beatScheduledNames = new Set(beatTasks.map(b => b.name))
+    return [...supportTasks]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(t => ({
+        name: t.name,
+        taskRouteDefaultQueue: t.task_route_default_queue ?? t.default_queue,
+        isBeatScheduled: beatScheduledNames.has(t.name),
+      }))
+  }, [supportTasks, beatTasks])
+
+  const filteredTaskRegistryRows = useMemo(() => {
+    if (!supportTasksBrokerFilter) return mergedTaskRegistryRows
+    return mergedTaskRegistryRows.filter(
+      row => row.taskRouteDefaultQueue === supportTasksBrokerFilter,
+    )
+  }, [mergedTaskRegistryRows, supportTasksBrokerFilter])
+
+  const filteredQueueKindMatrixRows = useMemo(() => {
+    if (!supportTasksBrokerFilter) return runMassiveJobMatrix
+    const f = supportTasksBrokerFilter
+    return runMassiveJobMatrix.filter(
+      row => row.broker_queue_standard === f || row.broker_queue_high === f,
+    )
+  }, [runMassiveJobMatrix, supportTasksBrokerFilter])
+
   /** Set when navigating from Queue summary — filter Worker Instances to profiles that consume this queue. */
   const [workerInstancesQueueFilter, setWorkerInstancesQueueFilter] = useState<string | null>(null)
 
@@ -1101,6 +1141,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
       const isCelery =
         h === 'settings-celery' ||
         h === 'settings-dashboard-celery' ||
+        h === 'settings-celery-support-tasks' ||
         h.startsWith('settings-celery-queue-')
       if (!isCelery) return
       requestAnimationFrame(() => {
@@ -1135,6 +1176,21 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
     })
   }, [])
 
+  /** Queue summary filter icon: Support Tasks tab + broker-key filter; click same queue again to clear filter. */
+  const openSupportTasksWithQueueFilter = useCallback((brokerKey: string) => {
+    const q = String(brokerKey).trim()
+    if (!q) return
+    setSupportTasksBrokerFilter(prev => (prev === q ? null : q))
+    setCelerySectionTab('support_tasks')
+    const h = typeof window !== 'undefined' ? window.location.hash.replace(/^#/, '') : ''
+    if (h !== 'settings-celery-support-tasks' && typeof window !== 'undefined') {
+      window.location.hash = 'settings-celery-support-tasks'
+    }
+    queueMicrotask(() => {
+      document.getElementById('celery-panel-support-tasks')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
+  }, [])
+
   /** Deep link: `#settings-celery-queue-<name>` opens Queues & Instances tab and selects that Celery queue. */
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined
@@ -1153,6 +1209,53 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
       if (t) clearTimeout(t)
     }
   }, [navigateToJobQueueFromSummary])
+
+  const loadSupportTasks = useCallback(async () => {
+    setSupportTasksLoading(true)
+    setSupportTasksError(null)
+    try {
+      const res = await fetchCeleryCapabilities()
+      if (!res.ok) {
+        setSupportTasksError(res.error ?? 'Failed to load Celery capabilities')
+        setSupportTasks([])
+        setRunMassiveJobMatrix([])
+        setBeatTasks([])
+        return
+      }
+      const mapped: CelerySupportedTaskRow[] = (res.registered_tasks ?? []).map(t => {
+        const dq = t.task_route_default_queue ?? t.default_queue
+        return { name: t.name, default_queue: dq, task_route_default_queue: dq }
+      })
+      setSupportTasks(mapped)
+      setRunMassiveJobMatrix(res.run_massive_job_matrix ?? [])
+      setBeatTasks(res.beat_tasks ?? [])
+    } catch (e) {
+      setSupportTasksError(e instanceof Error ? e.message : 'Failed to load')
+      setSupportTasks([])
+      setRunMassiveJobMatrix([])
+      setBeatTasks([])
+    } finally {
+      setSupportTasksLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (celerySectionTab !== 'support_tasks') return
+    void loadSupportTasks()
+  }, [celerySectionTab, loadSupportTasks])
+
+  /** Deep link: `#settings-celery-support-tasks` opens Support Tasks tab. */
+  useEffect(() => {
+    const applySupportHash = () => {
+      const h = window.location.hash.replace(/^#/, '')
+      if (h === 'settings-celery-support-tasks') {
+        setCelerySectionTab('support_tasks')
+      }
+    }
+    applySupportHash()
+    window.addEventListener('hashchange', applySupportHash)
+    return () => window.removeEventListener('hashchange', applySupportHash)
+  }, [])
 
   const navigateToJobQueueStatusFromSummary = useCallback(
     (celeryQueue: string, status: 'pending' | 'running' | 'done' | 'failed') => {
@@ -1450,6 +1553,8 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
         opsHostEnvPillTitle={opsHostEnvPillTitle}
         runtimeCeleryLamp={runtimeCeleryLamp}
         runtimeCeleryStatusText={runtimeCeleryStatusText}
+        onOpenSupportTasksFilter={openSupportTasksWithQueueFilter}
+        activeSupportTasksFilterKey={supportTasksBrokerFilter}
         onClearDone={executeClearDoneTop}
         onDeletePending={executeDeletePendingTop}
         onDeleteFailed={executeDeleteFailedTop}
@@ -1487,6 +1592,18 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           onClick={() => setCelerySectionTab('console_runtime')}
         >
           Console &amp; Runtime
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="celery-tab-support-tasks"
+          aria-selected={celerySectionTab === 'support_tasks'}
+          aria-controls="celery-panel-support-tasks"
+          tabIndex={celerySectionTab === 'support_tasks' ? 0 : -1}
+          className={`dashboard-celery-main-tab ${celerySectionTab === 'support_tasks' ? 'dashboard-celery-main-tab--active' : ''}`}
+          onClick={() => setCelerySectionTab('support_tasks')}
+        >
+          Support Tasks
         </button>
       </div>
 
@@ -1939,7 +2056,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               <span className={`dashboard-snapshot-celery-lamp-status dashboard-svc-status--${runtimeCeleryLamp}`}>
                 {runtimeCeleryStatusText}
               </span>
-              <InfoTooltip text="Red: broker unreachable. Yellow: broker OK but no workers, or workers’ queue list does not include every supported queue (bars, massive_stocks_high, massive_stocks, massive_high, massive). Green: at least one worker and their combined queues cover all supported queues." />
+              <InfoTooltip text="Red: broker unreachable. Yellow: broker OK but no workers, or workers’ queue list does not include every supported queue (Bars (IB), Massive stocks (high), Massive stocks, Massive options (high), Massive options — Redis keys bars, massive_stocks_high, massive_stocks, massive_high, massive). Green: at least one worker and their combined queues cover all supported queues." />
             </div>
 
             {/* Broker */}
@@ -2094,6 +2211,194 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               </div>
             )}
           </section>
+          </div>
+
+          {/* ── Tab: Support Tasks (registered Celery task names) ── */}
+          <div
+            role="tabpanel"
+            id="celery-panel-support-tasks"
+            aria-labelledby="celery-tab-support-tasks"
+            hidden={celerySectionTab !== 'support_tasks'}
+            className="dashboard-celery-tab-panel"
+          >
+            <section className="replay-section dashboard-section" aria-labelledby="celery-support-tasks-head">
+              <div className="celery-support-tasks-sheet">
+                <div className="celery-support-tasks-sheet__head">
+                  <div className="celery-support-tasks-sheet__head-lead">
+                    <h3 id="celery-support-tasks-head" className="page-title-with-tooltip">
+                      Support Tasks
+                      <InfoTooltip text="Celery self-description from GET /ops/celery/capabilities: task registry (job style, task route default queue), Queue kind/mode matrix with broker queues (same display names as Queue summary). Use the filter icon in Queue summary to narrow both tables by broker queue." />
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => void loadSupportTasks()}
+                    disabled={supportTasksLoading}
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                {supportTasksBrokerFilter ? (
+                  <div className="celery-support-tasks-filter-banner" role="status">
+                    <span>
+                      Filtered by <strong>{formatQueueLabel(supportTasksBrokerFilter)}</strong>
+                      <span className="celery-support-tasks-filter-banner-key" title={brokerQueueKeyTitle(supportTasksBrokerFilter)}>
+                        {' '}
+                        ({supportTasksBrokerFilter})
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setSupportTasksBrokerFilter(null)}
+                    >
+                      Clear filter
+                    </button>
+                  </div>
+                ) : null}
+
+                {supportTasksLoading ? (
+                  <div className="dashboard-empty" role="status">
+                    Loading…
+                  </div>
+                ) : supportTasksError ? (
+                  <div className="dashboard-inline-alert msg err" role="alert">
+                    {supportTasksError}
+                  </div>
+                ) : (
+                  <>
+                    <div
+                      className="celery-support-tasks-sheet__block"
+                      aria-labelledby="celery-support-tasks-registered-head"
+                    >
+                      <h4
+                        id="celery-support-tasks-registered-head"
+                        className="celery-support-tasks-sheet__block-title page-title-with-tooltip"
+                      >
+                        Task registry
+                        <InfoTooltip text="One row per registered Celery task. Job style: Beat scheduled if this task name appears in capabilities beat_tasks. Task route default queue: Celery default when apply_async omits queue=." />
+                      </h4>
+                      {mergedTaskRegistryRows.length === 0 ? (
+                        <div className="dashboard-empty" role="status">
+                          No registered tasks returned.
+                        </div>
+                      ) : filteredTaskRegistryRows.length === 0 ? (
+                        <div className="dashboard-empty" role="status">
+                          No task registry rows match this queue filter.
+                        </div>
+                      ) : (
+                        <div className="feed-massive-table-wrap">
+                          <table className="data-table" aria-label="Celery task registry">
+                            <thead>
+                              <tr>
+                                <th scope="col">Task name</th>
+                                <th scope="col">
+                                  Job style
+                                  <InfoTooltip text="Beat scheduled: this task name is in capabilities beat_tasks (Celery Beat sends it on a schedule). On-demand: not in that list — usually triggered by application code or manual apply_async. Beat-scheduled tasks are still “scheduled”; this column separates Beat entries from other registered tasks." />
+                                </th>
+                                <th scope="col">
+                                  Task route default queue
+                                  <InfoTooltip text="Display name for the default broker list when apply_async omits queue= (Celery task_routes); hover the cell for the Redis key. Differs from Massive per-kind broker queue unless enqueue does not set queue=." />
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filteredTaskRegistryRows.map(row => (
+                                <tr key={row.name}>
+                                  <td>
+                                    <code>{row.name}</code>
+                                  </td>
+                                  <td>{row.isBeatScheduled ? 'Beat scheduled' : 'On-demand'}</td>
+                                  <td>
+                                    {row.taskRouteDefaultQueue === '—' ? (
+                                      '—'
+                                    ) : (
+                                      <span title={brokerQueueKeyTitle(row.taskRouteDefaultQueue)}>
+                                        {formatQueueLabel(row.taskRouteDefaultQueue)}
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    <div
+                      className="celery-support-tasks-sheet__block"
+                      aria-labelledby="celery-support-tasks-matrix-head"
+                    >
+                      <h4
+                        id="celery-support-tasks-matrix-head"
+                        className="celery-support-tasks-sheet__block-title page-title-with-tooltip"
+                      >
+                        Queue kind / mode
+                        <InfoTooltip text="Documented Massive job kind and payload mode combinations (run_massive_job). Broker queue columns show the same display names as Queue summary; hover a cell for the Redis list key. Routing uses celery_queue_for_massive_job(kind). Mode does not affect queue selection." />
+                      </h4>
+                      {runMassiveJobMatrix.length === 0 ? (
+                        <div className="dashboard-empty" role="status">
+                          No matrix data returned.
+                        </div>
+                      ) : filteredQueueKindMatrixRows.length === 0 ? (
+                        <div className="dashboard-empty" role="status">
+                          No matrix rows match this queue filter.
+                        </div>
+                      ) : (
+                        <div className="feed-massive-table-wrap">
+                          <table className="data-table" aria-label="Queue kind and mode matrix">
+                            <thead>
+                              <tr>
+                                <th scope="col">Kind</th>
+                                <th scope="col">Mode</th>
+                                <th scope="col">
+                                  Mode source
+                                  <InfoTooltip text="Which field in the job payload JSON supplies the Mode value for this matrix row. For most kinds use payload.mode; n/a when this kind has no mode dimension in the payload." />
+                                </th>
+                                <th scope="col">
+                                  Broker queue (standard)
+                                  <InfoTooltip text="Display name for standard priority (e.g. Massive options). Hover the cell for Redis list key massive or massive_stocks." />
+                                </th>
+                                <th scope="col">
+                                  Broker queue (high)
+                                  <InfoTooltip text="Display name for high priority (e.g. Massive options (high priority)). Hover the cell for Redis list key massive_high or massive_stocks_high." />
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filteredQueueKindMatrixRows.map((row, i) => (
+                                <tr key={`${row.kind}-${row.mode ?? 'null'}-${i}`}>
+                                  <td>
+                                    <code>{row.kind}</code>
+                                  </td>
+                                  <td>{row.mode != null ? <code>{row.mode}</code> : '—'}</td>
+                                  <td>
+                                    <code>{row.mode_source}</code>
+                                  </td>
+                                  <td>
+                                    <span title={brokerQueueKeyTitle(row.broker_queue_standard)}>
+                                      {formatQueueLabel(row.broker_queue_standard)}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <span title={brokerQueueKeyTitle(row.broker_queue_high)}>
+                                      {formatQueueLabel(row.broker_queue_high)}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </section>
           </div>
 
           </div>

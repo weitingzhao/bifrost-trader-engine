@@ -13,31 +13,31 @@ from celery.schedules import crontab
 MASSIVE_BEAT_SCHEDULE_SPEC: List[Dict[str, Any]] = [
     {
         "name": "massive-eod-pipeline",
-        "task": "servers.massive_tasks.beat_eod_pipeline",
+        "task": "src.massive.tasks.beat_eod_pipeline",
         "label": "EOD pipeline (OI + Max Pain)",
         "crontab_kwargs": {"hour": 22, "minute": 0},
     },
     {
         "name": "massive-corporate-watchlist",
-        "task": "servers.massive_tasks.beat_corporate_watchlist",
+        "task": "src.massive.tasks.beat_corporate_watchlist",
         "label": "Corporate actions (watchlist)",
         "crontab_kwargs": {"hour": 23, "minute": 0},
     },
     {
         "name": "massive-reconcile",
-        "task": "servers.massive_tasks.beat_reconcile",
+        "task": "src.massive.tasks.beat_reconcile",
         "label": "Reconcile (watchlist vs DB OI)",
         "crontab_kwargs": {"hour": 22, "minute": 45},
     },
     {
         "name": "massive-trim-jobs",
-        "task": "servers.massive_tasks.beat_trim_massive_jobs",
+        "task": "src.massive.tasks.beat_trim_massive_jobs",
         "label": "Trim Massive job table",
         "crontab_kwargs": {"hour": 2, "minute": 15},
     },
     {
         "name": "massive-refresh-expirations",
-        "task": "servers.massive_tasks.beat_refresh_expirations",
+        "task": "src.massive.tasks.beat_refresh_expirations",
         "label": "Refresh option expirations",
         "crontab_kwargs": {"hour": "*/6", "minute": 20},
     },

@@ -9,6 +9,13 @@ from __future__ import annotations
 
 from typing import Final
 
+from src.workers.celery_queue_names import (
+    BROKER_QUEUE_MASSIVE_OPTIONS,
+    BROKER_QUEUE_MASSIVE_OPTIONS_HIGH,
+    BROKER_QUEUE_MASSIVE_STOCKS,
+    BROKER_QUEUE_MASSIVE_STOCKS_HIGH,
+)
+
 # Kinds routed to massive_stocks* (see run_massive_job + insert_job_massive_backfill).
 TICKER_REFERENCE_KINDS: Final[frozenset[str]] = frozenset(
     {
@@ -36,5 +43,5 @@ def celery_queue_for_massive_job(kind: str, *, priority_high: bool) -> str:
     """Return broker queue for ``run_massive_job`` given job kind and API priority."""
     k = (kind or "").strip().lower()
     if k in MASSIVE_STOCKS_QUEUE_KINDS:
-        return "massive_stocks_high" if priority_high else "massive_stocks"
-    return "massive_high" if priority_high else "massive"
+        return BROKER_QUEUE_MASSIVE_STOCKS_HIGH if priority_high else BROKER_QUEUE_MASSIVE_STOCKS
+    return BROKER_QUEUE_MASSIVE_OPTIONS_HIGH if priority_high else BROKER_QUEUE_MASSIVE_OPTIONS

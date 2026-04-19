@@ -1,17 +1,24 @@
 /**
  * Celery runtime lamp + queue totals — aligned with Dashboard Runtime Snapshot / Ops API.
- * Supported queue names mirror backend.ops.services.worker_state.SUPPORTED_CELERY_QUEUES.
- * Options: massive / massive_high. Stock reference: massive_stocks / massive_stocks_high.
+ * Supported queue names mirror backend ``SUPPORTED_CELERY_QUEUES`` / ``CANONICAL_BROKER_QUEUE_NAMES``.
+ * UI labels: ``frontend/src/utils/celeryQueueLabels.ts`` (e.g. Massive options = broker key massive).
  */
 
 import type { QueueSummaryRow, WorkerSummary } from '../api/ops/ops'
+import {
+  BROKER_QUEUE_BARS,
+  BROKER_QUEUE_MASSIVE_OPTIONS,
+  BROKER_QUEUE_MASSIVE_OPTIONS_HIGH,
+  BROKER_QUEUE_MASSIVE_STOCKS,
+  BROKER_QUEUE_MASSIVE_STOCKS_HIGH,
+} from './celeryQueueLabels'
 
 export const SUPPORTED_CELERY_QUEUE_NAMES = [
-  'bars',
-  'massive_stocks_high',
-  'massive_stocks',
-  'massive_high',
-  'massive',
+  BROKER_QUEUE_BARS,
+  BROKER_QUEUE_MASSIVE_STOCKS_HIGH,
+  BROKER_QUEUE_MASSIVE_STOCKS,
+  BROKER_QUEUE_MASSIVE_OPTIONS_HIGH,
+  BROKER_QUEUE_MASSIVE_OPTIONS,
 ] as const
 
 export type CeleryRuntimeLamp = 'green' | 'yellow' | 'red' | 'none'
@@ -55,10 +62,10 @@ export function computeCeleryRuntimeLamp(
 }
 
 const MASSIVE_LIKE_QUEUE_NAMES = [
-  'massive',
-  'massive_high',
-  'massive_stocks',
-  'massive_stocks_high',
+  BROKER_QUEUE_MASSIVE_OPTIONS,
+  BROKER_QUEUE_MASSIVE_OPTIONS_HIGH,
+  BROKER_QUEUE_MASSIVE_STOCKS,
+  BROKER_QUEUE_MASSIVE_STOCKS_HIGH,
 ] as const
 
 /**
@@ -70,9 +77,9 @@ export function dedupedQueueSummaryTotals(rows: QueueSummaryRow[]): {
   done_db: number | null
   failed_db: number | null
 } {
-  const bars = rows.find(r => r.name === 'bars')
+  const bars = rows.find(r => r.name === BROKER_QUEUE_BARS)
   const massivePrimary =
-    rows.find(r => r.name === 'massive') ??
+    rows.find(r => r.name === BROKER_QUEUE_MASSIVE_OPTIONS) ??
     rows.find(r => MASSIVE_LIKE_QUEUE_NAMES.includes(r.name as (typeof MASSIVE_LIKE_QUEUE_NAMES)[number]))
   const out = {
     pending_broker: null as number | null,
@@ -99,7 +106,7 @@ export function dedupedQueueSummaryTotals(rows: QueueSummaryRow[]): {
     rcHas = true
   }
   const massiveRun =
-    rows.find(r => r.name === 'massive')?.running_celery ??
+    rows.find(r => r.name === BROKER_QUEUE_MASSIVE_OPTIONS)?.running_celery ??
     MASSIVE_LIKE_QUEUE_NAMES.map(n => rows.find(r => r.name === n)?.running_celery).find(
       x => x != null && Number.isFinite(x as number),
     )
@@ -108,7 +115,10 @@ export function dedupedQueueSummaryTotals(rows: QueueSummaryRow[]): {
     rcHas = true
   }
   for (const row of rows) {
-    if (row.name === 'bars' || MASSIVE_LIKE_QUEUE_NAMES.includes(row.name as (typeof MASSIVE_LIKE_QUEUE_NAMES)[number])) {
+    if (
+      row.name === BROKER_QUEUE_BARS ||
+      MASSIVE_LIKE_QUEUE_NAMES.includes(row.name as (typeof MASSIVE_LIKE_QUEUE_NAMES)[number])
+    ) {
       continue
     }
     const x = row.running_celery

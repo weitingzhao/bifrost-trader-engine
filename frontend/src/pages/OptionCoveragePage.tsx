@@ -159,7 +159,7 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
     setGkChainErr(null)
     setGkChainBusy(true)
     try {
-      const res = await postMassiveSync('snapshot', { snapshot_type: 'chain', underlying: u })
+      const res = await postMassiveSync('feed_option_snapshots', { mode: 'chain', underlying: u })
       if (!res.ok) { setGkChainErr(res.error ?? res.message ?? 'Enqueue failed'); setGkChainBusy(false); return }
       if (!res.job_id) { setGkChainErr('No job_id'); setGkChainBusy(false); return }
       const sub = subscribeMassiveJobEvents(
@@ -195,7 +195,11 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
     setGkContractResult(null)
     setGkContractBusy(true)
     try {
-      const res = await postMassiveSync('snapshot', { snapshot_type: 'contract', underlying: u, option_contract: oc })
+      const res = await postMassiveSync('feed_option_snapshots', {
+        mode: 'contract',
+        underlying: u,
+        option_contract: oc,
+      })
       if (!res.ok) { setGkContractErr(res.error ?? res.message ?? 'Enqueue failed'); setGkContractBusy(false); return }
       if (!res.job_id) { setGkContractErr('No job_id'); setGkContractBusy(false); return }
       const sub = subscribeMassiveJobEvents(
@@ -230,7 +234,11 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
     setGkUnifiedResult(null)
     setGkUnifiedBusy(true)
     try {
-      const res = await postMassiveSync('snapshot', { snapshot_type: 'unified', tickers: t, asset_type: 'options' })
+      const res = await postMassiveSync('feed_option_snapshots', {
+        mode: 'unified',
+        tickers: t,
+        asset_type: 'options',
+      })
       if (!res.ok) { setGkUnifiedErr(res.error ?? res.message ?? 'Enqueue failed'); setGkUnifiedBusy(false); return }
       if (!res.job_id) { setGkUnifiedErr('No job_id'); setGkUnifiedBusy(false); return }
       const sub = subscribeMassiveJobEvents(

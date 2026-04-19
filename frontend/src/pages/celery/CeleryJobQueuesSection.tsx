@@ -13,6 +13,13 @@ import type { BarsJob, MassiveJobApiRow } from '../../api'
 import { barsJobResultTitle, formatBarsJobResult } from '../data/barsJobFormat'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import { fmtTs } from '../../utils/format'
+import {
+  BROKER_QUEUE_BARS,
+  BROKER_QUEUE_MASSIVE_OPTIONS,
+  BROKER_QUEUE_MASSIVE_OPTIONS_HIGH,
+  BROKER_QUEUE_MASSIVE_STOCKS,
+  BROKER_QUEUE_MASSIVE_STOCKS_HIGH,
+} from '../../utils/celeryQueueLabels'
 
 type StatusFilter = 'all' | 'pending' | 'running' | 'done' | 'failed'
 
@@ -35,11 +42,21 @@ export interface JobQueueTab {
 }
 
 const FALLBACK_JOB_QUEUE_TABS: JobQueueTab[] = [
-  { id: 'ib', label: 'IB', celeryQueue: 'bars', pipeline: 'bars' },
-  { id: 'massive', label: 'Massive options', celeryQueue: 'massive', pipeline: 'massive' },
-  { id: 'massive_high', label: 'Massive options (high priority)', celeryQueue: 'massive_high', pipeline: 'massive' },
-  { id: 'massive_stocks', label: 'Massive stocks', celeryQueue: 'massive_stocks', pipeline: 'massive' },
-  { id: 'massive_stocks_high', label: 'Massive stocks (high priority)', celeryQueue: 'massive_stocks_high', pipeline: 'massive' },
+  { id: 'ib', label: 'IB', celeryQueue: BROKER_QUEUE_BARS, pipeline: 'bars' },
+  { id: 'massive', label: 'Massive options', celeryQueue: BROKER_QUEUE_MASSIVE_OPTIONS, pipeline: 'massive' },
+  {
+    id: 'massive_high',
+    label: 'Massive options (high priority)',
+    celeryQueue: BROKER_QUEUE_MASSIVE_OPTIONS_HIGH,
+    pipeline: 'massive',
+  },
+  { id: 'massive_stocks', label: 'Massive stocks', celeryQueue: BROKER_QUEUE_MASSIVE_STOCKS, pipeline: 'massive' },
+  {
+    id: 'massive_stocks_high',
+    label: 'Massive stocks (high priority)',
+    celeryQueue: BROKER_QUEUE_MASSIVE_STOCKS_HIGH,
+    pipeline: 'massive',
+  },
 ]
 
 function tabsFromProfiles(profiles: WorkerProfileInfo[]): JobQueueTab[] {

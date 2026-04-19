@@ -45,12 +45,15 @@ const MASSIVE_OPTION_COVERAGE_PLAN_URL = `${import.meta.env.BASE_URL}plans/massi
 
 const checklistRows = optionFeedChecklistRows()
 
+/** Legacy hash / deep-link id before kind rename (``feed_option_snapshots``). */
+const LEGACY_FEED_OPTION_SNAPSHOTS_ID = 'snapshot'
+
 /** Second-level tabs inside REST API on Massive Option. */
-const OPTION_REST_SECTION_ORDER = ['contracts', 'aggregates', 'snapshot', 'trades-quotes'] as const
+const OPTION_REST_SECTION_ORDER = ['contracts', 'aggregates', 'feed_option_snapshots', 'trades-quotes'] as const
 const OPTION_REST_SECTION_LABELS: Record<(typeof OPTION_REST_SECTION_ORDER)[number], string> = {
   contracts: 'Contracts',
   aggregates: 'Aggregate Bars (OHLC)',
-  snapshot: 'Snapshots',
+  feed_option_snapshots: 'Snapshots',
   'trades-quotes': 'Trade & Quotes',
 }
 /** Second-level tabs inside WebSocket on Massive Option. */
@@ -83,7 +86,14 @@ function checklistRowById(id: string): ChecklistRow {
 
 function latestJobForKind(jobs: MassiveJobApiRow[], kind: string): MassiveJobApiRow | undefined {
   const k = kind.toLowerCase()
-  return jobs.find(j => (j.kind || '').toLowerCase() === k)
+  const match = (jk: string) => {
+    const x = jk.toLowerCase()
+    if (k === 'feed_option_snapshots') {
+      return x === 'feed_option_snapshots' || x === 'snapshot'
+    }
+    return x === k
+  }
+  return jobs.find(j => match(j.kind || ''))
 }
 
 function jobEvidenceLine(j: MassiveJobApiRow | undefined): string {
@@ -500,9 +510,10 @@ export function FeedMassiveOptionPage({
   useEffect(() => {
     const resolveIdFromHash = (hash: string): string | null => {
       const fromTab = parseFeedMassiveTabFromHash(hash)
-      if (fromTab && checklistRows.some(r => r.id === fromTab)) return fromTab
       const fromSvc = parseFeedMassiveSvcFromHash(hash)
-      if (fromSvc && checklistRows.some(r => r.id === fromSvc)) return fromSvc
+      const raw = fromTab ?? fromSvc
+      const id = raw === LEGACY_FEED_OPTION_SNAPSHOTS_ID ? 'feed_option_snapshots' : raw
+      if (id && checklistRows.some(r => r.id === id)) return id
       return null
     }
     const onHashChange = () => {
@@ -515,9 +526,10 @@ export function FeedMassiveOptionPage({
   }, [scrollToSection])
 
   useEffect(() => {
-    const id =
+    const raw =
       parseFeedMassiveTabFromHash(window.location.hash) ??
       parseFeedMassiveSvcFromHash(window.location.hash)
+    const id = raw === LEGACY_FEED_OPTION_SNAPSHOTS_ID ? 'feed_option_snapshots' : raw
     if (id && checklistRows.some(r => r.id === id)) {
       requestAnimationFrame(() => scrollToSection(id))
     }
@@ -642,7 +654,11 @@ export function FeedMassiveOptionPage({
     setCtSnapResult(null)
     setCtSnapBusy(true)
     try {
-      const res = await postMassiveSync('snapshot', { snapshot_type: 'contract', underlying: u, option_contract: t })
+      const res = await postMassiveSync('feed_option_snapshots', {
+        mode: 'contract',
+        underlying: u,
+        option_contract: t,
+      })
       if (!res.ok) { setCtSnapErr(res.error ?? res.message ?? 'Enqueue failed'); setCtSnapBusy(false); return }
       if (!res.job_id) { setCtSnapErr('No job_id'); setCtSnapBusy(false); return }
       const sub = subscribeMassiveJobEvents(
@@ -780,7 +796,7 @@ export function FeedMassiveOptionPage({
     if (snapType === 'chain') {
       const u = snapSymbol.trim().toUpperCase()
       if (!u) { setSnapErr('Underlying symbol required'); return }
-      payload = { snapshot_type: 'chain', underlying: u }
+      payload = { mode: 'chain', underlying: u }
       if (chainExpDate.trim()) payload.expiration_date = chainExpDate.trim()
       if (chainExpDateGte.trim()) payload.expiration_date_gte = chainExpDateGte.trim()
       if (chainExpDateLte.trim()) payload.expiration_date_lte = chainExpDateLte.trim()
@@ -795,11 +811,11 @@ export function FeedMassiveOptionPage({
       const u = contractUnderlying.trim().toUpperCase()
       const oc = contractTicker.trim()
       if (!u || !oc) { setSnapErr('Underlying and option contract ticker required'); return }
-      payload = { snapshot_type: 'contract', underlying: u, option_contract: oc }
+      payload = { mode: 'contract', underlying: u, option_contract: oc }
     } else {
       const t = unifiedTickers.trim()
       if (!t) { setSnapErr('At least one ticker required'); return }
-      payload = { snapshot_type: 'unified', tickers: t }
+      payload = { mode: 'unified', tickers: t }
       if (unifiedAssetType) payload.asset_type = unifiedAssetType
       if (unifiedLimit.trim()) payload.limit = parseInt(unifiedLimit, 10)
     }
@@ -807,7 +823,7 @@ export function FeedMassiveOptionPage({
     setSnapResult(null)
     setSnapBusy(true)
     try {
-      const res = await postMassiveSync('snapshot', payload)
+      const res = await postMassiveSync('feed_option_snapshots', payload)
       if (!res.ok) {
         setSnapErr(res.error ?? res.message ?? 'Enqueue failed')
         setSnapBusy(false)
@@ -1035,7 +1051,7 @@ export function FeedMassiveOptionPage({
     tierOkForRow(rRef, massiveStatus, Boolean(configured)),
     tradesOkForRow(rRef, massiveStatus),
   )
-  const rSnap = checklistRowById('snapshot')
+  const rSnap = checklistRowById('feed_option_snapshots')
   const effSnap = effectiveChecklistProjectStatus(
     rSnap,
     Boolean(configured),
@@ -1185,7 +1201,7 @@ export function FeedMassiveOptionPage({
               </>
             ) : null}
             {breadcrumbLabel}{' '}
-            <InfoTooltip text="Enqueue Massive REST sync on the Celery `massive` queue; quotes are delayed (tier-dependent). Verify reads latest rows from PostgreSQL option_snapshots (source=massive). Worker implements snapshot, aggregates, and oi placeholder; other kinds may fail until implemented." />
+            <InfoTooltip text="Enqueue Massive REST sync on the Celery `massive` queue; quotes are delayed (tier-dependent). Verify reads latest rows from PostgreSQL option_snapshots (source=massive). Worker implements feed_option_snapshots, aggregates, and oi placeholder; other kinds may fail until implemented." />
           </h2>
           {configured && (
             <span className="feed-massive-delay-pill" title={massiveStatus?.delay_notice}>
@@ -1905,22 +1921,22 @@ export function FeedMassiveOptionPage({
         </>
         ) : null}
 
-        {deliveryRestSubTab === 'snapshot' ? (
+        {deliveryRestSubTab === 'feed_option_snapshots' ? (
         <>
         {/* REST Snapshots: Contract → Chain → Unified (tab order); DocPage names per massive_api_coverage.csv */}
         <FeedMassiveCapabilityPanel
-          capId="snapshot"
+          capId="feed_option_snapshots"
           checklistRow={rSnap}
           effectiveStatus={effSnap}
-          expanded={capExpanded.snapshot === true}
-          onToggle={() => toggleCap('snapshot')}
-          highlight={highlightedCapabilityId === 'snapshot'}
+          expanded={capExpanded.feed_option_snapshots === true}
+          onToggle={() => toggleCap('feed_option_snapshots')}
+          highlight={highlightedCapabilityId === 'feed_option_snapshots'}
           ariaLabel={rSnap.service}
         >
           <FeedMassiveServiceBlock
             effectiveStatus={effSnap}
             checklistRow={rSnap}
-            evidence={jobEvidenceLine(latestJobForKind(jobs, 'snapshot'))}
+            evidence={jobEvidenceLine(latestJobForKind(jobs, 'feed_option_snapshots'))}
             testArea={
               <button
                 type="button"

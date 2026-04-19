@@ -18,6 +18,7 @@ import {
   type OptionSnapshotsContractsGapResult,
   type WatchlistDbCoverageOptionBars,
   type WatchlistDbCoverageOptionContracts,
+  type WatchlistDbCoverageOptionSnapshots,
 } from '../../api'
 import {
   formatRefJobIdShort,
@@ -62,6 +63,12 @@ function optionContractsNeedsColumnBackfill(
 function optionDayNeedsColumnBackfill(od: WatchlistDbCoverageOptionBars | undefined): boolean {
   if (!od?.has_data) return false
   const parts = [od.ohlc_complete_pct, od.volume_pct, od.vwap_pct, od.optional_avg_pct]
+  return parts.some(p => p != null && p < OPTION_CONTRACTS_COLUMN_HEALTH_PCT)
+}
+
+function optionSnapshotsNeedsColumnBackfill(os: WatchlistDbCoverageOptionSnapshots | undefined): boolean {
+  if (!os?.has_data) return false
+  const parts = [os.iv_pct, os.full_greeks_pct, os.open_interest_pct, os.optional_data_fill_avg_pct]
   return parts.some(p => p != null && p < OPTION_CONTRACTS_COLUMN_HEALTH_PCT)
 }
 
@@ -213,8 +220,8 @@ export function buildDataOverviewOptionEnqueuePlan(
     if (!u) return { ok: false, error: 'Pick an underlying symbol.' }
     return {
       ok: true,
-      syncKind: 'snapshot',
-      payload: { snapshot_type: 'chain', underlying: u },
+      syncKind: 'feed_option_snapshots',
+      payload: { mode: 'chain', underlying: u },
       kindLabel: 'Chain snapshot',
       needsSymbol: true,
       hint: `Fetches option chain for ${u}; writes option_contracts and option_snapshots rows.`,
@@ -518,6 +525,22 @@ export type DataOverviewOptionJobsBarHandle = {
    * `massive_option_ticker` → reference list upsert; `exercise_style` / `shares_per_contract` → detail API per row with ticker set.
    */
   enqueueNullableColumnFill: (underlying: string, column: NullableOptionContractsColumnCode) => Promise<void>
+  /** Chain snapshot (option_snapshots row gap); optional expiry filter. */
+  enqueueChainSnapshot: (underlying: string, options?: { expiration_date?: string }) => Promise<void>
+  /** Per-contract snapshot column refresh (IV / Greeks / OI). */
+  enqueueOptionSnapshotsContractColumnFill: (underlying: string) => Promise<void>
+  /** Pool row gap for one symbol — option_day; optional `expiration_date` scopes to one expiry. */
+  enqueueOptionDayPoolRowGap: (
+    underlying: string,
+    options?: { expiration_date?: string },
+  ) => Promise<void>
+  enqueueOptionDayPoolColumnFill: (underlying: string) => Promise<void>
+  /** Pool row/column for one symbol — option_min (uses current Bar period); optional `expiration_date` scopes row gap. */
+  enqueueOptionMinPoolRowGap: (
+    underlying: string,
+    options?: { expiration_date?: string },
+  ) => Promise<void>
+  enqueueOptionMinPoolColumnFill: (underlying: string) => Promise<void>
 }
 
 export type DataOverviewOptionJobsBarProps = {
@@ -565,6 +588,8 @@ export type DataOverviewOptionJobsBarProps = {
   optionContractsBySymbol?: Record<string, WatchlistDbCoverageOptionContracts>
   /** Per-symbol option_day coverage (watchlist matrix); used for option_day Fill column gating. */
   optionDayBySymbol?: Record<string, WatchlistDbCoverageOptionBars>
+  /** Per-symbol option_snapshots coverage (watchlist matrix); Fill column gating. */
+  optionSnapshotsBySymbol?: Record<string, WatchlistDbCoverageOptionSnapshots>
   onSelectAllComparePool?: () => void
   onClearComparePool?: () => void
   jobsSheetOpen: boolean
@@ -602,6 +627,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
     comparePool = [],
     optionContractsBySymbol = {},
     optionDayBySymbol = {},
+    optionSnapshotsBySymbol = {},
     onSelectAllComparePool,
     onClearComparePool,
     jobsSheetOpen,
@@ -622,6 +648,8 @@ export const DataOverviewOptionJobsBar = forwardRef<
   const [optionMinFillBatch, setOptionMinFillBatch] = useState<'row' | 'column' | null>(null)
   /** option_day pool: row/column fill jobs. */
   const [optionDayFillBatch, setOptionDayFillBatch] = useState<'row' | 'column' | null>(null)
+  /** option_snapshots pool: chain vs per-contract column fill. */
+  const [snapshotFillBatch, setSnapshotFillBatch] = useState<'row' | 'column' | null>(null)
   const [optionMinEligibility, setOptionMinEligibility] = useState<
     Record<string, { needs_row_fill: boolean; needs_column_fill: boolean }>
   >({})
@@ -732,83 +760,6 @@ export const DataOverviewOptionJobsBar = forwardRef<
     [startJobStream, onJobsSheetOpenChange],
   )
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      enqueueReferenceUpsert: async (underlying: string, options?: { expiration_date?: string }) => {
-        const u = underlying.trim().toUpperCase()
-        if (!u) throw new Error('Underlying symbol is required.')
-        const payload: Record<string, unknown> = {
-          mode: 'reference_upsert',
-          underlying: u,
-        }
-        const exp = options?.expiration_date?.trim()
-        if (exp) payload.expiration_date = exp
-        const res = await postMassiveSync('contracts', payload)
-        if (!res.ok) {
-          throw new Error(res.error ?? res.message ?? 'Enqueue failed')
-        }
-        const jid = res.job_id
-        if (!jid) throw new Error('No job_id returned')
-        const dedup = Boolean(res.deduplicated)
-        const label = exp
-          ? `Reference contracts · ${u} · ${exp}`
-          : `Reference contracts · ${u}`
-        pushJob({ jobId: jid, kindLabel: label, deduplicated: dedup })
-        scheduleWatchlistRefresh()
-      },
-      enqueueNullableColumnFill: async (underlying: string, column: NullableOptionContractsColumnCode) => {
-        const u = underlying.trim().toUpperCase()
-        if (!u) throw new Error('Underlying symbol is required.')
-        if (column === 'massive_option_ticker') {
-          const payload: Record<string, unknown> = {
-            mode: 'reference_upsert',
-            underlying: u,
-          }
-          const res = await postMassiveSync('contracts', payload)
-          if (!res.ok) {
-            throw new Error(res.error ?? res.message ?? 'Enqueue failed')
-          }
-          const jid = res.job_id
-          if (!jid) throw new Error('No job_id returned')
-          const dedup = Boolean(res.deduplicated)
-          pushJob({
-            jobId: jid,
-            kindLabel: `Reference contracts (ticker) · ${u}`,
-            deduplicated: dedup,
-          })
-          scheduleWatchlistRefresh()
-          return
-        }
-        const res = await postMassiveSync('contracts', {
-          mode: 'nullable_column_backfill',
-          underlying: u,
-          column,
-          max_contracts: 5000,
-        })
-        if (!res.ok) {
-          throw new Error(res.error ?? res.message ?? 'Enqueue failed')
-        }
-        const jid = res.job_id
-        if (!jid) throw new Error('No job_id returned')
-        const dedup = Boolean(res.deduplicated)
-        const colLabel =
-          column === 'exercise_style'
-            ? 'exercise_style'
-            : column === 'shares_per_contract'
-              ? 'shares_per_contract'
-              : column
-        pushJob({
-          jobId: jid,
-          kindLabel: `Nullable columns · ${u} · ${colLabel}`,
-          deduplicated: dedup,
-        })
-        scheduleWatchlistRefresh()
-      },
-    }),
-    [pushJob, scheduleWatchlistRefresh],
-  )
-
   const isContractsFocus = focusDataset === 'option_contracts'
   const isSnapshotsFocus = focusDataset === 'option_snapshots'
   const isBarsFocus = focusDataset === 'option_day' || focusDataset === 'option_min'
@@ -873,6 +824,24 @@ export const DataOverviewOptionJobsBar = forwardRef<
       return optionDayNeedsColumnBackfill(od) || Boolean(elig)
     })
   }, [isDayFocus, poolUpper, barsGapBySymbol, optionDayBySymbol, optionDayEligibility])
+
+  /** option_snapshots: non-zero gap after Check (chain snapshot candidates). */
+  const snapshotRowFillTargets = useMemo(() => {
+    if (!isSnapshotsFocus) return [] as string[]
+    return poolUpper.filter(sym => {
+      if (!hasRefCompareDone(snapshotGapBySymbol[sym])) return false
+      return symbolHasRowGapIssue(snapshotGapBySymbol[sym])
+    })
+  }, [isSnapshotsFocus, poolUpper, snapshotGapBySymbol])
+
+  /** option_snapshots: column health from watchlist coverage. */
+  const snapshotColumnFillTargets = useMemo(() => {
+    if (!isSnapshotsFocus) return [] as string[]
+    return poolUpper.filter(sym => {
+      if (!hasRefCompareDone(snapshotGapBySymbol[sym])) return false
+      return optionSnapshotsNeedsColumnBackfill(optionSnapshotsBySymbol[sym])
+    })
+  }, [isSnapshotsFocus, poolUpper, snapshotGapBySymbol, optionSnapshotsBySymbol])
 
   useEffect(() => {
     if (!isMinFocus || poolUpper.length === 0) {
@@ -1432,6 +1401,156 @@ export const DataOverviewOptionJobsBar = forwardRef<
     startJobStream,
   ])
 
+  const handleEnqueueSnapshotRowGap = useCallback(async () => {
+    setEnqueueErr(null)
+    const pool = snapshotRowFillTargets
+    if (pool.length === 0) {
+      setEnqueueErr(
+        'Run Check on the pool first. Fill row gap only enqueues symbols with a Compare result and a non-zero Gap.',
+      )
+      return
+    }
+    setSnapshotFillBatch('row')
+    const batchId = Date.now()
+    try {
+      setItems(prev =>
+        trimJobs([
+          ...prev,
+          ...pool.map((sym, i) => ({
+            trackKey: `snap-row-${batchId}-${sym}`,
+            kindLabel: `Chain snapshot (row gap) · ${sym}`,
+            status: 'Enqueueing…',
+            enqueuedAt: batchId + i,
+          })),
+        ]),
+      )
+      onJobsSheetOpenChange(true)
+      let nOk = 0
+      for (let i = 0; i < pool.length; i++) {
+        const sym = pool[i]!
+        const tk = `snap-row-${batchId}-${sym}`
+        const res = await postMassiveSync('feed_option_snapshots', { underlying: sym })
+        if (!res.ok) {
+          const msg = res.error ?? res.message ?? `Enqueue failed for ${sym}`
+          setEnqueueErr(msg)
+          setItems(prev =>
+            prev.map(row => (row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row)),
+          )
+          break
+        }
+        const jid = res.job_id
+        if (!jid) {
+          const msg = `No job_id for ${sym}`
+          setEnqueueErr(msg)
+          setItems(prev =>
+            prev.map(row => (row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row)),
+          )
+          break
+        }
+        const dedup = Boolean(res.deduplicated)
+        const st = dedup ? 'deduplicated (waiting)' : 'enqueued'
+        setItems(prev =>
+          prev.map(row =>
+            row.trackKey === tk
+              ? {
+                  ...row,
+                  jobId: jid,
+                  deduplicated: dedup,
+                  status: st,
+                  kindLabel: `Chain snapshot (row gap) · ${sym}`,
+                }
+              : row,
+          ),
+        )
+        startJobStream(jid)
+        nOk += 1
+        if (i < pool.length - 1) await delayMs(75)
+      }
+      if (nOk > 0) scheduleWatchlistRefresh()
+    } catch (e) {
+      setEnqueueErr(e instanceof Error ? e.message : 'Enqueue failed')
+    } finally {
+      setSnapshotFillBatch(null)
+    }
+  }, [snapshotRowFillTargets, onJobsSheetOpenChange, scheduleWatchlistRefresh, startJobStream])
+
+  const handleEnqueueSnapshotColumnData = useCallback(async () => {
+    setEnqueueErr(null)
+    const pool = snapshotColumnFillTargets
+    if (pool.length === 0) {
+      setEnqueueErr(
+        'Run Check on the pool first. Fill column data targets symbols with snapshot IV / Greeks / OI coverage below 97% on the watchlist matrix.',
+      )
+      return
+    }
+    setSnapshotFillBatch('column')
+    const batchId = Date.now()
+    try {
+      setItems(prev =>
+        trimJobs([
+          ...prev,
+          ...pool.map((sym, i) => ({
+            trackKey: `snap-col-${batchId}-${sym}`,
+            kindLabel: `Snapshot per-contract column fill · ${sym}`,
+            status: 'Enqueueing…',
+            enqueuedAt: batchId + i,
+          })),
+        ]),
+      )
+      onJobsSheetOpenChange(true)
+      let nOk = 0
+      for (let i = 0; i < pool.length; i++) {
+        const sym = pool[i]!
+        const tk = `snap-col-${batchId}-${sym}`
+        const res = await postMassiveSync('aggregates', {
+          mode: 'option_snapshots_pool_contract_fill',
+          underlying: sym,
+          max_contracts: 80,
+        })
+        if (!res.ok) {
+          const msg = res.error ?? res.message ?? `Enqueue failed for ${sym}`
+          setEnqueueErr(msg)
+          setItems(prev =>
+            prev.map(row => (row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row)),
+          )
+          break
+        }
+        const jid = res.job_id
+        if (!jid) {
+          const msg = `No job_id for ${sym}`
+          setEnqueueErr(msg)
+          setItems(prev =>
+            prev.map(row => (row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row)),
+          )
+          break
+        }
+        const dedup = Boolean(res.deduplicated)
+        const st = dedup ? 'deduplicated (waiting)' : 'enqueued'
+        setItems(prev =>
+          prev.map(row =>
+            row.trackKey === tk
+              ? {
+                  ...row,
+                  jobId: jid,
+                  deduplicated: dedup,
+                  status: st,
+                  kindLabel: `Snapshot per-contract column fill · ${sym}`,
+                }
+              : row,
+          ),
+        )
+        startJobStream(jid)
+        nOk += 1
+        if (i < pool.length - 1) await delayMs(75)
+      }
+      if (nOk > 0) scheduleWatchlistRefresh()
+    } catch (e) {
+      setEnqueueErr(e instanceof Error ? e.message : 'Enqueue failed')
+    } finally {
+      setSnapshotFillBatch(null)
+    }
+  }, [snapshotColumnFillTargets, onJobsSheetOpenChange, scheduleWatchlistRefresh, startJobStream])
+
   const handleEnqueue = useCallback(async () => {
     setEnqueueErr(null)
     if (focusDataset === 'option_contracts') {
@@ -1831,6 +1950,18 @@ export const DataOverviewOptionJobsBar = forwardRef<
     !optionDayEligibilityLoading &&
     optionDayColumnFillTargets.length > 0
 
+  const snapshotFillBusy = snapshotFillBatch != null
+  const canEnqueueSnapshotRow =
+    isSnapshotsFocus &&
+    !snapshotFillBusy &&
+    !snapshotGapLoading &&
+    snapshotRowFillTargets.length > 0
+  const canEnqueueSnapshotColumn =
+    isSnapshotsFocus &&
+    !snapshotFillBusy &&
+    !snapshotGapLoading &&
+    snapshotColumnFillTargets.length > 0
+
   const fillOptionMinRowGapButtonTitle = useMemo(() => {
     if (!isMinFocus) return ''
     if (optionMinFillBusy) return 'Another fill batch is in progress.'
@@ -1937,12 +2068,47 @@ export const DataOverviewOptionJobsBar = forwardRef<
     barsGapBySymbol,
   ])
 
+  const fillSnapshotRowGapButtonTitle = useMemo(() => {
+    if (!isSnapshotsFocus) return ''
+    if (snapshotFillBusy) return 'Another fill batch is in progress.'
+    if (snapshotGapLoading) return 'Wait for Check to finish.'
+    if (poolUpper.length === 0) {
+      return 'Add symbols to the compare pool (click Symbol in the matrix), or use Select all.'
+    }
+    if (snapshotRowFillTargets.length === 0) {
+      const anyUnchecked = poolUpper.some(s => !hasRefCompareDone(snapshotGapBySymbol[s]))
+      if (anyUnchecked) {
+        return 'Run Check on the pool first. Fill row gap enqueues chain snapshot for symbols with a non-zero Gap vs option_snapshots.'
+      }
+      return 'Every checked symbol has Gap 0 — no chain snapshot row fill is needed.'
+    }
+    return 'Enqueue Massive chain snapshot (GET /v3/snapshot/options) for pooled symbols with non-zero Gap after Check.'
+  }, [isSnapshotsFocus, snapshotFillBusy, snapshotGapLoading, poolUpper, snapshotRowFillTargets.length, snapshotGapBySymbol])
+
+  const fillSnapshotColumnDataButtonTitle = useMemo(() => {
+    if (!isSnapshotsFocus) return ''
+    if (snapshotFillBusy) return 'Another fill batch is in progress.'
+    if (snapshotGapLoading) return 'Wait for Check to finish.'
+    if (poolUpper.length === 0) {
+      return 'Add symbols to the compare pool (click Symbol in the matrix), or use Select all.'
+    }
+    if (snapshotColumnFillTargets.length === 0) {
+      const anyUnchecked = poolUpper.some(s => !hasRefCompareDone(snapshotGapBySymbol[s]))
+      if (anyUnchecked) {
+        return 'Run Check on the pool first. Fill column data uses per-contract snapshot API for symbols with IV / Greeks / OI coverage below 97% on the watchlist matrix.'
+      }
+      return 'No pooled symbols need snapshot column refresh at this threshold.'
+    }
+    return 'Enqueue option_snapshots_pool_contract_fill: per-contract GET /v3/snapshot/options/{u}/{contract}, capped per job.'
+  }, [isSnapshotsFocus, snapshotFillBusy, snapshotGapLoading, poolUpper, snapshotColumnFillTargets.length, snapshotGapBySymbol])
+
   const canCompareSelected =
     isContractsFocus && !refGapLoading && compareEligible.length > 0 && Boolean(onCompareMassiveReference)
 
   const canCompareSnapshotSelected =
     isSnapshotsFocus &&
     !snapshotGapLoading &&
+    !snapshotFillBusy &&
     compareEligible.length > 0 &&
     Boolean(onCompareSnapshotGap)
 
@@ -1975,10 +2141,235 @@ export const DataOverviewOptionJobsBar = forwardRef<
     (isContractsFocus
       ? contractsFillBusy
       : isSnapshotsFocus
-        ? snapshotGapLoading
+        ? snapshotGapLoading || snapshotFillBusy
         : isBarsFocus
           ? barsGapLoading || optionMinFillBusy || optionDayFillBusy
           : enqueueBusy)
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      enqueueReferenceUpsert: async (underlying: string, options?: { expiration_date?: string }) => {
+        const u = underlying.trim().toUpperCase()
+        if (!u) throw new Error('Underlying symbol is required.')
+        const payload: Record<string, unknown> = {
+          mode: 'reference_upsert',
+          underlying: u,
+        }
+        const exp = options?.expiration_date?.trim()
+        if (exp) payload.expiration_date = exp
+        const res = await postMassiveSync('contracts', payload)
+        if (!res.ok) {
+          throw new Error(res.error ?? res.message ?? 'Enqueue failed')
+        }
+        const jid = res.job_id
+        if (!jid) throw new Error('No job_id returned')
+        const dedup = Boolean(res.deduplicated)
+        const label = exp
+          ? `Reference contracts · ${u} · ${exp}`
+          : `Reference contracts · ${u}`
+        pushJob({ jobId: jid, kindLabel: label, deduplicated: dedup })
+        scheduleWatchlistRefresh()
+      },
+      enqueueNullableColumnFill: async (underlying: string, column: NullableOptionContractsColumnCode) => {
+        const u = underlying.trim().toUpperCase()
+        if (!u) throw new Error('Underlying symbol is required.')
+        if (column === 'massive_option_ticker') {
+          const payload: Record<string, unknown> = {
+            mode: 'reference_upsert',
+            underlying: u,
+          }
+          const res = await postMassiveSync('contracts', payload)
+          if (!res.ok) {
+            throw new Error(res.error ?? res.message ?? 'Enqueue failed')
+          }
+          const jid = res.job_id
+          if (!jid) throw new Error('No job_id returned')
+          const dedup = Boolean(res.deduplicated)
+          pushJob({
+            jobId: jid,
+            kindLabel: `Reference contracts (ticker) · ${u}`,
+            deduplicated: dedup,
+          })
+          scheduleWatchlistRefresh()
+          return
+        }
+        const res = await postMassiveSync('contracts', {
+          mode: 'nullable_column_backfill',
+          underlying: u,
+          column,
+          max_contracts: 5000,
+        })
+        if (!res.ok) {
+          throw new Error(res.error ?? res.message ?? 'Enqueue failed')
+        }
+        const jid = res.job_id
+        if (!jid) throw new Error('No job_id returned')
+        const dedup = Boolean(res.deduplicated)
+        const colLabel =
+          column === 'exercise_style'
+            ? 'exercise_style'
+            : column === 'shares_per_contract'
+              ? 'shares_per_contract'
+              : column
+        pushJob({
+          jobId: jid,
+          kindLabel: `Nullable columns · ${u} · ${colLabel}`,
+          deduplicated: dedup,
+        })
+        scheduleWatchlistRefresh()
+      },
+      enqueueChainSnapshot: async (underlying: string, options?: { expiration_date?: string }) => {
+        const u = underlying.trim().toUpperCase()
+        if (!u) throw new Error('Underlying symbol is required.')
+        const payload: Record<string, unknown> = { underlying: u }
+        const exp = options?.expiration_date?.trim()
+        if (exp) payload.expiration_date = exp
+        const res = await postMassiveSync('feed_option_snapshots', payload)
+        if (!res.ok) throw new Error(res.error ?? res.message ?? 'Enqueue failed')
+        const jid = res.job_id
+        if (!jid) throw new Error('No job_id returned')
+        const dedup = Boolean(res.deduplicated)
+        const label = exp ? `Chain snapshot · ${u} · ${exp}` : `Chain snapshot · ${u}`
+        pushJob({ jobId: jid, kindLabel: label, deduplicated: dedup })
+        startJobStream(jid)
+        scheduleWatchlistRefresh()
+      },
+      enqueueOptionSnapshotsContractColumnFill: async (underlying: string) => {
+        const u = underlying.trim().toUpperCase()
+        if (!u) throw new Error('Underlying symbol is required.')
+        const res = await postMassiveSync('aggregates', {
+          mode: 'option_snapshots_pool_contract_fill',
+          underlying: u,
+          max_contracts: 80,
+        })
+        if (!res.ok) throw new Error(res.error ?? res.message ?? 'Enqueue failed')
+        const jid = res.job_id
+        if (!jid) throw new Error('No job_id returned')
+        const dedup = Boolean(res.deduplicated)
+        pushJob({
+          jobId: jid,
+          kindLabel: `Snapshot per-contract column fill · ${u}`,
+          deduplicated: dedup,
+        })
+        startJobStream(jid)
+        scheduleWatchlistRefresh()
+      },
+      enqueueOptionDayPoolRowGap: async (
+        underlying: string,
+        options?: { expiration_date?: string },
+      ) => {
+        const u = underlying.trim().toUpperCase()
+        if (!u) throw new Error('Underlying symbol is required.')
+        const exp = (options?.expiration_date ?? '').trim().slice(0, 32)
+        const res = await postMassiveSync('aggregates', {
+          mode: 'option_day_pool_row_gap',
+          underlying: u,
+          row_lookback_days: 730,
+          max_contracts: 300,
+          max_expiries: 60,
+          ...(exp ? { expiration_date: exp } : {}),
+        })
+        if (!res.ok) throw new Error(res.error ?? res.message ?? 'Enqueue failed')
+        const jid = res.job_id
+        if (!jid) throw new Error('No job_id returned')
+        pushJob({
+          jobId: jid,
+          kindLabel: exp
+            ? `Fill option_day row gap · ${u} · ${exp}`
+            : `Fill option_day row gap · ${u}`,
+          deduplicated: Boolean(res.deduplicated),
+        })
+        startJobStream(jid)
+        scheduleWatchlistRefresh()
+      },
+      enqueueOptionDayPoolColumnFill: async (underlying: string) => {
+        const u = underlying.trim().toUpperCase()
+        if (!u) throw new Error('Underlying symbol is required.')
+        let priority_dates: string[] | undefined
+        try {
+          const bq = await fetchBarQualityDetail(u, 'option_day', undefined, 60)
+          const badDays = (bq.daily ?? []).filter(
+            r =>
+              (r.ohlc_pct != null && r.ohlc_pct < OPTION_CONTRACTS_COLUMN_HEALTH_PCT) ||
+              (r.volume_pct != null && r.volume_pct < OPTION_CONTRACTS_COLUMN_HEALTH_PCT) ||
+              (r.vwap_pct != null && r.vwap_pct < OPTION_CONTRACTS_COLUMN_HEALTH_PCT),
+          )
+          priority_dates = badDays.map(r => r.bar_day).slice(0, 40)
+          if (priority_dates.length === 0) priority_dates = undefined
+        } catch {
+          priority_dates = undefined
+        }
+        const res = await postMassiveSync('aggregates', {
+          mode: 'option_day_pool_column_fill',
+          underlying: u,
+          column_lookback_days: 30,
+          max_rows: 300,
+          ...(priority_dates ? { priority_dates } : {}),
+        })
+        if (!res.ok) throw new Error(res.error ?? res.message ?? 'Enqueue failed')
+        const jid = res.job_id
+        if (!jid) throw new Error('No job_id returned')
+        pushJob({
+          jobId: jid,
+          kindLabel: `Fill option_day column data · ${u}`,
+          deduplicated: Boolean(res.deduplicated),
+        })
+        startJobStream(jid)
+        scheduleWatchlistRefresh()
+      },
+      enqueueOptionMinPoolRowGap: async (
+        underlying: string,
+        options?: { expiration_date?: string },
+      ) => {
+        const u = underlying.trim().toUpperCase()
+        if (!u) throw new Error('Underlying symbol is required.')
+        const exp = (options?.expiration_date ?? '').trim().slice(0, 32)
+        const res = await postMassiveSync('aggregates', {
+          mode: 'option_min_pool_row_gap',
+          underlying: u,
+          period: optionMinPeriod,
+          lookback_days: 7,
+          max_contracts: 300,
+          ...(exp ? { expiration_date: exp } : {}),
+        })
+        if (!res.ok) throw new Error(res.error ?? res.message ?? 'Enqueue failed')
+        const jid = res.job_id
+        if (!jid) throw new Error('No job_id returned')
+        pushJob({
+          jobId: jid,
+          kindLabel: exp
+            ? `Fill option_min row gap · ${u} · ${exp}`
+            : `Fill option_min row gap · ${u}`,
+          deduplicated: Boolean(res.deduplicated),
+        })
+        startJobStream(jid)
+        scheduleWatchlistRefresh()
+      },
+      enqueueOptionMinPoolColumnFill: async (underlying: string) => {
+        const u = underlying.trim().toUpperCase()
+        if (!u) throw new Error('Underlying symbol is required.')
+        const res = await postMassiveSync('aggregates', {
+          mode: 'option_min_pool_column_fill',
+          underlying: u,
+          period: optionMinPeriod,
+          lookback_days: 7,
+          max_contracts: 300,
+        })
+        if (!res.ok) throw new Error(res.error ?? res.message ?? 'Enqueue failed')
+        const jid = res.job_id
+        if (!jid) throw new Error('No job_id returned')
+        pushJob({
+          jobId: jid,
+          kindLabel: `Fill option_min column data · ${u}`,
+          deduplicated: Boolean(res.deduplicated),
+        })
+        startJobStream(jid)
+        scheduleWatchlistRefresh()
+      },
+    }),
+    [pushJob, scheduleWatchlistRefresh, startJobStream, optionMinPeriod],
+  )
 
   return (
     <div className="data-overview-option-jobs-bar">
@@ -2118,21 +2509,35 @@ export const DataOverviewOptionJobsBar = forwardRef<
               </div>
             </div>
             <div className="data-overview-contracts-panel__toolbar-right" aria-label="Reference gap">
-              {(isContractsFocus || isSnapshotsFocus || isDayFocus) && onOpenGapExplainSheet ? (
+              {(isContractsFocus || isSnapshotsFocus || isDayFocus || isMinFocus) && onOpenGapExplainSheet ? (
                 <button
                   type="button"
                   className="data-overview-ctl data-overview-ctl--plain"
-                  title="How Ref, Gap, Cov%, and per-expiry breakdown are defined."
+                  title={
+                    isDayFocus
+                      ? 'How Ref, Gap, and Cov% are defined for option_day bars vs option_contracts.'
+                      : isMinFocus
+                        ? 'How Ref, Gap, and Cov% are defined for option_min bars vs option_contracts (per Bar period).'
+                        : isSnapshotsFocus
+                          ? 'How Ref, Gap, and Cov% are defined for option_snapshots vs chain snapshot API.'
+                          : 'How Ref, Gap, Cov%, and per-expiry breakdown are defined.'
+                  }
                   onClick={() => onOpenGapExplainSheet()}
                 >
                   <span>Gap scope</span>
                 </button>
               ) : null}
-              {isContractsFocus && onOpenAllGapsSheet ? (
+              {(isContractsFocus || isSnapshotsFocus || isDayFocus || isMinFocus) && onOpenAllGapsSheet ? (
                 <button
                   type="button"
                   className="data-overview-ctl data-overview-ctl--plain"
-                  title="Open per-expiry gap detail for every watchlist symbol."
+                  title={
+                    isContractsFocus
+                      ? 'Open per-expiry reference gap detail for pooled symbols.'
+                      : isSnapshotsFocus
+                        ? 'Open per-expiry snapshot gap detail for pooled symbols.'
+                        : 'Open per-expiry bars gap detail for pooled symbols (same Check data).'
+                  }
                   onClick={() => onOpenAllGapsSheet()}
                 >
                   <span>All gaps</span>
@@ -2182,6 +2587,35 @@ export const DataOverviewOptionJobsBar = forwardRef<
                     <IcoFillGap className={ico} />
                     <span>
                       {contractsFillBatch === 'column' ? 'Filling…' : 'Fill column data'}
+                    </span>
+                  </button>
+                </>
+              ) : isSnapshotsFocus ? (
+                <>
+                  <button
+                    type="button"
+                    className="data-overview-ctl data-overview-ctl--fill"
+                    disabled={!canEnqueueSnapshotRow}
+                    title={fillSnapshotRowGapButtonTitle}
+                    onClick={() => void handleEnqueueSnapshotRowGap()}
+                    aria-label="Fill row gap for option_snapshots"
+                  >
+                    <IcoFillGap className={ico} />
+                    <span>
+                      {snapshotFillBatch === 'row' ? 'Filling…' : 'Fill row gap'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="data-overview-ctl data-overview-ctl--fill data-overview-ctl--fill-column"
+                    disabled={!canEnqueueSnapshotColumn}
+                    title={fillSnapshotColumnDataButtonTitle}
+                    onClick={() => void handleEnqueueSnapshotColumnData()}
+                    aria-label="Fill column data for option_snapshots"
+                  >
+                    <IcoFillGap className={ico} />
+                    <span>
+                      {snapshotFillBatch === 'column' ? 'Filling…' : 'Fill column data'}
                     </span>
                   </button>
                 </>
@@ -2361,6 +2795,10 @@ export const DataOverviewOptionJobsBar = forwardRef<
                   <code>{focusDataset === 'option_min' ? 'option_min' : 'option_day'}</code> bar coverage against{' '}
                   <code>option_contracts</code> (purely local — no external API). Ref = distinct (expiry, strike, right) in{' '}
                   <code>option_contracts</code>. Gap = contracts with no bar. Click <strong>↗</strong> on a symbol for daily / expiry quality breakdown.
+                  {' '}
+                  Open <strong>All gaps</strong> for per-expiry tables (same data as <strong>Check</strong>). Symbol-level{' '}
+                  <strong>Fill row gap</strong> / <strong>Fill column data</strong> match the toolbar. Use <strong>↗</strong> /{' '}
+                  <strong>Bar quality</strong> for extra daily or expiry metrics.
                   {isDayFocus ? (
                     <>
                       {' '}

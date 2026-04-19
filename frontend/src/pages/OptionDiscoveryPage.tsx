@@ -988,7 +988,7 @@ export function OptionDiscoveryPage({
         setIvTermSyncStatus(`Massive chain snapshot ${i + 1}/${ordered.length} (${exp})…`)
         const massiveChainPayload: Record<string, unknown> = {
           underlying: sym,
-          snapshot_type: 'chain',
+          mode: 'chain',
           expiration_date: exp,
           limit: 250,
         }
@@ -996,7 +996,7 @@ export function OptionDiscoveryPage({
           massiveChainPayload.strike_price_gte = Math.min(...effectiveStrikes)
           massiveChainPayload.strike_price_lte = Math.max(...effectiveStrikes)
         }
-        const sync = await postMassiveSync('snapshot', massiveChainPayload)
+        const sync = await postMassiveSync('feed_option_snapshots', massiveChainPayload)
         if (!sync.ok || !sync.job_id) {
           setTermError(sync.error ?? sync.message ?? `Massive sync failed for ${exp}`)
           return
@@ -1102,7 +1102,7 @@ export function OptionDiscoveryPage({
       // Chain snapshot must match UI expiry/strikes: default API is ~10 rows with no filters (wrong contracts).
       const massiveChainPayload: Record<string, unknown> = {
         underlying: sym,
-        snapshot_type: 'chain',
+        mode: 'chain',
         expiration_date: exp,
         limit: 250,
       }
@@ -1112,7 +1112,7 @@ export function OptionDiscoveryPage({
         massiveChainPayload.strike_price_gte = mn
         massiveChainPayload.strike_price_lte = mx
       }
-      const sync = await postMassiveSync('snapshot', massiveChainPayload)
+      const sync = await postMassiveSync('feed_option_snapshots', massiveChainPayload)
       if (!sync.ok || !sync.job_id) {
         setSnapshotFeedback({ level: 'error', title: 'Sync failed', body: sync.error ?? sync.message ?? 'Massive sync failed' })
         setSnapshotRows([])

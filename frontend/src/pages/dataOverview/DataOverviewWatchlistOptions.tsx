@@ -8,12 +8,15 @@ import type {
   WatchlistDbCoverageOiDaily,
   WatchlistDbCoverageOptionBars,
   WatchlistDbCoverageOptionContracts,
+  WatchlistDbCoverageOptionSnapshots,
   WatchlistDbCoverageReportDaily,
   WatchlistDbCoverageSnapshotsWithUd,
   WatchlistDbCoverageSymbolRow,
 } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import { DataOverviewAllGapsSheet } from './DataOverviewAllGapsSheet'
+import { DataOverviewBarsAllGapsSheet } from './DataOverviewBarsAllGapsSheet'
+import { DataOverviewSnapshotAllGapsSheet } from './DataOverviewSnapshotAllGapsSheet'
 import { DataOverviewBarQualitySheet } from './DataOverviewBarQualitySheet'
 import { DataOverviewGapExplainSheet } from './DataOverviewGapExplainSheet'
 import { DataOverviewSnapshotQualitySheet } from './DataOverviewSnapshotQualitySheet'
@@ -600,7 +603,9 @@ export function DataOverviewWatchlistOptions({
   const [focusDataset, setFocusDataset] = useState<OptionsFocusDataset>('all')
   const prevFocusRef = useRef<OptionsFocusDataset>(focusDataset)
   const jobsBarRef = useRef<DataOverviewOptionJobsBarHandle | null>(null)
-  const [allGapsSheetOpen, setAllGapsSheetOpen] = useState(false)
+  const [allGapsSheetMode, setAllGapsSheetMode] = useState<
+    null | 'contracts' | 'snapshots' | 'bars_day' | 'bars_min'
+  >(null)
   const [gapExplainSheetOpen, setGapExplainSheetOpen] = useState(false)
   const [snapshotQualitySymbol, setSnapshotQualitySymbol] = useState<string | null>(null)
 
@@ -666,8 +671,13 @@ export function DataOverviewWatchlistOptions({
   }, [focusDataset, onClearComparePool, BARS_DATASETS])
 
   useEffect(() => {
-    if (focusDataset !== 'option_contracts' && focusDataset !== 'option_snapshots') {
-      setAllGapsSheetOpen(false)
+    if (
+      focusDataset !== 'option_contracts' &&
+      focusDataset !== 'option_snapshots' &&
+      focusDataset !== 'option_day' &&
+      focusDataset !== 'option_min'
+    ) {
+      setAllGapsSheetMode(null)
       setGapExplainSheetOpen(false)
     }
   }, [focusDataset])
@@ -675,7 +685,7 @@ export function DataOverviewWatchlistOptions({
   useEffect(() => {
     if (subTab !== 'by_symbol') {
       onJobsSheetOpenChange(false)
-      setAllGapsSheetOpen(false)
+      setAllGapsSheetMode(null)
       setGapExplainSheetOpen(false)
     }
   }, [subTab, onJobsSheetOpenChange])
@@ -695,6 +705,14 @@ export function DataOverviewWatchlistOptions({
     for (const r of wlRows) {
       const od = r.option_day
       if (od) m[r.symbol.trim().toUpperCase()] = od
+    }
+    return m
+  }, [wlRows])
+
+  const optionSnapshotsBySymbol = useMemo(() => {
+    const m: Record<string, WatchlistDbCoverageOptionSnapshots> = {}
+    for (const r of wlRows) {
+      m[r.symbol.trim().toUpperCase()] = r.option_snapshots
     }
     return m
   }, [wlRows])
@@ -792,15 +810,27 @@ export function DataOverviewWatchlistOptions({
             comparePool={comparePool}
             optionContractsBySymbol={optionContractsBySymbol}
             optionDayBySymbol={optionDayBySymbol}
+            optionSnapshotsBySymbol={optionSnapshotsBySymbol}
             onSelectAllComparePool={onSelectAllComparePool}
             onClearComparePool={onClearComparePool}
             jobsSheetOpen={jobsSheetOpen}
             onJobsSheetOpenChange={onJobsSheetOpenChange}
-            onOpenAllGapsSheet={focusDataset === 'option_contracts' ? () => setAllGapsSheetOpen(true) : undefined}
+            onOpenAllGapsSheet={
+              focusDataset === 'option_contracts'
+                ? () => setAllGapsSheetMode('contracts')
+                : focusDataset === 'option_snapshots'
+                  ? () => setAllGapsSheetMode('snapshots')
+                  : focusDataset === 'option_day'
+                    ? () => setAllGapsSheetMode('bars_day')
+                    : focusDataset === 'option_min'
+                      ? () => setAllGapsSheetMode('bars_min')
+                      : undefined
+            }
             onOpenGapExplainSheet={
               focusDataset === 'option_contracts' ||
               focusDataset === 'option_snapshots' ||
-              focusDataset === 'option_day'
+              focusDataset === 'option_day' ||
+              focusDataset === 'option_min'
                 ? () => setGapExplainSheetOpen(true)
                 : undefined
             }
@@ -818,16 +848,36 @@ export function DataOverviewWatchlistOptions({
                 ? 'snapshots'
                 : focusDataset === 'option_day'
                   ? 'option_day_bars'
-                  : 'contracts'
+                  : focusDataset === 'option_min'
+                    ? 'option_min_bars'
+                    : 'contracts'
             }
           />
 
           <DataOverviewAllGapsSheet
-            open={allGapsSheetOpen}
-            onClose={() => setAllGapsSheetOpen(false)}
+            open={allGapsSheetMode === 'contracts'}
+            onClose={() => setAllGapsSheetMode(null)}
             wlRows={wlRows}
             comparePool={comparePool}
             refGapBySymbol={refGapBySymbol}
+            fillApiRef={jobsBarRef}
+          />
+
+          <DataOverviewSnapshotAllGapsSheet
+            open={allGapsSheetMode === 'snapshots'}
+            onClose={() => setAllGapsSheetMode(null)}
+            comparePool={comparePool}
+            snapshotGapBySymbol={snapshotGapBySymbol}
+            fillApiRef={jobsBarRef}
+          />
+
+          <DataOverviewBarsAllGapsSheet
+            open={allGapsSheetMode === 'bars_day' || allGapsSheetMode === 'bars_min'}
+            onClose={() => setAllGapsSheetMode(null)}
+            comparePool={comparePool}
+            barsGapBySymbol={barsGapBySymbol}
+            table={allGapsSheetMode === 'bars_min' ? 'option_min' : 'option_day'}
+            optionMinPeriod={optionMinPeriod}
             fillApiRef={jobsBarRef}
           />
 

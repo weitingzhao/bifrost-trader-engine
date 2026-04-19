@@ -75,12 +75,12 @@ app.conf.update(
     task_routes={
         "src.bars.tasks.backfill_bars": {"queue": "bars"},
         # Default route; API enqueues with explicit queue= (options: massive/massive_high, stocks: massive_stocks*).
-        "servers.massive_tasks.run_massive_job": {"queue": "massive"},
-        "servers.massive_tasks.beat_eod_pipeline": {"queue": "massive"},
-        "servers.massive_tasks.beat_corporate_watchlist": {"queue": "massive"},
-        "servers.massive_tasks.beat_reconcile": {"queue": "massive"},
-        "servers.massive_tasks.beat_trim_massive_jobs": {"queue": "massive"},
-        "servers.massive_tasks.beat_refresh_expirations": {"queue": "massive"},
+        "src.massive.tasks.run_massive_job": {"queue": "massive"},
+        "src.massive.tasks.beat_eod_pipeline": {"queue": "massive"},
+        "src.massive.tasks.beat_corporate_watchlist": {"queue": "massive"},
+        "src.massive.tasks.beat_reconcile": {"queue": "massive"},
+        "src.massive.tasks.beat_trim_massive_jobs": {"queue": "massive"},
+        "src.massive.tasks.beat_refresh_expirations": {"queue": "massive"},
     },
     timezone="UTC",
     enable_utc=True,

@@ -183,7 +183,7 @@ export function DailyDataChecklistSection({
       try {
         let post: { ok: boolean; job_id?: string; error?: string } = { ok: false }
         if (dimKey === 'daily-snapshot') {
-          post = await postMassiveSync('snapshot', { snapshot_type: 'chain', underlying: sym })
+          post = await postMassiveSync('feed_option_snapshots', { mode: 'chain', underlying: sym })
         } else if (dimKey === 'daily-oi') {
           post = await postMassiveSync('oi', { mode: 'watchlist_eod', symbols: [sym], trade_date: tradeDate })
         } else if (dimKey === 'daily-max-pain') {

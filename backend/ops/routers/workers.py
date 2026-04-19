@@ -600,6 +600,59 @@ async def _journal_sse(
     yield f"data: {notice}\n\n"
 
 
+@router.get("/ops/celery/supported-tasks")
+async def get_ops_celery_supported_tasks(request: Request) -> Dict[str, Any]:
+    """Celery task registry names (``src.*``) and default queue per ``task_routes`` — same app as workers.
+
+    Must be ``async`` so the handler runs on the event-loop thread: importing ``src.bars.tasks``
+    pulls ``ib_insync``/``eventkit``, which require a current event loop and fail in Starlette's
+    sync-route threadpool workers.
+    """
+    from backend.ops.services.celery_supported_tasks import build_supported_tasks_payload
+
+    svc = _worker_svc(request)
+    celery_app = getattr(svc, "_celery", None)
+    if celery_app is None:
+        return {"ok": False, "error": "celery app unavailable", "tasks": [], "count": 0}
+    try:
+        return build_supported_tasks_payload(celery_app)
+    except Exception as e:
+        logger.exception("get_ops_celery_supported_tasks failed: %s", e)
+        return {"ok": False, "error": str(e), "tasks": [], "count": 0}
+
+
+@router.get("/ops/celery/capabilities")
+async def get_ops_celery_capabilities(request: Request) -> Dict[str, Any]:
+    """Celery self-description: task route default queues, canonical broker queue names, ``run_massive_job`` matrix."""
+    from backend.ops.services.celery_capabilities import build_celery_capabilities_payload
+
+    svc = _worker_svc(request)
+    celery_app = getattr(svc, "_celery", None)
+    if celery_app is None:
+        return {
+            "ok": False,
+            "error": "celery app unavailable",
+            "registered_tasks": [],
+            "count": 0,
+            "canonical_broker_queues": [],
+            "run_massive_job_matrix": [],
+            "beat_tasks": [],
+        }
+    try:
+        return build_celery_capabilities_payload(celery_app)
+    except Exception as e:
+        logger.exception("get_ops_celery_capabilities failed: %s", e)
+        return {
+            "ok": False,
+            "error": str(e),
+            "registered_tasks": [],
+            "count": 0,
+            "canonical_broker_queues": [],
+            "run_massive_job_matrix": [],
+            "beat_tasks": [],
+        }
+
+
 @router.get("/ops/celery/logs")
 def get_ops_celery_logs(
     request: Request,

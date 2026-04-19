@@ -290,7 +290,8 @@ export function SettingsPage({
     if (h === 'settings-subscribe') return 'settings-subscribe'
     if (h === 'settings-daemon' || h === 'settings-system-daemon' || h === 'settings-system') return 'settings-daemon'
     if (h === 'settings-system-monitor' || h === 'settings-system-server') return 'settings-api'
-    if (h === 'settings-celery' || h === 'settings-dashboard-celery' || h.startsWith('settings-celery-queue-')) {
+    // Any Celery-console deep link: base hash, queue filter, Support Tasks tab, etc.
+    if (h === 'settings-celery' || h === 'settings-dashboard-celery' || h.startsWith('settings-celery-')) {
       return 'settings-celery'
     }
     if (

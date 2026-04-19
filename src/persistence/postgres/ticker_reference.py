@@ -744,7 +744,7 @@ def all_ticker_symbols(cur: Any) -> List[str]:
 
 
 def normalize_ticker_ref_kind(kind: str) -> str:
-    """Normalize Celery/API kinds: legacy ``stock_reference_*`` and ``*_instrument_types`` synonyms."""
+    """Normalize Celery/API kinds: legacy ``stock_reference_*``, ``*_instrument_types``, and Massive option snapshot job."""
     k = (kind or "").strip().lower()
     legacy = {
         "stock_reference_universe": "ticker_reference_universe",
@@ -752,5 +752,7 @@ def normalize_ticker_ref_kind(kind: str) -> str:
         "stock_reference_related": "ticker_reference_related",
         "stock_reference_instrument_types": "ticker_reference_ticker_types",
         "ticker_reference_instrument_types": "ticker_reference_ticker_types",
+        # Massive REST option chain/contract/unified ingest (was ``snapshot``)
+        "snapshot": "feed_option_snapshots",
     }
     return legacy.get(k, k)

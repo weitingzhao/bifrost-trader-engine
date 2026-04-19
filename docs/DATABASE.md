@@ -583,7 +583,7 @@
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | job_massive_backfill_id | bigserial | 自增主键（作为 job_id 返回给客户端） |
-| kind | text NOT NULL | 任务类型：`aggregates` \| `snapshot` \| `oi` \| `trades` \| `reference` \| `corporate_action` \| `stock_ohlc_sync`（股票 OHLC 落库）\| `ticker_reference_*` / `stock_reference_*` 等 |
+| kind | text NOT NULL | 任务类型：`aggregates` \| `feed_option_snapshots`（期权链/单合约/统一快照拉取；历史行可能为 `snapshot`）\| `oi` \| `trades` \| `reference` \| `corporate_action` \| `stock_ohlc_sync`（股票 OHLC 落库）\| `ticker_reference_*` / `stock_reference_*` 等 |
 | payload | jsonb NOT NULL | 任务参数（如 { symbol, expiry, start_date, end_date } 等，仅参数） |
 | status | text NOT NULL | pending \| running \| done \| failed |
 | result | jsonb | 执行结果：{ ok, count?, message? } 或 { ok: false, error } |
@@ -1519,6 +1519,8 @@ python scripts/db/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-04-18 option_contracts 列级覆盖与参考对拍 | §2.16.1 增补「Massive 字段与写入路径」与 L1/L2/L3 说明。`watchlist-db-coverage` / `contracts-coverage` 增加 `exercise_style`/`shares_per_contract` 非空计数与占比；新增 `GET/POST .../option-contracts-reference-column-parity`（L2，与 reference 分页上限一致）。无表结构变更。 | 研究 / Massive |
 | 2026-04-18 option_snapshots 主键、幂等写入 | §2.16.2：主键为 `PRIMARY KEY (contract_key, snapshot_ts)`（`option_snapshots_id` 为序列列）；存量库由 `pg_ddl` 从旧 `(option_snapshots_id, snapshot_ts)` + 可选 `UNIQUE` 迁移；`DROP` 冗余索引 `option_snapshots_contract_key_ts`。去重脚本 `dedupe_option_snapshots.py`；链快照与 WS 为 `ON CONFLICT (contract_key, snapshot_ts) DO UPDATE`。 | Massive / Option Discovery |
 | 2026-04-19 option_day 池化补齐任务 | `job_massive_backfill` 在 `kind=aggregates` 下支持 `option_day_pool_row_gap`（v2 日线 aggs 补「有合约无 bar」）与 `option_day_pool_column_fill`（v1 open-close 刷新不完整行，可选再补 vwap）；`mode=open_close` 在 `persist=true` 时可 `UPDATE option_day`。无新表；环境变量 `BIFROST_OPTION_DAY_ROW_LOOKBACK_DAYS` 控制默认回溯窗口。 | Massive / Data Overview |
+| 2026-04-19 Massive 期权快照任务 kind 更名 | `job_massive_backfill.kind`：期权链/单合约/统一快照 ingest 由 `snapshot` 更名为 **`feed_option_snapshots`**；`POST /research/massive/sync` 与 Worker 经 `normalize_ticker_ref_kind` 仍接受旧名；存量行仍可执行。§2.16。 | Massive |
+| 2026-04-19 Massive 快照按合约补列 + bars 池 expiry | `kind=aggregates` 新增 `option_snapshots_pool_contract_fill`：按 `option_snapshots_latest` 语义选出 IV/Greeks/OI 可空合约，调用 `GET /v3/snapshot/options/{underlying}/{option_ticker}`，经 `apply_chain_snapshot_item` **UPSERT `option_snapshots`**（与链式快照列一致），并 `REFRESH` `option_snapshots_latest`。`kind=feed_option_snapshots` 且 `mode=contract`（旧 payload `snapshot_type` 仍兼容；历史 `kind=snapshot` 行 Worker 仍识别）在默认 persist 下同样落库。`option_day_pool_row_gap` / `option_min_pool_row_gap` 的 payload 可选 **`expiration_date`**，将行缺口池限制到单到期（Data Overview All gaps 表内「Fill row gap (expiry)」）。 | Massive / Data Overview |
 
 ---
 

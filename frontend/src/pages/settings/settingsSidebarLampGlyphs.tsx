@@ -29,6 +29,7 @@ export type SettingsSidebarLampGlyphId =
   | 'api-ops'
   | 'massive-option'
   | 'reference'
+  | 'feed_option_snapshots'
   | 'snapshot'
   | 'aggregates'
   | 'daily-oi'
@@ -171,6 +172,7 @@ export function SettingsSidebarLampGlyph({ id }: { id: SettingsSidebarLampGlyphI
         </svg>
       )
     /** Chain snapshot: 3D box / chain facet */
+    case 'feed_option_snapshots':
     case 'snapshot':
       return (
         <svg {...SVG_COMMON}>

@@ -360,7 +360,14 @@ export {
   fetchOpsHealthAtOrigin,
   fetchOpsWorkers,
   fetchOpsWorkerDetail,
+  fetchCelerySupportedTasks,
+  fetchCeleryCapabilities,
   fetchOpsAudit,
   fetchQueueSummary,
 } from './ops/ops'
-export type { QueueSummaryRow } from './ops/ops'
+export type {
+  CelerySupportedTaskRow,
+  RunMassiveJobMatrixRow,
+  CeleryBeatTaskRow,
+  QueueSummaryRow,
+} from './ops/ops'

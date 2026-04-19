@@ -16,7 +16,7 @@ export function DataOverviewGapExplainSheet({
   open: boolean
   onClose: () => void
   /** Which matrix toolbar opened the sheet (copy differs). */
-  variant?: 'contracts' | 'snapshots' | 'option_day_bars'
+  variant?: 'contracts' | 'snapshots' | 'option_day_bars' | 'option_min_bars'
 }) {
   const asideRef = useRef<HTMLDivElement | null>(null)
 
@@ -78,6 +78,39 @@ export function DataOverviewGapExplainSheet({
                 from day aggs. Column fill may prioritize trading days where bar-quality daily metrics are below 97% when that
                 data is available. This is separate from <code>option_contracts</code> reference or nullable column backfill.
               </p>
+              <h4 className="data-overview-gap-explain-sheet__h">All gaps vs bar drill-down</h4>
+              <p className="data-overview-gap-explain-sheet__p">
+                <strong>All gaps</strong> for <code>option_day</code> lists the same per-expiry Ref / PG / Gap as <strong>Check</strong>{' '}
+                and can enqueue <strong>Fill row gap</strong> / <strong>Fill column data</strong> for a whole symbol (toolbar-equivalent
+                jobs). For finer daily or expiry bar-quality metrics, click <strong>↗</strong> on a symbol to open{' '}
+                <strong>Bar quality</strong>.
+              </p>
+            </>
+          ) : variant === 'option_min_bars' ? (
+            <>
+              <p className="data-overview-gap-explain-sheet__lead">
+                In the <code>option_min</code> matrix, <strong>Ref</strong> is the count of distinct (expiry, strike, right)
+                keys in <code>option_contracts</code> for compared expiries. <strong>PG</strong> is how many of those keys have
+                at least one <code>option_min</code> row for the selected <strong>Bar period</strong> (source{' '}
+                <code>massive</code>). <strong>Gap</strong> = Ref − PG. <strong>Cov%</strong> is PG ÷ Ref. Check is purely local
+                (no Massive HTTP). Pick <strong>Bar period</strong> to match <code>option_min.period</code> in PostgreSQL (e.g.
+                5 minutes).
+              </p>
+              <h4 className="data-overview-gap-explain-sheet__h">Fill row gap vs Fill column data (option_min)</h4>
+              <p className="data-overview-gap-explain-sheet__p">
+                After <strong>Check</strong>, <strong>Fill row gap</strong> enqueues Celery <code>option_min_pool_row_gap</code>:
+                Massive GET /v2/aggs (intraday) for missing contracts in a 7-day window, capped per run (e.g. up to 300
+                contracts per symbol). <strong>Fill column data</strong> runs <code>option_min_pool_column_fill</code> to refresh
+                rows with incomplete OHLC, volume, or VWAP for that period and window. This is separate from{' '}
+                <code>option_contracts</code> reference or nullable column backfill.
+              </p>
+              <h4 className="data-overview-gap-explain-sheet__h">All gaps vs bar drill-down</h4>
+              <p className="data-overview-gap-explain-sheet__p">
+                <strong>All gaps</strong> for <code>option_min</code> mirrors <strong>Check</strong> per expiry and can enqueue symbol-level{' '}
+                <strong>Fill row gap</strong> / <strong>Fill column data</strong> (same as the toolbar). Use <strong>Bar period</strong>{' '}
+                consistently. For per-symbol quality, click <strong>↗</strong> for <strong>Bar quality</strong> (includes by-period for
+                minute bars).
+              </p>
             </>
           ) : variant === 'snapshots' ? (
             <>
@@ -93,6 +126,13 @@ export function DataOverviewGapExplainSheet({
               <p className="data-overview-gap-explain-sheet__p">
                 The symbol must have <code>option_contracts</code> rows. Check uses the Massive snapshot endpoint, not GET{' '}
                 /v3/reference/options/contracts.
+              </p>
+              <h4 className="data-overview-gap-explain-sheet__h">All gaps sheet</h4>
+              <p className="data-overview-gap-explain-sheet__p">
+                Open <strong>All gaps</strong> for per-expiry tables from the last <strong>Check</strong>. <strong>Fill row gap</strong>{' '}
+                enqueues a chain snapshot scoped to that expiry; <strong>Fill column data</strong> runs the per-contract pool job{' '}
+                (<code>option_snapshots_pool_contract_fill</code>) when IV / Greeks / OI coverage on the watchlist is below the healthy
+                band.
               </p>
             </>
           ) : (

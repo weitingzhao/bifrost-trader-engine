@@ -106,3 +106,45 @@ def test_run_option_min_pool_row_gap_calls_aggs(monkeypatch: pytest.MonkeyPatch)
     assert out["summary"]["bars_upserted"] == 3
     assert calls and calls[0]["symbol"] == "NVDA"
     client.fetch_option_aggs.assert_called_once()
+
+
+def test_run_option_min_pool_row_gap_passes_expiration_date(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.massive.option_min_pool_fill import run_option_min_pool_aggregates
+
+    captured: dict = {}
+
+    def fake_fetch(
+        cur: object,
+        sym: str,
+        period_db: str,
+        max_contracts: int,
+        *,
+        expiration_date: str | None = None,
+    ) -> list:
+        captured["sym"] = sym
+        captured["period_db"] = period_db
+        captured["expiration_date"] = expiration_date
+        return []
+
+    monkeypatch.setattr(
+        "src.massive.option_min_pool_fill._fetch_row_gap_targets",
+        fake_fetch,
+    )
+
+    conn = MagicMock()
+    client = MagicMock()
+    out = run_option_min_pool_aggregates(
+        conn,
+        client,
+        {
+            "underlying": "NVDA",
+            "period": "5 mins",
+            "lookback_days": 7,
+            "max_contracts": 10,
+            "expiration_date": "20250620",
+        },
+        mode="option_min_pool_row_gap",
+    )
+    assert out["ok"] is True
+    assert captured.get("expiration_date") == "20250620"
+    assert out["summary"].get("expiration_date") == "20250620"

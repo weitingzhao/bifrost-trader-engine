@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.massive.option_bars_period import (
     lookback_ms_for_option_min,
@@ -20,29 +20,56 @@ def _fetch_row_gap_targets(
     sym: str,
     period_db: str,
     max_contracts: int,
+    *,
+    expiration_date: Optional[str] = None,
 ) -> List[Tuple[str, str, str, float, str]]:
     """Contracts in option_contracts with ticker but no option_min row for this period (source=massive)."""
-    cur.execute(
-        """
-        SELECT oc.massive_option_ticker, oc.symbol, oc.expiry, oc.strike, oc.option_right
-        FROM option_contracts oc
-        WHERE UPPER(TRIM(oc.symbol)) = %s
-          AND oc.massive_option_ticker IS NOT NULL
-          AND TRIM(oc.massive_option_ticker) <> ''
-          AND NOT EXISTS (
-            SELECT 1 FROM option_min om
-            WHERE UPPER(TRIM(om.symbol)) = UPPER(TRIM(oc.symbol))
-              AND om.expiry = oc.expiry
-              AND om.strike = oc.strike
-              AND om.option_right = oc.option_right
-              AND om.period = %s
-              AND om.source = 'massive'
-          )
-        ORDER BY oc.expiry DESC, oc.strike, oc.option_right
-        LIMIT %s
-        """,
-        (sym, period_db, max(1, int(max_contracts))),
-    )
+    exp = (expiration_date or "").strip()[:32] or None
+    if exp:
+        cur.execute(
+            """
+            SELECT oc.massive_option_ticker, oc.symbol, oc.expiry, oc.strike, oc.option_right
+            FROM option_contracts oc
+            WHERE UPPER(TRIM(oc.symbol)) = %s
+              AND oc.expiry = %s
+              AND oc.massive_option_ticker IS NOT NULL
+              AND TRIM(oc.massive_option_ticker) <> ''
+              AND NOT EXISTS (
+                SELECT 1 FROM option_min om
+                WHERE UPPER(TRIM(om.symbol)) = UPPER(TRIM(oc.symbol))
+                  AND om.expiry = oc.expiry
+                  AND om.strike = oc.strike
+                  AND om.option_right = oc.option_right
+                  AND om.period = %s
+                  AND om.source = 'massive'
+              )
+            ORDER BY oc.strike, oc.option_right
+            LIMIT %s
+            """,
+            (sym, exp, period_db, max(1, int(max_contracts))),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT oc.massive_option_ticker, oc.symbol, oc.expiry, oc.strike, oc.option_right
+            FROM option_contracts oc
+            WHERE UPPER(TRIM(oc.symbol)) = %s
+              AND oc.massive_option_ticker IS NOT NULL
+              AND TRIM(oc.massive_option_ticker) <> ''
+              AND NOT EXISTS (
+                SELECT 1 FROM option_min om
+                WHERE UPPER(TRIM(om.symbol)) = UPPER(TRIM(oc.symbol))
+                  AND om.expiry = oc.expiry
+                  AND om.strike = oc.strike
+                  AND om.option_right = oc.option_right
+                  AND om.period = %s
+                  AND om.source = 'massive'
+              )
+            ORDER BY oc.expiry DESC, oc.strike, oc.option_right
+            LIMIT %s
+            """,
+            (sym, period_db, max(1, int(max_contracts))),
+        )
     rows = cur.fetchall() or []
     out: List[Tuple[str, str, str, float, str]] = []
     for r in rows:
@@ -145,9 +172,13 @@ def run_option_min_pool_aggregates(
     contracts_processed = 0
     bars_upserted = 0
 
+    exp_filter = (payload.get("expiration_date") or "").strip()[:32] or None
+
     with conn.cursor() as cur:
         if mode == "option_min_pool_row_gap":
-            targets = _fetch_row_gap_targets(cur, sym, period_db, max_contracts)
+            targets = _fetch_row_gap_targets(
+                cur, sym, period_db, max_contracts, expiration_date=exp_filter
+            )
         elif mode == "option_min_pool_column_fill":
             targets = _fetch_column_fill_targets(cur, sym, period_db, lookback_days, max_contracts)
         else:
@@ -178,6 +209,7 @@ def run_option_min_pool_aggregates(
     ok = len(errors) == 0
     summary = {
         "underlying": sym,
+        "expiration_date": exp_filter,
         "period": period_label,
         "period_db": period_db,
         "timespan": ts,

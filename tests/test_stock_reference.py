@@ -96,6 +96,11 @@ def test_normalize_ticker_ref_kind_maps_legacy_instrument_types():
     assert normalize_ticker_ref_kind("ticker_reference_ticker_types") == "ticker_reference_ticker_types"
 
 
+def test_normalize_ticker_ref_kind_maps_snapshot_to_feed_option_snapshots():
+    assert normalize_ticker_ref_kind("snapshot") == "feed_option_snapshots"
+    assert normalize_ticker_ref_kind("feed_option_snapshots") == "feed_option_snapshots"
+
+
 def test_overview_stub_cols_api_not_found_sets_timestamp():
     stub = overview_stub_cols_api_not_found()
     assert stub["sector"] == ""

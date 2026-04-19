@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import sys
-import time
+import time as time_module
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -136,7 +136,7 @@ REST_GAP_SEC = 0.2
 
 
 def _rest_throttle() -> None:
-    time.sleep(REST_GAP_SEC)
+    time_module.sleep(REST_GAP_SEC)
 
 
 def _nullable_column_backfill_gap_sec() -> float:
@@ -545,7 +545,7 @@ def _apply_snapshot(
     snap: Dict[str, Any],
 ) -> int:
     """Insert option_contracts + option_snapshots rows. Returns count inserted."""
-    from src.vendor.massive.client import contract_key_from_parts
+    from src.massive.snapshot_chain_ingest import apply_chain_snapshot_item
 
     results = snap.get("results")
     if not isinstance(results, list):
@@ -556,136 +556,8 @@ def _apply_snapshot(
         for item in results:
             if not isinstance(item, dict):
                 continue
-            det = item.get("details") or {}
-            ticker = (det.get("ticker") or item.get("ticker") or "").strip()
-            if not ticker:
-                continue
-            exp_raw = det.get("expiration_date") or det.get("expiration")
-            if not exp_raw:
-                continue
-            exp = _norm_expiry(str(exp_raw)[:10])
-            try:
-                strike = float(det.get("strike_price"))
-            except (TypeError, ValueError):
-                continue
-            ort = _right_from_contract_type(det.get("contract_type", "call"))
-            ck = contract_key_from_parts(underlying, exp, strike, ort)
-            g = item.get("greeks") if isinstance(item.get("greeks"), dict) else {}
-            iv = g.get("iv")
-            if iv is None:
-                iv = item.get("implied_volatility")
-
-            day = item.get("day") if isinstance(item.get("day"), dict) else {}
-
-            oi = item.get("open_interest")
-            if oi is not None:
-                try:
-                    oi = int(oi)
-                except (TypeError, ValueError):
-                    oi = None
-            ua = item.get("underlying_asset") if isinstance(item.get("underlying_asset"), dict) else {}
-            underlying_ticker = (ua.get("ticker") or "").strip() or None
-            ts = _parse_snapshot_ts(item)
-
-            ex_style = (det.get("exercise_style") or "").strip() or None
-            spc = det.get("shares_per_contract")
-            shares_per_contract: Optional[int] = None
-            if spc is not None:
-                try:
-                    shares_per_contract = int(spc)
-                except (TypeError, ValueError):
-                    shares_per_contract = None
-
-            day_ou = _f_or_none(day.get("open"))
-            day_hi = _f_or_none(day.get("high"))
-            day_lo = _f_or_none(day.get("low"))
-            day_close = _f_or_none(day.get("close"))
-            day_pc = _f_or_none(day.get("previous_close"))
-            day_ch = _f_or_none(day.get("change"))
-            day_chp = _f_or_none(day.get("change_percent"))
-            day_vol: Optional[int] = None
-            if day.get("volume") is not None:
-                try:
-                    day_vol = int(day.get("volume"))
-                except (TypeError, ValueError):
-                    day_vol = None
-            day_vw = _f_or_none(day.get("vwap"))
-            day_lu = _ns_to_datetime(day.get("last_updated"))
-
-            cur.execute(
-                """
-                INSERT INTO option_contracts (
-                  contract_key, symbol, expiry, strike, option_right, massive_option_ticker,
-                  exercise_style, shares_per_contract, created_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
-                ON CONFLICT (contract_key) DO UPDATE SET
-                  massive_option_ticker = COALESCE(EXCLUDED.massive_option_ticker, option_contracts.massive_option_ticker),
-                  exercise_style = COALESCE(EXCLUDED.exercise_style, option_contracts.exercise_style),
-                  shares_per_contract = COALESCE(EXCLUDED.shares_per_contract, option_contracts.shares_per_contract)
-                """,
-                (ck, underlying, exp, strike, ort, ticker, ex_style, shares_per_contract),
-            )
-            cur.execute(
-                """
-                INSERT INTO option_snapshots (
-                  contract_key, snapshot_ts,
-                  iv, delta, gamma, theta, vega, open_interest,
-                  underlying_ticker,
-                  day_open, day_high, day_low, day_close,
-                  day_previous_close, day_change, day_change_percent,
-                  day_volume, day_vwap, day_last_updated,
-                  source, created_at
-                )
-                VALUES (
-                  %s, %s, %s, %s, %s, %s, %s, %s,
-                  %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                  'massive', now()
-                )
-                ON CONFLICT (contract_key, snapshot_ts) DO UPDATE SET
-                  iv = EXCLUDED.iv,
-                  delta = EXCLUDED.delta,
-                  gamma = EXCLUDED.gamma,
-                  theta = EXCLUDED.theta,
-                  vega = EXCLUDED.vega,
-                  open_interest = EXCLUDED.open_interest,
-                  underlying_ticker = EXCLUDED.underlying_ticker,
-                  day_open = EXCLUDED.day_open,
-                  day_high = EXCLUDED.day_high,
-                  day_low = EXCLUDED.day_low,
-                  day_close = EXCLUDED.day_close,
-                  day_previous_close = EXCLUDED.day_previous_close,
-                  day_change = EXCLUDED.day_change,
-                  day_change_percent = EXCLUDED.day_change_percent,
-                  day_volume = EXCLUDED.day_volume,
-                  day_vwap = EXCLUDED.day_vwap,
-                  day_last_updated = EXCLUDED.day_last_updated,
-                  source = EXCLUDED.source,
-                  created_at = EXCLUDED.created_at
-                """,
-                (
-                    ck,
-                    ts,
-                    _f_or_none(iv),
-                    _f_or_none(g.get("delta")),
-                    _f_or_none(g.get("gamma")),
-                    _f_or_none(g.get("theta")),
-                    _f_or_none(g.get("vega")),
-                    oi,
-                    underlying_ticker,
-                    day_ou,
-                    day_hi,
-                    day_lo,
-                    day_close,
-                    day_pc,
-                    day_ch,
-                    day_chp,
-                    day_vol,
-                    day_vw,
-                    day_lu,
-                ),
-            )
-            n += 1
+            if apply_chain_snapshot_item(cur, underlying, item):
+                n += 1
     return n
 
 
@@ -1039,7 +911,7 @@ def _apply_corporate_actions(
     return total
 
 
-@app.task(bind=True, name="servers.massive_tasks.run_massive_job")
+@app.task(bind=True, name="src.massive.tasks.run_massive_job")
 def run_massive_job(self, job_id: int) -> Dict[str, Any]:
     """Execute one job_massive_backfill row."""
     from src.app.config import read_config
@@ -1058,7 +930,9 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
     job = get_job_massive_backfill(status_cfg, job_id)
     if not job:
         return {"ok": False, "error": "job not found"}
-    kind = (job.get("kind") or "").strip().lower()
+    from src.persistence.postgres.ticker_reference import normalize_ticker_ref_kind
+
+    kind = normalize_ticker_ref_kind((job.get("kind") or "").strip())
 
     ms = get_massive_settings(config)
     client = MassiveClient(ms["api_key"], ms["rest_base"])
@@ -1080,10 +954,16 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
         params = _get_conn_params(status_cfg)
         conn = psycopg2.connect(**params)
         try:
-            if kind == "snapshot":
-                snapshot_type = (payload.get("snapshot_type") or "chain").strip().lower()
+            if kind == "feed_option_snapshots":
+                # Align with other kinds: payload.mode; snapshot_type kept as legacy alias.
+                snap_mode = (payload.get("mode") or payload.get("snapshot_type") or "chain").strip().lower()
 
-                if snapshot_type == "contract":
+                if snap_mode == "contract":
+                    from src.massive.snapshot_chain_ingest import (
+                        apply_chain_snapshot_item,
+                        contract_snapshot_api_response_to_chain_item,
+                    )
+
                     u = (payload.get("underlying") or "").strip().upper()
                     oc = (payload.get("option_contract") or "").strip()
                     if not u or not oc:
@@ -1094,8 +974,22 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     res_obj = snap.get("results") if isinstance(snap.get("results"), dict) else {}
                     greeks = res_obj.get("greeks") if isinstance(res_obj.get("greeks"), dict) else {}
                     det = res_obj.get("details") if isinstance(res_obj.get("details"), dict) else {}
+                    rows_written = 0
+                    persist = payload.get("persist")
+                    if persist is None or persist:
+                        item = contract_snapshot_api_response_to_chain_item(snap)
+                        if item:
+                            with conn.cursor() as cur:
+                                if apply_chain_snapshot_item(cur, u, item):
+                                    rows_written = 1
+                            conn.commit()
+                            if rows_written > 0:
+                                _refresh_snapshots_latest(conn)
                     result = {
-                        "ok": True, "kind": kind, "snapshot_type": "contract",
+                        "ok": True,
+                        "kind": kind,
+                        "mode": "contract",
+                        "rows_written": rows_written,
                         "summary": {
                             "underlying": u,
                             "option_contract": oc,
@@ -1114,7 +1008,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                     return result
 
-                if snapshot_type == "unified":
+                if snap_mode == "unified":
                     tickers = (payload.get("tickers") or "").strip()
                     asset_type = (payload.get("asset_type") or "").strip() or None
                     lim = payload.get("limit")
@@ -1141,7 +1035,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     ]
                     content_items = results_list[:100]
                     result = {
-                        "ok": True, "kind": kind, "snapshot_type": "unified",
+                        "ok": True, "kind": kind, "mode": "unified",
                         "summary": {
                             "tickers_requested": tickers,
                             "results_count": len(results_list),
@@ -1237,7 +1131,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     if all(_has):
                         rows_with_full_greeks += 1
                 result = {
-                    "ok": True, "kind": kind, "snapshot_type": "chain",
+                    "ok": True, "kind": kind, "mode": "chain",
                     "rows_written": count,
                     "massive_request_id": snap.get("request_id"),
                     "massive_status": snap.get("status"),
@@ -1735,6 +1629,13 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                     return result
 
+                if mode == "option_snapshots_pool_contract_fill":
+                    from src.massive.option_snapshots_pool_fill import run_option_snapshots_pool_contract_fill
+
+                    result = run_option_snapshots_pool_contract_fill(conn, client, payload)
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
                 # default: custom_bars (backward-compatible)
                 ot = (payload.get("options_ticker") or "").strip()
                 if not ot:
@@ -1968,7 +1869,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                         ot = (crow[1] or "").strip()
                         if not ck or not ot:
                             continue
-                        time.sleep(_gap_bf)
+                        time_module.sleep(_gap_bf)
                         n_api += 1
                         if _total_cand > 0 and n_api % 250 == 0:
                             update_job_massive_backfill_result(
@@ -2568,13 +2469,13 @@ def _enqueue_massive_job(kind: str, payload: Optional[Dict[str, Any]] = None) ->
     return {"ok": True, "job_id": jid, "celery_task_id": async_result.id}
 
 
-@app.task(name="servers.massive_tasks.beat_eod_pipeline")
+@app.task(name="src.massive.tasks.beat_eod_pipeline")
 def beat_eod_pipeline() -> Dict[str, Any]:
     """Celery Beat: enqueue ``eod_pipeline`` (Watchlist EOD OI + Max Pain)."""
     return _enqueue_massive_job("eod_pipeline", {})
 
 
-@app.task(name="servers.massive_tasks.beat_corporate_watchlist")
+@app.task(name="src.massive.tasks.beat_corporate_watchlist")
 def beat_corporate_watchlist() -> Dict[str, Any]:
     """Celery Beat: enqueue ``corporate_action`` for all Watchlist optionable STK symbols."""
     from src.app.config import read_config
@@ -2589,19 +2490,19 @@ def beat_corporate_watchlist() -> Dict[str, Any]:
     return _enqueue_massive_job("corporate_action", {"symbols": symbols})
 
 
-@app.task(name="servers.massive_tasks.beat_reconcile")
+@app.task(name="src.massive.tasks.beat_reconcile")
 def beat_reconcile() -> Dict[str, Any]:
     """Celery Beat: enqueue ``reconcile`` (Watchlist vs DB OI counts)."""
     return _enqueue_massive_job("reconcile", {})
 
 
-@app.task(name="servers.massive_tasks.beat_trim_massive_jobs")
+@app.task(name="src.massive.tasks.beat_trim_massive_jobs")
 def beat_trim_massive_jobs() -> Dict[str, Any]:
     """Celery Beat: enqueue ``trim_jobs`` (keep newest 500 rows in job_massive_backfill)."""
     return _enqueue_massive_job("trim_jobs", {})
 
 
-@app.task(name="servers.massive_tasks.beat_refresh_expirations")
+@app.task(name="src.massive.tasks.beat_refresh_expirations")
 def beat_refresh_expirations() -> Dict[str, Any]:
     """Celery Beat: refresh option expiration cache + option_contracts for Watchlist optionable STK symbols."""
     from src.app.config import read_config
@@ -2627,7 +2528,9 @@ def reenqueue_massive_job_from_row(control_via_db: dict, row: Dict[str, Any]) ->
         jid = int(row["job_massive_backfill_id"])
     except (TypeError, ValueError, KeyError):
         return False, "invalid_job_id"
-    kind = str(row.get("kind") or "").strip()
+    from src.persistence.postgres.ticker_reference import normalize_ticker_ref_kind
+
+    kind = normalize_ticker_ref_kind(str(row.get("kind") or "").strip())
     if not kind:
         return False, "missing_kind"
     payload = row.get("payload") or {}

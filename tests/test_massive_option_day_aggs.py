@@ -193,3 +193,53 @@ def test_option_day_pool_row_gap_no_targets() -> None:
     assert out.get("ok") is True
     assert out["summary"]["contracts_processed"] == 0
     client.fetch_option_aggs.assert_not_called()
+
+
+def test_option_day_pool_row_gap_passes_expiration_date(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.massive.option_day_pool_fill import run_option_day_pool_aggregates
+
+    captured: dict = {}
+
+    def fake_fetch(
+        cur: object,
+        sym: str,
+        max_expiries: int,
+        max_contracts: int,
+        *,
+        expiration_date: str | None = None,
+    ) -> list:
+        captured["expiration_date"] = expiration_date
+        return []
+
+    monkeypatch.setattr(
+        "src.massive.option_day_pool_fill._fetch_option_day_row_gap_targets",
+        fake_fetch,
+    )
+
+    mock_cur = MagicMock()
+    cm = MagicMock()
+    cm.__enter__.return_value = mock_cur
+    cm.__exit__.return_value = None
+    mock_conn = MagicMock()
+    mock_conn.cursor.return_value = cm
+
+    client = MagicMock()
+    out = run_option_day_pool_aggregates(
+        mock_conn,
+        client,
+        {
+            "underlying": "NVDA",
+            "row_lookback_days": 730,
+            "max_contracts": 10,
+            "max_expiries": 60,
+            "expiration_date": "20250620",
+        },
+        mode="option_day_pool_row_gap",
+        apply_open_close_update=lambda *a, **k: 0,
+        apply_option_day_aggs=lambda *a, **k: 0,
+        patch_vwap=lambda *a, **k: 0,
+        rest_throttle=lambda: None,
+    )
+    assert out.get("ok") is True
+    assert captured.get("expiration_date") == "20250620"
+    assert out["summary"].get("expiration_date") == "20250620"

@@ -64,17 +64,18 @@ const rows: ChecklistRow[] = [
       + 'Previous Day Bar (OHLC): mode prev with options_ticker.',
   },
   {
-    id: 'snapshot',
+    id: 'feed_option_snapshots',
     service: 'Snapshots',
     group: 'rest',
     description:
       'Three Massive REST DocPage rows under Snapshots (UI tab order): Option Contract Snapshot (per-contract), Option Chain Snapshot (chain → option_snapshots), Unified Snapshot (cross-asset).',
     tierMin: 'starter',
     projectStatus: 'implemented',
-    verification: 'Enqueue snapshot → GET /research/option-snapshots or Verify section below',
+    verification:
+      'Enqueue feed_option_snapshots (Massive option chain/contract/unified) → GET /research/option-snapshots or Verify section below',
     purpose: 'Pull delayed chain or contract data from Massive REST; chain persists bid/ask/last and greeks when returned.',
     helpVerification:
-      'Option Chain Snapshot: Celery snapshot_type=chain for an underlying. Option Contract Snapshot: snapshot_type=contract + option_contract. Unified Snapshot: snapshot_type=unified + tickers. '
+      'Option Chain Snapshot: Celery kind feed_option_snapshots, mode=chain for an underlying. Option Contract Snapshot: mode=contract + option_contract. Unified Snapshot: mode=unified + tickers. '
       + 'Then GET /research/option-snapshots?symbol=&expiration=&source=massive for chain persistence checks.',
   },
   {
