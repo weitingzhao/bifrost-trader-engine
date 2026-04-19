@@ -104,15 +104,13 @@ export interface OptionSnapshotRow {
   right: string
   /** Latest snapshot row timestamp from PostgreSQL (ISO 8601) */
   snapshot_ts?: string | null
-  /**
-   * Display premium from API: mid, else (bid+ask)/2, else last, else day_close.
-   * Aligns with chain mid cell fallback when NBBO is absent.
-   */
+  /** Display premium: Massive PG uses day_close-derived mark; IB path may use NBBO/last */
   mark?: number | null
-  bid: number | null
-  ask: number | null
-  last: number | null
-  mid: number | null
+  /** IB live path only */
+  bid?: number | null
+  ask?: number | null
+  last?: number | null
+  mid?: number | null
   iv?: number | null
   delta?: number | null
   gamma?: number | null
@@ -132,9 +130,8 @@ export interface OptionSnapshotRow {
   day_volume?: number | null
   day_vwap?: number | null
   day_last_updated?: string | null
-  break_even_price?: number | null
-  fmv?: number | null
-  fmv_last_updated?: string | null
+  /** NY session calendar date for `day_last_updated` (YYYY-MM-DD) */
+  day_last_updated_day?: string | null
 }
 
 /** OD.3: Option snapshot (bid/ask/last/mid) for symbol + expiration with optional strikes (IB live). */
@@ -520,6 +517,38 @@ export interface DbCoverageSummaryResponse {
   error?: string
   generated_at?: string
   tables?: DbCoverageSummaryRow[]
+  /** When set, row counts use Massive source filters (see API docs). */
+  source_scope?: string
+}
+
+/** GET /research/massive/celery-beat-schedule — Massive Celery Beat entries (UTC). */
+export interface MassiveCeleryBeatEntry {
+  name: string
+  task: string
+  label: string
+  crontab: Record<string, string | number>
+}
+
+export interface MassiveCeleryBeatScheduleResponse {
+  ok: boolean
+  timezone?: string
+  entries?: MassiveCeleryBeatEntry[]
+  error?: string
+}
+
+export async function fetchMassiveCeleryBeatSchedule(): Promise<MassiveCeleryBeatScheduleResponse> {
+  const r = await fetch(massiveUrl('/research/massive/celery-beat-schedule'))
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}`,
+    }
+  }
+  if (j.ok === false) {
+    return { ok: false, error: typeof j.error === 'string' ? j.error : 'Request failed' }
+  }
+  return j as MassiveCeleryBeatScheduleResponse
 }
 
 export async function fetchDbCoverageSummary(): Promise<DbCoverageSummaryResponse> {
@@ -544,11 +573,55 @@ export interface WatchlistDbCoverageOptionContracts {
   age_seconds: number | null
   ticker_pct: number | null
   identity_pct: number | null
+  /** L1: share of rows with non-empty exercise_style (often filled after chain snapshot, not reference-only). */
+  exercise_style_pct: number | null
+  /** L1: share of rows with shares_per_contract set. */
+  shares_per_contract_pct: number | null
+  /**
+   * Average fill % across nullable data columns only (exercise_style + shares_per_contract) —
+   * not ticker/identity. Same as (es_non_null + spc_non_null) / (2 * row_count) * 100.
+   */
+  optional_data_fill_avg_pct: number | null
   mapping_mismatch_count: number | null
   distinct_expirations: number | null
   distinct_strikes: number | null
   /** Same as newest_created_at; kept for backward compatibility. */
   contracts_last_at: string | null
+}
+
+/** Per-symbol rollup for option_day / option_min (Massive source). */
+export interface WatchlistDbCoverageOptionBars {
+  has_data: boolean
+  row_count: number | null
+  last_bar_time: string | null
+  last_created_at: string | null
+}
+
+export interface WatchlistDbCoverageSnapshotsWithUd {
+  has_data: boolean
+  row_count: number | null
+  last_snapshot_ts: string | null
+  last_created_at: string | null
+}
+
+export interface WatchlistDbCoverageExpirationCache {
+  has_data: boolean
+  row_count: number | null
+  last_updated_at: string | null
+}
+
+export interface WatchlistDbCoverageOiDaily {
+  has_data: boolean
+  row_count: number | null
+  last_trade_date: string | null
+  last_created_at: string | null
+}
+
+export interface WatchlistDbCoverageReportDaily {
+  has_data: boolean
+  row_count: number | null
+  last_trade_date: string | null
+  last_created_at: string | null
 }
 
 export interface WatchlistDbCoverageSymbolRow {
@@ -565,6 +638,14 @@ export interface WatchlistDbCoverageSymbolRow {
     stock_day_last_bar: string | null
     stock_day_last_created_at: string | null
   }
+  /** Present when API supports extended option coverage (same deploy as Data Overview matrix). */
+  option_day?: WatchlistDbCoverageOptionBars
+  option_min?: WatchlistDbCoverageOptionBars
+  option_snapshots_with_underlying_day?: WatchlistDbCoverageSnapshotsWithUd
+  option_expiration_cache?: WatchlistDbCoverageExpirationCache
+  /** Distinct from legacy summary-only placeholder rows; per-symbol OI rollup. */
+  option_open_interest_daily?: WatchlistDbCoverageOiDaily
+  report_option_max_pain_daily?: WatchlistDbCoverageReportDaily
 }
 
 export interface WatchlistDbCoverageResponse {
@@ -575,6 +656,8 @@ export interface WatchlistDbCoverageResponse {
   symbols_count?: number
   symbols?: WatchlistDbCoverageSymbolRow[]
   message?: string
+  /** When set, per-table metrics use Massive source where applicable. */
+  source_scope?: string
 }
 
 export async function fetchWatchlistDbCoverage(): Promise<WatchlistDbCoverageResponse> {
@@ -587,6 +670,150 @@ export async function fetchWatchlistDbCoverage(): Promise<WatchlistDbCoverageRes
     }
   }
   return j as WatchlistDbCoverageResponse
+}
+
+/** GET /research/massive/option-contracts-reference-gap — PG vs Massive reference list per expiry (paginated). */
+export interface OptionContractsReferenceGapExpiryRow {
+  expiry: string
+  /** PG rows whose contract_key appears in the Massive reference list for this expiry (comparable scope). */
+  pg_count: number
+  /** All PG rows for this expiry (includes rows not returned by the reference API for this expiry). */
+  pg_count_all?: number
+  /** pg_count_all − pg_count — excluded from gap math (outside API reference universe). */
+  pg_rows_outside_reference?: number
+  massive_count: number
+  gap: number
+  truncated?: boolean
+}
+
+export interface OptionContractsReferenceGapResult {
+  ok: boolean
+  symbol?: string
+  error?: string
+  has_rows?: boolean
+  message?: string
+  db_row_count?: number
+  pg_total?: number
+  massive_total?: number | null
+  gap?: number | null
+  coverage_pct?: number | null
+  compared_at?: string
+  expiries?: OptionContractsReferenceGapExpiryRow[]
+  truncated?: boolean
+  expiries_truncated?: boolean
+}
+
+export async function fetchOptionContractsReferenceGap(
+  symbol: string,
+): Promise<OptionContractsReferenceGapResult> {
+  const s = (symbol || '').trim().toUpperCase()
+  if (!s) return { ok: false, error: 'symbol is required' }
+  const r = await fetch(
+    massiveUrl(`/research/massive/option-contracts-reference-gap?symbol=${encodeURIComponent(s)}`),
+  )
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}`,
+    }
+  }
+  return j as OptionContractsReferenceGapResult
+}
+
+export interface OptionContractsReferenceGapBatchResponse {
+  ok: boolean
+  error?: string
+  results?: Record<string, OptionContractsReferenceGapResult>
+}
+
+/** POST /research/massive/option-contracts-reference-gap/batch — max 10 symbols per request. */
+export async function postOptionContractsReferenceGapBatch(
+  symbols: string[],
+): Promise<OptionContractsReferenceGapBatchResponse> {
+  const uniq = [...new Set(symbols.map(x => (x || '').trim().toUpperCase()).filter(Boolean))]
+  if (uniq.length === 0) return { ok: false, error: 'symbols is required' }
+  const r = await fetch(massiveUrl('/research/massive/option-contracts-reference-gap/batch'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbols: uniq }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}`,
+    }
+  }
+  return j as OptionContractsReferenceGapBatchResponse
+}
+
+/** GET /research/massive/option-contracts-reference-column-parity — L2 ref-owned columns vs PG. */
+export interface OptionContractsReferenceColumnParityResult {
+  ok: boolean
+  symbol?: string
+  error?: string
+  has_rows?: boolean
+  message?: string
+  db_row_count?: number
+  compared_at?: string
+  api_rows_compared?: number
+  pg_rows_missing?: number
+  value_mismatch_rows?: number
+  field_mismatches?: Record<string, number>
+  truncated?: boolean
+  expiries_truncated?: boolean
+  sample_mismatches?: Array<{
+    kind: string
+    contract_key: string
+    detail: string
+    fields: string[]
+  }>
+}
+
+export async function fetchOptionContractsReferenceColumnParity(
+  symbol: string,
+): Promise<OptionContractsReferenceColumnParityResult> {
+  const s = (symbol || '').trim().toUpperCase()
+  if (!s) return { ok: false, error: 'symbol is required' }
+  const r = await fetch(
+    massiveUrl(`/research/massive/option-contracts-reference-column-parity?symbol=${encodeURIComponent(s)}`),
+  )
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}`,
+    }
+  }
+  return j as OptionContractsReferenceColumnParityResult
+}
+
+export interface OptionContractsReferenceColumnParityBatchResponse {
+  ok: boolean
+  error?: string
+  results?: Record<string, OptionContractsReferenceColumnParityResult>
+}
+
+/** POST /research/massive/option-contracts-reference-column-parity/batch — max 10 symbols. */
+export async function postOptionContractsReferenceColumnParityBatch(
+  symbols: string[],
+): Promise<OptionContractsReferenceColumnParityBatchResponse> {
+  const uniq = [...new Set(symbols.map(x => (x || '').trim().toUpperCase()).filter(Boolean))]
+  if (uniq.length === 0) return { ok: false, error: 'symbols is required' }
+  const r = await fetch(massiveUrl('/research/massive/option-contracts-reference-column-parity/batch'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbols: uniq }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}`,
+    }
+  }
+  return j as OptionContractsReferenceColumnParityBatchResponse
 }
 
 /** Live Max Pain from EOD OI (GET /research/max-pain/compute) — not persisted. */
@@ -1019,10 +1246,6 @@ export async function fetchOptionSnapshotsPg(
         right: String(row.right ?? ''),
         snapshot_ts: typeof row.snapshot_ts === 'string' ? row.snapshot_ts : null,
         mark: row.mark != null && Number.isFinite(Number(row.mark)) ? Number(row.mark) : null,
-        bid: row.bid != null && Number.isFinite(Number(row.bid)) ? Number(row.bid) : null,
-        ask: row.ask != null && Number.isFinite(Number(row.ask)) ? Number(row.ask) : null,
-        last: row.last != null && Number.isFinite(Number(row.last)) ? Number(row.last) : null,
-        mid: row.mid != null && Number.isFinite(Number(row.mid)) ? Number(row.mid) : null,
         iv: row.iv != null && Number.isFinite(Number(row.iv)) ? Number(row.iv) : null,
         delta: row.delta != null && Number.isFinite(Number(row.delta)) ? Number(row.delta) : null,
         gamma: row.gamma != null && Number.isFinite(Number(row.gamma)) ? Number(row.gamma) : null,
@@ -1051,12 +1274,8 @@ export async function fetchOptionSnapshotsPg(
           row.day_volume != null && Number.isFinite(Number(row.day_volume)) ? Number(row.day_volume) : null,
         day_vwap: row.day_vwap != null && Number.isFinite(Number(row.day_vwap)) ? Number(row.day_vwap) : null,
         day_last_updated: typeof row.day_last_updated === 'string' ? row.day_last_updated : null,
-        break_even_price:
-          row.break_even_price != null && Number.isFinite(Number(row.break_even_price))
-            ? Number(row.break_even_price)
-            : null,
-        fmv: row.fmv != null && Number.isFinite(Number(row.fmv)) ? Number(row.fmv) : null,
-        fmv_last_updated: typeof row.fmv_last_updated === 'string' ? row.fmv_last_updated : null,
+        day_last_updated_day:
+          typeof row.day_last_updated_day === 'string' ? row.day_last_updated_day : null,
       }))
     : []
   return {
@@ -1212,6 +1431,11 @@ export interface ContractsCoverageResponse {
     with_complete_identity?: number
     identity_pct?: number
     mapping_mismatch?: number
+    with_exercise_style?: number
+    exercise_style_pct?: number
+    with_shares_per_contract?: number
+    shares_per_contract_pct?: number
+    optional_data_fill_avg_pct?: number
     distinct_expirations?: number
     distinct_strikes?: number
   }

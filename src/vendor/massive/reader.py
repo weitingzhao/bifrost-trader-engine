@@ -629,13 +629,13 @@ def get_option_snapshots_latest(
                     if cur.fetchone():
                         cur.execute(
                             """
-                            SELECT contract_key, snapshot_ts, last, bid, ask, mid,
-                                   iv, delta, gamma, theta, vega, open_interest, underlying_price,
+                            SELECT contract_key, snapshot_ts,
+                                   iv, delta, gamma, theta, vega, open_interest,
                                    underlying_ticker,
                                    day_open, day_high, day_low, day_close,
                                    day_previous_close, day_change, day_change_percent,
                                    day_volume, day_vwap, day_last_updated,
-                                   break_even_price, fmv, fmv_last_updated,
+                                   day_last_updated_day,
                                    source, created_at
                             FROM option_snapshots_latest
                             WHERE contract_key = ANY(%s) AND source = %s
@@ -653,13 +653,13 @@ def get_option_snapshots_latest(
                     cur.execute(
                         """
                         SELECT DISTINCT ON (contract_key)
-                            contract_key, snapshot_ts, last, bid, ask, mid,
-                            iv, delta, gamma, theta, vega, open_interest, underlying_price,
+                            contract_key, snapshot_ts,
+                            iv, delta, gamma, theta, vega, open_interest,
                             underlying_ticker,
                             day_open, day_high, day_low, day_close,
                             day_previous_close, day_change, day_change_percent,
                             day_volume, day_vwap, day_last_updated,
-                            break_even_price, fmv, fmv_last_updated,
+                            day_last_updated_day,
                             source, created_at
                         FROM option_snapshots
                         WHERE contract_key = ANY(%s) AND source = %s
@@ -721,7 +721,7 @@ def get_option_snapshots_eod_per_day(
                           iv,
                           underlying_price,
                           snapshot_ts
-                        FROM option_snapshots
+                        FROM option_snapshots_with_underlying_day
                         WHERE source = %s
                           AND contract_key = ANY(%s)
                           AND snapshot_ts >= %s
@@ -1304,7 +1304,7 @@ def _load_oi_rows_from_chain_snapshots(
                     oc.expiry, oc.strike, oc.option_right, os.open_interest,
                     os.snapshot_ts, os.underlying_price
                 FROM option_contracts oc
-                INNER JOIN option_snapshots os ON os.contract_key = oc.contract_key
+                INNER JOIN option_snapshots_with_underlying_day os ON os.contract_key = oc.contract_key
                 WHERE oc.symbol = %s AND oc.expiry = %s AND os.source = %s
                   AND os.open_interest IS NOT NULL AND os.open_interest > 0
                 ORDER BY oc.contract_key, os.snapshot_ts DESC
@@ -1873,14 +1873,16 @@ def refresh_expirations_from_massive_api(
         expiration_date=expiration_date,
         collect_contract_rows=True,
     )
+    rows_upserted = 0
     if status_config and not result.get("error") and not skip_persist:
         rows = result.get("contract_rows") or []
         try:
-            upsert_option_contracts_from_reference_rows(status_config, symbol, rows)
+            rows_upserted = upsert_option_contracts_from_reference_rows(status_config, symbol, rows)
             if not (expiration_date or "").strip():
                 replace_option_expiration_cache(status_config, symbol, result.get("expirations") or [], source="massive")
         except Exception as e:
             logger.warning("refresh_expirations_from_massive_api persist failed: %s", e)
+    result["rows_upserted"] = rows_upserted
     return result
 
 

@@ -32,9 +32,9 @@ When adding or changing **PostgreSQL** tables in this project, follow the standa
 - **gate_safety_*** tables must use **scalar columns only** (integer, double precision, boolean, text, date, timestamptz). **No jsonb/json** in these tables.
 - Multi-value data (e.g. earnings blacklist dates) uses a separate table: `gate_safety_strategy_earnings_dates(gate_safety_strategy_id, holiday_date)`.
 
-## 5. Strategy Tables: Prefer Scalar/Child Tables; JSON for Compatibility Only
+## 5. Strategy Tables: Scalar Columns and Child Tables (No JSON on Core Rows)
 
-- **strategy_structure**: Prefer scalar columns and child tables for data mining and querying: use **strategy_structure_leg** (one row per leg), **strategy_structure_constraint** (typed key-value), **strategy_structure_meta** (meta_key / meta_value_text), and the **notes** (text) column. The columns `legs`, `constraints`, and `metadata` (jsonb) are **kept for compatibility only**; new logic and analytics should use the child tables and notes.
+- **strategy_structure**: Store structure data in **strategy_structure** (scalar + **notes**), **strategy_structure_leg**, **strategy_structure_constraint**, and **strategy_structure_meta** (meta_key / meta_value_text). API responses assemble **legs**, **constraints**, and **metadata** (object) from these child tables for clients.
 - **strategy_opportunity**: Use **scope_type** (text) and child tables **strategy_opportunity_symbol** (one row per symbol), **strategy_opportunity_entry_condition** (one row per condition: condition_type, value_text, value_numeric); no jsonb columns in this table.
 - **strategy_allocation**: Uses **strategy_allocation_opportunity** (junction table) for opportunity IDs and scalar columns **max_positions**, **max_bp_pct** for limits; no jsonb.
 

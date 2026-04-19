@@ -461,9 +461,26 @@
 - **用途**：期权合约定义，按 contract_key（与 account_positions、contract_quote_live 一致）唯一标识。
 - **列**：`option_contracts_id` (bigserial PK)、`contract_key` (text NOT NULL UNIQUE)、`symbol`、`expiry`、`strike`、`option_right`、`massive_option_ticker` (text, 可选, Massive/Polygon 供应商期权代码如 `O:NVDA250620C00120000`，便于 API 往返)、`exercise_style` (text, 可选, Massive `details.exercise_style`)、`shares_per_contract` (integer, 可选, Massive `details.shares_per_contract`)、`created_at`。索引 `(contract_key)`、`(symbol, expiry, strike, option_right)`。
 
+#### Massive 字段与写入路径（列级健康度）
+
+| 数据库列 | 参考 API `GET /v3/reference/options/contracts` | 链上 snapshot（`option_snapshots` 写入路径） | 备注 |
+|----------|---------------------------------------------------|-----------------------------------------------|------|
+| `contract_key` | 由 `underlying` + `expiration_date` + `strike_price` + `contract_type` 推导（`contract_key_from_parts` / `contract_key_from_reference_result`） | 同左 | 与 `symbol|OPT|expiry|strike|right` 一致 |
+| `symbol` | 标的 = 请求 underlying | 同左 | |
+| `expiry` | `expiration_date` / `expiration` → 规范为 8 位 `YYYYMMDD` | 同左 | |
+| `strike` | `strike_price`（float） | `details.strike_price` | 写入侧对 strike 做 round 与 key 一致 |
+| `option_right` | `contract_type` → `C`/`P` | `details.contract_type` | |
+| `massive_option_ticker` | 响应 `ticker` | `details.ticker` / 根上 `ticker` | 参考 upsert 仅 COALESCE 更新 ticker |
+| `exercise_style` | 参考列表**不写入** | snapshot `details` 填充 | 未跑链上 snapshot 时全表可空属预期 |
+| `shares_per_contract` | 参考列表**不写入** | snapshot `details` 填充 | 同上 |
+
+- **L1（仅 PostgreSQL）**：按标的汇总各列非空行数及占比（`exercise_style`、`shares_per_contract` 等）；不调用 Massive。低 `exercise_style`/`shares_per_contract` 覆盖率在「仅 reference 拉合约」阶段为常态，需结合是否已有链上快照解读。
+- **L2（参考域）**：在可比到期与分页上限内，将参考 API 返回的每条合约与 `option_contracts` 同行比较 `symbol` / `expiry` / `strike` / `option_right` / `massive_option_ticker`（与 `upsert_option_contracts_from_reference_rows` 责任范围一致）。见 `GET /research/massive/option-contracts-reference-column-parity`。
+- **L3（快照域，可选）**：若需校验 `exercise_style` / `shares_per_contract` 与某次 snapshot 一致，需行级来源或启发式（例如仅当存在 `option_snapshots` 行时再比较）；当前表无 `last_enriched_source` 等列，严谨 L3 需另议 schema 或接受子集校验。
+
 ### 2.16.2 表 `option_snapshots`（期权时点快照，含 Greeks/IV）
 
-- **用途**：期权某时点报价快照（last/bid/ask/mid）及可选 Greeks/IV（Massive Starter 可获取延迟 Greeks/IV）。
+- **用途**：期权某时点快照：Greeks/IV、OI、Massive 链 `day` 条（OHLC 等）。**不在此表持久化** NBBO（last/bid/ask/mid）、`underlying_asset.price`、break-even、FMV（当前 Massive 档位不写入或不再落库）；展示用 mark 由 API 侧使用 `day_close` 等推导。
 - **列**：
 
 | 列名 | 类型 | 说明 |
@@ -471,37 +488,36 @@
 | option_snapshots_id | bigserial | 自增主键 |
 | contract_key | text NOT NULL | 合约唯一键 |
 | snapshot_ts | timestamptz NOT NULL | 快照时间戳 |
-| last | double precision | 最新价（优先 last trade；无则可为 Massive `day.close` 回退） |
-| bid | double precision | 买一（仅真实 quote 时填写） |
-| ask | double precision | 卖一（仅真实 quote 时填写） |
-| mid | double precision | 中间价（bid/ask 或回退 `day.close`） |
 | iv | double precision | 隐含波动率（可空；API `implied_volatility` 或 `greeks.iv`） |
 | delta | double precision | Delta（可空） |
 | gamma | double precision | Gamma（可空） |
 | theta | double precision | Theta（可空） |
 | vega | double precision | Vega（可空） |
-| open_interest | integer | 快照时点的 OI（可空，若随报价一并返回） |
-| underlying_price | double precision | 标的价格（可空；Massive `underlying_asset.price`） |
+| open_interest | integer | 快照时点的 OI（可空） |
 | underlying_ticker | text | 标的代码（可空；Massive `underlying_asset.ticker`） |
 | day_open / day_high / day_low / day_close | double precision | Massive 链快照 `day` 对象 OHLC |
 | day_previous_close / day_change / day_change_percent | double precision | Massive `day` |
 | day_volume | bigint | Massive `day.volume` |
 | day_vwap | double precision | Massive `day.vwap` |
 | day_last_updated | timestamptz | 由 Massive `day.last_updated`（纳秒）换算 |
-| break_even_price | double precision | Massive `break_even_price` |
-| fmv / fmv_last_updated | double precision / timestamptz | Massive FMV（若套餐返回） |
+| day_last_updated_day | date GENERATED STORED | `DATE(timezone('America/New_York', day_last_updated))`，可空；用于与 `stock_day` 对齐 |
 | source | text NOT NULL DEFAULT 'ib' | 数据来源：`ib` 或 `massive` |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
 - **主键**：`PRIMARY KEY (option_snapshots_id, snapshot_ts)`（分区表要求主键包含分区键）。
 - **分区**：`PARTITION BY RANGE (snapshot_ts)` 按月分区（命名如 `option_snapshots_y2026m03`）。`pg_ddl` 自动创建当月 + 未来 3 个月分区及 default 分区。已有非分区表的库在 `db_refresh_schema.py` 时自动迁移。
-- **索引**：`(contract_key, snapshot_ts DESC)`。
+- **索引**：`(contract_key, snapshot_ts DESC)`；可选 `(underlying_ticker, day_last_updated_day)` 供 join。
 - **保留策略**：保留最近 **90 天**热数据；早于 90 天的月份分区 `ALTER TABLE ... DETACH PARTITION` 后归档（`pg_dump` / `COPY` 到冷存储）或 `DROP`。运维步骤见 `scripts/db/archive_option_snapshots.sh`（占位模板）。
+
+#### 视图 `option_snapshots_with_underlying_day`
+
+- **用途**：将 `option_snapshots` 与 **`stock_day`（`source = 'massive'`）** 按 `upper(trim(underlying_ticker)) = symbol` 且 `bar_time = day_last_updated_day` 左连接，输出标的日线 **OHLCVW** 及 **`sd.close AS underlying_price`**（供 EOD ATM IV / Max Pain 等读路径；无匹配行则 `underlying_price` 等为 NULL）。
+- **定义**：`CREATE OR REPLACE VIEW option_snapshots_with_underlying_day AS SELECT os.*, sd.open AS u_open, ...`（见 `src/persistence/postgres/ddl.py`）。
 
 #### 物化视图 `option_snapshots_latest`
 
 - **用途**：按 `contract_key` 取最新一行的物化视图，加速 Discovery 读路径。
-- **定义**：`CREATE MATERIALIZED VIEW option_snapshots_latest AS SELECT DISTINCT ON (contract_key) ... FROM option_snapshots ORDER BY contract_key, snapshot_ts DESC`，列集与 `option_snapshots` 中参与展示/研究的列对齐（含 `day_*`、`underlying_ticker`、FMV 等）。
+- **定义**：`CREATE MATERIALIZED VIEW option_snapshots_latest AS SELECT DISTINCT ON (contract_key) ... FROM option_snapshots ORDER BY contract_key, snapshot_ts DESC`，列集含 `day_*`、`day_last_updated_day`、`underlying_ticker` 等（**不含**已删除的报价/FMV 列）。
 - **唯一索引**：`UNIQUE (contract_key)`——支持 `REFRESH MATERIALIZED VIEW CONCURRENTLY`。
 - **刷新**：chain snapshot 写入成功后自动 `REFRESH CONCURRENTLY`（见 `src/massive/tasks.py`）。schema 升级时若基表新增列而 MV 未包含，`pg_ddl` 会 `DROP` 后按新列重建。
 
@@ -1497,6 +1513,8 @@ python scripts/db/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-04-15 report_option_atm_iv_daily | 新增表 `report_option_atm_iv_daily`（§2.16.5b）：按交易日汇总 ATM IV，加速 IV Volatility Cone；`pg_ddl` 建表与索引。 | Option Discovery |
 | 2026-04-15 option_day / option_min vwap | `option_day`、`option_min` 增加可空列 `vwap`（Massive 聚合 `vw` 回填）；`pg_ddl` 迁移 `ADD COLUMN`；GET `/bars`（option）与 K 线前端展示。§2.15、§2.16。 | 期权研究 / Option Discovery |
 | 2026-04-16 Massive chain snapshot 全量落库 | `option_contracts` 恢复 `exercise_style`、`shares_per_contract`（可空）。`option_snapshots` 增加 `underlying_ticker`、`day_*`（OHLC/量能/vwap/last_updated）、`break_even_price`、`fmv`/`fmv_last_updated`；`iv` 列语义对应 API `implied_volatility`。物化视图 `option_snapshots_latest` 列集同步；迁移路径在 `migrate_opt` 末尾按基表与 MV 差异重建 MV。Massive Worker 写入与 Research API / Option Discovery 读路径扩展。§2.16.1–2.16.2。 | Massive / Option Discovery |
+| 2026-04-17 option_snapshots 收窄 + 标的视图 | 删除列 `last`、`bid`、`ask`、`mid`、`underlying_price`、`break_even_price`、`fmv`、`fmv_last_updated`；新增生成列 `day_last_updated_day`。新增视图 `option_snapshots_with_underlying_day`（左连 `stock_day`，`source=massive`，`underlying_price` = `stock_day.close`）。`option_snapshots_latest` 与 EOD 读路径（`get_option_snapshots_eod_per_day`）同步。§2.16.2。 | Massive / Option Discovery |
+| 2026-04-18 option_contracts 列级覆盖与参考对拍 | §2.16.1 增补「Massive 字段与写入路径」与 L1/L2/L3 说明。`watchlist-db-coverage` / `contracts-coverage` 增加 `exercise_style`/`shares_per_contract` 非空计数与占比；新增 `GET/POST .../option-contracts-reference-column-parity`（L2，与 reference 分页上限一致）。无表结构变更。 | 研究 / Massive |
 
 ---
 

@@ -1,15 +1,28 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { StatusResponse } from '../types'
-import { fetchDbCoverageSummary, fetchWatchlistDbCoverage } from '../api'
-import type { DbCoverageSummaryRow, WatchlistDbCoverageSymbolRow } from '../api'
+import {
+  fetchDbCoverageSummary,
+  fetchMassiveCeleryBeatSchedule,
+  fetchMassiveJobsList,
+  fetchMassiveJobsSummary,
+  fetchOptionContractsReferenceGap,
+  fetchWatchlistDbCoverage,
+} from '../api'
+import type {
+  DbCoverageSummaryRow,
+  JobQueueStatusCounts,
+  MassiveCeleryBeatEntry,
+  MassiveJobApiRow,
+  OptionContractsReferenceGapResult,
+  WatchlistDbCoverageSymbolRow,
+} from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { DataOverviewWatchlistOptions, type OptionsSubTab } from './dataOverview/DataOverviewWatchlistOptions'
 import { COVERAGE_OPTION_SUBSECTION, COVERAGE_STOCK_SUBSECTIONS, FEED_MASSIVE_STOCK_ID } from './settings/settingsConstants'
 
 interface DataOverviewPageProps {
   status: StatusResponse | null
 }
-
-const SNAPSHOT_STALE_MS = 24 * 60 * 60 * 1000
 
 function detailLabel(hash: string): string {
   if (hash === COVERAGE_OPTION_SUBSECTION.id) return 'Option Coverage'
@@ -24,7 +37,6 @@ function fmtTs(iso: string | null): string {
   return iso
 }
 
-/** Human-readable age from server age_seconds (UTC), English. */
 function fmtAgeSeconds(sec: number | null | undefined): string {
   if (sec == null || !Number.isFinite(sec)) return '—'
   const s = Math.max(0, Math.floor(sec))
@@ -39,27 +51,56 @@ function fmtAgeSeconds(sec: number | null | undefined): string {
   return `${m}m ago`
 }
 
-function snapshotStale(ts: string | null): boolean {
-  if (!ts) return false
-  const t = Date.parse(ts)
-  if (!Number.isFinite(t)) return false
-  return Date.now() - t > SNAPSHOT_STALE_MS
+function isoToAgeSeconds(iso: string | null | undefined): number | null {
+  if (!iso) return null
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return null
+  return Math.max(0, Math.floor((Date.now() - t) / 1000))
 }
 
-function coverageScore(r: WatchlistDbCoverageSymbolRow): number {
-  let n = 0
-  if (r.option_contracts.has_data) n++
-  if (r.option_snapshots.has_data) n++
-  if (r.report_option_atm_iv_daily.has_data) n++
-  if (r.stock_day.has_data) n++
-  return n
+/** Prefer row activity time; else approximate age from trade / bar date. */
+function globalRowFreshness(row: DbCoverageSummaryRow): string {
+  if (row.error) return '—'
+  const act = row.newest_activity
+  if (act) return fmtAgeSeconds(isoToAgeSeconds(act))
+  const td = row.newest_trade_date
+  if (td && td.length >= 10) {
+    const t = Date.parse(`${td.slice(0, 10)}T12:00:00.000Z`)
+    if (Number.isFinite(t)) return fmtAgeSeconds(Math.max(0, Math.floor((Date.now() - t) / 1000)))
+  }
+  return '—'
+}
+
+function fmtCrontabUtc(c: Record<string, string | number>): string {
+  const h = c.hour
+  const m = c.minute ?? 0
+  return `hour=${String(h)} minute=${String(m)}`
+}
+
+function fmtJobTs(ts: number | undefined): string {
+  if (ts == null || !Number.isFinite(ts)) return '—'
+  const d = new Date(ts * 1000)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toISOString().slice(0, 16).replace('T', ' ')
+}
+
+function queueSummaryLine(c: JobQueueStatusCounts): string {
+  return `pending ${c.pending} · running ${c.running} · failed ${c.failed} · done ${c.done}`
 }
 
 type WatchlistSectionTab = 'options' | 'stocks'
 
+const emptyCounts = (): JobQueueStatusCounts => ({
+  pending: 0,
+  running: 0,
+  done: 0,
+  failed: 0,
+})
+
 export function DataOverviewPage(_props: DataOverviewPageProps) {
   const [wlRows, setWlRows] = useState<WatchlistDbCoverageSymbolRow[]>([])
   const [wlTab, setWlTab] = useState<WatchlistSectionTab>('options')
+  const [wlOptionsSubTab, setWlOptionsSubTab] = useState<OptionsSubTab>('summary')
   const [wlGeneratedAt, setWlGeneratedAt] = useState<string | null>(null)
   const [wlMessage, setWlMessage] = useState<string | null>(null)
   const [wlError, setWlError] = useState<string | null>(null)
@@ -68,49 +109,234 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
   const [generatedAt, setGeneratedAt] = useState<string | null>(null)
   const [globalError, setGlobalError] = useState<string | null>(null)
 
+  const [beatEntries, setBeatEntries] = useState<MassiveCeleryBeatEntry[]>([])
+  const [beatError, setBeatError] = useState<string | null>(null)
+  const [jobsOpt, setJobsOpt] = useState<JobQueueStatusCounts>(() => emptyCounts())
+  const [jobsStock, setJobsStock] = useState<JobQueueStatusCounts>(() => emptyCounts())
+  const [jobsSummaryError, setJobsSummaryError] = useState<string | null>(null)
+  const [recentJobs, setRecentJobs] = useState<MassiveJobApiRow[]>([])
+  const [jobsListError, setJobsListError] = useState<string | null>(null)
+
   const [loading, setLoading] = useState(true)
+
+  const [refGapBySymbol, setRefGapBySymbol] = useState<Record<string, OptionContractsReferenceGapResult>>({})
+  const [refGapLoading, setRefGapLoading] = useState(false)
+  const [refGapError, setRefGapError] = useState<string | null>(null)
+
+  /** Uppercase symbols in By symbol → option_contracts compare / enqueue pool (click Symbol column to toggle). */
+  const [comparePool, setComparePool] = useState<string[]>([])
+  /** Option jobs sheet (By symbol bar) — button next to Refresh when that bar is visible. */
+  const [optionJobsSheetOpen, setOptionJobsSheetOpen] = useState(false)
 
   const loadAll = useCallback(async () => {
     setLoading(true)
     setWlError(null)
     setGlobalError(null)
     setWlMessage(null)
-    try {
-      const [wl, g] = await Promise.all([fetchWatchlistDbCoverage(), fetchDbCoverageSummary()])
+    setBeatError(null)
+    setJobsSummaryError(null)
+    setJobsListError(null)
+    setRefGapBySymbol({})
+    setRefGapError(null)
+    setComparePool([])
 
-      if (!wl.ok) {
-        setWlRows([])
-        setWlGeneratedAt(null)
-        setWlError(wl.error ?? 'Watchlist coverage failed')
-      } else {
-        setWlRows(wl.symbols ?? [])
-        setWlGeneratedAt(wl.generated_at ?? null)
-        setWlMessage(typeof wl.message === 'string' ? wl.message : null)
-      }
+    const settled = await Promise.allSettled([
+      fetchWatchlistDbCoverage(),
+      fetchDbCoverageSummary(),
+      fetchMassiveCeleryBeatSchedule(),
+      fetchMassiveJobsSummary('massive'),
+      fetchMassiveJobsSummary('massive_stocks'),
+      fetchMassiveJobsList({ limit: 10 }),
+    ])
 
-      if (!g.ok) {
-        setRows([])
-        setGeneratedAt(null)
-        setGlobalError(g.error ?? 'Global summary failed')
-      } else {
-        setRows(g.tables ?? [])
-        setGeneratedAt(g.generated_at ?? null)
-      }
-    } catch (e) {
+    const wl = settled[0].status === 'fulfilled' ? settled[0].value : null
+    const g = settled[1].status === 'fulfilled' ? settled[1].value : null
+    const beat = settled[2].status === 'fulfilled' ? settled[2].value : null
+    const jq = settled[3].status === 'fulfilled' ? settled[3].value : null
+    const js = settled[4].status === 'fulfilled' ? settled[4].value : null
+    const jlist = settled[5].status === 'fulfilled' ? settled[5].value : null
+
+    if (wl?.ok) {
+      setWlRows(wl.symbols ?? [])
+      setWlGeneratedAt(wl.generated_at ?? null)
+      setWlMessage(typeof wl.message === 'string' ? wl.message : null)
+      setWlError(null)
+    } else {
       setWlRows([])
-      setRows([])
       setWlGeneratedAt(null)
-      setGeneratedAt(null)
-      setWlError(e instanceof Error ? e.message : 'Failed to load')
-      setGlobalError(e instanceof Error ? e.message : 'Failed to load')
-    } finally {
-      setLoading(false)
+      setWlMessage(null)
+      setWlError(
+        wl && !wl.ok
+          ? wl.error ?? 'Watchlist coverage failed'
+          : settled[0].status === 'rejected'
+            ? (settled[0].reason instanceof Error ? settled[0].reason.message : 'Watchlist coverage failed')
+            : 'Watchlist coverage failed',
+      )
     }
+
+    if (g?.ok) {
+      setRows(g.tables ?? [])
+      setGeneratedAt(g.generated_at ?? null)
+      setGlobalError(null)
+    } else {
+      setRows([])
+      setGeneratedAt(null)
+      setGlobalError(
+        g && !g.ok
+          ? g.error ?? 'Global summary failed'
+          : settled[1].status === 'rejected'
+            ? (settled[1].reason instanceof Error ? settled[1].reason.message : 'Global summary failed')
+            : 'Global summary failed',
+      )
+    }
+
+    if (beat?.ok && Array.isArray(beat.entries)) {
+      setBeatEntries(beat.entries)
+      setBeatError(null)
+    } else {
+      setBeatEntries([])
+      setBeatError(
+        beat && beat.ok === false
+          ? beat.error ?? 'Failed to load Celery Beat schedule'
+          : settled[2].status === 'rejected'
+            ? (settled[2].reason instanceof Error ? settled[2].reason.message : 'Failed to load Celery Beat schedule')
+            : 'Failed to load Celery Beat schedule',
+      )
+    }
+
+    const optOk = Boolean(jq?.ok && jq.counts)
+    const stOk = Boolean(js?.ok && js.counts)
+    if (optOk) {
+      setJobsOpt(jq!.counts!)
+    } else {
+      setJobsOpt(emptyCounts())
+    }
+    if (stOk) {
+      setJobsStock(js!.counts!)
+    } else {
+      setJobsStock(emptyCounts())
+    }
+    if (optOk && stOk) {
+      setJobsSummaryError(null)
+    } else {
+      const parts: string[] = []
+      if (!optOk) {
+        parts.push(
+          jq && !jq.ok
+            ? jq.error ?? 'Massive options queue unavailable'
+            : settled[3].status === 'rejected'
+              ? (settled[3].reason instanceof Error ? settled[3].reason.message : 'Massive options queue unavailable')
+              : 'Massive options queue unavailable',
+        )
+      }
+      if (!stOk) {
+        parts.push(
+          js && !js.ok
+            ? js.error ?? 'Massive stocks queue unavailable'
+            : settled[4].status === 'rejected'
+              ? (settled[4].reason instanceof Error ? settled[4].reason.message : 'Massive stocks queue unavailable')
+              : 'Massive stocks queue unavailable',
+        )
+      }
+      setJobsSummaryError(parts.join(' · '))
+    }
+
+    if (jlist?.ok && Array.isArray(jlist.jobs)) {
+      setRecentJobs(jlist.jobs)
+      setJobsListError(null)
+    } else {
+      setRecentJobs([])
+      setJobsListError(
+        jlist && !jlist.ok
+          ? jlist.error ?? 'Recent jobs unavailable'
+          : settled[5].status === 'rejected'
+            ? (settled[5].reason instanceof Error ? settled[5].reason.message : 'Recent jobs unavailable')
+            : 'Recent jobs unavailable',
+      )
+    }
+
+    setLoading(false)
+  }, [])
+
+  const handleCompareMassiveReference = useCallback(
+    async (
+      symbols: string[],
+      progress?: {
+        onSymbolStart?: (symbol: string) => void
+        onSymbolDone?: (symbol: string, result: OptionContractsReferenceGapResult) => void
+        onSymbolError?: (symbol: string, message: string) => void
+      },
+    ) => {
+      setRefGapLoading(true)
+      setRefGapError(null)
+      try {
+        const raw = symbols.map(s => s.trim().toUpperCase()).filter(Boolean)
+        const seen = new Set<string>()
+        const unique = raw.filter(s => (seen.has(s) ? false : (seen.add(s), true)))
+        const eligible = unique.filter(u => {
+          const row = wlRows.find(r => r.symbol.trim().toUpperCase() === u)
+          return row?.option_contracts.has_data
+        })
+        if (eligible.length === 0) {
+          setRefGapError(
+            unique.length === 0
+              ? 'Add symbols to the compare pool (click Symbol in the matrix).'
+              : 'No pool symbols have option_contracts rows yet.',
+          )
+          return
+        }
+        for (const sym of eligible) {
+          progress?.onSymbolStart?.(sym)
+          try {
+            const res = await fetchOptionContractsReferenceGap(sym)
+            if (!res.ok) {
+              const msg = typeof res.error === 'string' ? res.error : 'Compare failed'
+              progress?.onSymbolError?.(sym, msg)
+              continue
+            }
+            setRefGapBySymbol(prev => ({ ...prev, [sym]: res }))
+            progress?.onSymbolDone?.(sym, res)
+          } catch (err) {
+            progress?.onSymbolError?.(
+              sym,
+              err instanceof Error ? err.message : 'Compare failed',
+            )
+          }
+        }
+      } catch (e) {
+        setRefGapError(e instanceof Error ? e.message : 'Compare failed')
+      } finally {
+        setRefGapLoading(false)
+      }
+    },
+    [wlRows],
+  )
+
+  const toggleComparePool = useCallback((symbol: string) => {
+    const u = symbol.trim().toUpperCase()
+    if (!u) return
+    setComparePool(prev => (prev.includes(u) ? prev.filter(s => s !== u) : [...prev, u]))
+  }, [])
+
+  const selectAllComparePool = useCallback(() => {
+    const all = wlRows.map(r => r.symbol.trim().toUpperCase()).filter(Boolean)
+    const seen = new Set<string>()
+    setComparePool(all.filter(s => (seen.has(s) ? false : (seen.add(s), true))))
+  }, [wlRows])
+
+  const clearComparePool = useCallback(() => {
+    setComparePool([])
   }, [])
 
   useEffect(() => {
     void loadAll()
   }, [loadAll])
+
+  useEffect(() => {
+    if (wlTab !== 'options' || wlOptionsSubTab !== 'by_symbol') {
+      setOptionJobsSheetOpen(false)
+    }
+  }, [wlTab, wlOptionsSubTab])
 
   const openDetail = (hash: string) => {
     window.location.hash = `#${hash}`
@@ -129,27 +355,30 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
         </button>
         {' / '}
         Data Overview
-        <InfoTooltip text="Watchlist section: per-symbol PostgreSQL freshness for optionable STK symbols. Global section: distinct counts across the whole database." />
+        <InfoTooltip text="Coverage counts and watchlist metrics use Massive-sourced PostgreSQL rows only (not IB). Global table is whole-database; watchlist is optionable STK (max 80)." />
       </h2>
-
-      <p className="section-hint" style={{ marginBottom: 'var(--space-2)' }}>
-        Watchlist coverage uses the same universe as Daily Data Status (STK with optionable=true). Global summary is not limited to the watchlist.
-      </p>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
         <span style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)' }}>
-          Refresh loads both watchlist matrix and global aggregates.
+          Massive-only coverage and pipeline status.
         </span>
-        <button type="button" className="btn btn-secondary btn-sm" disabled={loading} onClick={() => void loadAll()}>
-          {loading ? 'Loading…' : 'Refresh'}
-        </button>
+        <div style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)' }}>
+          {wlTab === 'options' && wlOptionsSubTab === 'by_symbol' ? (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOptionJobsSheetOpen(true)}>
+              Jobs
+            </button>
+          ) : null}
+          <button type="button" className="btn btn-secondary btn-sm" disabled={loading} onClick={() => void loadAll()}>
+            {loading ? 'Loading…' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {/* Watchlist matrix */}
       <section className="replay-section" aria-labelledby="data-overview-wl-head" style={{ marginBottom: 'var(--space-4)' }}>
         <h3 id="data-overview-wl-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
           Watchlist coverage
-          <InfoTooltip text="One row per watchlist symbol (max 80). Options tab centers on option_contracts aggregates; Stocks tab shows stock_day only. Snapshots & ATM IV are optional detail. Snapshot time older than 24 hours is highlighted in the detail table." />
+          <InfoTooltip text="Options: Summary aggregates by table; By symbol shows per-ticker detail. Stocks: stock_day (Massive). Same symbol universe as Daily Data Status (max 80)." />
         </h3>
         {wlError ? <p className="status-page-msg err" role="alert">{wlError}</p> : null}
         {wlGeneratedAt ? (
@@ -191,108 +420,22 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
             </div>
 
             {wlTab === 'options' ? (
-              <>
-                <div className="feed-massive-table-wrap">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">Symbol</th>
-                        <th scope="col">
-                          Age since last row
-                          <InfoTooltip text="Based on max(created_at) in option_contracts — a last row activity proxy, same semantics as Contracts coverage newest_ts. Not a dedicated Celery job completion time." />
-                        </th>
-                        <th scope="col">
-                          Completeness
-                          <InfoTooltip text="ticker% = rows with massive_option_ticker set; identity% = rows with symbol, expiry, and option_right non-empty. Same definitions as GET /research/massive/contracts-coverage." />
-                        </th>
-                        <th scope="col">Rows</th>
-                        <th scope="col">Expiries / strikes</th>
-                        <th scope="col">
-                          Mismatch
-                          <InfoTooltip text="Rows where contract_key does not contain underlying symbol (mapping consistency check)." />
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {wlRows.map(r => {
-                        const oc = r.option_contracts
-                        const ticker = oc.ticker_pct
-                        const ident = oc.identity_pct
-                        const completeness = oc.has_data && ticker != null && ident != null
-                          ? `${ticker}% / ${ident}%`
-                          : '—'
-                        return (
-                          <tr key={r.symbol}>
-                            <th scope="row"><strong>{r.symbol}</strong></th>
-                            <td
-                              style={{ fontSize: 'var(--text-caption)' }}
-                              title={oc.newest_created_at ? `newest_created_at: ${oc.newest_created_at}` : undefined}
-                            >
-                              {fmtAgeSeconds(oc.age_seconds)}
-                            </td>
-                            <td style={{ fontSize: 'var(--text-caption)' }}>{completeness}</td>
-                            <td>{oc.has_data && oc.row_count != null ? oc.row_count : '—'}</td>
-                            <td style={{ fontSize: 'var(--text-caption)' }}>
-                              {oc.has_data && oc.distinct_expirations != null && oc.distinct_strikes != null
-                                ? `${oc.distinct_expirations} / ${oc.distinct_strikes}`
-                                : '—'}
-                            </td>
-                            <td>{oc.has_data && oc.mapping_mismatch_count != null ? oc.mapping_mismatch_count : '—'}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                <details className="replay-section" style={{ marginTop: 'var(--space-3)' }}>
-                  <summary style={{ cursor: 'pointer', fontWeight: 600, marginBottom: 'var(--space-2)' }}>
-                    Snapshots &amp; ATM IV
-                  </summary>
-                  <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
-                    option_snapshots and report_option_atm_iv_daily — same data as before, without extra API calls.
-                  </p>
-                  <div className="feed-massive-table-wrap">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th scope="col">Symbol</th>
-                          <th scope="col">option_snapshots</th>
-                          <th scope="col">report ATM IV</th>
-                          <th scope="col">Data OK</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {wlRows.map(r => {
-                          const st = r.option_snapshots.snapshots_last_ts
-                          const stale = snapshotStale(st)
-                          const ok = coverageScore(r)
-                          return (
-                            <tr key={r.symbol}>
-                              <th scope="row"><strong>{r.symbol}</strong></th>
-                              <td
-                                style={{
-                                  fontSize: 'var(--text-caption)',
-                                  color: stale ? '#fbbf24' : undefined,
-                                }}
-                                title={stale ? 'Snapshot older than 24h' : undefined}
-                              >
-                                {r.option_snapshots.has_data ? fmtTs(r.option_snapshots.snapshots_last_ts) : '—'}
-                              </td>
-                              <td style={{ fontSize: 'var(--text-caption)' }}>
-                                {r.report_option_atm_iv_daily.has_data
-                                  ? `${fmtTs(r.report_option_atm_iv_daily.atm_iv_last_trade_date)} / ${fmtTs(r.report_option_atm_iv_daily.atm_iv_last_created_at)}`
-                                  : '—'}
-                              </td>
-                              <td>{ok}/4</td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </details>
-              </>
+              <DataOverviewWatchlistOptions
+                wlRows={wlRows}
+                subTab={wlOptionsSubTab}
+                onSubTabChange={setWlOptionsSubTab}
+                onWatchlistRefreshRequested={loadAll}
+                refGapBySymbol={refGapBySymbol}
+                onCompareMassiveReference={handleCompareMassiveReference}
+                refGapLoading={refGapLoading}
+                refGapError={refGapError}
+                comparePool={comparePool}
+                onToggleComparePool={toggleComparePool}
+                onSelectAllComparePool={selectAllComparePool}
+                onClearComparePool={clearComparePool}
+                jobsSheetOpen={optionJobsSheetOpen}
+                onJobsSheetOpenChange={setOptionJobsSheetOpen}
+              />
             ) : (
               <div className="feed-massive-table-wrap">
                 <table className="data-table">
@@ -328,11 +471,116 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
         ) : null}
       </section>
 
+      {/* Job queues, Beat schedule, recent jobs */}
+      <section className="replay-section" aria-labelledby="data-overview-pipeline-head" style={{ marginBottom: 'var(--space-4)' }}>
+        <h3 id="data-overview-pipeline-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
+          Massive job queues and schedule
+          <InfoTooltip text="Queue counts come from job_massive_backfill (Ops API). Scheduled tasks list Celery Beat entries in UTC; actual execution requires Celery Beat and workers. Full job tables: Option Coverage and Massive Stock pages." />
+        </h3>
+        {jobsSummaryError ? (
+          <p className="status-page-msg err" role="alert">{jobsSummaryError}</p>
+        ) : null}
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 'var(--space-3)',
+            marginBottom: 'var(--space-3)',
+          }}
+        >
+          <div
+            className="replay-section"
+            style={{ flex: '1 1 260px', margin: 0, padding: 'var(--space-3)' }}
+          >
+            <h4 className="mp-chart-subtitle" style={{ marginTop: 0 }}>Massive options queue</h4>
+            <p style={{ fontSize: 'var(--text-caption)', marginBottom: 'var(--space-2)' }}>{queueSummaryLine(jobsOpt)}</p>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => openDetail(COVERAGE_OPTION_SUBSECTION.id)}
+            >
+              Open job details — Options
+            </button>
+          </div>
+          <div
+            className="replay-section"
+            style={{ flex: '1 1 260px', margin: 0, padding: 'var(--space-3)' }}
+          >
+            <h4 className="mp-chart-subtitle" style={{ marginTop: 0 }}>Massive stocks queue</h4>
+            <p style={{ fontSize: 'var(--text-caption)', marginBottom: 'var(--space-2)' }}>{queueSummaryLine(jobsStock)}</p>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => openDetail(FEED_MASSIVE_STOCK_ID)}
+            >
+              Open job details — Stock
+            </button>
+          </div>
+        </div>
+
+        {beatError ? <p className="status-page-msg err" role="alert">{beatError}</p> : null}
+        {!beatError && beatEntries.length > 0 ? (
+          <div className="feed-massive-table-wrap" style={{ marginBottom: 'var(--space-3)' }}>
+            <h4 className="mp-chart-subtitle">Scheduled tasks (Celery Beat, UTC)</h4>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Label</th>
+                  <th scope="col">Schedule</th>
+                  <th scope="col">Task</th>
+                </tr>
+              </thead>
+              <tbody>
+                {beatEntries.map(e => (
+                  <tr key={e.name}>
+                    <td><code>{e.name}</code></td>
+                    <td>{e.label}</td>
+                    <td style={{ fontSize: 'var(--text-caption)' }}>{fmtCrontabUtc(e.crontab)}</td>
+                    <td style={{ fontSize: 'var(--text-caption)' }}><code>{e.task}</code></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)' }}>
+              Execution depends on Celery Beat and workers consuming the massive / massive_stocks queues.
+            </p>
+          </div>
+        ) : null}
+
+        {jobsListError ? <p className="status-page-msg err" role="alert">{jobsListError}</p> : null}
+        {!jobsListError && recentJobs.length > 0 ? (
+          <div className="feed-massive-table-wrap">
+            <h4 className="mp-chart-subtitle">Recent jobs (newest first)</h4>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Job ID</th>
+                  <th scope="col">Kind</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentJobs.map(j => (
+                  <tr key={j.job_id}>
+                    <td><code>{j.job_id}</code></td>
+                    <td>{j.kind ?? '—'}</td>
+                    <td>{j.status ?? '—'}</td>
+                    <td style={{ fontSize: 'var(--text-caption)' }}>{fmtJobTs(j.created_ts)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </section>
+
       {/* Global summary */}
       <section className="replay-section" aria-labelledby="data-overview-summary-head">
         <h3 id="data-overview-summary-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-          Global PostgreSQL coverage
-          <InfoTooltip text="Distinct symbols use normalized upper-case tickers. option_snapshots uses the underlying segment of contract_key (SYM|OPT|…)." />
+          Global PostgreSQL coverage (Massive)
+          <InfoTooltip text="Whole-database aggregates for Massive source rows. Option contracts count symbols with massive_option_ticker set. Distinct symbols use normalized tickers; option_snapshots counts the underlying segment of contract_key." />
         </h3>
 
         {globalError ? <p className="status-page-msg err" role="alert">{globalError}</p> : null}
@@ -352,6 +600,7 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
                 <th scope="col">Distinct symbols</th>
                 <th scope="col">Newest row / activity</th>
                 <th scope="col">Trade / bar date</th>
+                <th scope="col">Freshness</th>
                 <th scope="col">Detail</th>
               </tr>
             </thead>
@@ -364,6 +613,7 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
                   <td>{row.error ? '—' : (row.distinct_symbols ?? '—')}</td>
                   <td style={{ fontSize: 'var(--text-caption)' }}>{row.error ? row.error : (row.newest_activity ?? '—')}</td>
                   <td style={{ fontSize: 'var(--text-caption)' }}>{row.newest_trade_date ?? '—'}</td>
+                  <td style={{ fontSize: 'var(--text-caption)' }}>{globalRowFreshness(row)}</td>
                   <td>
                     <button
                       type="button"

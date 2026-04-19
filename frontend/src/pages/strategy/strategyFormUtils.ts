@@ -7,6 +7,7 @@ import type {
   OpportunityPayload,
   StrategyOpportunity,
   EntryConditionItem,
+  MetaParamItem,
 } from '../../api'
 import { fmtTs } from '../../utils/format'
 
@@ -166,18 +167,43 @@ export function opportunityToPayload(row: StrategyOpportunity): OpportunityPaylo
   }
 }
 
+/** Map API `metadata` (from strategy_structure_meta rows) to edit payload `meta` entries. */
+function metadataToMetaEntries(metadata: StrategyStructure['metadata']): StructureMetaEntry[] {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return []
+  return Object.entries(metadata).map(([meta_key, v]) => ({
+    meta_key,
+    meta_value_text: v != null && typeof v !== 'object' ? String(v) : null,
+  }))
+}
+
+/**
+ * Editable wizard param values from saved structure meta + template param definitions.
+ */
+export function wizardParamValuesFromSavedMeta(
+  meta: StructureMetaEntry[] | undefined,
+  metaParams: MetaParamItem[] | undefined
+): Record<string, string | number> {
+  const byKey = new Map(
+    (meta ?? []).filter((m) => m.meta_key).map((m) => [m.meta_key, m.meta_value_text])
+  )
+  const out: Record<string, string | number> = {}
+  for (const mp of metaParams ?? []) {
+    if (mp.param_kind === 'fixed') continue
+    const raw = byKey.get(mp.meta_key)
+    if (raw == null || raw === '') continue
+    const s = String(raw).trim()
+    const n = Number(s)
+    out[mp.meta_key] = s !== '' && Number.isFinite(n) ? n : String(raw)
+  }
+  return out
+}
+
 export function structureToPayload(row: StrategyStructure): StructurePayload {
   const legs: StructureLeg[] = Array.isArray(row.legs) ? (row.legs as StructureLeg[]) : []
   const constraints: StructureConstraint[] = Array.isArray(row.constraints)
     ? (row.constraints as StructureConstraint[])
     : []
-  const meta: StructureMetaEntry[] =
-    row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
-      ? Object.entries(row.metadata).map(([meta_key, meta_value_text]) => ({
-          meta_key,
-          meta_value_text: meta_value_text as string | null,
-        }))
-      : []
+  const meta = metadataToMetaEntries(row.metadata)
   const structure_type = row.structure_type ?? 'custom'
   const structure_subtype =
     structure_type === 'covered_call' && row.structure_subtype != null && row.structure_subtype !== ''

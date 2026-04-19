@@ -272,25 +272,20 @@ class PgSampler:
                     cur.execute(
                         """
                         INSERT INTO option_snapshots (
-                            contract_key, snapshot_ts, last, bid, ask, mid,
-                            iv, delta, gamma, theta, vega, open_interest, underlying_price,
+                            contract_key, snapshot_ts,
+                            iv, delta, gamma, theta, vega, open_interest,
                             source, created_at
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'massive_ws', now())
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'massive_ws', now())
                         """,
                         (
                             contract_key,
                             datetime.fromtimestamp(data.get("t", now) / 1000 if data.get("t", 0) > 1e12 else data.get("t", now), tz=timezone.utc),
-                            data.get("last") or data.get("c"),
-                            data.get("bid") or data.get("bp"),
-                            data.get("ask") or data.get("ap"),
-                            _mid(data),
                             data.get("iv"),
                             data.get("delta"),
                             data.get("gamma"),
                             data.get("theta"),
                             data.get("vega"),
                             data.get("oi"),
-                            data.get("underlying_price"),
                         ),
                     )
                 conn.commit()
@@ -301,17 +296,6 @@ class PgSampler:
         except Exception as e:
             logger.debug("PG sample write failed for %s: %s", contract_key, e)
             return False
-
-
-def _mid(d: dict) -> Optional[float]:
-    bid = d.get("bid") or d.get("bp")
-    ask = d.get("ask") or d.get("ap")
-    if bid is not None and ask is not None:
-        try:
-            return (float(bid) + float(ask)) / 2.0
-        except (TypeError, ValueError):
-            pass
-    return d.get("last") or d.get("c")
 
 
 # ─── Main ingest loop ────────────────────────────────────────────────────────

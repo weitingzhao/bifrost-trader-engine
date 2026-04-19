@@ -315,10 +315,10 @@ interface DerivedMetrics {
 }
 
 /**
- * Mark price for decomposition: stored mid, else (bid+ask)/2, else last trade,
- * else Massive `day.close` when live quotes are absent.
+ * Mark for decomposition: API `mark` (Massive PG: day_close), else IB mid / NBBO / last / day close.
  */
 function effectiveQuotePremium(row: OptionSnapshotRow): number | null {
+  if (row.mark != null && Number.isFinite(row.mark) && row.mark >= 0) return row.mark
   const { bid, ask, mid, last, day_close: dayClose } = row
   if (mid != null && Number.isFinite(mid) && mid >= 0) return mid
   if (bid != null && ask != null && Number.isFinite(bid) && Number.isFinite(ask)) return (bid + ask) / 2
@@ -2384,7 +2384,7 @@ export function OptionDiscoveryPage({
                 <div className="od-card-section">
                   <div className="od-card-section-title od-card-section-title--with-hint">
                     Price
-                    <InfoTooltip text="Bid and ask require live NBBO (last_quote) when your data plan includes it. Mid uses stored mid, else mark (mid / bid-ask midpoint / last / day close). Last prefers last trade; without last_trade the worker may store day close as last. Underlying price for decomposition uses snapshot underlying_price or stock day fallback." />
+                    <InfoTooltip text="Massive PG snapshots omit NBBO and last trade at this tier. Mark uses chain day bar (day.close). IB path may still show bid/ask/last. Underlying spot for decomposition uses stock_day daily close when available." />
                   </div>
                   <div className="od-kv-grid">
                     {selectedRow.snapshot_ts && (
@@ -2484,8 +2484,15 @@ export function OptionDiscoveryPage({
             const lastTradeAge = lastTradeTs != null ? (Date.now() / 1000) - lastTradeTs : null
             const tradability = computeTradabilityScore(selectedRow, snapshotRows, lastTradeAge, liquidityQuoteCount)
             const spreadRows = snapshotRows
-              .filter(r => r.right === selectedRow.right && r.bid != null && r.ask != null && r.mid != null && r.mid! > 0)
-              .map(r => ((r.ask! - r.bid!) / r.mid!) * 100)
+              .filter(r => {
+                if (r.right !== selectedRow.right) return false
+                const m = effectiveQuotePremium(r)
+                return r.bid != null && r.ask != null && m != null && m > 0
+              })
+              .map(r => {
+                const m = effectiveQuotePremium(r)!
+                return ((r.ask! - r.bid!) / m) * 100
+              })
               .sort((a, b) => a - b)
             const curSpreadPct = selectedDerived?.spreadPct
             let spreadPercentile: number | null = null

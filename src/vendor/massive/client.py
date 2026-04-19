@@ -95,6 +95,30 @@ def contract_key_from_parts(
     return f"{sym}|OPT|{exp}|{sk}|{r}"
 
 
+def contract_key_from_reference_result(
+    underlying: str, row: Dict[str, Any]
+) -> Optional[str]:
+    """Build ``option_contracts.contract_key`` from a Polygon ``/v3/reference/options/contracts`` result row."""
+    u = (underlying or "").strip().upper()
+    if not u or not isinstance(row, dict):
+        return None
+    exp = row.get("expiration_date") or row.get("expiration") or ""
+    if not exp:
+        return None
+    ed = _norm_expiry(str(exp)[:10])
+    if len(ed) != 8 or not ed.isdigit():
+        return None
+    sp = row.get("strike_price")
+    if sp is None:
+        return None
+    try:
+        strike = float(sp)
+    except (TypeError, ValueError):
+        return None
+    ort = _right_from_contract_type(str(row.get("contract_type") or "call"))
+    return contract_key_from_parts(u, ed, strike, ort)
+
+
 class MassiveClient:
     """Minimal Polygon v3 options REST wrapper."""
 
@@ -138,6 +162,204 @@ class MassiveClient:
         except URLError as e:
             logger.warning("MassiveClient _get URLError: %s", e)
             return 0, {"error": str(e)}
+
+    def _get_json_from_next_url(self, next_url: str) -> Tuple[int, Any]:
+        """Follow Polygon next_url; append apiKey when missing. Returns (http_status, parsed_json)."""
+        url = next_url
+        if "apiKey=" not in url and "apikey=" not in url.lower():
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}apiKey={self._api_key}"
+        req = Request(url, headers={"Accept": "application/json"}, method="GET")
+        try:
+            with urlopen(req, timeout=60, context=self._ssl) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+                status = getattr(resp, "status", 200) or 200
+                try:
+                    return int(status), json.loads(body)
+                except json.JSONDecodeError:
+                    return int(status), {"raw": body[:500]}
+        except HTTPError as e:
+            try:
+                body = e.read().decode("utf-8", errors="replace")
+                return e.code, json.loads(body)
+            except Exception:
+                return e.code, {"error": str(e)}
+        except URLError as e:
+            logger.warning("MassiveClient _get_json_from_next_url URLError: %s", e)
+            return 0, {"error": str(e)}
+
+    def count_option_contracts_list_paginated(
+        self,
+        underlying: str,
+        *,
+        expiration_date: Optional[str] = None,
+        max_pages: int = 20,
+        limit: int = 250,
+    ) -> Dict[str, Any]:
+        """Paginate GET /v3/reference/options/contracts and sum len(results) per page.
+
+        When *expiration_date* is set, only that expiry is counted (server-side filter).
+        Returns ``count``, ``truncated`` (True if stopped early due to max_pages), and optional ``error``.
+        """
+        underlying = (underlying or "").strip().upper()
+        if not underlying or not self._api_key:
+            return {"count": 0, "truncated": False, "error": "symbol or api key missing"}
+        path = "/v3/reference/options/contracts"
+        params: Dict[str, Any] = {
+            "underlying_ticker": underlying,
+            "limit": min(int(limit), 250),
+        }
+        poly_exp = _expiry_to_polygon_date(expiration_date or "")
+        if poly_exp:
+            params["expiration_date"] = poly_exp
+        total = 0
+        next_url: Optional[str] = None
+        pages = 0
+        truncated = False
+        while True:
+            if pages >= max_pages:
+                if next_url:
+                    truncated = True
+                break
+            pages += 1
+            if next_url:
+                status, data = self._get_json_from_next_url(next_url)
+            else:
+                status, data = self._get(path, params)
+            if status >= 400:
+                err = data.get("error", data) if isinstance(data, dict) else str(data)
+                return {"count": total, "truncated": truncated, "error": _as_error_str(err)}
+            if not isinstance(data, dict):
+                return {"count": total, "truncated": truncated, "error": "invalid response"}
+            poly_err = _polygon_body_error_message(data, status)
+            if poly_err:
+                return {"count": total, "truncated": truncated, "error": poly_err}
+            results = data.get("results")
+            if not isinstance(results, list):
+                break
+            total += len(results)
+            next_url = data.get("next_url") if isinstance(data, dict) else None
+            if not next_url:
+                break
+        return {"count": total, "truncated": truncated, "error": None}
+
+    def collect_option_contract_keys_paginated(
+        self,
+        underlying: str,
+        *,
+        expiration_date: Optional[str],
+        max_pages: int = 20,
+        limit: int = 250,
+    ) -> Dict[str, Any]:
+        """Paginate GET /v3/reference/options/contracts; return each result row count and derived ``contract_key`` list.
+
+        Used to compare PostgreSQL ``option_contracts.contract_key`` only within the API-returned universe for that
+        expiry (rows in DB that are not returned by the reference list are excluded from the comparable PG count).
+        """
+        underlying = (underlying or "").strip().upper()
+        if not underlying or not self._api_key:
+            return {"count": 0, "keys": [], "truncated": False, "error": "symbol or api key missing"}
+        path = "/v3/reference/options/contracts"
+        params: Dict[str, Any] = {
+            "underlying_ticker": underlying,
+            "limit": min(int(limit), 250),
+        }
+        poly_exp = _expiry_to_polygon_date(expiration_date or "")
+        if poly_exp:
+            params["expiration_date"] = poly_exp
+        keys: List[str] = []
+        total = 0
+        next_url: Optional[str] = None
+        pages = 0
+        truncated = False
+        while True:
+            if pages >= max_pages:
+                if next_url:
+                    truncated = True
+                break
+            pages += 1
+            if next_url:
+                status, data = self._get_json_from_next_url(next_url)
+            else:
+                status, data = self._get(path, params)
+            if status >= 400:
+                err = data.get("error", data) if isinstance(data, dict) else str(data)
+                return {"count": total, "keys": keys, "truncated": truncated, "error": _as_error_str(err)}
+            if not isinstance(data, dict):
+                return {"count": total, "keys": keys, "truncated": truncated, "error": "invalid response"}
+            poly_err = _polygon_body_error_message(data, status)
+            if poly_err:
+                return {"count": total, "keys": keys, "truncated": truncated, "error": poly_err}
+            results = data.get("results")
+            if not isinstance(results, list):
+                break
+            for row in results:
+                total += 1
+                if isinstance(row, dict):
+                    ck = contract_key_from_reference_result(underlying, row)
+                    if ck:
+                        keys.append(ck)
+            next_url = data.get("next_url") if isinstance(data, dict) else None
+            if not next_url:
+                break
+        return {"count": total, "keys": keys, "truncated": truncated, "error": None}
+
+    def collect_option_contract_reference_rows_paginated(
+        self,
+        underlying: str,
+        *,
+        expiration_date: Optional[str],
+        max_pages: int = 20,
+        limit: int = 250,
+    ) -> Dict[str, Any]:
+        """Paginate GET /v3/reference/options/contracts; return rows with contract_key for PG/API column parity."""
+        underlying = (underlying or "").strip().upper()
+        if not underlying or not self._api_key:
+            return {"count": 0, "rows": [], "truncated": False, "error": "symbol or api key missing"}
+        path = "/v3/reference/options/contracts"
+        params: Dict[str, Any] = {
+            "underlying_ticker": underlying,
+            "limit": min(int(limit), 250),
+        }
+        poly_exp = _expiry_to_polygon_date(expiration_date or "")
+        if poly_exp:
+            params["expiration_date"] = poly_exp
+        out_rows: List[Dict[str, Any]] = []
+        total = 0
+        next_url: Optional[str] = None
+        pages = 0
+        truncated = False
+        while True:
+            if pages >= max_pages:
+                if next_url:
+                    truncated = True
+                break
+            pages += 1
+            if next_url:
+                status, data = self._get_json_from_next_url(next_url)
+            else:
+                status, data = self._get(path, params)
+            if status >= 400:
+                err = data.get("error", data) if isinstance(data, dict) else str(data)
+                return {"count": total, "rows": out_rows, "truncated": truncated, "error": _as_error_str(err)}
+            if not isinstance(data, dict):
+                return {"count": total, "rows": out_rows, "truncated": truncated, "error": "invalid response"}
+            poly_err = _polygon_body_error_message(data, status)
+            if poly_err:
+                return {"count": total, "rows": out_rows, "truncated": truncated, "error": poly_err}
+            results = data.get("results")
+            if not isinstance(results, list):
+                break
+            for row in results:
+                total += 1
+                if isinstance(row, dict):
+                    ck = contract_key_from_reference_result(underlying, row)
+                    if ck:
+                        out_rows.append({"contract_key": ck, "result": row})
+            next_url = data.get("next_url") if isinstance(data, dict) else None
+            if not next_url:
+                break
+        return {"count": total, "rows": out_rows, "truncated": truncated, "error": None}
 
     def fetch_expirations_and_strikes(
         self,

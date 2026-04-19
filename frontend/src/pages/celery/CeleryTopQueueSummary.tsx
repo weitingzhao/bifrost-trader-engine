@@ -434,7 +434,7 @@ export function CeleryTopQueueSummary({
                         <div className="dashboard-celery-top-queue-summary-action-icons">
                           <button
                             type="button"
-                            className="celery-queue-icon-btn celery-queue-icon-btn--delete"
+                            className="celery-queue-icon-btn celery-queue-icon-btn--delete-done"
                             title="Delete all rows with status done for this queue (PostgreSQL)"
                             aria-label="Clear done jobs for this queue"
                             disabled={

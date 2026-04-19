@@ -536,8 +536,8 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
                     <table className="data-table">
                       <thead>
                         <tr>
-                          <th scope="col">Strike</th><th scope="col">Right</th><th scope="col">Bid</th>
-                          <th scope="col">Ask</th><th scope="col">Last</th><th scope="col">Mid</th>
+                          <th scope="col">Strike</th><th scope="col">Right</th><th scope="col">Mark</th>
+                          <th scope="col">Day close</th>
                           <th scope="col">IV</th><th scope="col">Delta</th><th scope="col">Gamma</th>
                           <th scope="col">Theta</th><th scope="col">Vega</th><th scope="col">OI</th>
                         </tr>
@@ -547,10 +547,14 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
                           <tr key={`${row.strike}-${row.right}-${i}`}>
                             <td>{row.strike}</td>
                             <td>{row.right}</td>
-                            <td>{row.bid ?? '\u2014'}</td>
-                            <td>{row.ask ?? '\u2014'}</td>
-                            <td>{row.last ?? '\u2014'}</td>
-                            <td>{row.mid ?? '\u2014'}</td>
+                            <td>
+                              {row.mark != null && Number.isFinite(row.mark) ? row.mark.toFixed(2) : '\u2014'}
+                            </td>
+                            <td>
+                              {row.day_close != null && Number.isFinite(row.day_close)
+                                ? row.day_close.toFixed(2)
+                                : '\u2014'}
+                            </td>
                             <td>{row.iv != null && Number.isFinite(row.iv) ? row.iv.toFixed(4) : '\u2014'}</td>
                             <td>{row.delta != null && Number.isFinite(row.delta) ? row.delta.toFixed(4) : '\u2014'}</td>
                             <td>{row.gamma != null && Number.isFinite(row.gamma) ? row.gamma.toFixed(6) : '\u2014'}</td>

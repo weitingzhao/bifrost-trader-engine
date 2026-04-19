@@ -9,7 +9,7 @@ import sys
 import time
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from zoneinfo import ZoneInfo
 
 _here = Path(__file__).resolve().parent
@@ -559,29 +559,8 @@ def _apply_snapshot(
             iv = g.get("iv")
             if iv is None:
                 iv = item.get("implied_volatility")
-            lq = item.get("last_quote") if isinstance(item.get("last_quote"), dict) else {}
-            lt = item.get("last_trade") if isinstance(item.get("last_trade"), dict) else {}
-            bid = lq.get("bid") or lq.get("p")
-            ask = lq.get("ask") or lq.get("P")
-            last = lt.get("price")
-            if last is None and isinstance(lt.get("last"), (int, float)):
-                last = lt.get("last")
 
             day = item.get("day") if isinstance(item.get("day"), dict) else {}
-            day_close = _f_or_none(day.get("close"))
-            if last is None and day_close is not None:
-                last = day_close
-
-            mid: Optional[float] = None
-            if bid is not None and ask is not None:
-                try:
-                    mid = (float(bid) + float(ask)) / 2.0
-                except (TypeError, ValueError):
-                    mid = _f_or_none(last)
-            elif last is not None:
-                mid = _f_or_none(last)
-            elif day_close is not None:
-                mid = day_close
 
             oi = item.get("open_interest")
             if oi is not None:
@@ -590,7 +569,6 @@ def _apply_snapshot(
                 except (TypeError, ValueError):
                     oi = None
             ua = item.get("underlying_asset") if isinstance(item.get("underlying_asset"), dict) else {}
-            up = ua.get("price")
             underlying_ticker = (ua.get("ticker") or "").strip() or None
             ts = _parse_snapshot_ts(item)
 
@@ -606,6 +584,7 @@ def _apply_snapshot(
             day_ou = _f_or_none(day.get("open"))
             day_hi = _f_or_none(day.get("high"))
             day_lo = _f_or_none(day.get("low"))
+            day_close = _f_or_none(day.get("close"))
             day_pc = _f_or_none(day.get("previous_close"))
             day_ch = _f_or_none(day.get("change"))
             day_chp = _f_or_none(day.get("change_percent"))
@@ -617,10 +596,6 @@ def _apply_snapshot(
                     day_vol = None
             day_vw = _f_or_none(day.get("vwap"))
             day_lu = _ns_to_datetime(day.get("last_updated"))
-
-            be = _f_or_none(item.get("break_even_price"))
-            fmv = _f_or_none(item.get("fmv"))
-            fmv_lu = _ns_to_datetime(item.get("fmv_last_updated"))
 
             cur.execute(
                 """
@@ -639,34 +614,29 @@ def _apply_snapshot(
             cur.execute(
                 """
                 INSERT INTO option_snapshots (
-                  contract_key, snapshot_ts, last, bid, ask, mid,
-                  iv, delta, gamma, theta, vega, open_interest, underlying_price,
+                  contract_key, snapshot_ts,
+                  iv, delta, gamma, theta, vega, open_interest,
                   underlying_ticker,
                   day_open, day_high, day_low, day_close,
                   day_previous_close, day_change, day_change_percent,
                   day_volume, day_vwap, day_last_updated,
-                  break_even_price, fmv, fmv_last_updated,
                   source, created_at
                 )
                 VALUES (
-                  %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                  %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'massive', now()
+                  %s, %s, %s, %s, %s, %s, %s, %s,
+                  %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                  'massive', now()
                 )
                 """,
                 (
                     ck,
                     ts,
-                    _f_or_none(last),
-                    _f_or_none(bid),
-                    _f_or_none(ask),
-                    mid,
                     _f_or_none(iv),
                     _f_or_none(g.get("delta")),
                     _f_or_none(g.get("gamma")),
                     _f_or_none(g.get("theta")),
                     _f_or_none(g.get("vega")),
                     oi,
-                    _f_or_none(up),
                     underlying_ticker,
                     day_ou,
                     day_hi,
@@ -678,9 +648,6 @@ def _apply_snapshot(
                     day_vol,
                     day_vw,
                     day_lu,
-                    be,
-                    fmv,
-                    fmv_lu,
                 ),
             )
             n += 1
@@ -1707,6 +1674,159 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                             "shares_per_contract": res_obj.get("shares_per_contract"),
                         },
                         "content": res_obj,
+                    }
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
+                if mode == "reference_upsert":
+                    u = (payload.get("underlying") or payload.get("symbol") or "").strip().upper()
+                    if not u:
+                        raise ValueError("payload.underlying required")
+                    from src.vendor.massive.reader import refresh_expirations_from_massive_api
+
+                    exp_raw = payload.get("expiration_date")
+                    exp_opt = str(exp_raw).strip() if exp_raw not in (None, "") else None
+                    out = refresh_expirations_from_massive_api(
+                        status_cfg, config, u, expiration_date=exp_opt, skip_persist=False
+                    )
+                    if out.get("error"):
+                        raise RuntimeError(str(out["error"]))
+                    rs = int(out.get("rows_upserted") or 0)
+                    expi = out.get("expirations")
+                    expi_out = expi[:80] if isinstance(expi, list) else expi
+                    result = {
+                        "ok": True,
+                        "kind": kind,
+                        "mode": "reference_upsert",
+                        "summary": {
+                            "underlying": u,
+                            "endpoint": "GET /v3/reference/options/contracts (paginated; rows upserted to option_contracts)",
+                            "rows_upserted": rs,
+                            "expirations_returned": len(expi) if isinstance(expi, list) else 0,
+                        },
+                        "content": {
+                            "expirations": expi_out,
+                            "massive_debug": out.get("massive_debug"),
+                        },
+                    }
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
+                if mode == "nullable_column_backfill":
+                    u = (payload.get("underlying") or payload.get("symbol") or "").strip().upper()
+                    if not u:
+                        raise ValueError("payload.underlying required")
+                    col_one = (payload.get("column") or "").strip().lower()
+                    raw_cols = payload.get("columns")
+                    want: Set[str] = set()
+                    if isinstance(raw_cols, list) and raw_cols:
+                        for c in raw_cols:
+                            s = str(c).strip().lower()
+                            if s in ("exercise_style", "shares_per_contract"):
+                                want.add(s)
+                    elif col_one in ("exercise_style", "shares_per_contract"):
+                        want.add(col_one)
+                    elif col_one in ("both", "nullable", "optional", ""):
+                        want.update(["exercise_style", "shares_per_contract"])
+                    else:
+                        want.update(["exercise_style", "shares_per_contract"])
+                    if not want:
+                        raise ValueError(
+                            "payload.column or payload.columns must list exercise_style and/or shares_per_contract",
+                        )
+                    try:
+                        max_c_i = int(payload.get("max_contracts") or 2000)
+                    except (TypeError, ValueError):
+                        max_c_i = 2000
+                    max_c_i = max(1, min(max_c_i, 10000))
+                    need_ex = "exercise_style" in want
+                    need_sh = "shares_per_contract" in want
+                    or_parts: List[str] = []
+                    if need_ex:
+                        or_parts.append("(exercise_style IS NULL OR TRIM(exercise_style) = '')")
+                    if need_sh:
+                        or_parts.append("shares_per_contract IS NULL")
+                    where_fill = " OR ".join(or_parts) if or_parts else "FALSE"
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            f"""
+                            SELECT contract_key, massive_option_ticker
+                            FROM option_contracts
+                            WHERE UPPER(TRIM(symbol::text)) = %s
+                              AND massive_option_ticker IS NOT NULL
+                              AND TRIM(massive_option_ticker::text) <> ''
+                              AND ({where_fill})
+                            ORDER BY contract_key
+                            LIMIT %s
+                            """,
+                            (u, max_c_i),
+                        )
+                        rows_bf = cur.fetchall()
+                    n_api = 0
+                    upd_ex = 0
+                    upd_sh = 0
+                    err_sample: List[str] = []
+                    for crow in rows_bf:
+                        ck = crow[0]
+                        ot = (crow[1] or "").strip()
+                        if not ck or not ot:
+                            continue
+                        _rest_throttle()
+                        n_api += 1
+                        data = client.fetch_option_contract_detail(ot)
+                        if data.get("error"):
+                            if len(err_sample) < 15:
+                                err_sample.append(f"{ot}: {data.get('error')}")
+                            continue
+                        res_obj = data.get("results") if isinstance(data.get("results"), dict) else {}
+                        with conn.cursor() as cur:
+                            if need_ex:
+                                ex_raw = res_obj.get("exercise_style")
+                                exv = (str(ex_raw).strip() if ex_raw is not None else "") or None
+                                if exv:
+                                    cur.execute(
+                                        """
+                                        UPDATE option_contracts
+                                        SET exercise_style = %s
+                                        WHERE contract_key = %s
+                                          AND (exercise_style IS NULL OR TRIM(exercise_style) = '')
+                                        """,
+                                        (exv, ck),
+                                    )
+                                    upd_ex += int(cur.rowcount)
+                            if need_sh:
+                                spc = res_obj.get("shares_per_contract")
+                                shares_i: Optional[int] = None
+                                if spc is not None:
+                                    try:
+                                        shares_i = int(spc)
+                                    except (TypeError, ValueError):
+                                        shares_i = None
+                                if shares_i is not None:
+                                    cur.execute(
+                                        """
+                                        UPDATE option_contracts
+                                        SET shares_per_contract = %s
+                                        WHERE contract_key = %s
+                                          AND shares_per_contract IS NULL
+                                        """,
+                                        (shares_i, ck),
+                                    )
+                                    upd_sh += int(cur.rowcount)
+                        conn.commit()
+                    result = {
+                        "ok": True,
+                        "kind": kind,
+                        "mode": "nullable_column_backfill",
+                        "summary": {
+                            "underlying": u,
+                            "columns": sorted(want),
+                            "candidates_queried": len(rows_bf),
+                            "detail_api_calls": n_api,
+                            "rows_updated_exercise_style": upd_ex,
+                            "rows_updated_shares_per_contract": upd_sh,
+                            "errors_sample": err_sample,
+                        },
                     }
                     update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                     return result

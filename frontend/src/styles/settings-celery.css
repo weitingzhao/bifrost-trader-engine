@@ -1474,55 +1474,87 @@ button.dashboard-queue-summary-status-console-nav:focus-visible {
   transform-origin: 50% 50%;
 }
 
-/* Delete done — wastebasket (distinct from failed purge icon) */
+/*
+ * Bulk-delete toolbar icons — hues match job status badges (App.css .feed-massive-badge--*):
+ * done → --color-success, running/staging → --color-accent, failed → --color-danger
+ */
 .celery-queue-icon-btn--delete-done {
-  border: 1px solid color-mix(in srgb, var(--color-danger) 55%, var(--color-border));
+  border: 1px solid color-mix(in srgb, var(--color-success) 50%, var(--color-border));
   background: linear-gradient(
     165deg,
-    color-mix(in srgb, var(--color-danger) 90%, #fff) 0%,
-    var(--color-danger) 52%,
-    color-mix(in srgb, var(--color-danger) 90%, #1a0505) 100%
+    color-mix(in srgb, var(--color-success) 82%, #fff) 0%,
+    var(--color-success) 48%,
+    color-mix(in srgb, var(--color-success) 72%, #052e14) 100%
   );
-  color: #fff;
+  color: #f0fdf4;
   box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.18) inset,
-    0 2px 8px color-mix(in srgb, var(--color-danger) 32%, transparent);
+    0 1px 0 rgba(255, 255, 255, 0.2) inset,
+    0 2px 8px color-mix(in srgb, var(--color-success) 30%, transparent);
 }
 .celery-queue-icon-btn--delete-done:hover {
   filter: brightness(1.05);
   box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.2) inset,
-    0 3px 12px color-mix(in srgb, var(--color-danger) 40%, transparent);
+    0 1px 0 rgba(255, 255, 255, 0.22) inset,
+    0 3px 12px color-mix(in srgb, var(--color-success) 38%, transparent);
 }
 .celery-queue-icon-btn--delete-done:active {
   filter: brightness(0.97);
 }
 
-/* Delete failed — circle + X, amber/warning tone vs red trash */
-.celery-queue-icon-btn--delete-failed {
-  border: 1px solid color-mix(in srgb, #c2410c 50%, var(--color-border));
+/* Running / staging — same accent as .feed-massive-badge--run */
+.celery-queue-icon-btn--delete-running {
+  border: 1px solid color-mix(in srgb, var(--color-accent) 42%, var(--color-border));
   background: linear-gradient(
     165deg,
-    color-mix(in srgb, #ea580c 88%, #fff) 0%,
-    #c2410c 52%,
-    color-mix(in srgb, #9a3412 95%, #1a0a00) 100%
+    color-mix(in srgb, var(--color-accent) 78%, #fff) 0%,
+    var(--color-accent) 45%,
+    color-mix(in srgb, var(--color-accent) 55%, #0c1118) 100%
   );
-  color: #fff8f0;
+  color: #0a0f14;
   box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.16) inset,
-    0 2px 8px color-mix(in srgb, #c2410c 35%, transparent);
+    0 1px 0 rgba(255, 255, 255, 0.28) inset,
+    0 2px 8px color-mix(in srgb, var(--color-accent) 28%, transparent);
 }
-.celery-queue-icon-btn--delete-failed:hover {
+.celery-queue-icon-btn--delete-running:hover {
   filter: brightness(1.06);
   box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.3) inset,
+    0 3px 12px color-mix(in srgb, var(--color-accent) 36%, transparent);
+}
+.celery-queue-icon-btn--delete-running:active {
+  filter: brightness(0.97);
+}
+
+/* Dark: lime accent — dark glyph; light: sky accent — light glyph */
+[data-theme="light"] .celery-queue-icon-btn--delete-running {
+  color: #f8fafc;
+}
+
+/* Failed — same as .feed-massive-badge--fail */
+.celery-queue-icon-btn--delete-failed {
+  border: 1px solid color-mix(in srgb, var(--color-danger) 50%, var(--color-border));
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--color-danger) 85%, #fff) 0%,
+    var(--color-danger) 50%,
+    color-mix(in srgb, var(--color-danger) 78%, #1a0505) 100%
+  );
+  color: #fff5f5;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.18) inset,
+    0 2px 8px color-mix(in srgb, var(--color-danger) 32%, transparent);
+}
+.celery-queue-icon-btn--delete-failed:hover {
+  filter: brightness(1.05);
+  box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.2) inset,
-    0 3px 12px color-mix(in srgb, #c2410c 42%, transparent);
+    0 3px 12px color-mix(in srgb, var(--color-danger) 40%, transparent);
 }
 .celery-queue-icon-btn--delete-failed:active {
   filter: brightness(0.97);
 }
 
-/* Legacy alias — top queue summary / older markup */
+/* Generic destructive clear (e.g. log console) — not tied to job status */
 .celery-queue-icon-btn--delete {
   border: 1px solid color-mix(in srgb, var(--color-danger) 55%, var(--color-border));
   background: linear-gradient(

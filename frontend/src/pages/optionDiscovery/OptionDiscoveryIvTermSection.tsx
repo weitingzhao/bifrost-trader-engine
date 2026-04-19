@@ -78,7 +78,7 @@ function IvDataQualityIcon({ tier }: { tier: IvDataQuality }) {
 }
 
 const TOOLTIP_SAMPLES_VS_REQ = (actual: number, req: number) =>
-  `Expected: at least ${req} calendar days in the lookback window where a daily ATM IV can be computed from PostgreSQL option_snapshots (near-ATM strikes for this expiration, valid IV, and underlying_price that day). Actual: ${actual}. To satisfy: keep ingesting chain snapshots (Massive backfill or Load quotes in section 4) so rows accumulate across days; a wider historical strike grid helps when spot moves. The orange cone line uses option_snapshots_latest and does not require this count.`
+  `Expected: at least ${req} calendar days in the lookback window where a daily ATM IV can be computed from historical snapshots (near-ATM strikes, valid IV, underlying spot from stock_day Massive bars aligned to option day_last_updated). Actual: ${actual}. To satisfy: keep ingesting chain snapshots and stock_day so rows accumulate; a wider strike grid helps when spot moves. The orange cone line uses option_snapshots_latest and does not require this count.`
 
 const TOOLTIP_BAND_CELLS_NA = (actual: number, req: number) =>
   `P10–P90 / Min / Max are hidden until daily samples reach ${req} (currently ${actual}). See Samples (act. / req.) column.`

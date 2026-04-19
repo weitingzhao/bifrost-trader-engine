@@ -324,6 +324,9 @@ def get_massive_contracts_coverage(
                         count(CASE WHEN massive_option_ticker IS NOT NULL
                                     AND massive_option_ticker != ''
                                     AND contract_key NOT LIKE '%%' || symbol || '%%' THEN 1 END) AS mapping_mismatch,
+                        count(CASE WHEN exercise_style IS NOT NULL AND trim(exercise_style) <> ''
+                                    THEN 1 END) AS with_exercise_style,
+                        count(CASE WHEN shares_per_contract IS NOT NULL THEN 1 END) AS with_shares_per_contract,
                         min(created_at) AS oldest_ts,
                         max(created_at) AS newest_ts,
                         count(CASE WHEN created_at < now() - interval '7 days' THEN 1 END) AS stale_rows,
@@ -341,8 +344,14 @@ def get_massive_contracts_coverage(
                         "total": 0, "coverage": {}, "freshness": {},
                     }
                 (total, w_ticker, w_identity, mismatch,
+                 w_ex_style, w_spc,
                  oldest, newest, stale, dist_exp, dist_strikes) = row
                 pct = lambda n: round(n / total * 100, 1) if total else 0  # noqa: E731
+                data_avg = (
+                    round((int(w_ex_style or 0) + int(w_spc or 0)) / (2.0 * int(total)) * 100, 1)
+                    if total
+                    else 0.0
+                )
                 return {
                     "ok": True, "symbol": sym, "expiration": exp_norm or "",
                     "total": total,
@@ -352,6 +361,11 @@ def get_massive_contracts_coverage(
                         "with_complete_identity": w_identity,
                         "identity_pct": pct(w_identity),
                         "mapping_mismatch": mismatch,
+                        "with_exercise_style": w_ex_style,
+                        "exercise_style_pct": pct(w_ex_style),
+                        "with_shares_per_contract": w_spc,
+                        "shares_per_contract_pct": pct(w_spc),
+                        "optional_data_fill_avg_pct": data_avg,
                         "distinct_expirations": dist_exp,
                         "distinct_strikes": dist_strikes,
                     },
@@ -462,7 +476,7 @@ def get_db_coverage_summary(request: Request) -> Dict[str, Any]:
                     tables,
                     id_="option_contracts",
                     table_name="option_contracts",
-                    dataset_label="Option contract reference",
+                    dataset_label="Option contract reference (Massive ticker)",
                     domain="Option",
                     drill_down_hash="coverage-option",
                     cur=cur,
@@ -471,13 +485,15 @@ def get_db_coverage_summary(request: Request) -> Dict[str, Any]:
                                MAX(created_at),
                                NULL::date
                         FROM option_contracts
+                        WHERE massive_option_ticker IS NOT NULL
+                          AND TRIM(COALESCE(massive_option_ticker, '')) <> ''
                         """,
                 )
                 _append_table(
                     tables,
                     id_="option_snapshots",
                     table_name="option_snapshots",
-                    dataset_label="Option snapshots (greeks / IV)",
+                    dataset_label="Option snapshots (greeks / IV) (Massive)",
                     domain="Option",
                     drill_down_hash="coverage-option",
                     cur=cur,
@@ -486,14 +502,15 @@ def get_db_coverage_summary(request: Request) -> Dict[str, Any]:
                                MAX(snapshot_ts),
                                NULL::date
                         FROM option_snapshots
-                        WHERE position('|' IN contract_key) > 0
+                        WHERE source = 'massive'
+                          AND position('|' IN contract_key) > 0
                         """,
                 )
                 _append_table(
                     tables,
                     id_="report_option_atm_iv_daily",
                     table_name="report_option_atm_iv_daily",
-                    dataset_label="ATM IV daily rollup",
+                    dataset_label="ATM IV daily rollup (Massive)",
                     domain="Option",
                     drill_down_hash="coverage-option",
                     cur=cur,
@@ -502,13 +519,14 @@ def get_db_coverage_summary(request: Request) -> Dict[str, Any]:
                                MAX(created_at),
                                MAX(trade_date)
                         FROM report_option_atm_iv_daily
+                        WHERE source = 'massive'
                         """,
                 )
                 _append_table(
                     tables,
                     id_="stock_day",
                     table_name="stock_day",
-                    dataset_label="Stock daily bars (underlying spot)",
+                    dataset_label="Stock daily bars (underlying spot) (Massive)",
                     domain="Shared",
                     drill_down_hash="coverage-massive-stock",
                     cur=cur,
@@ -517,6 +535,7 @@ def get_db_coverage_summary(request: Request) -> Dict[str, Any]:
                                MAX(created_at),
                                MAX(bar_time)
                         FROM stock_day
+                        WHERE source = 'massive'
                         """,
                 )
         finally:
@@ -526,9 +545,18 @@ def get_db_coverage_summary(request: Request) -> Dict[str, Any]:
 
     return {
         "ok": True,
+        "source_scope": "massive",
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "tables": tables,
     }
+
+
+@router.get("/research/massive/celery-beat-schedule")
+def get_massive_celery_beat_schedule() -> Dict[str, Any]:
+    """Celery Beat entries for Massive tasks (UTC). Does not require Celery broker to be up."""
+    from src.massive.beat_schedule_public import public_celery_beat_schedule_response
+
+    return public_celery_beat_schedule_response()
 
 
 @router.get("/research/massive/watchlist-db-coverage")
@@ -573,6 +601,7 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
     if not syms:
         return {
             "ok": True,
+            "source_scope": "massive",
             "generated_at": generated_at,
             "universe": "watchlist_optionable_stk",
             "symbols_count": 0,
@@ -584,6 +613,12 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
     snapshots_map: Dict[str, Optional[datetime]] = {}
     atm_map: Dict[str, tuple] = {}  # sym -> (max trade_date, max created_at)
     stock_map: Dict[str, tuple] = {}  # sym -> (max bar_time, max created_at)
+    option_day_map: Dict[str, tuple] = {}  # sym -> (row_count, max bar_time, max created_at)
+    option_min_map: Dict[str, tuple] = {}
+    suv_day_map: Dict[str, tuple] = {}  # option_snapshots_with_underlying_day: (count, max snapshot_ts, max created_at)
+    oec_map: Dict[str, tuple] = {}  # option_expiration_cache: (count, max updated_at)
+    oi_daily_map: Dict[str, tuple] = {}  # option_open_interest_daily: (count, max trade_date, max created_at)
+    max_pain_map: Dict[str, tuple] = {}  # report_option_max_pain_daily: (count, max trade_date, max created_at)
 
     try:
         params = _get_conn_params(db)
@@ -602,6 +637,9 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                         COUNT(CASE WHEN massive_option_ticker IS NOT NULL
                                     AND massive_option_ticker != ''
                                     AND contract_key NOT LIKE '%%' || symbol || '%%' THEN 1 END) AS mapping_mismatch,
+                        COUNT(CASE WHEN exercise_style IS NOT NULL AND trim(exercise_style) <> ''
+                                    THEN 1 END) AS with_exercise_style,
+                        COUNT(CASE WHEN shares_per_contract IS NOT NULL THEN 1 END) AS with_shares_per_contract,
                         COUNT(DISTINCT expiry)::bigint AS distinct_expirations,
                         COUNT(DISTINCT strike)::bigint AS distinct_strikes
                     FROM option_contracts
@@ -619,9 +657,15 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                     w_ticker = int(row[3] or 0)
                     w_identity = int(row[4] or 0)
                     mismatch = int(row[5] or 0)
-                    dist_exp = int(row[6] or 0)
-                    dist_strikes = int(row[7] or 0)
+                    w_ex_style = int(row[6] or 0)
+                    w_spc = int(row[7] or 0)
+                    dist_exp = int(row[8] or 0)
+                    dist_strikes = int(row[9] or 0)
                     pct = lambda n: round(n / total * 100, 1) if total else 0.0  # noqa: E731
+                    # Average fill across nullable *data* columns (exercise_style, shares_per_contract), not ticker/identity.
+                    data_avg = (
+                        round((w_ex_style + w_spc) / (2.0 * total) * 100, 1) if total else 0.0
+                    )
                     contracts_map[u] = {
                         "row_count": total,
                         "newest_created_at": _iso(newest_ts),
@@ -629,6 +673,9 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                         "ticker_pct": pct(w_ticker),
                         "identity_pct": pct(w_identity),
                         "mapping_mismatch_count": mismatch,
+                        "exercise_style_pct": pct(w_ex_style),
+                        "shares_per_contract_pct": pct(w_spc),
+                        "optional_data_fill_avg_pct": data_avg,
                         "distinct_expirations": dist_exp,
                         "distinct_strikes": dist_strikes,
                     }
@@ -637,7 +684,8 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                     """
                     SELECT UPPER(TRIM(SPLIT_PART(contract_key, '|', 1))) AS u, MAX(snapshot_ts)
                     FROM option_snapshots
-                    WHERE POSITION('|' IN contract_key) > 0
+                    WHERE source = 'massive'
+                      AND POSITION('|' IN contract_key) > 0
                       AND UPPER(TRIM(SPLIT_PART(contract_key, '|', 1))) = ANY(%s)
                     GROUP BY UPPER(TRIM(SPLIT_PART(contract_key, '|', 1)))
                     """,
@@ -651,7 +699,8 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                     """
                     SELECT UPPER(TRIM(symbol)) AS u, MAX(trade_date), MAX(created_at)
                     FROM report_option_atm_iv_daily
-                    WHERE UPPER(TRIM(symbol)) = ANY(%s)
+                    WHERE source = 'massive'
+                      AND UPPER(TRIM(symbol)) = ANY(%s)
                     GROUP BY UPPER(TRIM(symbol))
                     """,
                     (syms,),
@@ -664,7 +713,8 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                     """
                     SELECT UPPER(TRIM(symbol)) AS u, MAX(bar_time), MAX(created_at)
                     FROM stock_day
-                    WHERE UPPER(TRIM(symbol)) = ANY(%s)
+                    WHERE source = 'massive'
+                      AND UPPER(TRIM(symbol)) = ANY(%s)
                     GROUP BY UPPER(TRIM(symbol))
                     """,
                     (syms,),
@@ -672,6 +722,90 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                 for row in cur.fetchall() or []:
                     if row and row[0]:
                         stock_map[str(row[0]).strip().upper()] = (row[1], row[2])
+
+                cur.execute(
+                    """
+                    SELECT UPPER(TRIM(symbol)) AS u, COUNT(*)::bigint, MAX(bar_time), MAX(created_at)
+                    FROM option_day
+                    WHERE source = 'massive'
+                      AND UPPER(TRIM(symbol)) = ANY(%s)
+                    GROUP BY UPPER(TRIM(symbol))
+                    """,
+                    (syms,),
+                )
+                for row in cur.fetchall() or []:
+                    if row and row[0]:
+                        option_day_map[str(row[0]).strip().upper()] = (int(row[1] or 0), row[2], row[3])
+
+                cur.execute(
+                    """
+                    SELECT UPPER(TRIM(symbol)) AS u, COUNT(*)::bigint, MAX(bar_time), MAX(created_at)
+                    FROM option_min
+                    WHERE source = 'massive'
+                      AND UPPER(TRIM(symbol)) = ANY(%s)
+                    GROUP BY UPPER(TRIM(symbol))
+                    """,
+                    (syms,),
+                )
+                for row in cur.fetchall() or []:
+                    if row and row[0]:
+                        option_min_map[str(row[0]).strip().upper()] = (int(row[1] or 0), row[2], row[3])
+
+                cur.execute(
+                    """
+                    SELECT UPPER(TRIM(underlying_ticker)) AS u, COUNT(*)::bigint, MAX(snapshot_ts), MAX(created_at)
+                    FROM option_snapshots_with_underlying_day
+                    WHERE source = 'massive'
+                      AND UPPER(TRIM(underlying_ticker)) = ANY(%s)
+                    GROUP BY UPPER(TRIM(underlying_ticker))
+                    """,
+                    (syms,),
+                )
+                for row in cur.fetchall() or []:
+                    if row and row[0]:
+                        suv_day_map[str(row[0]).strip().upper()] = (int(row[1] or 0), row[2], row[3])
+
+                cur.execute(
+                    """
+                    SELECT UPPER(TRIM(symbol)) AS u, COUNT(*)::bigint, MAX(updated_at)
+                    FROM option_expiration_cache
+                    WHERE source = 'massive'
+                      AND UPPER(TRIM(symbol)) = ANY(%s)
+                    GROUP BY UPPER(TRIM(symbol))
+                    """,
+                    (syms,),
+                )
+                for row in cur.fetchall() or []:
+                    if row and row[0]:
+                        oec_map[str(row[0]).strip().upper()] = (int(row[1] or 0), row[2])
+
+                cur.execute(
+                    """
+                    SELECT UPPER(TRIM(symbol)) AS u, COUNT(*)::bigint, MAX(trade_date), MAX(created_at)
+                    FROM option_open_interest_daily
+                    WHERE source = 'massive'
+                      AND UPPER(TRIM(symbol)) = ANY(%s)
+                    GROUP BY UPPER(TRIM(symbol))
+                    """,
+                    (syms,),
+                )
+                for row in cur.fetchall() or []:
+                    if row and row[0]:
+                        oi_daily_map[str(row[0]).strip().upper()] = (int(row[1] or 0), row[2], row[3])
+
+                cur.execute(
+                    """
+                    SELECT UPPER(TRIM(symbol)) AS u, COUNT(*)::bigint, MAX(trade_date), MAX(created_at)
+                    FROM report_option_max_pain_daily
+                    WHERE source = 'massive'
+                      AND UPPER(TRIM(symbol)) = ANY(%s)
+                    GROUP BY UPPER(TRIM(symbol))
+                    """,
+                    (syms,),
+                )
+                for row in cur.fetchall() or []:
+                    if row and row[0]:
+                        max_pain_map[str(row[0]).strip().upper()] = (int(row[1] or 0), row[2], row[3])
         finally:
             conn.close()
     except Exception as exc:
@@ -683,6 +817,12 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
         sn = snapshots_map.get(sym)
         atm = atm_map.get(sym)
         sd = stock_map.get(sym)
+        od = option_day_map.get(sym)
+        om = option_min_map.get(sym)
+        suv = suv_day_map.get(sym)
+        oec = oec_map.get(sym)
+        oid = oi_daily_map.get(sym)
+        rmp = max_pain_map.get(sym)
         if ca:
             oc_payload = {
                 "has_data": True,
@@ -692,6 +832,9 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                 "ticker_pct": ca["ticker_pct"],
                 "identity_pct": ca["identity_pct"],
                 "mapping_mismatch_count": ca["mapping_mismatch_count"],
+                "exercise_style_pct": ca["exercise_style_pct"],
+                "shares_per_contract_pct": ca["shares_per_contract_pct"],
+                "optional_data_fill_avg_pct": ca["optional_data_fill_avg_pct"],
                 "distinct_expirations": ca["distinct_expirations"],
                 "distinct_strikes": ca["distinct_strikes"],
                 "contracts_last_at": ca["newest_created_at"],
@@ -705,6 +848,9 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                 "ticker_pct": None,
                 "identity_pct": None,
                 "mapping_mismatch_count": None,
+                "exercise_style_pct": None,
+                "shares_per_contract_pct": None,
+                "optional_data_fill_avg_pct": None,
                 "distinct_expirations": None,
                 "distinct_strikes": None,
                 "contracts_last_at": None,
@@ -727,16 +873,260 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                     "stock_day_last_bar": _iso(sd[0]) if sd else None,
                     "stock_day_last_created_at": _iso(sd[1]) if sd else None,
                 },
+                "option_day": {
+                    "has_data": od is not None,
+                    "row_count": int(od[0]) if od else None,
+                    "last_bar_time": _iso(od[1]) if od else None,
+                    "last_created_at": _iso(od[2]) if od else None,
+                },
+                "option_min": {
+                    "has_data": om is not None,
+                    "row_count": int(om[0]) if om else None,
+                    "last_bar_time": _iso(om[1]) if om else None,
+                    "last_created_at": _iso(om[2]) if om else None,
+                },
+                "option_snapshots_with_underlying_day": {
+                    "has_data": suv is not None,
+                    "row_count": int(suv[0]) if suv else None,
+                    "last_snapshot_ts": _iso(suv[1]) if suv else None,
+                    "last_created_at": _iso(suv[2]) if suv else None,
+                },
+                "option_expiration_cache": {
+                    "has_data": oec is not None,
+                    "row_count": int(oec[0]) if oec else None,
+                    "last_updated_at": _iso(oec[1]) if oec else None,
+                },
+                "option_open_interest_daily": {
+                    "has_data": oid is not None,
+                    "row_count": int(oid[0]) if oid else None,
+                    "last_trade_date": _iso(oid[1]) if oid else None,
+                    "last_created_at": _iso(oid[2]) if oid else None,
+                },
+                "report_option_max_pain_daily": {
+                    "has_data": rmp is not None,
+                    "row_count": int(rmp[0]) if rmp else None,
+                    "last_trade_date": _iso(rmp[1]) if rmp else None,
+                    "last_created_at": _iso(rmp[2]) if rmp else None,
+                },
             }
         )
 
     return {
         "ok": True,
+        "source_scope": "massive",
         "generated_at": generated_at,
         "universe": "watchlist_optionable_stk",
         "symbols_count": len(out_symbols),
         "symbols": out_symbols,
     }
+
+
+@router.get("/research/massive/option-contracts-reference-gap")
+def get_option_contracts_reference_gap(
+    request: Request,
+    symbol: str = Query(..., description="Underlying symbol"),
+) -> Dict[str, Any]:
+    """Compare option_contracts row counts per expiry to Massive GET /v3/reference/options/contracts (paginated)."""
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.vendor.massive.client import MassiveClient
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.contracts_reference_gap import compute_option_contracts_reference_gap
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured"}
+
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"ok": False, "error": "symbol is required"}
+
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    try:
+        params = _get_conn_params(db)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                return compute_option_contracts_reference_gap(cur, client, sym)
+        finally:
+            conn.close()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@router.post("/research/massive/option-contracts-reference-gap/batch")
+def post_option_contracts_reference_gap_batch(
+    request: Request,
+    payload: Dict[str, Any] = Body(...),
+) -> Dict[str, Any]:
+    """Batch compare (max 10 symbols). Reuses one DB connection; small delay between symbols for API pacing."""
+    import time
+
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.vendor.massive.client import MassiveClient
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.contracts_reference_gap import compute_option_contracts_reference_gap
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured"}
+
+    raw = payload.get("symbols") if isinstance(payload, dict) else None
+    if not isinstance(raw, list):
+        return {"ok": False, "error": "payload.symbols must be a non-empty array"}
+    syms: List[str] = []
+    seen: set = set()
+    for x in raw:
+        u = (str(x) or "").strip().upper()
+        if u and u not in seen:
+            seen.add(u)
+            syms.append(u)
+    if not syms:
+        return {"ok": False, "error": "payload.symbols must be a non-empty array"}
+    if len(syms) > 10:
+        return {"ok": False, "error": "At most 10 symbols per batch"}
+
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    results: Dict[str, Any] = {}
+    try:
+        params = _get_conn_params(db)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                for i, s in enumerate(syms):
+                    if i > 0:
+                        time.sleep(0.05)
+                    try:
+                        results[s] = compute_option_contracts_reference_gap(cur, client, s)
+                    except Exception as exc:  # noqa: BLE001
+                        results[s] = {"ok": False, "symbol": s, "error": str(exc)}
+        finally:
+            conn.close()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+    return {"ok": True, "results": results}
+
+
+@router.get("/research/massive/option-contracts-reference-column-parity")
+def get_option_contracts_reference_column_parity(
+    request: Request,
+    symbol: str = Query(..., description="Underlying symbol"),
+) -> Dict[str, Any]:
+    """L2: compare reference API contract fields to PostgreSQL option_contracts rows (ref-owned columns only)."""
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.vendor.massive.client import MassiveClient
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.contracts_reference_column_parity import (
+        compute_option_contracts_reference_column_parity,
+    )
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured"}
+
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"ok": False, "error": "symbol is required"}
+
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    try:
+        params = _get_conn_params(db)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                return compute_option_contracts_reference_column_parity(cur, client, sym)
+        finally:
+            conn.close()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@router.post("/research/massive/option-contracts-reference-column-parity/batch")
+def post_option_contracts_reference_column_parity_batch(
+    request: Request,
+    payload: Dict[str, Any] = Body(...),
+) -> Dict[str, Any]:
+    """Batch L2 column parity (max 10 symbols)."""
+    import time
+
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.vendor.massive.client import MassiveClient
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.contracts_reference_column_parity import (
+        compute_option_contracts_reference_column_parity,
+    )
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured"}
+
+    raw = payload.get("symbols") if isinstance(payload, dict) else None
+    if not isinstance(raw, list):
+        return {"ok": False, "error": "payload.symbols must be a non-empty array"}
+    syms: List[str] = []
+    seen: set = set()
+    for x in raw:
+        u = (str(x) or "").strip().upper()
+        if u and u not in seen:
+            seen.add(u)
+            syms.append(u)
+    if not syms:
+        return {"ok": False, "error": "payload.symbols must be a non-empty array"}
+    if len(syms) > 10:
+        return {"ok": False, "error": "At most 10 symbols per batch"}
+
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    results: Dict[str, Any] = {}
+    try:
+        params = _get_conn_params(db)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                for i, s in enumerate(syms):
+                    if i > 0:
+                        time.sleep(0.05)
+                    try:
+                        results[s] = compute_option_contracts_reference_column_parity(cur, client, s)
+                    except Exception as exc:  # noqa: BLE001
+                        results[s] = {"ok": False, "symbol": s, "error": str(exc)}
+        finally:
+            conn.close()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+    return {"ok": True, "results": results}
 
 
 # ── Market Ops (REST-only, read-only) ────────────────────────────────────────

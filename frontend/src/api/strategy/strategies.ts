@@ -32,6 +32,7 @@ export interface StrategyStructure {
   /** Present when fetched by id (from child tables). */
   legs?: StructureLeg[]
   constraints?: StructureConstraint[]
+  /** Key-value map assembled from strategy_structure_meta when fetched by id. */
   metadata?: Record<string, unknown>
 }
 
@@ -59,7 +60,7 @@ export interface StructureMetaEntry {
 export interface StructurePayload {
   name: string
   strategy_template_id?: number
-  /** Legacy: resolved to template when strategy_template_id omitted. */
+  /** Used to resolve template server-side when strategy_template_id is omitted. */
   structure_type?: string
   structure_subtype?: string | null
   legs: StructureLeg[]

@@ -110,6 +110,28 @@ function CeleryQueueDeleteFailedIcon({ size = CELERY_QUEUE_ICON_PX }: { size?: n
   )
 }
 
+/** Circle + activity bars (running rows purge). */
+function CeleryQueueDeleteRunningIcon({ size = CELERY_QUEUE_ICON_PX }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={CELERY_QUEUE_ICON_STROKE}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="9" />
+      <line x1="8" x2="8" y1="15" y2="11" />
+      <line x1="12" x2="12" y1="15" y2="8" />
+      <line x1="16" x2="16" y1="15" y2="10" />
+    </svg>
+  )
+}
+
 function CeleryQueueRefreshIcon({ size = CELERY_QUEUE_ICON_PX }: { size?: number }) {
   return (
     <svg
@@ -354,6 +376,33 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
     })
   }
 
+  const openDeleteRunning = () => {
+    if (!activeTab) return
+    setConfirm({
+      title:
+        activeTab.pipeline === 'bars'
+          ? 'Delete running bars backfill jobs'
+          : `Delete running Massive jobs (queue “${activeTab.celeryQueue}”)`,
+      message:
+        'This will permanently delete all rows with status running in this queue slice. A worker may still be executing a task; this only removes PostgreSQL rows and cannot be undone.',
+      confirming: false,
+      action: async () => {
+        if (activeTab.pipeline === 'massive') {
+          const r = await deleteAllMassiveJobs('running', activeTab.celeryQueue)
+          if (!r.ok) throw new Error(r.error ?? 'Delete failed')
+          setActionMsg({ text: `Deleted ${r.deleted} job(s).`, isErr: false })
+          await loadMassiveQueue(activeTab.celeryQueue)
+        } else {
+          const r = await deleteAllBarsJobs('running')
+          if (!r.ok) throw new Error(r.error ?? 'Delete failed')
+          setActionMsg({ text: `Deleted ${r.deleted} job(s).`, isErr: false })
+          await loadBarsQueue()
+        }
+        void onJobCountsChanged?.()
+      },
+    })
+  }
+
   const openDeleteFailed = () => {
     if (!activeTab) return
     setConfirm({
@@ -433,7 +482,7 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
       <div className="celery-queues-header">
         <h3 id="celery-queues-head" className="page-title-with-tooltip" style={{ margin: 0 }}>
           Queues
-          <InfoTooltip text="Queue summary (above main tabs) shows all queues. Tabs follow ops.worker_profiles (GET /ops/workers/profiles). Each tab lists PostgreSQL jobs for that Celery queue: bars → job_bars_backfill; Massive* → job_massive_backfill filtered by routing. Delete done (trash icon) and Delete failed (circle with X) remove only those statuses in the active queue slice; trim applies to row age by ID." />
+          <InfoTooltip text="Queue summary (above main tabs) shows all queues. Tabs follow ops.worker_profiles (GET /ops/workers/profiles). Each tab lists PostgreSQL jobs for that Celery queue: bars → job_bars_backfill; Massive* → job_massive_backfill filtered by routing. Delete done (trash), Delete running (circle with bars), and Delete failed (circle with X) remove only those statuses in the active queue slice; trim applies to row age by ID." />
         </h3>
       </div>
 
@@ -522,6 +571,15 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
           aria-label="Delete all jobs with status done in this queue slice"
         >
           <CeleryQueueTrashIcon />
+        </button>
+        <button
+          type="button"
+          className="celery-queue-icon-btn celery-queue-icon-btn--delete-running"
+          onClick={openDeleteRunning}
+          title="Delete all jobs with status running in this queue slice"
+          aria-label="Delete all jobs with status running in this queue slice"
+        >
+          <CeleryQueueDeleteRunningIcon />
         </button>
         <button
           type="button"

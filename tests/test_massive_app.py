@@ -104,6 +104,18 @@ class TestMassiveHealth:
         assert body.get("ok") is False
         assert "PostgreSQL" in str(body.get("error", ""))
 
+    def test_celery_beat_schedule_ok(self):
+        client = _make_client()
+        r = client.get("/research/massive/celery-beat-schedule")
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is True
+        assert body.get("timezone") == "UTC"
+        entries = body.get("entries") or []
+        assert len(entries) >= 1
+        first = entries[0]
+        assert "name" in first and "task" in first and "label" in first and "crontab" in first
+
     def test_watchlist_db_coverage_requires_postgres(self):
         client = _make_client()
         r = client.get("/research/massive/watchlist-db-coverage")
@@ -121,10 +133,16 @@ class TestMassiveHealth:
         newest = datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
         cur = MagicMock()
         cur.fetchall.side_effect = [
-            [("NVDA", 100, newest, 90, 80, 2, 4, 12)],
+            [("NVDA", 100, newest, 90, 80, 2, 50, 45, 4, 12)],
             [("NVDA", newest)],
             [("NVDA", newest.date(), newest)],
             [("NVDA", newest, newest)],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
         ]
         cursor_cm = MagicMock()
         cursor_cm.__enter__.return_value = cur
@@ -138,6 +156,7 @@ class TestMassiveHealth:
         assert r.status_code == 200
         body = r.json()
         assert body.get("ok") is True
+        assert body.get("source_scope") == "massive"
         syms = body.get("symbols") or []
         assert len(syms) == 1
         oc = syms[0]["option_contracts"]
@@ -146,11 +165,177 @@ class TestMassiveHealth:
         assert oc["ticker_pct"] == 90.0
         assert oc["identity_pct"] == 80.0
         assert oc["mapping_mismatch_count"] == 2
+        assert oc["exercise_style_pct"] == 50.0
+        assert oc["shares_per_contract_pct"] == 45.0
+        assert oc["optional_data_fill_avg_pct"] == 47.5
         assert oc["distinct_expirations"] == 4
         assert oc["distinct_strikes"] == 12
         assert oc["newest_created_at"] is not None
         assert oc["contracts_last_at"] == oc["newest_created_at"]
         assert isinstance(oc.get("age_seconds"), int)
+        row0 = syms[0]
+        assert row0.get("option_day", {}).get("has_data") is False
+        assert row0.get("report_option_max_pain_daily", {}).get("has_data") is False
+
+    @patch("src.vendor.massive.contracts_reference_gap.compute_option_contracts_reference_gap")
+    @patch("psycopg2.connect")
+    @patch("backend.massive.routers.routes._db_config", return_value={"host": "h", "database": "d"})
+    def test_option_contracts_reference_gap_get_ok(self, _mock_db, mock_connect, mock_compute):
+        mock_compute.return_value = {
+            "ok": True,
+            "symbol": "NVDA",
+            "has_rows": True,
+            "db_row_count": 10,
+            "pg_total": 10,
+            "massive_total": 12,
+            "gap": 2,
+            "coverage_pct": 83.3,
+            "compared_at": "2026-01-01T00:00:00Z",
+            "expiries": [],
+            "truncated": False,
+            "expiries_truncated": False,
+        }
+        cur = MagicMock()
+        cursor_cm = MagicMock()
+        cursor_cm.__enter__.return_value = cur
+        cursor_cm.__exit__.return_value = None
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor_cm
+        mock_connect.return_value = mock_conn
+
+        client = _make_client(reader_config={"massive": {"api_key": "test-key"}})
+        r = client.get("/research/massive/option-contracts-reference-gap?symbol=NVDA")
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is True
+        assert body.get("symbol") == "NVDA"
+        assert body.get("gap") == 2
+        mock_compute.assert_called_once()
+
+    @patch("src.vendor.massive.contracts_reference_gap.compute_option_contracts_reference_gap")
+    @patch("psycopg2.connect")
+    @patch("backend.massive.routers.routes._db_config", return_value={"host": "h", "database": "d"})
+    def test_option_contracts_reference_gap_batch_ok(self, _mock_db, mock_connect, mock_compute):
+        mock_compute.side_effect = [
+            {"ok": True, "symbol": "NVDA", "has_rows": True, "pg_total": 1, "massive_total": 1, "gap": 0},
+            {"ok": True, "symbol": "AAPL", "has_rows": True, "pg_total": 2, "massive_total": 3, "gap": 1},
+        ]
+        cur = MagicMock()
+        cursor_cm = MagicMock()
+        cursor_cm.__enter__.return_value = cur
+        cursor_cm.__exit__.return_value = None
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor_cm
+        mock_connect.return_value = mock_conn
+
+        client = _make_client(reader_config={"massive": {"api_key": "test-key"}})
+        r = client.post(
+            "/research/massive/option-contracts-reference-gap/batch",
+            json={"symbols": ["NVDA", "AAPL"]},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is True
+        res = body.get("results") or {}
+        assert res.get("NVDA", {}).get("gap") == 0
+        assert res.get("AAPL", {}).get("gap") == 1
+        assert mock_compute.call_count == 2
+
+    def test_option_contracts_reference_gap_requires_postgres(self):
+        client = _make_client()
+        r = client.get("/research/massive/option-contracts-reference-gap?symbol=NVDA")
+        assert r.status_code == 200
+        assert r.json().get("ok") is False
+        assert "PostgreSQL" in str(r.json().get("error", ""))
+
+    @patch("src.vendor.massive.config.get_massive_settings")
+    @patch("backend.massive.routers.routes._db_config", return_value={"host": "h", "database": "d"})
+    def test_option_contracts_reference_gap_requires_api_key(self, _mock_db, mock_ms):
+        mock_ms.return_value = {
+            "api_key": "",
+            "rest_base": "https://api.polygon.io",
+            "tier": "starter",
+            "ws_url": "wss://x",
+            "trades_enabled": False,
+            "daily_full_backfill_years": 5.0,
+        }
+        client = _make_client()
+        r = client.get("/research/massive/option-contracts-reference-gap?symbol=NVDA")
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is False
+        assert "API key" in str(body.get("error", ""))
+
+    @patch("src.vendor.massive.contracts_reference_column_parity.compute_option_contracts_reference_column_parity")
+    @patch("psycopg2.connect")
+    @patch("backend.massive.routers.routes._db_config", return_value={"host": "h", "database": "d"})
+    def test_option_contracts_reference_column_parity_get_ok(self, _mock_db, mock_connect, mock_compute):
+        mock_compute.return_value = {
+            "ok": True,
+            "symbol": "NVDA",
+            "has_rows": True,
+            "db_row_count": 10,
+            "api_rows_compared": 10,
+            "pg_rows_missing": 0,
+            "value_mismatch_rows": 0,
+            "field_mismatches": {},
+            "truncated": False,
+            "expiries_truncated": False,
+            "sample_mismatches": [],
+            "compared_at": "2026-01-01T00:00:00Z",
+        }
+        cur = MagicMock()
+        cursor_cm = MagicMock()
+        cursor_cm.__enter__.return_value = cur
+        cursor_cm.__exit__.return_value = None
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor_cm
+        mock_connect.return_value = mock_conn
+
+        client = _make_client(reader_config={"massive": {"api_key": "test-key"}})
+        r = client.get("/research/massive/option-contracts-reference-column-parity?symbol=NVDA")
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is True
+        assert body.get("api_rows_compared") == 10
+        assert body.get("value_mismatch_rows") == 0
+        mock_compute.assert_called_once()
+
+    @patch("src.vendor.massive.contracts_reference_column_parity.compute_option_contracts_reference_column_parity")
+    @patch("psycopg2.connect")
+    @patch("backend.massive.routers.routes._db_config", return_value={"host": "h", "database": "d"})
+    def test_option_contracts_reference_column_parity_batch_ok(self, _mock_db, mock_connect, mock_compute):
+        mock_compute.side_effect = [
+            {"ok": True, "symbol": "NVDA", "value_mismatch_rows": 0},
+            {"ok": True, "symbol": "AAPL", "value_mismatch_rows": 1},
+        ]
+        cur = MagicMock()
+        cursor_cm = MagicMock()
+        cursor_cm.__enter__.return_value = cur
+        cursor_cm.__exit__.return_value = None
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor_cm
+        mock_connect.return_value = mock_conn
+
+        client = _make_client(reader_config={"massive": {"api_key": "test-key"}})
+        r = client.post(
+            "/research/massive/option-contracts-reference-column-parity/batch",
+            json={"symbols": ["NVDA", "AAPL"]},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is True
+        res = body.get("results") or {}
+        assert res.get("NVDA", {}).get("value_mismatch_rows") == 0
+        assert res.get("AAPL", {}).get("value_mismatch_rows") == 1
+        assert mock_compute.call_count == 2
+
+    def test_option_contracts_reference_column_parity_requires_postgres(self):
+        client = _make_client()
+        r = client.get("/research/massive/option-contracts-reference-column-parity?symbol=NVDA")
+        assert r.status_code == 200
+        assert r.json().get("ok") is False
+        assert "PostgreSQL" in str(r.json().get("error", ""))
 
 
 class TestMassiveDocs:

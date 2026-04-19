@@ -46,31 +46,7 @@ MAX_OPTION_SNAPSHOT_CONTRACTS_EXTENDED = 60  # when frontend sends many strikes 
 
 
 def _mark_from_snapshot_row(row: Dict[str, Any]) -> Optional[float]:
-    """Display premium: mid, else (bid+ask)/2, else last, else day_close (matches UI effectiveQuotePremium)."""
-    mid = row.get("mid")
-    if mid is not None:
-        try:
-            m = float(mid)
-            if math.isfinite(m) and m >= 0:
-                return m
-        except (TypeError, ValueError):
-            pass
-    bid, ask = row.get("bid"), row.get("ask")
-    if bid is not None and ask is not None:
-        try:
-            b, a = float(bid), float(ask)
-            if math.isfinite(b) and math.isfinite(a):
-                return (b + a) / 2.0
-        except (TypeError, ValueError):
-            pass
-    last = row.get("last")
-    if last is not None:
-        try:
-            l = float(last)
-            if math.isfinite(l) and l >= 0:
-                return l
-        except (TypeError, ValueError):
-            pass
+    """Option mark from Massive chain day aggregate (day_close). NBBO/last are not persisted at current tier."""
     day_close = row.get("day_close")
     if day_close is not None:
         try:
@@ -512,10 +488,6 @@ def get_option_snapshots_pg(
                 "right": right,
                 "snapshot_ts": _snapshot_ts_iso(row),
                 "mark": _mark_from_snapshot_row(row),
-                "bid": row.get("bid"),
-                "ask": row.get("ask"),
-                "last": row.get("last"),
-                "mid": row.get("mid"),
                 "iv": row.get("iv"),
                 "delta": row.get("delta"),
                 "gamma": row.get("gamma"),
@@ -533,9 +505,12 @@ def get_option_snapshots_pg(
                 "day_volume": row.get("day_volume"),
                 "day_vwap": row.get("day_vwap"),
                 "day_last_updated": row.get("day_last_updated"),
-                "break_even_price": row.get("break_even_price"),
-                "fmv": row.get("fmv"),
-                "fmv_last_updated": row.get("fmv_last_updated"),
+                "day_last_updated_day": (
+                    row["day_last_updated_day"].isoformat()
+                    if row.get("day_last_updated_day") is not None
+                    and hasattr(row["day_last_updated_day"], "isoformat")
+                    else row.get("day_last_updated_day")
+                ),
             }
         )
     out_rows.sort(key=lambda x: (x["strike"], 0 if x["right"] == "C" else 1))

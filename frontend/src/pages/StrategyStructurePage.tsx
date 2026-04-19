@@ -25,6 +25,7 @@ import {
   DEFAULT_STRUCTURE_PAYLOAD,
   getStructureDisplayLabel,
   structureToPayload,
+  wizardParamValuesFromSavedMeta,
   formatHistoryTs,
   summarizeStateSummary,
   summarizeLegs,
@@ -390,18 +391,7 @@ export function StrategyStructurePage({
           fetchTemplateDetail(row.strategy_template_id)
             .then((d) => {
               setWizardTemplateDetail(d)
-              const meta = row.metadata as Record<string, unknown> | null | undefined
-              const paramValues: Record<string, string | number> = {}
-              if (meta && typeof meta === 'object') {
-                d.meta_params?.forEach((mp) => {
-                  if (mp.param_kind !== 'fixed' && meta[mp.meta_key] != null) {
-                    const val = meta[mp.meta_key]
-                    paramValues[mp.meta_key] =
-                      typeof val === 'number' ? val : Number(val) || String(val)
-                  }
-                })
-              }
-              setWizardParamValues(paramValues)
+              setWizardParamValues(wizardParamValuesFromSavedMeta(p.meta, d.meta_params))
             })
             .catch(() => setWizardTemplateDetail(null))
         } else {

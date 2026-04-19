@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-from src.vendor.massive.client import MassiveClient
+from src.vendor.massive.client import MassiveClient, contract_key_from_reference_result
 
 
 def _client() -> MassiveClient:
@@ -164,3 +164,52 @@ class TestFetchOptionsSnapshotAllPages:
         assert len(out["results"]) == 2
         assert out["results"][0]["details"]["ticker"] == "O:FIRST"
         assert out["results"][1]["details"]["ticker"] == "O:SECOND"
+
+
+class TestContractKeyFromReferenceResult:
+    def test_builds_key_like_upsert_path(self):
+        row = {
+            "expiration_date": "2026-04-18",
+            "strike_price": 150.0,
+            "contract_type": "call",
+        }
+        ck = contract_key_from_reference_result("NVDA", row)
+        assert ck == "NVDA|OPT|20260418|150.0|C"
+
+    def test_put_right(self):
+        row = {
+            "expiration_date": "2026-04-18",
+            "strike_price": 150,
+            "contract_type": "put",
+        }
+        assert contract_key_from_reference_result("NVDA", row) == "NVDA|OPT|20260418|150.0|P"
+
+
+class TestCollectOptionContractKeysPaginated:
+    def test_collects_keys_from_pages(self):
+        page1 = {
+            "status": "OK",
+            "results": [
+                {
+                    "expiration_date": "2026-04-18",
+                    "strike_price": 100,
+                    "contract_type": "call",
+                },
+                {
+                    "expiration_date": "2026-04-18",
+                    "strike_price": 105,
+                    "contract_type": "put",
+                },
+            ],
+            "next_url": None,
+        }
+        with patch.object(MassiveClient, "_get", return_value=(200, page1)):
+            out = _client().collect_option_contract_keys_paginated(
+                "NVDA",
+                expiration_date="20260418",
+            )
+        assert out.get("error") is None
+        assert out.get("count") == 2
+        assert len(out.get("keys") or []) == 2
+        assert "NVDA|OPT|20260418|100.0|C" in out["keys"]
+        assert "NVDA|OPT|20260418|105.0|P" in out["keys"]

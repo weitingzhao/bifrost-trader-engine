@@ -263,20 +263,22 @@ def _scan_csp(
         if contract_spot <= 0:
             continue
 
-        # Option prices
+        # Option premium (day_close from Massive chain; NBBO not stored)
+        bid_f = float(row["bid"]) if row.get("bid") is not None else None
+        ask_f = float(row["ask"]) if row.get("ask") is not None else None
+        mid_raw = row.get("mid")
         try:
-            bid_f = float(row["bid"]) if row.get("bid") is not None else None
-            ask_f = float(row["ask"]) if row.get("ask") is not None else None
-            mid_raw = row.get("mid")
             mid_f = float(mid_raw) if mid_raw is not None else None
         except (TypeError, ValueError):
-            continue
-        if mid_f is None:
-            if bid_f is not None and ask_f is not None:
-                mid_f = (bid_f + ask_f) / 2.0
-            else:
-                continue
-        if mid_f <= 0:
+            mid_f = None
+        if mid_f is None and bid_f is not None and ask_f is not None:
+            mid_f = (bid_f + ask_f) / 2.0
+        if mid_f is None and row.get("day_close") is not None:
+            try:
+                mid_f = float(row["day_close"])
+            except (TypeError, ValueError):
+                mid_f = None
+        if mid_f is None or mid_f <= 0:
             continue
 
         # Spread pct (relative to mid)
