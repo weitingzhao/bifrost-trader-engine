@@ -2,15 +2,38 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List
 
 from backend.ops.services.celery_supported_tasks import build_supported_tasks_payload
+from src.massive.beat_schedule_public import beat_tasks_payload_for_capabilities
 from src.massive.run_massive_job_manifest import RUN_MASSIVE_JOB_MATRIX
-from src.workers.celery_queue_names import CANONICAL_BROKER_QUEUE_NAMES
+from src.workers.celery_queue_names import (
+    build_broker_queue_labels_from_worker_profiles,
+    load_canonical_broker_queue_names,
+    ops_celery_config_validation_errors,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _config_for_capabilities() -> dict:
+    try:
+        from src.app.config import read_config
+
+        cfg, _ = read_config()
+        return cfg if isinstance(cfg, dict) else {}
+    except Exception as e:
+        logger.debug("read_config for celery capabilities: %s", e)
+        return {}
 
 
 def build_celery_capabilities_payload(celery_app: Any) -> Dict[str, Any]:
     """Return registered tasks + canonical queue names + ``run_massive_job`` kind/mode matrix + beat tasks."""
+    cfg = _config_for_capabilities()
+    for msg in ops_celery_config_validation_errors(cfg):
+        logger.warning("ops celery config: %s", msg)
+
     base = build_supported_tasks_payload(celery_app)
     registered: List[Dict[str, str]] = []
     for t in base.get("tasks") or []:
@@ -26,38 +49,17 @@ def build_celery_capabilities_payload(celery_app: Any) -> Dict[str, Any]:
             }
         )
 
-    # Notes: business intent only — routing (task_routes queue) and Beat vs on-demand are in other columns.
-    beat_tasks: List[Dict[str, str]] = [
-        {
-            "name": "src.massive.tasks.beat_eod_pipeline",
-            "note": "Inserts eod_pipeline job: watchlist EOD OI + report_option_max_pain for the trade date.",
-        },
-        {
-            "name": "src.massive.tasks.beat_corporate_watchlist",
-            "note": "Inserts feed_stocks_corporate_action job with all watchlist optionable STK symbols.",
-        },
-        {
-            "name": "src.massive.tasks.beat_reconcile",
-            "note": "Inserts reconcile job: watchlist vs DB open-interest counts.",
-        },
-        {
-            "name": "src.massive.tasks.beat_trim_massive_jobs",
-            "note": "Inserts trim_jobs: cap job_massive_backfill history (newest 500 rows).",
-        },
-        {
-            "name": "src.massive.tasks.beat_refresh_expirations",
-            "note": "Runs expiration cache + option_contracts refresh in-process; not a run_massive_job enqueue.",
-        },
-    ]
-
+    beat_tasks = beat_tasks_payload_for_capabilities()
     matrix = [r.to_api_dict() for r in RUN_MASSIVE_JOB_MATRIX]
+    broker_queue_labels = build_broker_queue_labels_from_worker_profiles(cfg)
 
     out: Dict[str, Any] = {
         "ok": bool(base.get("ok")),
         "registered_tasks": registered,
         "count": len(registered),
-        "canonical_broker_queues": list(CANONICAL_BROKER_QUEUE_NAMES),
+        "canonical_broker_queues": list(load_canonical_broker_queue_names(cfg)),
         "run_massive_job_matrix": matrix,
         "beat_tasks": beat_tasks,
+        "broker_queue_labels": broker_queue_labels,
     }
     return out

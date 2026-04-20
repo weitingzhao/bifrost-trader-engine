@@ -9,39 +9,57 @@ from typing import Any, Dict, List
 
 from celery.schedules import crontab
 
-# Each entry: name, Celery task path, human label, kwargs for celery.schedules.crontab (UTC).
+# Each entry: name, Celery task path, human label, note (for Ops /capabilities), crontab kwargs (UTC).
 MASSIVE_BEAT_SCHEDULE_SPEC: List[Dict[str, Any]] = [
     {
         "name": "massive-eod-pipeline",
         "task": "src.massive.tasks.beat_eod_pipeline",
         "label": "EOD pipeline (OI + Max Pain)",
+        "note": "Inserts eod_pipeline job: watchlist EOD OI + report_option_max_pain for the trade date.",
         "crontab_kwargs": {"hour": 22, "minute": 0},
     },
     {
         "name": "massive-corporate-watchlist",
         "task": "src.massive.tasks.beat_corporate_watchlist",
         "label": "Corporate actions (watchlist)",
+        "note": "Inserts feed_stocks_corporate_action job with all watchlist optionable STK symbols.",
         "crontab_kwargs": {"hour": 23, "minute": 0},
     },
     {
         "name": "massive-reconcile",
         "task": "src.massive.tasks.beat_reconcile",
         "label": "Reconcile (watchlist vs DB OI)",
+        "note": "Inserts reconcile job: watchlist vs DB open-interest counts.",
         "crontab_kwargs": {"hour": 22, "minute": 45},
     },
     {
         "name": "massive-trim-jobs",
         "task": "src.massive.tasks.beat_trim_massive_jobs",
         "label": "Trim Massive job table",
+        "note": "Inserts trim_jobs: cap job_massive_backfill history (newest 500 rows).",
         "crontab_kwargs": {"hour": 2, "minute": 15},
     },
     {
         "name": "massive-refresh-expirations",
         "task": "src.massive.tasks.beat_refresh_expirations",
         "label": "Refresh option expirations",
+        "note": "Runs expiration cache + option_contracts refresh in-process; not a run_massive_job enqueue.",
         "crontab_kwargs": {"hour": "*/6", "minute": 20},
     },
 ]
+
+
+def beat_tasks_payload_for_capabilities() -> List[Dict[str, str]]:
+    """Rows for GET /ops/celery/capabilities ``beat_tasks`` (task path + note)."""
+    out: List[Dict[str, str]] = []
+    for spec in MASSIVE_BEAT_SCHEDULE_SPEC:
+        out.append(
+            {
+                "name": str(spec["task"]),
+                "note": str(spec.get("note", "")),
+            }
+        )
+    return out
 
 
 def build_celery_beat_schedule() -> Dict[str, Any]:

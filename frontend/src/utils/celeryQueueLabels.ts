@@ -12,9 +12,23 @@ export const BROKER_QUEUE_MASSIVE_STOCKS = 'massive_stocks' as const
 export const BROKER_QUEUE_MASSIVE_STOCKS_HIGH = 'massive_stocks_high' as const
 export const BROKER_QUEUE_BARS = 'bars' as const
 
+/** Set by Settings → Celery after GET /ops/celery/capabilities (ops.worker_profiles labels). */
+let brokerQueueLabelsFromApi: Record<string, string> | null = null
+
+/** Call when Celery capabilities load so labels match config without redeploying the SPA. */
+export function setBrokerQueueLabelsFromApi(labels: Record<string, string> | undefined | null): void {
+  if (labels && typeof labels === 'object' && Object.keys(labels).length > 0) {
+    brokerQueueLabelsFromApi = { ...labels }
+  } else {
+    brokerQueueLabelsFromApi = null
+  }
+}
+
 /** Human-readable label for a broker queue key (Queue summary, Support Tasks, worker badges). */
 export function formatQueueLabel(brokerKey: string): string {
   const k = (brokerKey || '').trim()
+  const fromApi = brokerQueueLabelsFromApi?.[k]
+  if (fromApi) return fromApi
   if (k === BROKER_QUEUE_MASSIVE_STOCKS_HIGH) return 'Massive stocks (H)'
   if (k === BROKER_QUEUE_MASSIVE_STOCKS) return 'Massive stocks'
   if (k === BROKER_QUEUE_MASSIVE_OPTIONS_HIGH) return 'Massive options (H)'

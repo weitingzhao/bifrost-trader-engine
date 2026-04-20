@@ -15,11 +15,11 @@ from src.workers.celery_app import (
     CELERY_INSPECT_TIMEOUT_SEC,
     OPS_WORKER_PRESENCE_KEY_PREFIX,
 )
-from src.workers.celery_queue_names import CANONICAL_BROKER_QUEUE_NAMES
+from src.workers.celery_queue_names import CANONICAL_BROKER_QUEUE_NAMES, load_canonical_broker_queue_names
 
 logger = logging.getLogger(__name__)
 
-# Canonical Celery queues (see scripts/systemd/run_celery.py, src/workers/celery_queue_names.py).
+# Backward compat: default tuple when no config (prefer :func:`load_canonical_broker_queue_names`).
 SUPPORTED_CELERY_QUEUES: Tuple[str, ...] = CANONICAL_BROKER_QUEUE_NAMES
 
 # Redis list keys that look like Celery broker queues (SCAN discovery; excludes streams / result keys).
@@ -61,6 +61,10 @@ class WorkerStateService:
         self._inspect_cache_workers: List[WorkerSummary] = []
         self._inspect_cache_ts = 0.0
         self._inspect_refreshing = False
+
+    def _canonical_celery_queues(self) -> Tuple[str, ...]:
+        cfg = self._config if isinstance(self._config, dict) else None
+        return load_canonical_broker_queue_names(cfg)
 
     # ── internal helpers ──────────────────────────────────────────────────────
 
@@ -538,13 +542,14 @@ class WorkerStateService:
     def queue_summaries(self) -> Dict[str, Any]:
         """Per-queue Redis LLEN plus PostgreSQL job totals for known pipelines.
 
-        Rows include all ``SUPPORTED_CELERY_QUEUES``, then any extra names from
+        Rows include all configured canonical queues (``ops.celery.canonical_queue_order``), then any extra names from
         ``ops.worker_profiles`` and Redis LIST keys discovered via SCAN (custom
         Celery queues not listed in config still show up when present on the broker).
         """
         bars_db, massive_db = self._pg_status_counts()
         profile_queues = self._queues_from_worker_profiles()
-        canonical = set(SUPPORTED_CELERY_QUEUES)
+        supported = self._canonical_celery_queues()
+        canonical = set(supported)
         extras: set[str] = set(profile_queues) - canonical
         ordered: List[str] = []
         llens: Dict[str, Optional[int]] = {}
@@ -561,7 +566,7 @@ class WorkerStateService:
             r.ping()
             discovered = self._redis_discovered_queue_names_scan(r)
             extras |= discovered - canonical
-            ordered = list(SUPPORTED_CELERY_QUEUES) + sorted(extras)
+            ordered = list(supported) + sorted(extras)
             for q in ordered:
                 try:
                     llens[q] = int(r.llen(q))
@@ -569,7 +574,7 @@ class WorkerStateService:
                     llens[q] = None
         except Exception as e:
             logger.debug("queue_summaries redis: %s", e)
-            ordered = list(SUPPORTED_CELERY_QUEUES) + sorted(extras)
+            ordered = list(supported) + sorted(extras)
             for q in ordered:
                 llens[q] = None
 
@@ -584,7 +589,7 @@ class WorkerStateService:
                     "done_db": (bars_db.get("done") if bars_db else None),
                     "failed_db": (bars_db.get("failed") if bars_db else None),
                 }
-            elif q in SUPPORTED_CELERY_QUEUES:
+            elif q in supported:
                 row = {
                     "name": q,
                     "pending_broker": pending_broker,

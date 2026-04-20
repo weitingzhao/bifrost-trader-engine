@@ -48,7 +48,7 @@ import { CeleryTopQueueSummary } from './celery/CeleryTopQueueSummary'
 import { CeleryBeatSchedulePanel } from './celery/CeleryBeatSchedulePanel'
 import { fetchMassiveCeleryBeatSchedule } from '../api/research/research'
 import type { MassiveCeleryBeatEntry } from '../api/research/research'
-import { brokerQueueKeyTitle, formatQueueLabel } from '../utils/celeryQueueLabels'
+import { brokerQueueKeyTitle, formatQueueLabel, setBrokerQueueLabelsFromApi } from '../utils/celeryQueueLabels'
 import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
 import { computeCeleryRuntimeLamp, supportedQueueNamesFromSummary } from '../utils/celeryRuntime'
 import { opsHostEnvFromConfigProfile } from '../utils/opsHostEnvPill'
@@ -722,7 +722,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
 
   /** Main sections: queues + instances (job DB + scaling + broker), or console + runtime snapshot. */
   const [celerySectionTab, setCelerySectionTab] = useState<
-    'queues_instances' | 'console_runtime' | 'support_tasks'
+    'queues_instances' | 'console_runtime' | 'support_tasks' | 'scheduled_jobs'
   >('queues_instances')
   const [runMassiveJobMatrix, setRunMassiveJobMatrix] = useState<RunMassiveJobMatrixRow[]>([])
   /** Celery Beat entry points from capabilities (includes tasks not listed in the run_massive_job matrix). */
@@ -1425,6 +1425,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
         h === 'settings-celery' ||
         h === 'settings-dashboard-celery' ||
         h === 'settings-celery-support-tasks' ||
+        h === 'settings-celery-scheduled-jobs' ||
         h.startsWith('settings-celery-queue-')
       if (!isCelery) return
       requestAnimationFrame(() => {
@@ -1499,12 +1500,14 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
     try {
       const res = await fetchCeleryCapabilities()
       if (!res.ok) {
+        setBrokerQueueLabelsFromApi(null)
         setSupportTasksError(res.error ?? 'Failed to load Celery capabilities')
         setRunMassiveJobMatrix([])
         setCeleryBeatTasks([])
         setRegisteredCeleryTasks([])
         return
       }
+      setBrokerQueueLabelsFromApi(res.broker_queue_labels)
       setRunMassiveJobMatrix(res.run_massive_job_matrix ?? [])
       setCeleryBeatTasks(res.beat_tasks ?? [])
       setRegisteredCeleryTasks(
@@ -1514,6 +1517,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
         }),
       )
     } catch (e) {
+      setBrokerQueueLabelsFromApi(null)
       setSupportTasksError(e instanceof Error ? e.message : 'Failed to load')
       setRunMassiveJobMatrix([])
       setCeleryBeatTasks([])
@@ -1524,21 +1528,23 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   }, [])
 
   useEffect(() => {
-    if (celerySectionTab !== 'support_tasks') return
+    if (celerySectionTab !== 'support_tasks' && celerySectionTab !== 'scheduled_jobs') return
     void loadSupportTasks()
   }, [celerySectionTab, loadSupportTasks])
 
-  /** Deep link: `#settings-celery-support-tasks` opens Support Tasks tab. */
+  /** Deep link: `#settings-celery-support-tasks` / `#settings-celery-scheduled-jobs` open the matching tab. */
   useEffect(() => {
-    const applySupportHash = () => {
+    const applyCelerySubtabHash = () => {
       const h = window.location.hash.replace(/^#/, '')
       if (h === 'settings-celery-support-tasks') {
         setCelerySectionTab('support_tasks')
+      } else if (h === 'settings-celery-scheduled-jobs') {
+        setCelerySectionTab('scheduled_jobs')
       }
     }
-    applySupportHash()
-    window.addEventListener('hashchange', applySupportHash)
-    return () => window.removeEventListener('hashchange', applySupportHash)
+    applyCelerySubtabHash()
+    window.addEventListener('hashchange', applyCelerySubtabHash)
+    return () => window.removeEventListener('hashchange', applyCelerySubtabHash)
   }, [])
 
   const navigateToJobQueueStatusFromSummary = useCallback(
@@ -1890,6 +1896,18 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           onClick={() => setCelerySectionTab('support_tasks')}
         >
           Support Tasks
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="celery-tab-scheduled-jobs"
+          aria-selected={celerySectionTab === 'scheduled_jobs'}
+          aria-controls="celery-panel-scheduled-jobs"
+          tabIndex={celerySectionTab === 'scheduled_jobs' ? 0 : -1}
+          className={`dashboard-celery-main-tab ${celerySectionTab === 'scheduled_jobs' ? 'dashboard-celery-main-tab--active' : ''}`}
+          onClick={() => setCelerySectionTab('scheduled_jobs')}
+        >
+          Scheduled Jobs
         </button>
       </div>
 
@@ -2497,7 +2515,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                   <div className="celery-support-tasks-sheet__head-lead">
                     <h3 id="celery-support-tasks-head" className="page-title-with-tooltip">
                       Support Tasks
-                      <InfoTooltip text="GET /ops/celery/capabilities: Queue kind/mode matrix for run_massive_job, plus Celery Beat tasks and the full worker task registry below. Use the filter icon in Queue summary to narrow the matrix by broker queue." />
+                      <InfoTooltip text="GET /ops/celery/capabilities: Queue kind/mode matrix for run_massive_job and the full worker task registry below. Celery Beat task names are listed in the Scheduled Jobs tab. Use the filter icon in Queue summary to narrow the matrix by broker queue." />
                     </h3>
                   </div>
                   <button
@@ -2805,7 +2823,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                                     >
                                       Job style {queueKindMatrixSortArrow('job_style', queueKindMatrixSort)}
                                     </button>
-                                    <InfoTooltip text="Matrix rows only cover run_massive_job kinds. Scheduled here means that kind is also inserted by a Celery Beat task (e.g. eod_pipeline, trim_jobs). Other Beat tasks (e.g. beat_refresh_expirations) appear under Celery Beat (scheduled) below, not as matrix rows. On-demand: no Beat insert for this kind." />
+                                    <InfoTooltip text="Matrix rows only cover run_massive_job kinds. Scheduled here means that kind is also inserted by a Celery Beat task (e.g. eod_pipeline, trim_jobs). Other Beat tasks (e.g. beat_refresh_expirations) appear in the Scheduled Jobs tab, not as matrix rows. On-demand: no Beat insert for this kind." />
                                   </span>
                                 </th>
                                 <th scope="col">
@@ -2910,41 +2928,6 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                       )}
                     </div>
 
-                    {celeryBeatTasks.length > 0 ? (
-                      <div
-                        className="celery-support-tasks-sheet__block"
-                        aria-labelledby="celery-support-tasks-beat-head"
-                      >
-                        <h4
-                          id="celery-support-tasks-beat-head"
-                          className="celery-support-tasks-sheet__block-title page-title-with-tooltip"
-                        >
-                          Celery Beat (scheduled)
-                          <InfoTooltip text="Tasks invoked on a schedule by Celery Beat. Most enqueue run_massive_job; beat_refresh_expirations runs in-process and does not correspond to a matrix row." />
-                        </h4>
-                        <div className="feed-massive-table-wrap">
-                          <table className="data-table" aria-label="Celery Beat scheduled tasks">
-                            <thead>
-                              <tr>
-                                <th scope="col">Task name</th>
-                                <th scope="col">Note</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {celeryBeatTasks.map(b => (
-                                <tr key={b.name}>
-                                  <td>
-                                    <code>{b.name}</code>
-                                  </td>
-                                  <td>{b.note}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    ) : null}
-
                     {sortedRegisteredCeleryTasks.length > 0 ? (
                       <div
                         className="celery-support-tasks-sheet__block"
@@ -2991,6 +2974,80 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                       </div>
                     ) : null}
                   </>
+                )}
+              </div>
+            </section>
+          </div>
+
+          {/* ── Tab: Scheduled Jobs (Celery Beat task names from capabilities) ── */}
+          <div
+            role="tabpanel"
+            id="celery-panel-scheduled-jobs"
+            aria-labelledby="celery-tab-scheduled-jobs"
+            hidden={celerySectionTab !== 'scheduled_jobs'}
+            className="dashboard-celery-tab-panel"
+          >
+            <section className="replay-section dashboard-section" aria-labelledby="celery-scheduled-jobs-head">
+              <div className="celery-support-tasks-sheet">
+                <div className="celery-support-tasks-sheet__head">
+                  <div className="celery-support-tasks-sheet__head-lead">
+                    <h3 id="celery-scheduled-jobs-head" className="page-title-with-tooltip">
+                      Scheduled Jobs
+                      <InfoTooltip text="Celery Beat task names from GET /ops/celery/capabilities (same source as the former Celery Beat block under Support Tasks). Most enqueue run_massive_job; beat_refresh_expirations runs in-process and does not correspond to a matrix row. UTC cron-style times are in Scheduled Celery Beat above the tabs." />
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => void loadSupportTasks()}
+                    disabled={supportTasksLoading}
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                {supportTasksLoading ? (
+                  <div className="dashboard-empty" role="status">
+                    Loading…
+                  </div>
+                ) : supportTasksError ? (
+                  <div className="dashboard-inline-alert msg err" role="alert">
+                    {supportTasksError}
+                  </div>
+                ) : celeryBeatTasks.length > 0 ? (
+                  <div aria-labelledby="celery-scheduled-jobs-beat-head">
+                    <h4
+                      id="celery-scheduled-jobs-beat-head"
+                      className="celery-support-tasks-sheet__block-title page-title-with-tooltip"
+                    >
+                      Celery Beat (scheduled)
+                      <InfoTooltip text="Tasks invoked on a schedule by Celery Beat. Most enqueue run_massive_job; beat_refresh_expirations runs in-process and does not correspond to a matrix row." />
+                    </h4>
+                    <div className="feed-massive-table-wrap">
+                      <table className="data-table" aria-label="Celery Beat scheduled tasks">
+                        <thead>
+                          <tr>
+                            <th scope="col">Task name</th>
+                            <th scope="col">Note</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {celeryBeatTasks.map(b => (
+                            <tr key={b.name}>
+                              <td>
+                                <code>{b.name}</code>
+                              </td>
+                              <td>{b.note}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="dashboard-empty" role="status">
+                    No Celery Beat task rows returned from capabilities.
+                  </div>
                 )}
               </div>
             </section>

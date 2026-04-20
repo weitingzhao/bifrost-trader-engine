@@ -637,6 +637,7 @@ async def get_ops_celery_capabilities(request: Request) -> Dict[str, Any]:
             "canonical_broker_queues": [],
             "run_massive_job_matrix": [],
             "beat_tasks": [],
+            "broker_queue_labels": {},
         }
     try:
         return build_celery_capabilities_payload(celery_app)
@@ -650,6 +651,7 @@ async def get_ops_celery_capabilities(request: Request) -> Dict[str, Any]:
             "canonical_broker_queues": [],
             "run_massive_job_matrix": [],
             "beat_tasks": [],
+            "broker_queue_labels": {},
         }
 
 

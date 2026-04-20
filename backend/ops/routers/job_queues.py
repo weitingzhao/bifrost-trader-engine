@@ -89,9 +89,12 @@ def ops_aggregated_job_queues_summary(request: Request) -> Dict[str, Any]:
                     )
 
     if not rows:
-        from backend.ops.services.worker_state import SUPPORTED_CELERY_QUEUES
+        from src.workers.celery_queue_names import load_canonical_broker_queue_names
 
-        for qn in SUPPORTED_CELERY_QUEUES:
+        cfg = getattr(request.app.state, "bifrost_config", None)
+        if not isinstance(cfg, dict):
+            cfg = {}
+        for qn in load_canonical_broker_queue_names(cfg):
             label = _FALLBACK_QUEUE_LABELS.get(qn, qn)
             if qn == "bars":
                 counts = count_job_bars_backfill_by_status(db)

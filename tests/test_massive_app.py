@@ -133,16 +133,17 @@ class TestMassiveHealth:
         newest = datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
         cur = MagicMock()
         cur.fetchall.side_effect = [
-            [("NVDA", 100, newest, 90, 80, 2, 50, 45, 4, 12)],
-            [("NVDA", 50, newest, 45, 40, 30, 3)],
-            [("NVDA", newest.date(), newest)],
-            [("NVDA", newest, newest)],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
+            [("NVDA", 100, newest, 90, 80, 2, 50, 45, 4, 12)],  # option_contracts
+            [("NVDA", 50, newest, 45, 40, 30, 3)],               # option_snapshots
+            [("NVDA", newest.date(), newest)],                   # report_option_atm_iv_daily
+            [("NVDA", newest, newest)],                          # stock_day
+            [],  # option_day
+            [],  # option_min
+            [],  # option_snapshots_with_underlying_day
+            [],  # job_ticker_reference_state (contracts check)
+            [],  # option_expiration_cache
+            [],  # option_open_interest_daily
+            [],  # report_option_max_pain_daily
         ]
         cursor_cm = MagicMock()
         cursor_cm.__enter__.return_value = cur

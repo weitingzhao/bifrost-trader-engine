@@ -7,16 +7,37 @@ def test_build_celery_capabilities_payload_has_matrix_and_canonical_queues() -> 
     import src.bars.tasks  # noqa: F401
     import src.massive.tasks  # noqa: F401
     from backend.ops.services.celery_capabilities import build_celery_capabilities_payload
+    from src.app.config import read_config
+    from src.massive.beat_schedule_public import beat_tasks_payload_for_capabilities
     from src.workers.celery_app import app
-    from src.workers.celery_queue_names import CANONICAL_BROKER_QUEUE_NAMES
+    from src.workers.celery_queue_names import load_canonical_broker_queue_names
 
+    cfg, _ = read_config()
     out = build_celery_capabilities_payload(app)
     assert out["ok"] is True
-    assert out["canonical_broker_queues"] == list(CANONICAL_BROKER_QUEUE_NAMES)
+    assert out["canonical_broker_queues"] == list(load_canonical_broker_queue_names(cfg))
+    assert out["broker_queue_labels"].get("massive") == "Massive options"
+    assert out["broker_queue_labels"].get("bars") == "IB"
     assert len(out["run_massive_job_matrix"]) >= 1
     assert out["run_massive_job_matrix"][0]["broker_queue_standard"]
+    assert out["beat_tasks"] == beat_tasks_payload_for_capabilities()
     assert out["beat_tasks"] and len(out["beat_tasks"]) == 5
     assert out["registered_tasks"] and out["count"] == len(out["registered_tasks"])
     first = out["registered_tasks"][0]
     assert first["name"].startswith("src.")
     assert first["task_route_default_queue"] == first["default_queue"]
+
+
+def test_ops_celery_config_validation_errors_detects_unknown_queue() -> None:
+    from src.workers.celery_queue_names import ops_celery_config_validation_errors
+
+    bad = {
+        "ops": {
+            "worker_profiles": {
+                "ib": {"label": "IB", "queues": ["bars"]},
+            },
+            "celery": {"canonical_queue_order": ["bars", "massive"]},
+        }
+    }
+    errs = ops_celery_config_validation_errors(bad)
+    assert any("massive" in e for e in errs)

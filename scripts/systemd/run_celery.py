@@ -7,8 +7,8 @@ Requires Redis (config.redis or REDIS_* env) and postgres. Usage:
   python scripts/systemd/run_celery.py --prod
   BIFROST_ENV=prod python scripts/systemd/run_celery.py
 
-Default (no ``--instance``): subscribes ``bars,massive_stocks_high,massive_stocks,massive_high,massive`` — IB bars
-backfill, Massive/Polygon **options** queues (``massive`` / ``massive_high``), and **stock-reference** queues
+Default (no ``--instance``): subscribes all queues in ``ops.celery.canonical_queue_order`` (see ``config/config.yaml``) —
+IB bars backfill, Massive/Polygon **options** queues (``massive`` / ``massive_high``), and **stock-reference** queues
 (``massive_stocks`` / ``massive_stocks_high``).
 
 With ``--instance <profile>-<n>`` (e.g. ``bars-1``, ``massive-1``), queues come from ``ops.worker_profiles`` in config.
@@ -104,8 +104,6 @@ def _kill_existing_celery_workers(instance: str | None) -> None:
         sys.stderr.write(f"[run_celery] Warning: could not kill existing workers: {e}\n")
 
 
-_DEFAULT_QUEUES = "bars,massive_stocks_high,massive_stocks,massive_high,massive"
-
 _INSTANCE_PROFILE_RE = None
 
 
@@ -131,8 +129,30 @@ def _resolve_queues_for_instance(
     up in ``ops.worker_profiles`` from the loaded config.  If not found or no
     instance flag, falls back to the legacy all-queue list.
     """
+    from src.app.config import read_config
+
     if instance is None:
-        return _DEFAULT_QUEUES
+        from src.workers.celery_queue_names import (
+            CANONICAL_BROKER_QUEUE_NAMES,
+            load_canonical_broker_queue_names,
+            ops_celery_config_validation_errors,
+        )
+
+        try:
+            cfg, _cfg_path = read_config(config_path)
+        except Exception as exc:
+            sys.stderr.write(
+                f"[run_celery] WARNING: cannot read {config_path}: {exc}; "
+                f"using built-in default queue order.\n"
+            )
+            return ",".join(CANONICAL_BROKER_QUEUE_NAMES)
+
+        errs = ops_celery_config_validation_errors(cfg if isinstance(cfg, dict) else None)
+        if errs:
+            for msg in errs:
+                sys.stderr.write(f"[run_celery] ERROR: ops celery config: {msg}\n")
+            sys.exit(1)
+        return ",".join(load_canonical_broker_queue_names(cfg if isinstance(cfg, dict) else None))
 
     profile_key, _seq = _parse_instance_profile(instance)
     if profile_key is None:
@@ -140,9 +160,13 @@ def _resolve_queues_for_instance(
             f"[run_celery] WARNING: instance {instance!r} does not match "
             f"<profile>-<seq> pattern; using default queues.\n"
         )
-        return _DEFAULT_QUEUES
+        from src.workers.celery_queue_names import CANONICAL_BROKER_QUEUE_NAMES, load_canonical_broker_queue_names
 
-    from src.app.config import read_config
+        try:
+            cfg, _ = read_config(config_path)
+            return ",".join(load_canonical_broker_queue_names(cfg if isinstance(cfg, dict) else None))
+        except Exception:
+            return ",".join(CANONICAL_BROKER_QUEUE_NAMES)
 
     try:
         # Same merge as daemon/server: config.dev.yaml / config.prod.yaml overlay on config.yaml
@@ -151,9 +175,11 @@ def _resolve_queues_for_instance(
     except Exception as exc:
         sys.stderr.write(
             f"[run_celery] WARNING: cannot read {config_path}: {exc}; "
-            f"using default queues.\n"
+            f"using built-in default queue order.\n"
         )
-        return _DEFAULT_QUEUES
+        from src.workers.celery_queue_names import CANONICAL_BROKER_QUEUE_NAMES
+
+        return ",".join(CANONICAL_BROKER_QUEUE_NAMES)
 
     profiles = (cfg.get("ops") or {}).get("worker_profiles") or {}
     entry = profiles.get(profile_key)

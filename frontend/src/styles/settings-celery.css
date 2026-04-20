@@ -1154,7 +1154,7 @@
   min-width: 0;
 }
 
-/* Support Tasks tab: one sheet — Task registry + Queue kind/mode matrix */
+/* Support Tasks / Scheduled Jobs tabs: capability sheets (matrix, registry, Beat task names) */
 .celery-support-tasks-sheet {
   margin-bottom: var(--space-3);
   padding: var(--space-3);
@@ -1336,6 +1336,10 @@
   gap: 0.25rem;
   min-width: 0;
   max-width: 100%;
+}
+.dashboard-celery-top-queue-summary button.dashboard-queue-summary-queue-nav {
+  display: block;
+  width: 100%;
 }
 .dashboard-celery-top-queue-summary .dashboard-queue-summary-queue-nav {
   flex: 1 1 auto;

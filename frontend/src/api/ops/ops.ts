@@ -288,6 +288,8 @@ export async function fetchCeleryCapabilities(): Promise<{
   canonical_broker_queues: string[]
   run_massive_job_matrix: RunMassiveJobMatrixRow[]
   beat_tasks: CeleryBeatTaskRow[]
+  /** Redis broker queue key → label from ops.worker_profiles (optional; UI falls back to hardcoded map). */
+  broker_queue_labels?: Record<string, string>
   error?: string
 }> {
   const r = await fetch(`${opsBase()}/ops/celery/capabilities`, { headers: authHeaders() })
