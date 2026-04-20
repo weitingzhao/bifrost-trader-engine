@@ -3,14 +3,15 @@
  * Keys must stay stable for workers; labels are the mental model in the UI (e.g. Massive options).
  */
 
-/** Redis broker list key for the default Massive options pipeline (straddles / options jobs). */
-export const BROKER_QUEUE_MASSIVE_OPTIONS = 'massive' as const
+/** IB historical bars backfill (job_bars_backfill). */
+export const BROKER_QUEUE_STOCKS_IB = 'stocks_ib' as const
+/** Default Massive/Polygon options pipeline. */
+export const BROKER_QUEUE_OPTIONS_MASSIVE = 'options_massive' as const
 /** High-priority Massive options queue. */
-export const BROKER_QUEUE_MASSIVE_OPTIONS_HIGH = 'massive_high' as const
+export const BROKER_QUEUE_OPTIONS_MASSIVE_HIGH = 'options_massive_high' as const
 /** Massive stocks / reference pipeline. */
-export const BROKER_QUEUE_MASSIVE_STOCKS = 'massive_stocks' as const
-export const BROKER_QUEUE_MASSIVE_STOCKS_HIGH = 'massive_stocks_high' as const
-export const BROKER_QUEUE_BARS = 'bars' as const
+export const BROKER_QUEUE_STOCKS_MASSIVE = 'stocks_massive' as const
+export const BROKER_QUEUE_STOCKS_MASSIVE_HIGH = 'stocks_massive_high' as const
 
 /** Set by Settings → Celery after GET /ops/celery/capabilities (ops.worker_profiles labels). */
 let brokerQueueLabelsFromApi: Record<string, string> | null = null
@@ -29,11 +30,11 @@ export function formatQueueLabel(brokerKey: string): string {
   const k = (brokerKey || '').trim()
   const fromApi = brokerQueueLabelsFromApi?.[k]
   if (fromApi) return fromApi
-  if (k === BROKER_QUEUE_MASSIVE_STOCKS_HIGH) return 'Massive stocks (H)'
-  if (k === BROKER_QUEUE_MASSIVE_STOCKS) return 'Massive stocks'
-  if (k === BROKER_QUEUE_MASSIVE_OPTIONS_HIGH) return 'Massive options (H)'
-  if (k === BROKER_QUEUE_MASSIVE_OPTIONS) return 'Massive options'
-  if (k === BROKER_QUEUE_BARS) return 'Bars (IB)'
+  if (k === BROKER_QUEUE_STOCKS_MASSIVE_HIGH) return 'Massive stocks (H)'
+  if (k === BROKER_QUEUE_STOCKS_MASSIVE) return 'Massive stocks'
+  if (k === BROKER_QUEUE_OPTIONS_MASSIVE_HIGH) return 'Massive options (H)'
+  if (k === BROKER_QUEUE_OPTIONS_MASSIVE) return 'Massive options'
+  if (k === BROKER_QUEUE_STOCKS_IB) return 'Bars (IB)'
   return k
 }
 

@@ -2800,7 +2800,7 @@ def get_massive_hist_trades(
 
 @router.post("/research/massive/sync")
 def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """Enqueue Celery job (queue depends on kind: options → massive/massive_high, ticker ref → massive_stocks*)."""
+    """Enqueue Celery job (queue depends on kind: options → options_massive/*_high, ticker ref → stocks_massive*)."""
     from src.vendor.massive.config import get_massive_settings
     from src.massive.tasks import run_massive_job
     from src.vendor.massive.reader import insert_job_massive_backfill, update_job_massive_backfill_celery_task_id

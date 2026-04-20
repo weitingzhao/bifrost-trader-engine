@@ -1,9 +1,9 @@
 """Celery app for bars backfill worker. Broker and result backend use Redis from config.
 
 Usage:
-  celery -A src.workers.celery_app worker -l info -Q bars --pool=solo
-  celery -A src.workers.celery_app worker -l info -Q massive --pool=solo   # Massive/Polygon options (no IB)
-  # Stock reference jobs use queues massive_stocks / massive_stocks_high (see src.massive.celery_queues).
+  celery -A src.workers.celery_app worker -l info -Q stocks_ib --pool=solo
+  celery -A src.workers.celery_app worker -l info -Q options_massive --pool=solo   # Massive/Polygon options (no IB)
+  # Stock reference jobs use queues stocks_massive / stocks_massive_high (see src.massive.celery_queues).
 
 Or: python scripts/systemd/run_celery.py [config_path]
 
@@ -71,16 +71,16 @@ app.conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
-    task_default_queue="bars",
+    task_default_queue="stocks_ib",
     task_routes={
-        "src.bars.tasks.backfill_bars": {"queue": "bars"},
-        # Default route; API enqueues with explicit queue= (options: massive/massive_high, stocks: massive_stocks*).
-        "src.massive.tasks.run_massive_job": {"queue": "massive"},
-        "src.massive.tasks.beat_eod_pipeline": {"queue": "massive"},
-        "src.massive.tasks.beat_corporate_watchlist": {"queue": "massive"},
-        "src.massive.tasks.beat_reconcile": {"queue": "massive"},
-        "src.massive.tasks.beat_trim_massive_jobs": {"queue": "massive"},
-        "src.massive.tasks.beat_refresh_expirations": {"queue": "massive"},
+        "src.bars.tasks.backfill_bars": {"queue": "stocks_ib"},
+        # Default route; API enqueues with explicit queue= (options: options_massive/*_high, stocks: stocks_massive*).
+        "src.massive.tasks.run_massive_job": {"queue": "options_massive"},
+        "src.massive.tasks.beat_eod_pipeline": {"queue": "options_massive"},
+        "src.massive.tasks.beat_corporate_watchlist": {"queue": "options_massive"},
+        "src.massive.tasks.beat_reconcile": {"queue": "options_massive"},
+        "src.massive.tasks.beat_trim_massive_jobs": {"queue": "options_massive"},
+        "src.massive.tasks.beat_refresh_expirations": {"queue": "options_massive"},
     },
     timezone="UTC",
     enable_utc=True,

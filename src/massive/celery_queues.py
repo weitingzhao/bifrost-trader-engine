@@ -1,7 +1,7 @@
 """Celery queue names for Massive jobs.
 
-Options sync uses ``massive`` / ``massive_high``. Ticker reference jobs use dedicated queues
-``massive_stocks`` / ``massive_stocks_high`` so workers can scale or isolate pipelines without
+Options sync uses ``options_massive`` / ``options_massive_high``. Ticker reference jobs use
+``stocks_massive`` / ``stocks_massive_high`` so workers can scale or isolate pipelines without
 sharing the same Redis list as options.
 """
 
@@ -10,10 +10,10 @@ from __future__ import annotations
 from typing import Final
 
 from src.workers.celery_queue_names import (
-    BROKER_QUEUE_MASSIVE_OPTIONS,
-    BROKER_QUEUE_MASSIVE_OPTIONS_HIGH,
-    BROKER_QUEUE_MASSIVE_STOCKS,
-    BROKER_QUEUE_MASSIVE_STOCKS_HIGH,
+    BROKER_QUEUE_OPTIONS_MASSIVE,
+    BROKER_QUEUE_OPTIONS_MASSIVE_HIGH,
+    BROKER_QUEUE_STOCKS_MASSIVE,
+    BROKER_QUEUE_STOCKS_MASSIVE_HIGH,
 )
 
 # Full tickers universe sync (Massive ref tickers list). Canonical ``feed_stocks_tickers_reference_universe``;
@@ -37,7 +37,7 @@ FEED_STOCKS_TICKERS_TYPES_KINDS: Final[frozenset[str]] = frozenset(
     }
 )
 
-# Kinds routed to massive_stocks* (see run_massive_job + insert_job_massive_backfill).
+# Kinds routed to stocks_massive* (see run_massive_job + insert_job_massive_backfill).
 TICKER_REFERENCE_KINDS: Final[frozenset[str]] = frozenset(
     {
         "feed_stocks_tickers_reference_universe",
@@ -74,7 +74,7 @@ MASSIVE_STOCKS_QUEUE_KINDS: Final[frozenset[str]] = (
     | FEED_STOCKS_CORPORATE_ACTION_KINDS
 )
 
-# Option contract OHLC / pool fills on Massive options queues (``massive`` / ``massive_high``).
+# Option contract OHLC / pool fills on Massive options queues (``options_massive`` / ``options_massive_high``).
 FEED_OPTIONS_AGGREGATE_KINDS: Final[frozenset[str]] = frozenset(
     {"feed_options_aggregate", "aggregates"}
 )
@@ -94,5 +94,5 @@ def celery_queue_for_massive_job(kind: str, *, priority_high: bool) -> str:
     """Return broker queue for ``run_massive_job`` given job kind and API priority."""
     k = (kind or "").strip().lower()
     if k in MASSIVE_STOCKS_QUEUE_KINDS:
-        return BROKER_QUEUE_MASSIVE_STOCKS_HIGH if priority_high else BROKER_QUEUE_MASSIVE_STOCKS
-    return BROKER_QUEUE_MASSIVE_OPTIONS_HIGH if priority_high else BROKER_QUEUE_MASSIVE_OPTIONS
+        return BROKER_QUEUE_STOCKS_MASSIVE_HIGH if priority_high else BROKER_QUEUE_STOCKS_MASSIVE
+    return BROKER_QUEUE_OPTIONS_MASSIVE_HIGH if priority_high else BROKER_QUEUE_OPTIONS_MASSIVE

@@ -71,15 +71,15 @@ def test_bifrost_config_env_wins(project_root: Path, monkeypatch: pytest.MonkeyP
 
 
 def test_read_config_dev_includes_ops_worker_profiles_from_config_yaml(project_root: Path) -> None:
-    """run_celery --instance massive-N must see profiles merged from base config.yaml (not only dev overlay)."""
+    """run_celery --instance options_massive-N must see profiles merged from base config.yaml (not only dev overlay)."""
     dev = str(project_root / "config" / "config.dev.yaml")
     if not Path(dev).is_file():
         pytest.skip("config.dev.yaml not present")
     cfg, _ = read_config(dev)
     profiles = (cfg.get("ops") or {}).get("worker_profiles") or {}
-    assert "massive" in profiles
-    assert profiles["massive"].get("queues") == ["massive"]
-    assert "massive_stocks" in profiles
-    assert profiles["massive_stocks"].get("queues") == ["massive_stocks"]
-    assert "massive_stocks_high" in profiles
-    assert profiles["massive_stocks_high"].get("queues") == ["massive_stocks_high"]
+    assert "options_massive" in profiles
+    assert profiles["options_massive"].get("queues") == ["options_massive"]
+    assert "stocks_massive" in profiles
+    assert profiles["stocks_massive"].get("queues") == ["stocks_massive"]
+    assert "stocks_massive_high" in profiles
+    assert profiles["stocks_massive_high"].get("queues") == ["stocks_massive_high"]

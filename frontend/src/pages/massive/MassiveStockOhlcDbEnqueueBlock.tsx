@@ -388,7 +388,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
   const disabled = !configured || refJobSession.jobBusyKind != null
 
   const modeMeta = OHLC_MODES.find(m => m.id === delayDbOhlcTab)
-  const queueCode = priorityHigh ? 'massive_stocks_high' : 'massive_stocks'
+  const queueCode = priorityHigh ? 'stocks_massive_high' : 'stocks_massive'
 
   return (
     <div
@@ -429,7 +429,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
               High
             </button>
           </div>
-          <InfoTooltip text="Standard uses Celery queue massive_stocks. High uses massive_stocks_high for feed_stocks_aggregate." />
+          <InfoTooltip text="Standard uses Celery queue stocks_massive. High uses stocks_massive_high for feed_stocks_aggregate." />
         </div>
       </div>
 

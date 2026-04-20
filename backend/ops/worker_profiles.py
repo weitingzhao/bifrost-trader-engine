@@ -3,7 +3,7 @@
 Profiles live in YAML under ``ops.worker_profiles``.  Each key maps to a label
 and a list of Celery queues the worker consumes.
 
-Instance IDs follow ``{profile_key}-{seq}`` (e.g. ``bars-1``, ``massive-3``).
+Instance IDs follow ``{profile_key}-{seq}`` (e.g. ``stocks_ib-1``, ``options_massive-3``).
 Sequence numbers are allocated atomically via Redis INCR; when Redis is
 unavailable the allocator falls back to max(existing) + 1.
 """

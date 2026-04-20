@@ -147,7 +147,7 @@ function instanceIdFromWorkerUnit(unit: string): string | null {
   return m ? m[1] : null
 }
 
-/** Ops allocates IDs as `{profile_key}-{seq}` (e.g. `bars-2`). */
+/** Ops allocates IDs as `{profile_key}-{seq}` (e.g. `stocks_ib-2`). */
 function parseCeleryWorkerInstanceId(instanceId: string): { profileKey: string; cycle: number } | null {
   const m = instanceId.trim().match(/^([a-zA-Z0-9_]+)-(\d+)$/)
   if (!m) return null
@@ -1564,7 +1564,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   const openQueueSummaryBulkDelete = useCallback(
     (row: AggregatedJobQueueSummaryRow, kind: 'pending' | 'running' | 'done' | 'failed') => {
       setConfirmVariant('default')
-      const bars = row.pipeline === 'bars'
+      const bars = row.pipeline === 'stocks_ib'
       const q = row.celery_queue
       const titleByKind: Record<typeof kind, string> = {
         pending: bars ? 'Delete pending bars backfill jobs' : `Delete pending Massive jobs (queue "${q}")`,
@@ -1591,7 +1591,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           setConfirmState(prev => ({ ...prev, confirming: true }))
           setTopQueueActionBusy(q)
           try {
-            if (row.pipeline === 'massive') {
+            if (row.pipeline === 'massive_async') {
               const r = await deleteAllMassiveJobs(kind, row.celery_queue)
               if (!r.ok) throw new Error(r.error ?? 'Delete failed')
               setFlashMsg({ text: `Deleted ${r.deleted} job(s).`, isErr: false })
@@ -1620,7 +1620,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
       const q = row.celery_queue
       setConfirmState({
         open: true,
-        title: row.pipeline === 'bars' ? 'Retry failed bars jobs' : `Retry failed Massive jobs (queue "${q}")`,
+        title: row.pipeline === 'stocks_ib' ? 'Retry failed bars jobs' : `Retry failed Massive jobs (queue "${q}")`,
         message:
           'Reset up to 500 oldest failed jobs to pending and re-queue Celery. Some rows may fail to enqueue.',
         confirming: false,
@@ -1629,7 +1629,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           setConfirmState(prev => ({ ...prev, confirming: true }))
           setTopQueueActionBusy(q)
           try {
-            if (row.pipeline === 'massive') {
+            if (row.pipeline === 'massive_async') {
               const r = await postRetryFailedMassiveJobs(q, 500)
               if (!r.ok) throw new Error(r.error ?? 'Reset failed')
               setFlashMsg({
@@ -2344,7 +2344,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               <span className={`dashboard-snapshot-celery-lamp-status dashboard-svc-status--${runtimeCeleryLamp}`}>
                 {runtimeCeleryStatusText}
               </span>
-              <InfoTooltip text="Red: broker unreachable. Yellow: broker OK but no workers, or workers’ queue list does not include every supported queue (Bars (IB), Massive stocks (H), Massive stocks, Massive options (H), Massive options — Redis keys bars, massive_stocks_high, massive_stocks, massive_high, massive). Green: at least one worker and their combined queues cover all supported queues." />
+              <InfoTooltip text="Red: broker unreachable. Yellow: broker OK but no workers, or workers’ queue list does not include every supported queue (Bars (IB), Massive stocks (H), Massive stocks, Massive options (H), Massive options — Redis keys stocks_ib, stocks_massive_high, stocks_massive, options_massive_high, options_massive). Green: at least one worker and their combined queues cover all supported queues." />
             </div>
 
             {/* Broker */}
@@ -2869,7 +2869,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                                         Broker queue (S · H){' '}
                                         {queueKindMatrixSortArrow('broker_queue', queueKindMatrixSort)}
                                       </button>
-                                      <InfoTooltip text="Standard and high priority broker queues on one line (S then H), same display names as Queue summary. Hover each segment in the cell for its Redis list key (e.g. massive vs massive_high)." />
+                                      <InfoTooltip text="Standard and high priority broker queues on one line (S then H), same display names as Queue summary. Hover each segment in the cell for its Redis list key (e.g. options_massive vs options_massive_high)." />
                                     </span>
                                   </th>
                                 ) : null}

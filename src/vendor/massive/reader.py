@@ -222,13 +222,13 @@ def _massive_celery_queue_condition(celery_queue: str) -> Tuple[Optional[str], L
     not_stock = f"(kind NOT IN ({ph}))"
     is_stock = f"(kind IN ({ph}))"
     sp = list(stock)
-    if cq == "massive":
+    if cq == "options_massive":
         return f"{not_stock} AND {pri_low}", sp
-    if cq == "massive_high":
+    if cq == "options_massive_high":
         return f"{not_stock} AND {pri_high}", sp
-    if cq == "massive_stocks":
+    if cq == "stocks_massive":
         return f"{is_stock} AND {pri_low}", sp
-    if cq == "massive_stocks_high":
+    if cq == "stocks_massive_high":
         return f"{is_stock} AND {pri_high}", sp
     logger.warning("unknown massive celery_queue filter %r — no SQL filter applied", cq)
     return None, []

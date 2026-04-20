@@ -36,7 +36,7 @@ _BARS_TASK_FUTURE_TIMEOUT_SEC = float(os.environ.get("BIFROST_BARS_TASK_FUTURE_T
 def _config_path_for_bars_task() -> Optional[str]:
     """Explicit YAML path from argv if present; else None so read_config uses BIFROST_CONFIG (set by run_celery / prod).
 
-    Celery worker argv is like ``worker -l info -Q bars`` — no config file. Previously we always fell back to
+    Celery worker argv is like ``worker -l info -Q stocks_ib`` — no config file. Previously we always fell back to
     ``config/config.yaml`` only, missing deep-merge with ``config.prod.yaml`` when postgres/IB live in the overlay.
     """
     for a in sys.argv[1:]:

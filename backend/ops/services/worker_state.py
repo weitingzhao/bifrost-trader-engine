@@ -403,7 +403,7 @@ class WorkerStateService:
                 return str(rk).strip()
         name = str(task.get("name") or "")
         if "backfill_bars" in name:
-            return "bars"
+            return "stocks_ib"
         return ""
 
     def _count_celery_tasks_for_queue(
@@ -581,7 +581,7 @@ class WorkerStateService:
         rows: List[Dict[str, Any]] = []
         for q in ordered:
             pending_broker = llens.get(q)
-            if q == "bars":
+            if q == "stocks_ib":
                 row = {
                     "name": q,
                     "pending_broker": pending_broker,

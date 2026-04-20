@@ -8,24 +8,24 @@ Requires Redis (config.redis or REDIS_* env) and postgres. Usage:
   BIFROST_ENV=prod python scripts/systemd/run_celery.py
 
 Default (no ``--instance``): subscribes all queues in ``ops.celery.canonical_queue_order`` (see ``config/config.yaml``) —
-IB bars backfill, Massive/Polygon **options** queues (``massive`` / ``massive_high``), and **stock-reference** queues
-(``massive_stocks`` / ``massive_stocks_high``).
+IB bars backfill, Massive/Polygon **options** queues (``options_massive`` / ``options_massive_high``), and **stock-reference** queues
+(``stocks_massive`` / ``stocks_massive_high``).
 
-With ``--instance <profile>-<n>`` (e.g. ``bars-1``, ``massive-1``), queues come from ``ops.worker_profiles`` in config.
+With ``--instance <profile>-<n>`` (e.g. ``stocks_ib-1``, ``options_massive-1``), queues come from ``ops.worker_profiles`` in config.
 
-Before starting, kills any existing Celery worker process for this app (same script or celery -A src.workers.celery_app worker -Q bars)
+Before starting, kills any existing Celery worker process for this app (same script or celery -A src.workers.celery_app worker -Q stocks_ib)
 so the port/process is not left occupied. Uses --pool=solo (single process) so Stop button and IB connection work reliably.
 
 Massive options only (no IB):
-  celery -A src.workers.celery_app worker -l info -Q massive --pool=solo
+  celery -A src.workers.celery_app worker -l info -Q options_massive --pool=solo
 Stock reference only:
-  celery -A src.workers.celery_app worker -l info -Q massive_stocks --pool=solo
+  celery -A src.workers.celery_app worker -l info -Q stocks_massive --pool=solo
 High-priority options queue:
-  celery -A src.workers.celery_app worker -l info -Q massive_high --pool=solo
+  celery -A src.workers.celery_app worker -l info -Q options_massive_high --pool=solo
 High-priority stock reference queue:
-  celery -A src.workers.celery_app worker -l info -Q massive_stocks_high --pool=solo
+  celery -A src.workers.celery_app worker -l info -Q stocks_massive_high --pool=solo
 Or run Celery directly for bars only:
-  celery -A src.workers.celery_app worker -l info -Q bars --pool=solo
+  celery -A src.workers.celery_app worker -l info -Q stocks_ib --pool=solo
 
 Default config: config/config.dev.yaml (or BIFROST_CONFIG / first positional path / BIFROST_ENV=prod → config.prod.yaml).
 """
@@ -99,7 +99,7 @@ def _kill_existing_celery_workers(instance: str | None) -> None:
             return
 
         _kill_pids_from_pgrep(["pgrep", "-f", "python.*run_celery\\.py"])
-        _kill_pids_from_pgrep(["pgrep", "-f", "celery.*worker.*bars"])
+        _kill_pids_from_pgrep(["pgrep", "-f", "celery.*worker.*stocks_ib"])
     except Exception as e:
         sys.stderr.write(f"[run_celery] Warning: could not kill existing workers: {e}\n")
 
@@ -108,7 +108,7 @@ _INSTANCE_PROFILE_RE = None
 
 
 def _parse_instance_profile(instance_id: str) -> tuple[str | None, str | None]:
-    """Extract ``(profile_key, seq)`` from instance ID like ``bars-1``."""
+    """Extract ``(profile_key, seq)`` from instance ID like ``stocks_ib-1``."""
     import re
 
     global _INSTANCE_PROFILE_RE
@@ -125,7 +125,7 @@ def _resolve_queues_for_instance(
 ) -> str:
     """Determine the comma-separated queue list for the given instance.
 
-    When ``--instance bars-2`` is passed, the profile prefix ``bars`` is looked
+    When ``--instance stocks_ib-2`` is passed, the profile prefix ``stocks_ib`` is looked
     up in ``ops.worker_profiles`` from the loaded config.  If not found or no
     instance flag, falls back to the legacy all-queue list.
     """

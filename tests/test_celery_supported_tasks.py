@@ -15,20 +15,20 @@ def test_build_supported_tasks_payload_filters_and_queues() -> None:
         "src.massive.tasks.run_massive_job",
         "kombu.foo",
     ]
-    app.conf.task_default_queue = "bars"
+    app.conf.task_default_queue = "stocks_ib"
     app.conf.task_routes = {
-        "src.bars.tasks.backfill_bars": {"queue": "bars"},
-        "src.massive.tasks.run_massive_job": {"queue": "massive"},
+        "src.bars.tasks.backfill_bars": {"queue": "stocks_ib"},
+        "src.massive.tasks.run_massive_job": {"queue": "options_massive"},
     }
 
     out = build_supported_tasks_payload(app)
     assert out["ok"] is True
     assert out["count"] == 2
     by_name = {t["name"]: t for t in out["tasks"]}
-    assert by_name["src.bars.tasks.backfill_bars"]["default_queue"] == "bars"
-    assert by_name["src.bars.tasks.backfill_bars"]["task_route_default_queue"] == "bars"
-    assert by_name["src.massive.tasks.run_massive_job"]["default_queue"] == "massive"
-    assert by_name["src.massive.tasks.run_massive_job"]["task_route_default_queue"] == "massive"
+    assert by_name["src.bars.tasks.backfill_bars"]["default_queue"] == "stocks_ib"
+    assert by_name["src.bars.tasks.backfill_bars"]["task_route_default_queue"] == "stocks_ib"
+    assert by_name["src.massive.tasks.run_massive_job"]["default_queue"] == "options_massive"
+    assert by_name["src.massive.tasks.run_massive_job"]["task_route_default_queue"] == "options_massive"
 
 
 def test_build_supported_tasks_payload_real_app_lists_project_tasks() -> None:

@@ -27,11 +27,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["ops-job-queues"])
 
 _FALLBACK_QUEUE_LABELS: Dict[str, str] = {
-    "bars": "IB",
-    "massive": "Massive options",
-    "massive_high": "Massive options (H)",
-    "massive_stocks": "Massive stocks",
-    "massive_stocks_high": "Massive stocks (H)",
+    "stocks_ib": "IB",
+    "options_massive": "Massive options",
+    "options_massive_high": "Massive options (H)",
+    "stocks_massive": "Massive stocks",
+    "stocks_massive_high": "Massive stocks (H)",
 }
 
 
@@ -65,14 +65,14 @@ def ops_aggregated_job_queues_summary(request: Request) -> Dict[str, Any]:
                     label = f"{base_label} ({qn})" if base_label else qn
                 else:
                     label = base_label or qn
-                if qn == "bars":
+                if qn == "stocks_ib":
                     counts = count_job_bars_backfill_by_status(db)
                     rows.append(
                         {
                             "profile_key": str(pk),
                             "label": label,
                             "celery_queue": qn,
-                            "pipeline": "bars",
+                            "pipeline": "stocks_ib",
                             "counts": counts,
                         },
                     )
@@ -83,7 +83,7 @@ def ops_aggregated_job_queues_summary(request: Request) -> Dict[str, Any]:
                             "profile_key": str(pk),
                             "label": label,
                             "celery_queue": qn,
-                            "pipeline": "massive",
+                            "pipeline": "massive_async",
                             "counts": counts,
                         },
                     )
@@ -96,14 +96,14 @@ def ops_aggregated_job_queues_summary(request: Request) -> Dict[str, Any]:
             cfg = {}
         for qn in load_canonical_broker_queue_names(cfg):
             label = _FALLBACK_QUEUE_LABELS.get(qn, qn)
-            if qn == "bars":
+            if qn == "stocks_ib":
                 counts = count_job_bars_backfill_by_status(db)
                 rows.append(
                     {
-                        "profile_key": "ib" if qn == "bars" else qn,
+                        "profile_key": "stocks_ib",
                         "label": label,
                         "celery_queue": qn,
-                        "pipeline": "bars",
+                        "pipeline": "stocks_ib",
                         "counts": counts,
                     },
                 )
@@ -114,7 +114,7 @@ def ops_aggregated_job_queues_summary(request: Request) -> Dict[str, Any]:
                         "profile_key": qn,
                         "label": label,
                         "celery_queue": qn,
-                        "pipeline": "massive",
+                        "pipeline": "massive_async",
                         "counts": counts,
                     },
                 )
@@ -314,7 +314,7 @@ def ops_list_massive_jobs(
     kind: Optional[str] = Query(None, description="Filter by job kind"),
     celery_queue: Optional[str] = Query(
         None,
-        description="Filter by broker queue (massive, massive_high, massive_stocks, massive_stocks_high)",
+        description="Filter by broker queue (options_massive, options_massive_high, stocks_massive, stocks_massive_high)",
     ),
 ) -> Dict[str, Any]:
     from src.vendor.massive.reader import list_job_massive_backfill

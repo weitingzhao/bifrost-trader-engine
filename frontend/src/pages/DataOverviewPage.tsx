@@ -154,8 +154,8 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
       fetchWatchlistDbCoverage(),
       fetchDbCoverageSummary(),
       fetchMassiveCeleryBeatSchedule(),
-      fetchMassiveJobsSummary('massive'),
-      fetchMassiveJobsSummary('massive_stocks'),
+      fetchMassiveJobsSummary('options_massive'),
+      fetchMassiveJobsSummary('stocks_massive'),
       fetchMassiveJobsList({ limit: 10 }),
     ])
 
@@ -611,7 +611,7 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
               </tbody>
             </table>
             <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)' }}>
-              Execution depends on Celery Beat and workers consuming the massive / massive_stocks queues.
+              Execution depends on Celery Beat and workers consuming the options_massive / stocks_massive queues.
             </p>
           </div>
         ) : null}

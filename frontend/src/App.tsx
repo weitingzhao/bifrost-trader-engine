@@ -1359,7 +1359,7 @@ export default function App() {
                   </span>
                   <span
                     className="app-header-queue-value app-header-queue-value--inline"
-                    title="Queue summary Pending total (deduped: bars + massive once) — jobs waiting in queue"
+                    title="Queue summary Pending total (deduped: stocks_ib + options Massive once) — jobs waiting in queue"
                   >
                     {celeryQueuePendingTotal != null ? (celeryQueuePendingTotal > 99 ? '99+' : String(celeryQueuePendingTotal)) : '—'}
                   </span>

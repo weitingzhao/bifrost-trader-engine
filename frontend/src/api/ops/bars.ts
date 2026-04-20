@@ -148,7 +148,7 @@ export interface AggregatedJobQueueSummaryRow {
   profile_key: string
   label: string
   celery_queue: string
-  pipeline: 'bars' | 'massive'
+  pipeline: 'stocks_ib' | 'massive_async'
   counts: JobQueueStatusCounts
 }
 
@@ -169,7 +169,8 @@ export async function fetchAggregatedJobQueuesSummary(): Promise<{
       done: typeof c?.done === 'number' ? c.done : 0,
       failed: typeof c?.failed === 'number' ? c.failed : 0,
     }
-    const pipeline: 'bars' | 'massive' = o.pipeline === 'bars' ? 'bars' : 'massive'
+    const pipeline: 'stocks_ib' | 'massive_async' =
+      o.pipeline === 'stocks_ib' ? 'stocks_ib' : 'massive_async'
     return {
       profile_key: String(o.profile_key ?? ''),
       label: String(o.label ?? o.celery_queue ?? ''),

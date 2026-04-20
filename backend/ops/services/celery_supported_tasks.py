@@ -14,7 +14,7 @@ def build_supported_tasks_payload(celery_app: Any) -> Dict[str, Any]:
     importlib.import_module("src.bars.tasks")
     importlib.import_module("src.massive.tasks")
 
-    default_q = str(getattr(celery_app.conf, "task_default_queue", None) or "bars")
+    default_q = str(getattr(celery_app.conf, "task_default_queue", None) or "stocks_ib")
     routes = getattr(celery_app.conf, "task_routes", None) or {}
     if not isinstance(routes, dict):
         routes = {}

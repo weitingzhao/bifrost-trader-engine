@@ -14,11 +14,11 @@ import { barsJobResultTitle, formatBarsJobResult } from '../data/barsJobFormat'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import { fmtTs } from '../../utils/format'
 import {
-  BROKER_QUEUE_BARS,
-  BROKER_QUEUE_MASSIVE_OPTIONS,
-  BROKER_QUEUE_MASSIVE_OPTIONS_HIGH,
-  BROKER_QUEUE_MASSIVE_STOCKS,
-  BROKER_QUEUE_MASSIVE_STOCKS_HIGH,
+  BROKER_QUEUE_STOCKS_IB,
+  BROKER_QUEUE_OPTIONS_MASSIVE,
+  BROKER_QUEUE_OPTIONS_MASSIVE_HIGH,
+  BROKER_QUEUE_STOCKS_MASSIVE,
+  BROKER_QUEUE_STOCKS_MASSIVE_HIGH,
 } from '../../utils/celeryQueueLabels'
 import {
   CeleryQueueDeleteFailedIcon,
@@ -45,24 +45,34 @@ export interface JobQueueTab {
   id: string
   label: string
   celeryQueue: string
-  pipeline: 'bars' | 'massive'
+  pipeline: 'stocks_ib' | 'massive_async'
 }
 
 const FALLBACK_JOB_QUEUE_TABS: JobQueueTab[] = [
-  { id: 'ib', label: 'IB', celeryQueue: BROKER_QUEUE_BARS, pipeline: 'bars' },
-  { id: 'massive', label: 'Massive options', celeryQueue: BROKER_QUEUE_MASSIVE_OPTIONS, pipeline: 'massive' },
+  { id: 'stocks_ib', label: 'IB', celeryQueue: BROKER_QUEUE_STOCKS_IB, pipeline: 'stocks_ib' },
   {
-    id: 'massive_high',
-    label: 'Massive options (H)',
-    celeryQueue: BROKER_QUEUE_MASSIVE_OPTIONS_HIGH,
-    pipeline: 'massive',
+    id: 'options_massive',
+    label: 'Massive options',
+    celeryQueue: BROKER_QUEUE_OPTIONS_MASSIVE,
+    pipeline: 'massive_async',
   },
-  { id: 'massive_stocks', label: 'Massive stocks', celeryQueue: BROKER_QUEUE_MASSIVE_STOCKS, pipeline: 'massive' },
   {
-    id: 'massive_stocks_high',
+    id: 'options_massive_high',
+    label: 'Massive options (H)',
+    celeryQueue: BROKER_QUEUE_OPTIONS_MASSIVE_HIGH,
+    pipeline: 'massive_async',
+  },
+  {
+    id: 'stocks_massive',
+    label: 'Massive stocks',
+    celeryQueue: BROKER_QUEUE_STOCKS_MASSIVE,
+    pipeline: 'massive_async',
+  },
+  {
+    id: 'stocks_massive_high',
     label: 'Massive stocks (H)',
-    celeryQueue: BROKER_QUEUE_MASSIVE_STOCKS_HIGH,
-    pipeline: 'massive',
+    celeryQueue: BROKER_QUEUE_STOCKS_MASSIVE_HIGH,
+    pipeline: 'massive_async',
   },
 ]
 
@@ -80,7 +90,7 @@ function tabsFromProfiles(profiles: WorkerProfileInfo[]): JobQueueTab[] {
         id,
         label: qs.length > 1 ? `${p.label} (${q})` : p.label,
         celeryQueue: q,
-        pipeline: q === 'bars' ? 'bars' : 'massive',
+        pipeline: q === 'stocks_ib' ? 'stocks_ib' : 'massive_async',
       })
     }
   }
@@ -261,7 +271,7 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
     const t = activeTabRef.current
     if (clearedQueue != null && t && t.celeryQueue !== clearedQueue) return
     if (!t) return
-    if (t.pipeline === 'massive') void loadMassiveQueue(t.celeryQueue)
+    if (t.pipeline === 'massive_async') void loadMassiveQueue(t.celeryQueue)
     else void loadBarsQueue()
   }, [loadMassiveQueue, loadBarsQueue])
 
@@ -272,7 +282,7 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
   useEffect(() => {
     const tab = queueTabs.find(t => t.id === activeTabId)
     if (!tab) return
-    if (tab.pipeline === 'massive') {
+    if (tab.pipeline === 'massive_async') {
       void loadMassiveQueue(tab.celeryQueue)
     } else {
       void loadBarsQueue()
@@ -283,7 +293,7 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
     setActionMsg(null)
     if (!activeTab) return
     void onJobCountsChanged?.()
-    if (activeTab.pipeline === 'massive') void loadMassiveQueue(activeTab.celeryQueue)
+    if (activeTab.pipeline === 'massive_async') void loadMassiveQueue(activeTab.celeryQueue)
     else void loadBarsQueue()
   }
 
@@ -294,14 +304,14 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
     if (!activeTab) return
     setConfirm({
       title:
-        activeTab.pipeline === 'bars'
+        activeTab.pipeline === 'stocks_ib'
           ? 'Delete pending bars backfill jobs'
           : `Delete pending Massive jobs (queue “${activeTab.celeryQueue}”)`,
       message:
         'This will permanently delete all rows with status pending in this queue slice. This cannot be undone.',
       confirming: false,
       action: async () => {
-        if (activeTab.pipeline === 'massive') {
+        if (activeTab.pipeline === 'massive_async') {
           const r = await deleteAllMassiveJobs('pending', activeTab.celeryQueue)
           if (!r.ok) throw new Error(r.error ?? 'Delete failed')
           setActionMsg({ text: `Deleted ${r.deleted} job(s).`, isErr: false })
@@ -321,14 +331,14 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
     if (!activeTab) return
     setConfirm({
       title:
-        activeTab.pipeline === 'bars'
+        activeTab.pipeline === 'stocks_ib'
           ? 'Delete done bars backfill jobs'
           : `Delete done Massive jobs (queue “${activeTab.celeryQueue}”)`,
       message:
         'This will permanently delete all rows with status done in this queue slice. This cannot be undone.',
       confirming: false,
       action: async () => {
-        if (activeTab.pipeline === 'massive') {
+        if (activeTab.pipeline === 'massive_async') {
           const r = await deleteAllMassiveJobs('done', activeTab.celeryQueue)
           if (!r.ok) throw new Error(r.error ?? 'Delete failed')
           setActionMsg({ text: `Deleted ${r.deleted} job(s).`, isErr: false })
@@ -348,14 +358,14 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
     if (!activeTab) return
     setConfirm({
       title:
-        activeTab.pipeline === 'bars'
+        activeTab.pipeline === 'stocks_ib'
           ? 'Delete running bars backfill jobs'
           : `Delete running Massive jobs (queue “${activeTab.celeryQueue}”)`,
       message:
         'This will permanently delete all rows with status running in this queue slice. A worker may still be executing a task; this only removes PostgreSQL rows and cannot be undone.',
       confirming: false,
       action: async () => {
-        if (activeTab.pipeline === 'massive') {
+        if (activeTab.pipeline === 'massive_async') {
           const r = await deleteAllMassiveJobs('running', activeTab.celeryQueue)
           if (!r.ok) throw new Error(r.error ?? 'Delete failed')
           setActionMsg({ text: `Deleted ${r.deleted} job(s).`, isErr: false })
@@ -375,14 +385,14 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
     if (!activeTab) return
     setConfirm({
       title:
-        activeTab.pipeline === 'bars'
+        activeTab.pipeline === 'stocks_ib'
           ? 'Delete failed bars backfill jobs'
           : `Delete failed Massive jobs (queue “${activeTab.celeryQueue}”)`,
       message:
         'This will permanently delete all rows with status failed in this queue slice. This cannot be undone.',
       confirming: false,
       action: async () => {
-        if (activeTab.pipeline === 'massive') {
+        if (activeTab.pipeline === 'massive_async') {
           const r = await deleteAllMassiveJobs('failed', activeTab.celeryQueue)
           if (!r.ok) throw new Error(r.error ?? 'Delete failed')
           setActionMsg({ text: `Deleted ${r.deleted} job(s).`, isErr: false })
@@ -407,13 +417,13 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
     }
     setConfirm({
       title:
-        activeTab.pipeline === 'bars'
+        activeTab.pipeline === 'stocks_ib'
           ? 'Trim bars backfill job table'
           : `Trim Massive jobs (queue “${activeTab.celeryQueue}”)`,
       message: `Keep only the newest ${n} job(s) by ID in this queue slice. Older rows will be deleted. This cannot be undone.`,
       confirming: false,
       action: async () => {
-        if (activeTab.pipeline === 'massive') {
+        if (activeTab.pipeline === 'massive_async') {
           const r = await trimMassiveJobs(n, activeTab.celeryQueue)
           if (!r.ok) throw new Error(r.error ?? 'Trim failed')
           setActionMsg({ text: `Removed ${r.deleted} older job(s); kept ${n} newest.`, isErr: false })
@@ -442,15 +452,15 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
     }
   }
 
-  const loading = activeTab?.pipeline === 'massive' ? massiveLoading : barsLoading
-  const err = activeTab?.pipeline === 'massive' ? massiveError : barsError
+  const loading = activeTab?.pipeline === 'massive_async' ? massiveLoading : barsLoading
+  const err = activeTab?.pipeline === 'massive_async' ? massiveError : barsError
 
   return (
     <section className="replay-section dashboard-section dashboard-celery-queues" aria-labelledby="celery-queues-head">
       <div className="celery-queues-header">
         <h3 id="celery-queues-head" className="page-title-with-tooltip" style={{ margin: 0 }}>
           Queues
-          <InfoTooltip text="Queue summary (above main tabs) shows all queues. Tabs follow ops.worker_profiles (GET /ops/workers/profiles). Each tab lists PostgreSQL jobs for that Celery queue: bars → job_bars_backfill; Massive* → job_massive_backfill filtered by routing. Bulk delete icons: pending (clock), running (bars), done (trash), failed (circle with X). When Status is not All, only the icon for the current filter is shown. Trim applies to row age by ID." />
+          <InfoTooltip text="Queue summary (above main tabs) shows all queues. Tabs follow ops.worker_profiles (GET /ops/workers/profiles). Each tab lists PostgreSQL jobs for that Celery queue: stocks_ib → job_bars_backfill; Polygon/Massive queues → job_massive_backfill filtered by routing. Bulk delete icons: pending (clock), running (worker), done (trash), failed (circle with X). When Status is not All, only the icon for the current filter is shown. Trim applies to row age by ID." />
         </h3>
       </div>
 
@@ -603,7 +613,7 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
       <p className="section-hint celery-queue-hint">
         <code className="dashboard-queue-name">{activeTab?.celeryQueue ?? '—'}</code>
         {' — '}
-        {activeTab?.pipeline === 'massive' ? (
+        {activeTab?.pipeline === 'massive_async' ? (
           <>
             Massive feeds: <a href="#feed-massive-common">Massive Common</a>
             {' · '}
@@ -630,7 +640,7 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
         </p>
       ) : null}
 
-      {activeTab?.pipeline === 'massive' ? (
+      {activeTab?.pipeline === 'massive_async' ? (
         <div className="feed-massive-table-wrap">
           <table className="data-table">
             <thead>

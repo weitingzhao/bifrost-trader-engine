@@ -2,21 +2,23 @@
 
 Used by Ops queue summary, worker profiles, and UI — same strings as ``celery -Q`` lists.
 
-Stock aggregate jobs use kind ``feed_stocks_aggregate`` (legacy ``stock_ohlc_sync``) on ``massive_stocks`` / ``massive_stocks_high``.
+Stock aggregate jobs use kind ``feed_stocks_aggregate`` (legacy ``stock_ohlc_sync``) on ``stocks_massive`` / ``stocks_massive_high``.
 
-Option contract OHLC / pool jobs use kind ``feed_options_aggregate`` (legacy ``aggregates``) on ``massive`` / ``massive_high``.
+Option contract OHLC / pool jobs use kind ``feed_options_aggregate`` (legacy ``aggregates``) on ``options_massive`` / ``options_massive_high``.
 
-Options last-trade / quotes / historical trades proxy jobs use kind ``feed_options_trades_quotes`` (legacy ``trades_quotes``) on ``massive`` / ``massive_high``.
+Options last-trade / quotes / historical trades proxy jobs use kind ``feed_options_trades_quotes`` (legacy ``trades_quotes``) on ``options_massive`` / ``options_massive_high``.
 
-Option reference contracts (list/detail/upsert/backfill) jobs use kind ``feed_option_contracts`` (legacy ``contracts``) on ``massive`` / ``massive_high``.
+Option reference contracts (list/detail/upsert/backfill) jobs use kind ``feed_option_contracts`` (legacy ``contracts``) on ``options_massive`` / ``options_massive_high``.
 
-Full tickers reference universe sync uses kind ``feed_stocks_tickers_reference_universe`` (legacy ``ticker_reference_universe`` / ``stock_reference_universe``) on ``massive_stocks`` / ``massive_stocks_high``.
+Full tickers reference universe sync uses kind ``feed_stocks_tickers_reference_universe`` (legacy ``ticker_reference_universe`` / ``stock_reference_universe``) on ``stocks_massive`` / ``stocks_massive_high``.
 
-Ticker-reference overview jobs use kind ``feed_stocks_tickers_overview`` (legacy ``ticker_reference_overview`` / ``stock_reference_overview``) on ``massive_stocks`` / ``massive_stocks_high``.
+Ticker-reference overview jobs use kind ``feed_stocks_tickers_overview`` (legacy ``ticker_reference_overview`` / ``stock_reference_overview``) on ``stocks_massive`` / ``stocks_massive_high``.
 
-Ticker-reference related-peers jobs use kind ``feed_stocks_tickers_related`` (legacy ``ticker_reference_related`` / ``stock_reference_related``) on ``massive_stocks`` / ``massive_stocks_high``.
+Ticker-reference related-peers jobs use kind ``feed_stocks_tickers_related`` (legacy ``ticker_reference_related`` / ``stock_reference_related``) on ``stocks_massive`` / ``stocks_massive_high``.
 
-Ticker types dictionary jobs (GET /v3/reference/tickers/types) use kind ``feed_stocks_tickers_types`` (legacy ``ticker_reference_ticker_types`` / ``ticker_reference_instrument_types`` / ``stock_reference_instrument_types``) on ``massive_stocks`` / ``massive_stocks_high``.
+Ticker types dictionary jobs (GET /v3/reference/tickers/types) use kind ``feed_stocks_tickers_types`` (legacy ``ticker_reference_ticker_types`` / ``ticker_reference_instrument_types`` / ``stock_reference_instrument_types``) on ``stocks_massive`` / ``stocks_massive_high``.
+
+IB historical bars backfill uses queue ``stocks_ib``.
 
 Display names: prefer ``broker_queue_labels`` from GET /ops/celery/capabilities (from ``ops.worker_profiles``); fallback in ``frontend/src/utils/celeryQueueLabels.ts``.
 """
@@ -29,19 +31,19 @@ from typing import Dict, Final, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 # Redis LIST keys (stable for workers and broker).
-BROKER_QUEUE_BARS: Final[str] = "bars"
-BROKER_QUEUE_MASSIVE_STOCKS_HIGH: Final[str] = "massive_stocks_high"
-BROKER_QUEUE_MASSIVE_STOCKS: Final[str] = "massive_stocks"
-BROKER_QUEUE_MASSIVE_OPTIONS_HIGH: Final[str] = "massive_high"
-BROKER_QUEUE_MASSIVE_OPTIONS: Final[str] = "massive"
+BROKER_QUEUE_STOCKS_IB: Final[str] = "stocks_ib"
+BROKER_QUEUE_STOCKS_MASSIVE_HIGH: Final[str] = "stocks_massive_high"
+BROKER_QUEUE_STOCKS_MASSIVE: Final[str] = "stocks_massive"
+BROKER_QUEUE_OPTIONS_MASSIVE_HIGH: Final[str] = "options_massive_high"
+BROKER_QUEUE_OPTIONS_MASSIVE: Final[str] = "options_massive"
 
 # Default order when ``ops.celery.canonical_queue_order`` is absent (tests, tools without merged YAML).
 CANONICAL_BROKER_QUEUE_NAMES: Final[Tuple[str, ...]] = (
-    BROKER_QUEUE_BARS,
-    BROKER_QUEUE_MASSIVE_STOCKS_HIGH,
-    BROKER_QUEUE_MASSIVE_STOCKS,
-    BROKER_QUEUE_MASSIVE_OPTIONS_HIGH,
-    BROKER_QUEUE_MASSIVE_OPTIONS,
+    BROKER_QUEUE_STOCKS_IB,
+    BROKER_QUEUE_STOCKS_MASSIVE_HIGH,
+    BROKER_QUEUE_STOCKS_MASSIVE,
+    BROKER_QUEUE_OPTIONS_MASSIVE_HIGH,
+    BROKER_QUEUE_OPTIONS_MASSIVE,
 )
 
 

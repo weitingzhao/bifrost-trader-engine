@@ -16,8 +16,8 @@ def test_build_celery_capabilities_payload_has_matrix_and_canonical_queues() -> 
     out = build_celery_capabilities_payload(app)
     assert out["ok"] is True
     assert out["canonical_broker_queues"] == list(load_canonical_broker_queue_names(cfg))
-    assert out["broker_queue_labels"].get("massive") == "Massive options"
-    assert out["broker_queue_labels"].get("bars") == "IB"
+    assert out["broker_queue_labels"].get("options_massive") == "Massive options"
+    assert out["broker_queue_labels"].get("stocks_ib") == "IB"
     assert len(out["run_massive_job_matrix"]) >= 1
     assert out["run_massive_job_matrix"][0]["broker_queue_standard"]
     assert out["beat_tasks"] == beat_tasks_payload_for_capabilities()
@@ -34,10 +34,10 @@ def test_ops_celery_config_validation_errors_detects_unknown_queue() -> None:
     bad = {
         "ops": {
             "worker_profiles": {
-                "ib": {"label": "IB", "queues": ["bars"]},
+                "stocks_ib": {"label": "IB", "queues": ["stocks_ib"]},
             },
-            "celery": {"canonical_queue_order": ["bars", "massive"]},
+            "celery": {"canonical_queue_order": ["stocks_ib", "options_massive"]},
         }
     }
     errs = ops_celery_config_validation_errors(bad)
-    assert any("massive" in e for e in errs)
+    assert any("options_massive" in e for e in errs)

@@ -1,5 +1,5 @@
 [Unit]
-Description=Bifrost Celery worker instance %i (bars/massive queues, run_celery.py)
+Description=Bifrost Celery worker instance %i (stocks_ib / options_massive / stocks_massive queues, run_celery.py)
 After=network-online.target
 Wants=network-online.target
 

@@ -1333,7 +1333,7 @@ export function FeedMassiveOptionPage({
             ) : null}
             <a href="#settings-celery" className="feed-massive-queue-summary-link">Celery queue details</a>
             {!_status?.celery?.workers?.length ? (
-              <span className="feed-massive-queue-summary-warn">No workers — start a worker with -Q massive (or run_celery default including massive_stocks*, massive*)</span>
+              <span className="feed-massive-queue-summary-warn">No workers — start a worker with -Q options_massive (or run_celery default including stocks_massive*, options_massive*)</span>
             ) : null}
           </div>
           <p className="feed-massive-cap-hint">

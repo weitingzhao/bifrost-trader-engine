@@ -1329,7 +1329,7 @@ export async function fetchMassiveJobsList(options?: {
   offset?: number
   status?: string
   kind?: string
-  /** Broker queue slice (massive, massive_high, massive_stocks, massive_stocks_high). */
+  /** Broker queue slice (options_massive, options_massive_high, stocks_massive, stocks_massive_high). */
   celery_queue?: string
 }): Promise<{ ok: boolean; jobs: MassiveJobApiRow[]; error?: string }> {
   const q = new URLSearchParams()

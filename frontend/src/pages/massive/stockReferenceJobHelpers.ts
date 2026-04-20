@@ -141,7 +141,7 @@ export const REF_TICKER_JOB_ROWS: ReadonlyArray<{
 }> = [
   {
     kind: 'feed_stocks_tickers_reference_universe',
-    queueNote: 'massive_stocks_high',
+    queueNote: 'stocks_massive_high',
     hint: 'Full pagination until no cursor (1000 rows/page, sort ticker asc).',
     needsSymbols: false,
     restEndpointShort: 'GET v3/ref/tickers',
@@ -151,7 +151,7 @@ export const REF_TICKER_JOB_ROWS: ReadonlyArray<{
   },
   {
     kind: 'feed_stocks_tickers_types',
-    queueNote: 'massive_stocks_high',
+    queueNote: 'stocks_massive_high',
     hint: 'Replaces all rows from the API (truncate + insert).',
     needsSymbols: false,
     restEndpointShort: 'GET v3/ref/tickers/types',
@@ -161,7 +161,7 @@ export const REF_TICKER_JOB_ROWS: ReadonlyArray<{
   },
   {
     kind: 'feed_stocks_tickers_overview',
-    queueNote: 'massive_stocks',
+    queueNote: 'stocks_massive',
     hint:
       'Payload mode: missing (no ticker_overview row), stale (missing or older than stale_hours), symbols (list), or all tickers.',
     needsSymbols: false,
@@ -172,7 +172,7 @@ export const REF_TICKER_JOB_ROWS: ReadonlyArray<{
   },
   {
     kind: 'feed_stocks_tickers_related',
-    queueNote: 'massive_stocks',
+    queueNote: 'stocks_massive',
     hint:
       'Payload mode: missing (no related rows), stale (missing or older than stale_hours by MAX(fetched_at)), symbols (list), or all tickers.',
     needsSymbols: false,

@@ -71,7 +71,7 @@ export function StatusCeleryPanel({
             {celeryBrokerConnected ? (
               workersCount > 0 ? (
                 <p className="section-hint countdown-line">
-                  <span className="countdown-num">Connected</span> <span>(bars queue available)</span>
+                  <span className="countdown-num">Connected</span> <span>(stocks_ib queue available)</span>
                 </p>
               ) : (
                 <p className="section-hint">
