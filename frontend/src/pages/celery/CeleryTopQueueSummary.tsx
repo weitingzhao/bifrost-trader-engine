@@ -91,6 +91,8 @@ export interface CeleryTopQueueSummaryProps {
   onNavigateAggregateCoverageConsole?: () => void
   /** When set, highlights the data row for this Celery queue name (Worker Instances filter). */
   highlightQueueName?: string | null
+  /** Totals row: clear Worker Instances queue filter and show all systemd units (same as filter bar “Show all”). */
+  onTotalsRowClearWorkerFilter?: () => void
   /** Open Support Tasks tab and filter Task registry + Queue kind matrix by this broker queue key. */
   onOpenSupportTasksFilter?: (brokerQueueKey: string) => void
   /** Broker key when Support Tasks filter is active (highlights matching Queue summary filter icon). */
@@ -125,6 +127,7 @@ export function CeleryTopQueueSummary({
   onNavigateQueueCoverageConsole,
   onNavigateAggregateCoverageConsole,
   highlightQueueName = null,
+  onTotalsRowClearWorkerFilter,
   onOpenSupportTasksFilter,
   activeSupportTasksFilterKey = null,
 }: CeleryTopQueueSummaryProps) {
@@ -177,7 +180,7 @@ export function CeleryTopQueueSummary({
     >
       <h3 id="dashboard-celery-top-queue-summary-head" className="page-title-with-tooltip">
         Queue summary
-        <InfoTooltip text="R/C = Redis LLEN / Celery inspect (active + reserved). P/R/D/F = PostgreSQL counts. Default action: delete all pending (same API as Queues toolbar). Click a PG count to switch the icon; confirmations match Queues bulk delete. Failed mode: delete failed + reset. Icons stay visible when counts are zero. Host: env pill + lamp." />
+        <InfoTooltip text="R/C = Redis LLEN / Celery inspect (active + reserved). P/R/D/F = PostgreSQL job rows. If PostgreSQL P is non-zero but Redis R is 0, tasks may not be on the broker (stuck rows, deduplicated enqueue, or wrong Redis). Per-queue Host lamp yellow = no worker in inspect consumes that queue. Click a queue name or PG cell filters Worker Instances; click Total to show all instances. Default action: delete pending. Click a PG count to switch the action icon." />
       </h3>
       {queueSummaryDb === false && (
         <p className="dashboard-queue-summary-hint">PostgreSQL job totals unavailable (check ops config or DB).</p>
@@ -544,7 +547,19 @@ export function CeleryTopQueueSummary({
                     </div>
                   </td>
                   <td>
-                    <strong>Total</strong>
+                    {onTotalsRowClearWorkerFilter ? (
+                      <button
+                        type="button"
+                        className="dashboard-queue-summary-totals-queue-clear"
+                        title="Show all worker instances (clear queue filter)"
+                        aria-label="Show all worker instances, clear queue filter"
+                        onClick={() => onTotalsRowClearWorkerFilter()}
+                      >
+                        <strong>Total</strong>
+                      </button>
+                    ) : (
+                      <strong>Total</strong>
+                    )}
                   </td>
                   <td className="dashboard-queue-summary-rc-cell" title="Redis / Celery (deduped totals)">
                     {`${fmtQueueCell(totalsBroker?.pending_broker ?? null)}/${fmtQueueCell(totalsBroker?.running_celery ?? null)}`}

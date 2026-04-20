@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 
 /** Shared copy — also reflected in matrix tooltips where relevant. */
 export const GAP_SCOPE_CORE_TEXT =
-  'For each expiry (newest 60 in option_contracts if there are more), we take every contract returned by Massive GET /v3/reference/options/contracts (paginated, with expiration_date). The comparable PostgreSQL count is how many of your option_contracts rows have the same contract_key as one of those API rows. Rows that exist only in the database but are not in the API response for that expiry are excluded from the PG side (they do not affect Gap or Cov%). Gap = Massive row count − matched PG rows. Cov% = 100 × matched PG ÷ Massive total for compared expiries (never above 100%).'
+  'For each expiry (newest N distinct expiries in option_contracts, default N=60, Advanced up to 120), we take every contract returned by Massive GET /v3/reference/options/contracts (paginated, with expiration_date; server page cap per expiry). The comparable PostgreSQL count is how many of your option_contracts rows have the same contract_key as one of those API rows. Rows that exist only in the database but are not in the API response for that expiry are excluded from the PG side (they do not affect Gap or Cov%). Gap = Massive row count − matched PG rows. Cov% = 100 × matched PG ÷ Massive total for compared expiries (never above 100%).'
 
 /** option_snapshots matrix Check — chain snapshot API vs PG, scoped to option_contracts keys. */
 export const SNAPSHOT_GAP_SCOPE_CORE_TEXT =
@@ -73,7 +73,8 @@ export function DataOverviewGapExplainSheet({
               <p className="data-overview-gap-explain-sheet__p">
                 After <strong>Check</strong>, <strong>Fill row gap</strong> enqueues Celery <code>option_day_pool_row_gap</code>:
                 Massive GET /v2/aggs (daily) for missing contracts up to a configured lookback (default ~2 years), capped per
-                run. <strong>Fill column data</strong> runs <code>option_day_pool_column_fill</code>: GET /v1/open-close per
+                run. The API may <strong>fan out</strong> into several smaller jobs (fewer contracts per task) so one network
+                failure does not block the whole batch. <strong>Fill column data</strong> runs <code>option_day_pool_column_fill</code>: GET /v1/open-close per
                 trading day for rows with incomplete OHLC, volume, or VWAP in the lookback window, then optional VWAP patch
                 from day aggs. Column fill may prioritize trading days where bar-quality daily metrics are below 97% when that
                 data is available. This is separate from <code>option_contracts</code> reference or nullable column backfill.
@@ -191,6 +192,15 @@ export function DataOverviewGapExplainSheet({
             API. In <strong>All gaps</strong>, use <strong>Fill column</strong> under &quot;Nullable / optional column NULL
             share&quot; for those fields (or toolbar <strong>Fill column data</strong> for both columns across the pool). Run
             row/ticker fill first if <code>massive_option_ticker</code> is missing on rows that need detail backfill.
+          </p>
+
+          <h4 className="data-overview-gap-explain-sheet__h">Why Fill row gap may be disabled when the matrix looks thin</h4>
+          <p className="data-overview-gap-explain-sheet__p">
+            The matrix row count reflects all <code>option_contracts</code> rows in PostgreSQL. Compare (and the Gap used for Fill)
+            only covers the <strong>newest N expiries</strong> plus Massive pagination limits. If Compare is truncated or the
+            aggregate Gap is <strong>0</strong> within that scanned subset, <strong>Fill row gap</strong> stays off even when older
+            expiries still have rows — raise <strong>Max expiries</strong> (Advanced) and run <strong>Check</strong> again, or use{' '}
+            <strong>All gaps</strong> per expiry.
           </p>
 
           <h4 className="data-overview-gap-explain-sheet__h">When Fill row gap is disabled</h4>

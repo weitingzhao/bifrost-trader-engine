@@ -7,14 +7,28 @@ from typing import Any, Dict, List, Optional
 
 from src.vendor.massive.client import MassiveClient
 
+# Tunable via API; hard caps protect Massive REST from accidental huge scans.
+_DEFAULT_MAX_EXPIRIES = 60
+_MAX_EXPIRIES_CAP = 120
+_DEFAULT_MAX_PAGES_PER_EXPIRY = 20
+_MAX_PAGES_PER_EXPIRY_CAP = 30
+
+
+def _clamp_int(n: Any, lo: int, hi: int, default: int) -> int:
+    try:
+        v = int(n)
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(hi, v))
+
 
 def compute_option_contracts_reference_gap(
     cur: Any,
     client: MassiveClient,
     symbol: str,
     *,
-    max_expiries: int = 60,
-    max_pages_per_expiry: int = 20,
+    max_expiries: int = _DEFAULT_MAX_EXPIRIES,
+    max_pages_per_expiry: int = _DEFAULT_MAX_PAGES_PER_EXPIRY,
 ) -> Dict[str, Any]:
     """For each distinct expiry in option_contracts, paginate Massive GET /v3/reference/options/contracts.
 
@@ -28,6 +42,9 @@ def compute_option_contracts_reference_gap(
     sym = (symbol or "").strip().upper()
     if not sym:
         return {"ok": False, "error": "symbol is required"}
+
+    max_expiries = _clamp_int(max_expiries, 1, _MAX_EXPIRIES_CAP, _DEFAULT_MAX_EXPIRIES)
+    max_pages_per_expiry = _clamp_int(max_pages_per_expiry, 1, _MAX_PAGES_PER_EXPIRY_CAP, _DEFAULT_MAX_PAGES_PER_EXPIRY)
 
     compared_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -56,6 +73,10 @@ def compute_option_contracts_reference_gap(
             "symbol": sym,
             "has_rows": False,
             "db_row_count": 0,
+            "distinct_expiry_total": distinct_exp_ct,
+            "expiries_scanned": 0,
+            "max_expiries_used": max_expiries,
+            "max_pages_per_expiry_used": max_pages_per_expiry,
             "pg_total": 0,
             "massive_total": None,
             "gap": None,
@@ -153,6 +174,10 @@ def compute_option_contracts_reference_gap(
         "symbol": sym,
         "has_rows": True,
         "db_row_count": db_row_count,
+        "distinct_expiry_total": distinct_exp_ct,
+        "expiries_scanned": len(expiries_raw),
+        "max_expiries_used": max_expiries,
+        "max_pages_per_expiry_used": max_pages_per_expiry,
         "pg_total": pg_total_sum,
         "massive_total": massive_total,
         "gap": gap,

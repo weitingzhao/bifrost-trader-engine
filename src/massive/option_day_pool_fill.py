@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 
 _NY = ZoneInfo("America/New_York")
 
+# Max explicit contracts per job (API fan-out chunks must stay at or below this).
+ROW_GAP_EXPLICIT_TARGETS_MAX = 200
+
 
 def option_day_row_lookback_days() -> int:
     raw = (os.environ.get("BIFROST_OPTION_DAY_ROW_LOOKBACK_DAYS") or "").strip()
@@ -36,7 +39,7 @@ def _bar_time_ny_date_str(bt: Any) -> str:
     return dt.astimezone(_NY).date().isoformat()
 
 
-def _fetch_option_day_row_gap_targets(
+def list_option_day_row_gap_targets(
     cur: Any,
     sym: str,
     max_expiries: int,
@@ -44,7 +47,10 @@ def _fetch_option_day_row_gap_targets(
     *,
     expiration_date: Optional[str] = None,
 ) -> List[Tuple[str, str, str, float, str]]:
-    """Contracts in option_contracts (newest expiries) with ticker but no option_day row (source=massive)."""
+    """Contracts in option_contracts (newest expiries) with ticker but no option_day row (source=massive).
+
+    Returns tuples ``(massive_option_ticker, symbol, expiry, strike, option_right)``.
+    """
     exp = (expiration_date or "").strip()[:32] or None
     if exp:
         cur.execute(
@@ -112,6 +118,126 @@ def _fetch_option_day_row_gap_targets(
             )
         )
     return out
+
+
+# Backward compat for tests that monkeypatch the private name.
+_fetch_option_day_row_gap_targets = list_option_day_row_gap_targets
+
+
+def parse_row_gap_targets_from_payload(raw: Any, sym_upper: str) -> List[Tuple[str, str, str, float, str]]:
+    """Parse ``payload.row_gap_targets`` into tuples; capped at :data:`ROW_GAP_EXPLICIT_TARGETS_MAX`."""
+    if not isinstance(raw, list) or not raw:
+        return []
+    out: List[Tuple[str, str, str, float, str]] = []
+    for item in raw:
+        if len(out) >= ROW_GAP_EXPLICIT_TARGETS_MAX:
+            break
+        if isinstance(item, (list, tuple)) and len(item) >= 5:
+            out.append(
+                (
+                    str(item[0]).strip(),
+                    (str(item[1]).strip() or sym_upper).upper(),
+                    str(item[2]).strip(),
+                    float(item[3]),
+                    str(item[4]).strip(),
+                )
+            )
+        elif isinstance(item, dict):
+            ot = str(item.get("options_ticker") or item.get("massive_option_ticker") or "").strip()
+            u = str(item.get("symbol") or item.get("underlying") or sym_upper).strip().upper()
+            exp = str(item.get("expiry") or "").strip()
+            try:
+                strike = float(item.get("strike") or 0)
+            except (TypeError, ValueError):
+                continue
+            right = str(item.get("option_right") or item.get("right") or "C").strip()
+            if ot and exp:
+                out.append((ot, u, exp, strike, right))
+    return out
+
+
+def chunk_option_day_row_gap_targets(
+    targets: List[Tuple[str, str, str, float, str]],
+    chunk_size: int,
+) -> List[List[Tuple[str, str, str, float, str]]]:
+    """Split target list into slices of ``chunk_size`` (last slice may be smaller)."""
+    if chunk_size < 1:
+        return [targets] if targets else []
+    return [targets[i : i + chunk_size] for i in range(0, len(targets), chunk_size)]
+
+
+def row_gap_targets_to_payload_dicts(
+    chunk: List[Tuple[str, str, str, float, str]],
+) -> List[Dict[str, Any]]:
+    """Serialize chunk for JSON payload (stable keys for dedup hash)."""
+    return [
+        {
+            "options_ticker": ot,
+            "symbol": u,
+            "expiry": exp,
+            "strike": strike,
+            "option_right": opt_right,
+        }
+        for ot, u, exp, strike, opt_right in chunk
+    ]
+
+
+def _is_transient_aggs_error(msg: str) -> bool:
+    m = (msg or "").lower()
+    needles = (
+        "remote end closed connection",
+        "connection reset",
+        "connection aborted",
+        "timed out",
+        "timeout",
+        "temporarily unavailable",
+        "bad gateway",
+        "service unavailable",
+        "gateway timeout",
+    )
+    return any(n in m for n in needles)
+
+
+def _is_transient_aggs_exception(ex: BaseException) -> bool:
+    if isinstance(ex, (ConnectionError, TimeoutError, OSError)):
+        return True
+    return _is_transient_aggs_error(str(ex))
+
+
+def fetch_option_aggs_with_retry(
+    client: Any,
+    options_ticker: str,
+    multiplier: int,
+    timespan: str,
+    start_ms: int,
+    end_ms: int,
+    rest_throttle: Any,
+    *,
+    max_attempts: int = 3,
+) -> Dict[str, Any]:
+    """Call ``client.fetch_option_aggs`` with retries on transient network / HTTP-style errors."""
+    last: Dict[str, Any] = {"results": [], "error": "no attempts"}
+    for attempt in range(max(1, int(max_attempts))):
+        try:
+            aggs = client.fetch_option_aggs(options_ticker, multiplier, timespan, start_ms, end_ms)
+            last = aggs if isinstance(aggs, dict) else {"results": [], "error": "invalid response"}
+            err = last.get("error")
+            if not err:
+                return last
+            err_s = str(err)
+            if attempt < max_attempts - 1 and _is_transient_aggs_error(err_s):
+                time.sleep(min(4.0, 0.4 * (2**attempt)))
+                rest_throttle()
+                continue
+            return last
+        except Exception as ex:  # noqa: BLE001
+            last = {"results": [], "error": str(ex)}
+            if attempt < max_attempts - 1 and _is_transient_aggs_exception(ex):
+                time.sleep(min(4.0, 0.4 * (2**attempt)))
+                rest_throttle()
+                continue
+            return last
+    return last
 
 
 def _fetch_option_day_column_targets(
@@ -274,14 +400,22 @@ def run_option_day_pool_aggregates(
         exp_filter = (payload.get("expiration_date") or "").strip()[:32] or None
         contracts_processed = 0
         bars_upserted = 0
-        with conn.cursor() as cur:
-            targets = _fetch_option_day_row_gap_targets(
-                cur, sym, max_expiries, max_contracts, expiration_date=exp_filter
-            )
+        explicit = parse_row_gap_targets_from_payload(payload.get("row_gap_targets"), sym)
+        if explicit:
+            targets = explicit
+            targets_source = "explicit"
+        else:
+            with conn.cursor() as cur:
+                targets = list_option_day_row_gap_targets(
+                    cur, sym, max_expiries, max_contracts, expiration_date=exp_filter
+                )
+            targets_source = "query"
 
         for ot, u_sym, exp, strike, opt_right in targets:
             try:
-                aggs = client.fetch_option_aggs(ot, 1, "day", start_ms, end_ms)
+                aggs = fetch_option_aggs_with_retry(
+                    client, ot, 1, "day", start_ms, end_ms, rest_throttle, max_attempts=3
+                )
                 if aggs.get("error"):
                     err_s = str(aggs.get("error"))
                     errors.append(f"{ot}: {err_s}")
@@ -301,6 +435,8 @@ def run_option_day_pool_aggregates(
                 logger.exception("option_day_pool_row_gap failed for %s", ot)
             rest_throttle()
 
+        contracts_failed = len(errors)
+        contracts_ok = contracts_processed
         ok = len(errors) == 0
         summary = {
             "underlying": sym,
@@ -310,11 +446,18 @@ def run_option_day_pool_aggregates(
             "end_ms": end_ms,
             "max_expiries": max_expiries,
             "contracts_processed": contracts_processed,
+            "contracts_ok": contracts_ok,
+            "contracts_failed": contracts_failed,
+            "targets_source": targets_source,
             "bars_upserted": bars_upserted,
             "targets_found": len(targets),
             "errors": errors[:20],
             "errors_truncated": len(errors) > 20,
         }
+        if payload.get("fan_out_chunk_index") is not None:
+            summary["fan_out_chunk_index"] = int(payload["fan_out_chunk_index"])
+        if payload.get("fan_out_chunks_total") is not None:
+            summary["fan_out_chunks_total"] = int(payload["fan_out_chunks_total"])
         return {
             "ok": ok,
             "kind": "feed_options_aggregate",

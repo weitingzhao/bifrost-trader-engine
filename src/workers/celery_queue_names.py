@@ -28,7 +28,7 @@ Optional fallback from ``ops.worker_profiles`` ``label`` when a queue key is mis
 from __future__ import annotations
 
 import logging
-from typing import Dict, Final, List, Optional, Tuple
+from typing import Any, Dict, Final, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -189,3 +189,58 @@ def build_broker_queue_labels_from_worker_profiles(config: Optional[dict]) -> Di
             if qn not in out:
                 out[qn] = label
     return out
+
+
+# Default Celery pool for Massive-only worker profiles (options_*, stocks_massive*): prefork with this concurrency.
+DEFAULT_MASSIVE_WORKER_CONCURRENCY: Final[int] = 4
+
+
+def build_celery_worker_pool_argv(
+    *,
+    instance_profile_resolved: bool,
+    profile_key: Optional[str],
+    worker_profile_entry: Optional[dict],
+    ops_celery: Any,
+) -> List[str]:
+    """Return argv fragments for ``celery worker`` pool (e.g. ``--pool=solo`` or ``--pool=prefork --concurrency=N``).
+
+    - No ``--instance`` / unresolved profile: ``solo`` (legacy worker may mix ``stocks_ib`` with Massive queues).
+    - ``stocks_ib`` profile: always ``solo`` (single IB connection per worker OS process).
+    - Other profiles: ``prefork`` unless ``ops.worker_profiles.<key>.pool`` is ``solo``; concurrency from profile,
+      else ``ops.celery.massive_worker_concurrency``, else :data:`DEFAULT_MASSIVE_WORKER_CONCURRENCY`.
+    """
+    if not instance_profile_resolved or not profile_key:
+        return ["--pool=solo"]
+    if profile_key == BROKER_QUEUE_STOCKS_IB:
+        return ["--pool=solo"]
+    entry = worker_profile_entry if isinstance(worker_profile_entry, dict) else {}
+    pool = str(entry.get("pool", "") or "").strip().lower()
+    if pool in ("", "prefork"):
+        pass
+    elif pool == "solo":
+        return ["--pool=solo"]
+    else:
+        logger.warning(
+            "ops.worker_profiles[%r].pool=%r is not supported; using prefork",
+            profile_key,
+            entry.get("pool"),
+        )
+
+    oc = ops_celery if isinstance(ops_celery, dict) else {}
+    conc_val: Any = entry.get("concurrency")
+    if conc_val is None:
+        conc_val = oc.get("massive_worker_concurrency")
+    if conc_val is None:
+        n = DEFAULT_MASSIVE_WORKER_CONCURRENCY
+    else:
+        try:
+            n = int(conc_val)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid massive worker concurrency %r; using %s",
+                conc_val,
+                DEFAULT_MASSIVE_WORKER_CONCURRENCY,
+            )
+            n = DEFAULT_MASSIVE_WORKER_CONCURRENCY
+    n = max(1, min(n, 64))
+    return ["--pool=prefork", f"--concurrency={n}"]

@@ -27,11 +27,23 @@ import {
 import type { OptionsFocusDataset } from './optionFocusDataset'
 import { DEFAULT_OPTION_MIN_PERIOD, OPTION_MIN_INTRADAY_PERIODS } from '../../utils/optionBarPeriods'
 
-/** Watchlist optionable symbols max 80; batch chain jobs need headroom. */
-const MAX_TRACKED = 96
+/** Watchlist optionable symbols max 80; batch chain jobs + Check rows need headroom (trim is display-only). */
+const MAX_TRACKED = 128
+
+/** Browsers stall with hundreds of EventSource connections; queue excess and coalesce UI updates. */
+const MAX_CONCURRENT_JOB_SSE = 8
 
 /** Align with All gaps / matrix coloring: below 97% is review or attention. */
 const OPTION_CONTRACTS_COLUMN_HEALTH_PCT = 97
+
+/** Massive option_day row-gap: POST /research/massive/sync fan-out chunk size (contracts per Celery job). */
+const OPTION_DAY_ROW_GAP_FANOUT_CHUNK_SIZE = 35
+
+/** Parallel POST /research/massive/sync per Fill row gap batch so one slow symbol does not block the rest. */
+const OPTION_DAY_ROW_GAP_ENQUEUE_CONCURRENCY = 4
+
+/** If the Massive sync HTTP request hangs (server busy), abort so other symbols and chunks can continue. */
+const OPTION_DAY_ROW_GAP_POST_TIMEOUT_MS = 180_000
 
 function hasRefCompareDone(g: OptionContractsReferenceGapResult | undefined): boolean {
   return Boolean(g?.ok && g.compared_at)
@@ -41,6 +53,18 @@ function hasRefCompareDone(g: OptionContractsReferenceGapResult | undefined): bo
 function symbolHasRowGapIssue(g: OptionContractsReferenceGapResult | undefined): boolean {
   if (!hasRefCompareDone(g)) return false
   return typeof g!.gap === 'number' && g!.gap !== 0
+}
+
+/** True when Compare hit server-side expiry or per-expiry page caps (aggregate gap may not cover the full chain). */
+function poolHasRefCompareTruncation(
+  refGapBySymbol: Record<string, OptionContractsReferenceGapResult | undefined>,
+  poolUpper: string[],
+): boolean {
+  for (const s of poolUpper) {
+    const g = refGapBySymbol[s]
+    if (g?.ok && (g.expiries_truncated || g.truncated)) return true
+  }
+  return false
 }
 
 /** Nullable / ticker coverage still below healthy threshold (watchlist coverage row). */
@@ -294,6 +318,9 @@ function DataOverviewOptionJobsSheet({
   onClearCompleted,
   onClearAll,
   onRefreshCoverage,
+  maxTracked,
+  sessionEnqueueTotal,
+  bulkEnqueueTrimHint,
 }: {
   open: boolean
   onClose: () => void
@@ -302,6 +329,12 @@ function DataOverviewOptionJobsSheet({
   onClearAll: () => void
   /** Reload Data Overview coverage (watchlist matrix, global summary, job summaries) without a full page refresh. */
   onRefreshCoverage?: () => void | Promise<void>
+  /** Display cap for the table below; older rows are dropped from this list only. */
+  maxTracked: number
+  /** Successful Celery enqueues this session (not reduced when rows trim). */
+  sessionEnqueueTotal: number
+  /** When a single bulk enqueue added more rows than maxTracked. */
+  bulkEnqueueTrimHint: boolean
 }) {
   const asideRef = useRef<HTMLDivElement | null>(null)
   const [refreshBusy, setRefreshBusy] = useState(false)
@@ -373,8 +406,43 @@ function DataOverviewOptionJobsSheet({
         <p className="ref-jobs-sheet-meta">
           Session-only tracking for jobs enqueued from Data Overview (By symbol). Massive job rows update via stream;
           reference gap checks update per symbol as each completes. Use Refresh coverage to reload the watchlist matrix
-          and summaries after jobs finish (no full page reload).
+          and summaries after jobs finish (no full page reload). Only the last {maxTracked} tracked rows are shown here;
+          older rows drop from this list — jobs may still be running. Use Celery / job tables for full history.
         </p>
+        <p className="ref-jobs-sheet-meta ref-jobs-sheet-meta--sub" role="note">
+          Workers must consume broker queue <code>options_massive</code>. If the job table shows pending/enqueued but no
+          task progress, open{' '}
+          <button
+            type="button"
+            className="ref-jobs-sheet-link"
+            onClick={() => {
+              window.location.hash = '#settings-celery'
+            }}
+          >
+            Settings → Celery
+          </button>{' '}
+          and ensure an <code>options_massive</code> worker instance is running (same Redis/config as the Massive API).
+        </p>
+        {sessionEnqueueTotal > 0 ? (
+          <p className="ref-jobs-sheet-meta ref-jobs-sheet-meta--sub" role="status">
+            Session enqueues (successful): <strong>{sessionEnqueueTotal}</strong>
+          </p>
+        ) : null}
+        {bulkEnqueueTrimHint ? (
+          <p className="ref-jobs-sheet-meta ref-jobs-sheet-meta--warn" role="status">
+            This batch enqueued more than {maxTracked} jobs — some rows may no longer appear in the list above. Open{' '}
+            <button
+              type="button"
+              className="ref-jobs-sheet-link"
+              onClick={() => {
+                window.location.hash = '#settings-celery'
+              }}
+            >
+              Open Celery job details
+            </button>{' '}
+            or the job table for full history.
+          </p>
+        ) : null}
 
         <div className="ref-jobs-sheet-toolbar">
           {onRefreshCoverage ? (
@@ -494,7 +562,7 @@ function DataOverviewOptionJobsSheet({
                 window.location.hash = '#settings-celery'
               }}
             >
-              Celery queues
+              Open Celery job details
             </button>
           </p>
         </div>
@@ -557,6 +625,7 @@ export type DataOverviewOptionJobsBarProps = {
       onSymbolDone?: (symbol: string, result: OptionContractsReferenceGapResult) => void
       onSymbolError?: (symbol: string, message: string) => void
     },
+    options?: { maxExpiries?: number },
   ) => void | Promise<void>
   refGapLoading?: boolean
   refGapError?: string | null
@@ -659,16 +728,41 @@ export const DataOverviewOptionJobsBar = forwardRef<
   >({})
   const [optionDayEligibilityLoading, setOptionDayEligibilityLoading] = useState(false)
   const [enqueueErr, setEnqueueErr] = useState<string | null>(null)
+  /** Successful Celery enqueues this session (Jobs sheet; not reduced when the list trims). */
+  const [sessionEnqueueTotal, setSessionEnqueueTotal] = useState(0)
+  /** Set when a bulk enqueue added more rows than MAX_TRACKED in one batch. */
+  const [bulkEnqueueTrimHint, setBulkEnqueueTrimHint] = useState(false)
+  /** Massive reference compare: distinct expiries scanned (server clamps to cap). */
+  const [referenceCompareMaxExpiries, setReferenceCompareMaxExpiries] = useState(60)
 
   const optionMinPeriod = optionMinPeriodProp
 
+  const bumpSessionEnqueue = useCallback((n: number) => {
+    if (n > 0) setSessionEnqueueTotal(prev => prev + n)
+  }, [])
+
   const sseClosersRef = useRef<Map<string, () => void>>(new Map())
+  const jobSseQueueRef = useRef<string[]>([])
+  const queuedJobStreamsRef = useRef<Set<string>>(new Set())
+  const activeJobSseRef = useRef(0)
+  const pendingJobUiRef = useRef<
+    Map<string, { status?: string; job?: MassiveJobApiRow; streamError?: string; terminal?: boolean }>
+  >(new Map())
+  const flushJobUiRafRef = useRef<number | null>(null)
   const refreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(
     () => () => {
       sseClosersRef.current.forEach(close => close())
       sseClosersRef.current.clear()
+      jobSseQueueRef.current = []
+      queuedJobStreamsRef.current.clear()
+      activeJobSseRef.current = 0
+      pendingJobUiRef.current.clear()
+      if (flushJobUiRafRef.current != null) {
+        cancelAnimationFrame(flushJobUiRafRef.current)
+        flushJobUiRafRef.current = null
+      }
       if (refreshDebounceRef.current) {
         clearTimeout(refreshDebounceRef.current)
         refreshDebounceRef.current = null
@@ -703,38 +797,100 @@ export const DataOverviewOptionJobsBar = forwardRef<
     return buildDataOverviewOptionEnqueuePlan(focusDataset, selectedSymbol)
   }, [focusDataset, selectedSymbol, comparePool])
 
-  const startJobStream = useCallback((jid: string) => {
-    if (sseClosersRef.current.has(jid)) return
-    const sub = subscribeMassiveJobEvents(
-      jid,
-      data => {
-        setItems(prev =>
-          prev.map(row => {
-            if (row.jobId !== jid) return row
-            if (!data.ok) {
-              sseClosersRef.current.delete(jid)
-              return { ...row, streamError: data.error ?? 'Job stream error', status: 'failed' }
+  const scheduleJobUiFlush = useCallback(() => {
+    if (flushJobUiRafRef.current != null) return
+    flushJobUiRafRef.current = requestAnimationFrame(() => {
+      flushJobUiRafRef.current = null
+      const batch = pendingJobUiRef.current
+      if (batch.size === 0) return
+      pendingJobUiRef.current = new Map()
+      setItems(prev =>
+        prev.map(row => {
+          const id = row.jobId
+          if (!id) return row
+          const p = batch.get(id)
+          if (!p) return row
+          return {
+            ...row,
+            ...(p.streamError !== undefined ? { streamError: p.streamError } : {}),
+            ...(p.status !== undefined ? { status: p.status } : {}),
+            ...(p.job !== undefined ? { job: p.job } : {}),
+          }
+        }),
+      )
+    })
+  }, [])
+
+  const openJobStreamNow = useCallback(
+    (jid: string) => {
+      activeJobSseRef.current += 1
+      const sub = subscribeMassiveJobEvents(
+        jid,
+        data => {
+          if (!data.ok) {
+            if (!sseClosersRef.current.has(jid)) return
+          }
+          const cur = pendingJobUiRef.current.get(jid) ?? {}
+          if (!data.ok) {
+            pendingJobUiRef.current.set(jid, {
+              ...cur,
+              streamError: data.error ?? 'Job stream error',
+              status: 'failed',
+            })
+            scheduleJobUiFlush()
+            sseClosersRef.current.delete(jid)
+            activeJobSseRef.current = Math.max(0, activeJobSseRef.current - 1)
+            while (
+              activeJobSseRef.current < MAX_CONCURRENT_JOB_SSE &&
+              jobSseQueueRef.current.length > 0
+            ) {
+              const next = jobSseQueueRef.current.shift()
+              if (!next) break
+              queuedJobStreamsRef.current.delete(next)
+              openJobStreamNow(next)
             }
-            const j = data.job
-            const st = (j?.status ?? '').trim() || 'running'
-            const stLower = st.toLowerCase()
-            if (stLower === 'done' || stLower === 'failed') {
-              sseClosersRef.current.delete(jid)
-              if (stLower === 'done') scheduleWatchlistRefresh()
+            return
+          }
+          const j = data.job
+          const st = (j?.status ?? '').trim() || 'running'
+          const stLower = st.toLowerCase()
+          pendingJobUiRef.current.set(jid, { ...cur, status: st, job: j })
+          scheduleJobUiFlush()
+          if (stLower === 'done' || stLower === 'failed') {
+            if (!sseClosersRef.current.has(jid)) return
+            sseClosersRef.current.delete(jid)
+            if (stLower === 'done') scheduleWatchlistRefresh()
+            activeJobSseRef.current = Math.max(0, activeJobSseRef.current - 1)
+            while (
+              activeJobSseRef.current < MAX_CONCURRENT_JOB_SSE &&
+              jobSseQueueRef.current.length > 0
+            ) {
+              const next = jobSseQueueRef.current.shift()
+              if (!next) break
+              queuedJobStreamsRef.current.delete(next)
+              openJobStreamNow(next)
             }
-            return {
-              ...row,
-              status: st,
-              job: j,
-              streamError: row.streamError,
-            }
-          }),
-        )
-      },
-      { timeoutSec: 86400 },
-    )
-    sseClosersRef.current.set(jid, sub.close)
-  }, [scheduleWatchlistRefresh])
+          }
+        },
+        { timeoutSec: 86400 },
+      )
+      sseClosersRef.current.set(jid, sub.close)
+    },
+    [scheduleJobUiFlush, scheduleWatchlistRefresh],
+  )
+
+  const startJobStream = useCallback(
+    (jid: string) => {
+      if (sseClosersRef.current.has(jid) || queuedJobStreamsRef.current.has(jid)) return
+      if (activeJobSseRef.current >= MAX_CONCURRENT_JOB_SSE) {
+        queuedJobStreamsRef.current.add(jid)
+        jobSseQueueRef.current.push(jid)
+        return
+      }
+      openJobStreamNow(jid)
+    },
+    [openJobStreamNow],
+  )
 
   const pushJob = useCallback(
     (params: { jobId: string; kindLabel: string; deduplicated: boolean }) => {
@@ -754,6 +910,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
         ]
         return trimJobs(next)
       })
+      setSessionEnqueueTotal(c => c + 1)
       onJobsSheetOpenChange(true)
       startJobStream(jid)
     },
@@ -967,13 +1124,17 @@ export const DataOverviewOptionJobsBar = forwardRef<
         nOk += 1
         if (i < pool.length - 1) await delayMs(75)
       }
-      if (nOk > 0) scheduleWatchlistRefresh()
+      if (nOk > 0) {
+        bumpSessionEnqueue(nOk)
+        if (pool.length > MAX_TRACKED) setBulkEnqueueTrimHint(true)
+        scheduleWatchlistRefresh()
+      }
     } catch (e) {
       setEnqueueErr(e instanceof Error ? e.message : 'Enqueue failed')
     } finally {
       setContractsFillBatch(null)
     }
-  }, [rowGapFillTargets, onJobsSheetOpenChange, scheduleWatchlistRefresh, startJobStream])
+  }, [rowGapFillTargets, onJobsSheetOpenChange, scheduleWatchlistRefresh, startJobStream, bumpSessionEnqueue])
 
   const handleEnqueueColumnData = useCallback(async () => {
     setEnqueueErr(null)
@@ -1049,13 +1210,17 @@ export const DataOverviewOptionJobsBar = forwardRef<
         nOk += 1
         if (i < pool.length - 1) await delayMs(75)
       }
-      if (nOk > 0) scheduleWatchlistRefresh()
+      if (nOk > 0) {
+        bumpSessionEnqueue(nOk)
+        if (pool.length > MAX_TRACKED) setBulkEnqueueTrimHint(true)
+        scheduleWatchlistRefresh()
+      }
     } catch (e) {
       setEnqueueErr(e instanceof Error ? e.message : 'Enqueue failed')
     } finally {
       setContractsFillBatch(null)
     }
-  }, [columnFillTargets, onJobsSheetOpenChange, scheduleWatchlistRefresh, startJobStream])
+  }, [columnFillTargets, onJobsSheetOpenChange, scheduleWatchlistRefresh, startJobStream, bumpSessionEnqueue])
 
   const handleEnqueueOptionMinRowGap = useCallback(async () => {
     setEnqueueErr(null)
@@ -1126,7 +1291,11 @@ export const DataOverviewOptionJobsBar = forwardRef<
         nOk += 1
         if (i < pool.length - 1) await delayMs(75)
       }
-      if (nOk > 0) scheduleWatchlistRefresh()
+      if (nOk > 0) {
+        bumpSessionEnqueue(nOk)
+        if (pool.length > MAX_TRACKED) setBulkEnqueueTrimHint(true)
+        scheduleWatchlistRefresh()
+      }
     } catch (e) {
       setEnqueueErr(e instanceof Error ? e.message : 'Enqueue failed')
     } finally {
@@ -1138,6 +1307,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
     onJobsSheetOpenChange,
     scheduleWatchlistRefresh,
     startJobStream,
+    bumpSessionEnqueue,
   ])
 
   const handleEnqueueOptionMinColumnData = useCallback(async () => {
@@ -1209,7 +1379,11 @@ export const DataOverviewOptionJobsBar = forwardRef<
         nOk += 1
         if (i < pool.length - 1) await delayMs(75)
       }
-      if (nOk > 0) scheduleWatchlistRefresh()
+      if (nOk > 0) {
+        bumpSessionEnqueue(nOk)
+        if (pool.length > MAX_TRACKED) setBulkEnqueueTrimHint(true)
+        scheduleWatchlistRefresh()
+      }
     } catch (e) {
       setEnqueueErr(e instanceof Error ? e.message : 'Enqueue failed')
     } finally {
@@ -1221,6 +1395,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
     onJobsSheetOpenChange,
     scheduleWatchlistRefresh,
     startJobStream,
+    bumpSessionEnqueue,
   ])
 
   const handleEnqueueOptionDayRowGap = useCallback(async () => {
@@ -1248,51 +1423,124 @@ export const DataOverviewOptionJobsBar = forwardRef<
       )
       onJobsSheetOpenChange(true)
       let nOk = 0
-      for (let i = 0; i < pool.length; i++) {
-        const sym = pool[i]!
-        const tk = `opt-day-row-${batchId}-${sym}`
-        const res = await postMassiveSync('feed_options_aggregate', {
-          mode: 'option_day_pool_row_gap',
-          underlying: sym,
-          row_lookback_days: 730,
-          max_contracts: 300,
-          max_expiries: 60,
-        })
-        if (!res.ok) {
-          const msg = res.error ?? res.message ?? `Enqueue failed for ${sym}`
-          setEnqueueErr(msg)
-          setItems(prev =>
-            prev.map(row =>
-              row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row,
-            ),
-          )
-          break
-        }
-        const jid = res.job_id
-        if (!jid) {
-          const msg = `No job_id for ${sym}`
-          setEnqueueErr(msg)
-          setItems(prev =>
-            prev.map(row =>
-              row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row,
-            ),
-          )
-          break
-        }
-        const dedup = Boolean(res.deduplicated)
-        const st = dedup ? 'deduplicated (waiting)' : 'enqueued'
-        setItems(prev =>
-          prev.map(row =>
-            row.trackKey === tk
-              ? { ...row, jobId: jid, deduplicated: dedup, status: st, kindLabel: `Fill option_day row gap · ${sym}` }
-              : row,
-          ),
+      let aborted = false
+      for (let off = 0; off < pool.length && !aborted; off += OPTION_DAY_ROW_GAP_ENQUEUE_CONCURRENCY) {
+        const slice = pool.slice(off, off + OPTION_DAY_ROW_GAP_ENQUEUE_CONCURRENCY)
+        await Promise.all(
+          slice.map(async (sym, j) => {
+            if (aborted) return
+            const i = off + j
+            const tk = `opt-day-row-${batchId}-${sym}`
+            const controller = new AbortController()
+            const tid = window.setTimeout(() => controller.abort(), OPTION_DAY_ROW_GAP_POST_TIMEOUT_MS)
+            let res: Awaited<ReturnType<typeof postMassiveSync>>
+            try {
+              res = await postMassiveSync(
+                'feed_options_aggregate',
+                {
+                  mode: 'option_day_pool_row_gap',
+                  underlying: sym,
+                  row_lookback_days: 730,
+                  max_contracts: 300,
+                  max_expiries: 60,
+                  chunk_size: OPTION_DAY_ROW_GAP_FANOUT_CHUNK_SIZE,
+                },
+                { signal: controller.signal },
+              )
+            } catch (e) {
+              const isAbort = e instanceof Error && e.name === 'AbortError'
+              const msg = isAbort
+                ? `Enqueue request timed out after ${OPTION_DAY_ROW_GAP_POST_TIMEOUT_MS / 1000}s (server did not respond in time).`
+                : e instanceof Error
+                  ? e.message
+                  : 'Request failed'
+              setItems(prev =>
+                prev.map(row =>
+                  row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row,
+                ),
+              )
+              return
+            } finally {
+              window.clearTimeout(tid)
+            }
+            if (!res.ok) {
+              const msg = res.error ?? res.message ?? `Enqueue failed for ${sym}`
+              aborted = true
+              setEnqueueErr(msg)
+              setItems(prev =>
+                prev.map(row =>
+                  row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row,
+                ),
+              )
+              return
+            }
+            if (res.fan_out && res.job_ids && res.job_ids.length > 0) {
+              const ids = res.job_ids
+              const n = ids.length
+              setItems(prev => {
+                const rest = prev.filter(row => row.trackKey !== tk)
+                const added = ids.map((jid, ci) => ({
+                  trackKey: `${tk}-c${ci}`,
+                  jobId: jid,
+                  kindLabel: `Fill option_day row gap · ${sym} (${ci + 1}/${n})`,
+                  deduplicated: false,
+                  status: 'enqueued' as const,
+                  enqueuedAt: batchId + i + ci * 0.001,
+                }))
+                return trimJobs([...rest, ...added])
+              })
+              ids.forEach(jid => {
+                startJobStream(jid)
+              })
+              nOk += 1
+            } else if (res.fan_out && (!res.job_ids || res.job_ids.length === 0)) {
+              setItems(prev =>
+                prev.map(row =>
+                  row.trackKey === tk
+                    ? {
+                        ...row,
+                        status: 'done',
+                        streamError: undefined,
+                        kindLabel: `Fill option_day row gap · ${sym} (no targets)`,
+                      }
+                    : row,
+                ),
+              )
+              nOk += 1
+            } else {
+              const jid = res.job_id
+              if (!jid) {
+                const msg = `No job_id for ${sym}`
+                aborted = true
+                setEnqueueErr(msg)
+                setItems(prev =>
+                  prev.map(row =>
+                    row.trackKey === tk ? { ...row, status: 'failed', streamError: msg } : row,
+                  ),
+                )
+                return
+              }
+              const dedup = Boolean(res.deduplicated)
+              const st = dedup ? 'deduplicated (waiting)' : 'enqueued'
+              setItems(prev =>
+                prev.map(row =>
+                  row.trackKey === tk
+                    ? { ...row, jobId: jid, deduplicated: dedup, status: st, kindLabel: `Fill option_day row gap · ${sym}` }
+                    : row,
+                ),
+              )
+              startJobStream(jid)
+              nOk += 1
+            }
+          }),
         )
-        startJobStream(jid)
-        nOk += 1
-        if (i < pool.length - 1) await delayMs(75)
+        if (off + slice.length < pool.length && !aborted) await delayMs(75)
       }
-      if (nOk > 0) scheduleWatchlistRefresh()
+      if (nOk > 0) {
+        bumpSessionEnqueue(nOk)
+        if (pool.length > MAX_TRACKED) setBulkEnqueueTrimHint(true)
+        scheduleWatchlistRefresh()
+      }
     } catch (e) {
       setEnqueueErr(e instanceof Error ? e.message : 'Enqueue failed')
     } finally {
@@ -1303,6 +1551,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
     onJobsSheetOpenChange,
     scheduleWatchlistRefresh,
     startJobStream,
+    bumpSessionEnqueue,
   ])
 
   const handleEnqueueOptionDayColumnData = useCallback(async () => {
@@ -1388,7 +1637,11 @@ export const DataOverviewOptionJobsBar = forwardRef<
         nOk += 1
         if (i < pool.length - 1) await delayMs(75)
       }
-      if (nOk > 0) scheduleWatchlistRefresh()
+      if (nOk > 0) {
+        bumpSessionEnqueue(nOk)
+        if (pool.length > MAX_TRACKED) setBulkEnqueueTrimHint(true)
+        scheduleWatchlistRefresh()
+      }
     } catch (e) {
       setEnqueueErr(e instanceof Error ? e.message : 'Enqueue failed')
     } finally {
@@ -1399,6 +1652,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
     onJobsSheetOpenChange,
     scheduleWatchlistRefresh,
     startJobStream,
+    bumpSessionEnqueue,
   ])
 
   const handleEnqueueSnapshotRowGap = useCallback(async () => {
@@ -1466,13 +1720,17 @@ export const DataOverviewOptionJobsBar = forwardRef<
         nOk += 1
         if (i < pool.length - 1) await delayMs(75)
       }
-      if (nOk > 0) scheduleWatchlistRefresh()
+      if (nOk > 0) {
+        bumpSessionEnqueue(nOk)
+        if (pool.length > MAX_TRACKED) setBulkEnqueueTrimHint(true)
+        scheduleWatchlistRefresh()
+      }
     } catch (e) {
       setEnqueueErr(e instanceof Error ? e.message : 'Enqueue failed')
     } finally {
       setSnapshotFillBatch(null)
     }
-  }, [snapshotRowFillTargets, onJobsSheetOpenChange, scheduleWatchlistRefresh, startJobStream])
+  }, [snapshotRowFillTargets, onJobsSheetOpenChange, scheduleWatchlistRefresh, startJobStream, bumpSessionEnqueue])
 
   const handleEnqueueSnapshotColumnData = useCallback(async () => {
     setEnqueueErr(null)
@@ -1543,13 +1801,17 @@ export const DataOverviewOptionJobsBar = forwardRef<
         nOk += 1
         if (i < pool.length - 1) await delayMs(75)
       }
-      if (nOk > 0) scheduleWatchlistRefresh()
+      if (nOk > 0) {
+        bumpSessionEnqueue(nOk)
+        if (pool.length > MAX_TRACKED) setBulkEnqueueTrimHint(true)
+        scheduleWatchlistRefresh()
+      }
     } catch (e) {
       setEnqueueErr(e instanceof Error ? e.message : 'Enqueue failed')
     } finally {
       setSnapshotFillBatch(null)
     }
-  }, [snapshotColumnFillTargets, onJobsSheetOpenChange, scheduleWatchlistRefresh, startJobStream])
+  }, [snapshotColumnFillTargets, onJobsSheetOpenChange, scheduleWatchlistRefresh, startJobStream, bumpSessionEnqueue])
 
   const handleEnqueue = useCallback(async () => {
     setEnqueueErr(null)
@@ -1608,6 +1870,8 @@ export const DataOverviewOptionJobsBar = forwardRef<
     sseClosersRef.current.forEach(close => close())
     sseClosersRef.current.clear()
     setItems([])
+    setSessionEnqueueTotal(0)
+    setBulkEnqueueTrimHint(false)
   }, [])
 
   const watchlistUpper = useMemo(
@@ -1691,41 +1955,45 @@ export const DataOverviewOptionJobsBar = forwardRef<
       ]),
     )
 
-    await onCompareMassiveReference(comparePool, {
-      onSymbolStart: sym => {
-        setItems(prev =>
-          prev.map(r =>
-            r.trackKey === `check-${batchId}-${sym}` ? { ...r, status: 'Running…' } : r,
-          ),
-        )
+    await onCompareMassiveReference(
+      comparePool,
+      {
+        onSymbolStart: sym => {
+          setItems(prev =>
+            prev.map(r =>
+              r.trackKey === `check-${batchId}-${sym}` ? { ...r, status: 'Running…' } : r,
+            ),
+          )
+        },
+        onSymbolDone: (sym, result) => {
+          const gap = result.ok && typeof result.gap === 'number' ? result.gap : null
+          const activitySummary =
+            result.ok && gap != null
+              ? `Gap ${gap > 0 ? `+${gap.toLocaleString()}` : gap.toLocaleString()}`
+              : result.ok
+                ? 'OK'
+                : '—'
+          setItems(prev =>
+            prev.map(r =>
+              r.trackKey === `check-${batchId}-${sym}`
+                ? { ...r, status: 'done', activitySummary }
+                : r,
+            ),
+          )
+        },
+        onSymbolError: (sym, message) => {
+          setItems(prev =>
+            prev.map(r =>
+              r.trackKey === `check-${batchId}-${sym}`
+                ? { ...r, status: 'failed', streamError: message }
+                : r,
+            ),
+          )
+        },
       },
-      onSymbolDone: (sym, result) => {
-        const gap = result.ok && typeof result.gap === 'number' ? result.gap : null
-        const activitySummary =
-          result.ok && gap != null
-            ? `Gap ${gap > 0 ? `+${gap.toLocaleString()}` : gap.toLocaleString()}`
-            : result.ok
-              ? 'OK'
-              : '—'
-        setItems(prev =>
-          prev.map(r =>
-            r.trackKey === `check-${batchId}-${sym}`
-              ? { ...r, status: 'done', activitySummary }
-              : r,
-          ),
-        )
-      },
-      onSymbolError: (sym, message) => {
-        setItems(prev =>
-          prev.map(r =>
-            r.trackKey === `check-${batchId}-${sym}`
-              ? { ...r, status: 'failed', streamError: message }
-              : r,
-          ),
-        )
-      },
-    })
-  }, [onCompareMassiveReference, compareEligible, comparePool])
+      { maxExpiries: referenceCompareMaxExpiries },
+    )
+  }, [onCompareMassiveReference, compareEligible, comparePool, referenceCompareMaxExpiries])
 
   const runCompareSnapshotWithSheetTracking = useCallback(async () => {
     if (!onCompareSnapshotGap || compareEligible.length === 0) return
@@ -1899,6 +2167,9 @@ export const DataOverviewOptionJobsBar = forwardRef<
       if (anyUnchecked) {
         return 'Run Check on the pool first. Fill row gap only enqueues symbols with a Compare result and a non-zero Gap.'
       }
+      if (poolHasRefCompareTruncation(refGapBySymbol, poolUpper)) {
+        return 'Aggregate gap may be incomplete: one or more symbols hit expiry or Massive API page limits. Raise Max expiries (Advanced) and run Check again before relying on Fill row gap.'
+      }
       return 'Every checked symbol has Gap 0 — no row-level reference upsert is needed for this pool.'
     }
     return `Row-level gap: enqueue ${rowGapFillTargets.length} reference upsert job(s) for symbols with a non-zero Gap after Check (full underlying). Merges massive_option_ticker from the list API. Use Fill column data or All gaps for exercise_style / shares_per_contract detail.`
@@ -2029,7 +2300,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
       }
       return 'Every checked symbol has Gap 0 — no daily aggregates backfill is needed for missing contract coverage.'
     }
-    return 'Enqueue Celery option_day_pool_row_gap: Massive GET /v2/aggs (daily) up to 300 contracts per symbol (~2y window).'
+    return 'Enqueue Celery option_day_pool_row_gap: Massive GET /v2/aggs (daily), fan-out into multiple jobs (~35 contracts each, up to 300 total per symbol, ~2y window).'
   }, [
     isDayFocus,
     optionDayFillBusy,
@@ -2268,9 +2539,30 @@ export const DataOverviewOptionJobsBar = forwardRef<
           row_lookback_days: 730,
           max_contracts: 300,
           max_expiries: 60,
+          chunk_size: OPTION_DAY_ROW_GAP_FANOUT_CHUNK_SIZE,
           ...(exp ? { expiration_date: exp } : {}),
         })
         if (!res.ok) throw new Error(res.error ?? res.message ?? 'Enqueue failed')
+        if (res.fan_out && res.job_ids && res.job_ids.length > 0) {
+          const ids = res.job_ids
+          const n = ids.length
+          ids.forEach((jid, ci) => {
+            pushJob({
+              jobId: jid,
+              kindLabel: exp
+                ? `Fill option_day row gap · ${u} · ${exp} (${ci + 1}/${n})`
+                : `Fill option_day row gap · ${u} (${ci + 1}/${n})`,
+              deduplicated: false,
+            })
+            startJobStream(jid)
+          })
+          scheduleWatchlistRefresh()
+          return
+        }
+        if (res.fan_out && (!res.job_ids || res.job_ids.length === 0)) {
+          scheduleWatchlistRefresh()
+          return
+        }
         const jid = res.job_id
         if (!jid) throw new Error('No job_id returned')
         pushJob({
@@ -2432,6 +2724,34 @@ export const DataOverviewOptionJobsBar = forwardRef<
             <p className="data-overview-option-jobs-bar__hint data-overview-option-jobs-bar__hint--err" role="status">
               {plan.error}
             </p>
+          ) : null}
+          {isContractsFocus ? (
+            <details
+              className="data-overview-contracts-panel__conclusion"
+              style={{ marginBottom: 'var(--space-2)' }}
+            >
+              <summary className="data-overview-contracts-panel__conclusion-sum">Advanced · reference compare</summary>
+              <div className="data-overview-contracts-panel__conclusion-body">
+                <label className="data-overview-option-jobs-bar__sym" style={{ alignItems: 'center', gap: '0.5rem' }}>
+                  <span className="data-overview-option-jobs-bar__sym-label">Max expiries</span>
+                  <select
+                    className="form-input data-overview-option-jobs-bar__sym-select"
+                    value={referenceCompareMaxExpiries}
+                    disabled={refGapLoading}
+                    onChange={e => setReferenceCompareMaxExpiries(Number(e.target.value))}
+                    aria-label="Maximum distinct expiries scanned per symbol on Check"
+                  >
+                    <option value={60}>60 (default)</option>
+                    <option value={90}>90</option>
+                    <option value={120}>120 (server cap)</option>
+                  </select>
+                </label>
+                <p className="data-overview-option-jobs-bar__hint" style={{ marginTop: 'var(--space-2)', marginBottom: 0 }}>
+                  Higher values increase Compare time and Massive API usage. Rollup Gap / Cov% only cover expiries included in
+                  this scan.
+                </p>
+              </div>
+            </details>
           ) : null}
           {isMinFocus ? (
             <div
@@ -2731,6 +3051,19 @@ export const DataOverviewOptionJobsBar = forwardRef<
                     </span>
                   </>
                 ) : null}
+                {isContractsFocus &&
+                selectedActiveGap.distinct_expiry_total != null &&
+                selectedActiveGap.expiries_scanned != null ? (
+                  <>
+                    {' · '}
+                    <span
+                      className="data-overview-ref-strip__meta data-overview-ref-strip__meta--muted"
+                      title="Expiries scanned in this Compare vs distinct expiries in PostgreSQL"
+                    >
+                      {selectedActiveGap.expiries_scanned}/{selectedActiveGap.distinct_expiry_total} exp.
+                    </span>
+                  </>
+                ) : null}
                 <span className="data-overview-ref-strip__time" title="compared_at (UTC)">
                   {' '}
                   · {selectedActiveGap.compared_at}
@@ -2860,6 +3193,9 @@ export const DataOverviewOptionJobsBar = forwardRef<
         onClearCompleted={clearCompleted}
         onClearAll={clearAll}
         onRefreshCoverage={onWatchlistRefreshRequested}
+        maxTracked={MAX_TRACKED}
+        sessionEnqueueTotal={sessionEnqueueTotal}
+        bulkEnqueueTrimHint={bulkEnqueueTrimHint}
       />
     </div>
   )

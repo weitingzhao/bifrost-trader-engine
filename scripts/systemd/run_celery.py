@@ -14,17 +14,16 @@ IB bars backfill, Massive/Polygon **options** queues (``options_massive`` / ``op
 With ``--instance <profile>-<n>`` (e.g. ``stocks_ib-1``, ``options_massive-1``), queues come from ``ops.worker_profiles`` in config.
 
 Before starting, kills any existing Celery worker process for this app (same script or celery -A src.workers.celery_app worker -Q stocks_ib)
-so the port/process is not left occupied. Uses --pool=solo (single process) so Stop button and IB connection work reliably.
+so the port/process is not left occupied.
 
-Massive options only (no IB):
-  celery -A src.workers.celery_app worker -l info -Q options_massive --pool=solo
+``--pool`` / concurrency: **stocks_ib** profile and the legacy no-``--instance`` worker use ``--pool=solo`` (one IB connection per process, reliable Stop).
+Massive profiles (``options_massive*``, ``stocks_massive*``) use ``--pool=prefork`` with concurrency from ``ops.celery.massive_worker_concurrency`` or per-profile ``concurrency`` (see ``src.workers.celery_queue_names.build_celery_worker_pool_argv``).
+
+Massive options only (typical):
+  celery -A src.workers.celery_app worker -l info -Q options_massive --pool=prefork --concurrency=4
 Stock reference only:
-  celery -A src.workers.celery_app worker -l info -Q stocks_massive --pool=solo
-High-priority options queue:
-  celery -A src.workers.celery_app worker -l info -Q options_massive_high --pool=solo
-High-priority stock reference queue:
-  celery -A src.workers.celery_app worker -l info -Q stocks_massive_high --pool=solo
-Or run Celery directly for bars only:
+  celery -A src.workers.celery_app worker -l info -Q stocks_massive --pool=prefork --concurrency=4
+IB bars only (solo):
   celery -A src.workers.celery_app worker -l info -Q stocks_ib --pool=solo
 
 Default config: config/config.dev.yaml (or BIFROST_CONFIG / first positional path / BIFROST_ENV=prod → config.prod.yaml).
@@ -217,9 +216,30 @@ if __name__ == "__main__":
     queue_str = _resolve_queues_for_instance(instance, config_path)
     sys.stderr.write(f"[run_celery] queues={queue_str} instance={instance}\n")
 
+    from src.app.config import read_config
+    from src.workers.celery_queue_names import build_celery_worker_pool_argv
+
+    cfg, _cfg_path = read_config(config_path)
+    os.environ["BIFROST_CELERY_QUEUES"] = queue_str
+
+    profile_key, _seq = _parse_instance_profile(instance) if instance else (None, None)
+    instance_ok = bool(instance and profile_key)
+    profile_entry = None
+    if instance_ok:
+        profiles = (cfg.get("ops") or {}).get("worker_profiles") or {}
+        if isinstance(profiles, dict):
+            profile_entry = profiles.get(profile_key or "")
+    pool_argv = build_celery_worker_pool_argv(
+        instance_profile_resolved=instance_ok,
+        profile_key=profile_key,
+        worker_profile_entry=profile_entry if isinstance(profile_entry, dict) else None,
+        ops_celery=(cfg.get("ops") or {}).get("celery") or {},
+    )
+    sys.stderr.write(f"[run_celery] pool_argv={pool_argv}\n")
+
     from src.workers.celery_app import app
 
-    worker_argv = ["worker", "-l", "info", "-Q", queue_str, "--pool=solo"]
+    worker_argv = ["worker", "-l", "info", "-Q", queue_str, *pool_argv]
     if instance is not None:
         host = socket.gethostname()
         nodename = f"worker{instance}@{host}"

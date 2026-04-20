@@ -337,6 +337,8 @@ export interface WorkerProfileInfo {
   key: string
   label: string
   queues: string[]
+  /** Ops scale target: max ``bifrost-celery-worker@`` units per profile on this host (config ``max_worker_instances``). */
+  max_worker_instances?: number
 }
 
 export async function fetchWorkerProfiles(): Promise<{

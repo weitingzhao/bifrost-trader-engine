@@ -20,6 +20,7 @@ from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.massive.celery_queues import celery_queue_for_massive_job
+from src.massive.massive_job_goal import describe_massive_job_goal
 from src.vendor.massive.client import _as_error_str
 
 logger = logging.getLogger(__name__)
@@ -55,12 +56,15 @@ def _massive_job_to_api(j: Dict[str, Any]) -> Dict[str, Any]:
             res = json.loads(res)
         except json.JSONDecodeError:
             pass
+    raw_payload = j.get("payload")
+    goal = describe_massive_job_goal(str(j.get("kind") or ""), raw_payload)
     out: Dict[str, Any] = {
         "job_id": str(j.get("job_massive_backfill_id", "")),
         "type": "massive_backfill",
         "kind": j.get("kind"),
         "status": j.get("status"),
         "result": res,
+        "goal": goal,
         "celery_task_id": j.get("celery_task_id"),
         "created_ts": created_ts,
         "updated_ts": updated_ts,
@@ -613,7 +617,10 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
     contracts_check_map: Dict[str, Any] = {}  # sym -> last check updated_at from job_ticker_reference_state
     snapshots_map: Dict[str, Dict[str, Any]] = {}
     atm_map: Dict[str, tuple] = {}  # sym -> (max trade_date, max created_at)
-    stock_map: Dict[str, tuple] = {}  # sym -> (max bar_time, max created_at)
+    stock_day_map: Dict[str, tuple] = {}  # sym -> aggregate tuple (like option_day)
+    stock_min_map: Dict[str, tuple] = {}  # sym -> stock_min aggregate
+    tickers_ref_map: Dict[str, tuple] = {}  # sym -> (tickers_id, updated_at, last_updated_utc, overview_updated_at)
+    ticker_types_global: Optional[tuple] = None  # (row_count, max(created_at))
     option_day_map: Dict[str, tuple] = {}  # sym -> (row_count, max bar_time, max created_at)
     option_min_map: Dict[str, tuple] = {}
     suv_day_map: Dict[str, tuple] = {}  # option_snapshots_with_underlying_day: (count, max snapshot_ts, max created_at)
@@ -753,7 +760,17 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
 
                 cur.execute(
                     """
-                    SELECT UPPER(TRIM(symbol)) AS u, MAX(bar_time), MAX(created_at)
+                    SELECT
+                        UPPER(TRIM(symbol)) AS u,
+                        COUNT(*)::bigint AS row_count,
+                        MAX(bar_time) AS last_bar_time,
+                        MAX(created_at) AS last_created_at,
+                        ROUND(COUNT(CASE WHEN open IS NOT NULL AND high IS NOT NULL
+                                          AND low IS NOT NULL AND close IS NOT NULL
+                                     THEN 1 END)::numeric / NULLIF(COUNT(*),0) * 100, 1) AS ohlc_complete_pct,
+                        ROUND(COUNT(volume)::numeric / NULLIF(COUNT(*),0) * 100, 1) AS volume_pct,
+                        ROUND(COUNT(vwap)::numeric / NULLIF(COUNT(*),0) * 100, 1) AS vwap_pct,
+                        COUNT(DISTINCT bar_time)::bigint AS distinct_bar_dates
                     FROM stock_day
                     WHERE source = 'massive'
                       AND UPPER(TRIM(symbol)) = ANY(%s)
@@ -763,7 +780,31 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                 )
                 for row in cur.fetchall() or []:
                     if row and row[0]:
-                        stock_map[str(row[0]).strip().upper()] = (row[1], row[2])
+                        stock_day_map[str(row[0]).strip().upper()] = row[1:]
+
+                cur.execute(
+                    """
+                    SELECT
+                        UPPER(TRIM(symbol)) AS u,
+                        COUNT(*)::bigint AS row_count,
+                        MAX(bar_time) AS last_bar_time,
+                        MAX(created_at) AS last_created_at,
+                        ROUND(COUNT(CASE WHEN open IS NOT NULL AND high IS NOT NULL
+                                          AND low IS NOT NULL AND close IS NOT NULL
+                                     THEN 1 END)::numeric / NULLIF(COUNT(*),0) * 100, 1) AS ohlc_complete_pct,
+                        ROUND(COUNT(volume)::numeric / NULLIF(COUNT(*),0) * 100, 1) AS volume_pct,
+                        ROUND(COUNT(vwap)::numeric / NULLIF(COUNT(*),0) * 100, 1) AS vwap_pct,
+                        COUNT(DISTINCT period)::bigint AS distinct_periods
+                    FROM stock_min
+                    WHERE source = 'massive'
+                      AND UPPER(TRIM(symbol)) = ANY(%s)
+                    GROUP BY UPPER(TRIM(symbol))
+                    """,
+                    (syms,),
+                )
+                for row in cur.fetchall() or []:
+                    if row and row[0]:
+                        stock_min_map[str(row[0]).strip().upper()] = row[1:]
 
                 cur.execute(
                     """
@@ -885,6 +926,33 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                 for row in cur.fetchall() or []:
                     if row and row[0]:
                         max_pain_map[str(row[0]).strip().upper()] = (int(row[1] or 0), row[2], row[3])
+
+                cur.execute(
+                    """
+                    SELECT UPPER(TRIM(t.ticker)) AS u,
+                           t.tickers_id,
+                           t.updated_at,
+                           t.last_updated_utc,
+                           o.overview_updated_at
+                    FROM tickers t
+                    LEFT JOIN ticker_overview o ON o.tickers_id = t.tickers_id
+                    WHERE UPPER(TRIM(t.ticker)) = ANY(%s)
+                    """,
+                    (syms,),
+                )
+                for row in cur.fetchall() or []:
+                    if row and row[0]:
+                        tickers_ref_map[str(row[0]).strip().upper()] = (
+                            int(row[1]) if row[1] is not None else None,
+                            row[2],
+                            row[3],
+                            row[4],
+                        )
+
+                cur.execute("SELECT COUNT(*)::bigint, MAX(created_at) FROM ticker_types")
+                tt_one = cur.fetchone()
+                if tt_one and tt_one[0] is not None:
+                    ticker_types_global = (int(tt_one[0] or 0), tt_one[1])
         finally:
             conn.close()
     except Exception as exc:
@@ -896,7 +964,9 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
         cc = contracts_check_map.get(sym)
         sn = snapshots_map.get(sym)
         atm = atm_map.get(sym)
-        sd = stock_map.get(sym)
+        sd = stock_day_map.get(sym)
+        sm_st = stock_min_map.get(sym)
+        tr_ref = tickers_ref_map.get(sym)
         od = option_day_map.get(sym)
         om = option_min_map.get(sym)
         suv = suv_day_map.get(sym)
@@ -975,8 +1045,48 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                 },
                 "stock_day": {
                     "has_data": sd is not None,
-                    "stock_day_last_bar": _iso(sd[0]) if sd else None,
-                    "stock_day_last_created_at": _iso(sd[1]) if sd else None,
+                    "stock_day_last_bar": _iso(sd[1]) if sd else None,
+                    "stock_day_last_created_at": _iso(sd[2]) if sd else None,
+                    "row_count": int(sd[0]) if sd else None,
+                    "ohlc_complete_pct": float(sd[3]) if sd and sd[3] is not None else None,
+                    "volume_pct": float(sd[4]) if sd and sd[4] is not None else None,
+                    "vwap_pct": float(sd[5]) if sd and sd[5] is not None else None,
+                    "optional_avg_pct": (
+                        round((float(sd[4]) + float(sd[5])) / 2, 1)
+                        if sd and sd[4] is not None and sd[5] is not None
+                        else None
+                    ),
+                    "distinct_bar_dates": int(sd[6]) if sd and sd[6] is not None else None,
+                },
+                "stock_min": {
+                    "has_data": sm_st is not None,
+                    "row_count": int(sm_st[0]) if sm_st else None,
+                    "last_bar_time": _iso(sm_st[1]) if sm_st else None,
+                    "last_created_at": _iso(sm_st[2]) if sm_st else None,
+                    "ohlc_complete_pct": float(sm_st[3]) if sm_st and sm_st[3] is not None else None,
+                    "volume_pct": float(sm_st[4]) if sm_st and sm_st[4] is not None else None,
+                    "vwap_pct": float(sm_st[5]) if sm_st and sm_st[5] is not None else None,
+                    "optional_avg_pct": (
+                        round((float(sm_st[4]) + float(sm_st[5])) / 2, 1)
+                        if sm_st and sm_st[4] is not None and sm_st[5] is not None
+                        else None
+                    ),
+                    "distinct_periods": int(sm_st[6]) if sm_st and sm_st[6] is not None else None,
+                },
+                "tickers": {
+                    "has_data": tr_ref is not None,
+                    "tickers_id": int(tr_ref[0]) if tr_ref and tr_ref[0] is not None else None,
+                    "tickers_updated_at": _iso(tr_ref[1]) if tr_ref else None,
+                    "last_updated_utc": _iso(tr_ref[2]) if tr_ref else None,
+                },
+                "ticker_overview": {
+                    "has_data": tr_ref is not None and tr_ref[3] is not None,
+                    "overview_updated_at": _iso(tr_ref[3]) if tr_ref else None,
+                },
+                "ticker_types": {
+                    "has_data": ticker_types_global is not None and int(ticker_types_global[0] or 0) > 0,
+                    "dictionary_row_count": int(ticker_types_global[0]) if ticker_types_global else None,
+                    "dictionary_last_created_at": _iso(ticker_types_global[1]) if ticker_types_global else None,
                 },
                 "option_day": {
                     "has_data": od is not None,
@@ -1050,6 +1160,18 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
 def get_option_contracts_reference_gap(
     request: Request,
     symbol: str = Query(..., description="Underlying symbol"),
+    max_expiries: Optional[int] = Query(
+        None,
+        ge=1,
+        le=120,
+        description="Max distinct expiries to scan (default 60; cap 120).",
+    ),
+    max_pages_per_expiry: Optional[int] = Query(
+        None,
+        ge=1,
+        le=30,
+        description="Max Massive API pages per expiry (default 20; cap 30).",
+    ),
 ) -> Dict[str, Any]:
     """Compare option_contracts row counts per expiry to Massive GET /v3/reference/options/contracts (paginated)."""
     import psycopg2
@@ -1079,7 +1201,11 @@ def get_option_contracts_reference_gap(
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor() as cur:
-                result = compute_option_contracts_reference_gap(cur, client, sym)
+                me = max_expiries if max_expiries is not None else 60
+                mp = max_pages_per_expiry if max_pages_per_expiry is not None else 20
+                result = compute_option_contracts_reference_gap(
+                    cur, client, sym, max_expiries=me, max_pages_per_expiry=mp
+                )
                 cur.execute(
                     """
                     INSERT INTO job_ticker_reference_state (sync_kind, last_cursor, status, updated_at)
@@ -1138,6 +1264,17 @@ def post_option_contracts_reference_gap_batch(
     if len(syms) > 10:
         return {"ok": False, "error": "At most 10 symbols per batch"}
 
+    me = payload.get("max_expiries") if isinstance(payload, dict) else None
+    mp = payload.get("max_pages_per_expiry") if isinstance(payload, dict) else None
+    try:
+        max_e = int(me) if me is not None else 60
+    except (TypeError, ValueError):
+        max_e = 60
+    try:
+        max_p = int(mp) if mp is not None else 20
+    except (TypeError, ValueError):
+        max_p = 20
+
     client = MassiveClient(ms["api_key"], ms["rest_base"])
     results: Dict[str, Any] = {}
     try:
@@ -1149,7 +1286,9 @@ def post_option_contracts_reference_gap_batch(
                     if i > 0:
                         time.sleep(0.05)
                     try:
-                        results[s] = compute_option_contracts_reference_gap(cur, client, s)
+                        results[s] = compute_option_contracts_reference_gap(
+                            cur, client, s, max_expiries=max_e, max_pages_per_expiry=max_p
+                        )
                         cur.execute(
                             """
                             INSERT INTO job_ticker_reference_state (sync_kind, last_cursor, status, updated_at)
@@ -1373,6 +1512,7 @@ def get_bar_quality_detail(
 ) -> Dict[str, Any]:
     """Per-day / per-expiry / per-period bar quality breakdown for option_day or option_min."""
     import psycopg2
+    from datetime import date, datetime, timezone
 
     from src.persistence.postgres.connection import _get_conn_params
 
@@ -1387,6 +1527,17 @@ def get_bar_quality_detail(
         return {"ok": False, "error": "table must be 'option_day' or 'option_min'"}
     if days < 1 or days > 365:
         days = 30
+
+    def _iso(dt: Any) -> Optional[str]:
+        if dt is None:
+            return None
+        if isinstance(dt, datetime):
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc).isoformat()
+            return dt.isoformat()
+        if isinstance(dt, date):
+            return dt.isoformat()
+        return str(dt)
 
     try:
         params = _get_conn_params(db)
@@ -1476,9 +1627,8 @@ def get_bar_quality_detail(
                         exp = str(row[0]).strip() if row[0] else ""
                         try:
                             # DTE: expiry is YYYYMMDD, today is YYYYMMDD
-                            from datetime import date as _date
-                            exp_date = _date(int(exp[:4]), int(exp[4:6]), int(exp[6:8]))
-                            today_date = _date(int(today_str[:4]), int(today_str[4:6]), int(today_str[6:8]))
+                            exp_date = date(int(exp[:4]), int(exp[4:6]), int(exp[6:8]))
+                            today_date = date(int(today_str[:4]), int(today_str[4:6]), int(today_str[6:8]))
                             dte = (exp_date - today_date).days
                         except Exception:
                             dte = None
@@ -2906,6 +3056,108 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
     db = _db_config(request)
     if not db:
         return {"ok": False, "error": "PostgreSQL not configured"}
+
+    # option_day_pool_row_gap: optional fan-out — one DB query for targets, then N smaller Celery jobs.
+    mode_payload = (payload.get("mode") or "").strip()
+    if kind == "feed_options_aggregate" and mode_payload == "option_day_pool_row_gap":
+        raw_chunk = payload.get("chunk_size")
+        if raw_chunk is not None:
+            try:
+                chunk_sz = int(raw_chunk)
+            except (TypeError, ValueError):
+                chunk_sz = 0
+            if chunk_sz >= 2:
+                chunk_sz = max(5, min(chunk_sz, 100))
+                import psycopg2
+
+                from src.massive.option_day_pool_fill import (
+                    chunk_option_day_row_gap_targets,
+                    list_option_day_row_gap_targets,
+                    row_gap_targets_to_payload_dicts,
+                )
+                from src.persistence.postgres.connection import _get_conn_params
+
+                sym_u = (payload.get("underlying") or payload.get("symbol") or "").strip().upper()
+                if not sym_u:
+                    return {"ok": False, "error": "payload.underlying (or symbol) required for row-gap fan-out"}
+
+                max_c = int(payload.get("max_contracts") or 300)
+                max_c = max(1, min(max_c, 2000))
+                max_e = int(payload.get("max_expiries") or 60)
+                max_e = max(1, min(max_e, 120))
+                exp_f_raw = (payload.get("expiration_date") or "").strip()[:32]
+                exp_f = exp_f_raw or None
+                fanout_max_chunks = 25
+
+                try:
+                    pg_params = _get_conn_params(db)
+                    pg_conn = psycopg2.connect(**pg_params)
+                    try:
+                        with pg_conn.cursor() as cur:
+                            targets_all = list_option_day_row_gap_targets(
+                                cur, sym_u, max_e, max_c, expiration_date=exp_f
+                            )
+                    finally:
+                        pg_conn.close()
+                except Exception as exc:
+                    return {"ok": False, "error": f"row-gap fan-out target query failed: {exc}"}
+
+                chunks = chunk_option_day_row_gap_targets(targets_all, chunk_sz)
+                if len(chunks) > fanout_max_chunks:
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "ok": False,
+                            "error": (
+                                f"Fan-out would create {len(chunks)} jobs; maximum is {fanout_max_chunks}. "
+                                "Increase chunk_size or reduce max_contracts."
+                            ),
+                        },
+                    )
+                if not chunks:
+                    return {
+                        "ok": True,
+                        "fan_out": True,
+                        "job_ids": [],
+                        "chunks": 0,
+                        "targets_total": 0,
+                        "message": "No row-gap targets for this symbol.",
+                    }
+
+                priority_high = str(body.get("priority") or "").strip().lower() == "high"
+                queue_name = celery_queue_for_massive_job(kind, priority_high=priority_high)
+                job_ids: List[str] = []
+                n_chunks = len(chunks)
+                for idx, chunk in enumerate(chunks):
+                    pl = {k: v for k, v in payload.items() if k != "chunk_size"}
+                    pl["row_gap_targets"] = row_gap_targets_to_payload_dicts(chunk)
+                    pl["fan_out_chunk_index"] = idx + 1
+                    pl["fan_out_chunks_total"] = n_chunks
+                    jid, deduplicated = insert_job_massive_backfill(db, kind, pl)
+                    if jid is None:
+                        return {
+                            "ok": False,
+                            "error": "Failed to enqueue job (fan-out chunk)",
+                            "job_ids": job_ids,
+                        }
+                    if deduplicated:
+                        job_ids.append(str(jid))
+                        continue
+                    try:
+                        async_result = run_massive_job.apply_async(
+                            args=[jid], task_id=str(jid), queue=queue_name
+                        )
+                        update_job_massive_backfill_celery_task_id(db, jid, async_result.id)
+                    except Exception as e:
+                        return {"ok": False, "error": str(e), "job_ids": job_ids}
+                    job_ids.append(str(jid))
+                return {
+                    "ok": True,
+                    "fan_out": True,
+                    "job_ids": job_ids,
+                    "chunks": n_chunks,
+                    "targets_total": len(targets_all),
+                }
 
     jid, deduplicated = insert_job_massive_backfill(db, kind, payload)
     if jid is None:

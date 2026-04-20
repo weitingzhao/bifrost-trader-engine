@@ -651,6 +651,53 @@ export interface WatchlistDbCoverageOptionSnapshots {
   stale_snapshot_rows: number | null
 }
 
+/** Massive stock daily bars (watchlist row). */
+export interface WatchlistDbCoverageStockDay {
+  has_data: boolean
+  stock_day_last_bar: string | null
+  stock_day_last_created_at: string | null
+  row_count?: number | null
+  ohlc_complete_pct?: number | null
+  volume_pct?: number | null
+  vwap_pct?: number | null
+  optional_avg_pct?: number | null
+  distinct_bar_dates?: number | null
+}
+
+/** Massive stock minute bars (watchlist row). */
+export interface WatchlistDbCoverageStockMin {
+  has_data: boolean
+  row_count?: number | null
+  last_bar_time?: string | null
+  last_created_at?: string | null
+  ohlc_complete_pct?: number | null
+  volume_pct?: number | null
+  vwap_pct?: number | null
+  optional_avg_pct?: number | null
+  distinct_periods?: number | null
+}
+
+/** Row in ``tickers`` (reference universe). */
+export interface WatchlistDbCoverageTickers {
+  has_data: boolean
+  tickers_id?: number | null
+  tickers_updated_at?: string | null
+  last_updated_utc?: string | null
+}
+
+/** Row in ``ticker_overview`` (1:1 with tickers when synced). DDL has ``overview_updated_at`` only. */
+export interface WatchlistDbCoverageTickerOverview {
+  has_data: boolean
+  overview_updated_at?: string | null
+}
+
+/** Global ``ticker_types`` dictionary (same values on every symbol row). */
+export interface WatchlistDbCoverageTickerTypes {
+  has_data: boolean
+  dictionary_row_count?: number | null
+  dictionary_last_created_at?: string | null
+}
+
 export interface WatchlistDbCoverageSymbolRow {
   symbol: string
   option_contracts: WatchlistDbCoverageOptionContracts
@@ -660,11 +707,7 @@ export interface WatchlistDbCoverageSymbolRow {
     atm_iv_last_trade_date: string | null
     atm_iv_last_created_at: string | null
   }
-  stock_day: {
-    has_data: boolean
-    stock_day_last_bar: string | null
-    stock_day_last_created_at: string | null
-  }
+  stock_day: WatchlistDbCoverageStockDay
   /** Present when API supports extended option coverage (same deploy as Data Overview matrix). */
   option_day?: WatchlistDbCoverageOptionBars
   option_min?: WatchlistDbCoverageOptionBars
@@ -673,6 +716,11 @@ export interface WatchlistDbCoverageSymbolRow {
   /** Distinct from legacy summary-only placeholder rows; per-symbol OI rollup. */
   option_open_interest_daily?: WatchlistDbCoverageOiDaily
   report_option_max_pain_daily?: WatchlistDbCoverageReportDaily
+  stock_min?: WatchlistDbCoverageStockMin
+  tickers?: WatchlistDbCoverageTickers
+  ticker_overview?: WatchlistDbCoverageTickerOverview
+  /** Instrument-type dictionary; identical across symbols (whole-table rollup). */
+  ticker_types?: WatchlistDbCoverageTickerTypes
 }
 
 export interface WatchlistDbCoverageResponse {
@@ -720,6 +768,12 @@ export interface OptionContractsReferenceGapResult {
   has_rows?: boolean
   message?: string
   db_row_count?: number
+  /** Distinct expiries in PostgreSQL for this symbol (not capped by max_expiries scan). */
+  distinct_expiry_total?: number
+  /** Distinct expiries included in this Compare run (≤ max_expiries). */
+  expiries_scanned?: number
+  max_expiries_used?: number
+  max_pages_per_expiry_used?: number
   pg_total?: number
   massive_total?: number | null
   gap?: number | null
@@ -730,14 +784,23 @@ export interface OptionContractsReferenceGapResult {
   expiries_truncated?: boolean
 }
 
+export type OptionContractsReferenceGapRequestOptions = {
+  max_expiries?: number
+  max_pages_per_expiry?: number
+}
+
 export async function fetchOptionContractsReferenceGap(
   symbol: string,
+  options?: OptionContractsReferenceGapRequestOptions,
 ): Promise<OptionContractsReferenceGapResult> {
   const s = (symbol || '').trim().toUpperCase()
   if (!s) return { ok: false, error: 'symbol is required' }
-  const r = await fetch(
-    massiveUrl(`/research/massive/option-contracts-reference-gap?symbol=${encodeURIComponent(s)}`),
-  )
+  const q = new URLSearchParams({ symbol: s })
+  if (options?.max_expiries != null) q.set('max_expiries', String(options.max_expiries))
+  if (options?.max_pages_per_expiry != null) {
+    q.set('max_pages_per_expiry', String(options.max_pages_per_expiry))
+  }
+  const r = await fetch(massiveUrl(`/research/massive/option-contracts-reference-gap?${q}`))
   const j = await r.json().catch(() => ({}))
   if (!r.ok) {
     return {
@@ -757,13 +820,17 @@ export interface OptionContractsReferenceGapBatchResponse {
 /** POST /research/massive/option-contracts-reference-gap/batch — max 10 symbols per request. */
 export async function postOptionContractsReferenceGapBatch(
   symbols: string[],
+  options?: OptionContractsReferenceGapRequestOptions,
 ): Promise<OptionContractsReferenceGapBatchResponse> {
   const uniq = [...new Set(symbols.map(x => (x || '').trim().toUpperCase()).filter(Boolean))]
   if (uniq.length === 0) return { ok: false, error: 'symbols is required' }
+  const body: Record<string, unknown> = { symbols: uniq }
+  if (options?.max_expiries != null) body.max_expiries = options.max_expiries
+  if (options?.max_pages_per_expiry != null) body.max_pages_per_expiry = options.max_pages_per_expiry
   const r = await fetch(massiveUrl('/research/massive/option-contracts-reference-gap/batch'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ symbols: uniq }),
+    body: JSON.stringify(body),
   })
   const j = await r.json().catch(() => ({}))
   if (!r.ok) {
@@ -1182,8 +1249,18 @@ export async function fetchMaxPainComputeHistory(params: {
 export async function postMassiveSync(
   kind: string,
   payload: Record<string, unknown>,
-  options?: { priority?: 'high' },
-): Promise<{ ok: boolean; job_id?: string; error?: string; message?: string; deduplicated?: boolean }> {
+  options?: { priority?: 'high'; signal?: AbortSignal },
+): Promise<{
+  ok: boolean
+  job_id?: string
+  job_ids?: string[]
+  fan_out?: boolean
+  chunks?: number
+  targets_total?: number
+  error?: string
+  message?: string
+  deduplicated?: boolean
+}> {
   const r = await fetch(massiveUrl('/research/massive/sync'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1192,15 +1269,26 @@ export async function postMassiveSync(
       payload,
       ...(options?.priority === 'high' ? { priority: 'high' } : {}),
     }),
+    signal: options?.signal,
   })
   const j = await r.json().catch(() => ({}))
   if (r.status === 403) {
     return { ok: false, message: typeof j.message === 'string' ? j.message : 'Forbidden' }
   }
+  const rawIds = j.job_ids
+  const job_ids =
+    Array.isArray(rawIds) && rawIds.length > 0
+      ? rawIds.map((x: unknown) => String(x)).filter(Boolean)
+      : undefined
   return {
     ok: Boolean(j.ok),
     job_id: typeof j.job_id === 'string' ? j.job_id : undefined,
+    job_ids,
+    fan_out: typeof j.fan_out === 'boolean' ? j.fan_out : undefined,
+    chunks: typeof j.chunks === 'number' ? j.chunks : undefined,
+    targets_total: typeof j.targets_total === 'number' ? j.targets_total : undefined,
     error: typeof j.error === 'string' ? j.error : undefined,
+    message: typeof j.message === 'string' ? j.message : undefined,
     deduplicated: typeof j.deduplicated === 'boolean' ? j.deduplicated : undefined,
   }
 }
@@ -1249,6 +1337,8 @@ export interface MassiveJobApiRow {
   job_id: string
   type?: string
   kind?: string
+  /** Human-readable intent derived server-side from kind + payload (no full payload in API). */
+  goal?: string
   status?: string
   result?: unknown
   created_ts?: number
@@ -1352,6 +1442,7 @@ export async function fetchMassiveJobsList(options?: {
     job_id: String(row.job_id ?? ''),
     type: typeof row.type === 'string' ? row.type : undefined,
     kind: typeof row.kind === 'string' ? row.kind : undefined,
+    goal: typeof row.goal === 'string' ? row.goal : undefined,
     status: typeof row.status === 'string' ? row.status : undefined,
     result: row.result,
     created_ts: typeof row.created_ts === 'number' ? row.created_ts : undefined,

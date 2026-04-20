@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react'
 import { DraggableModal } from '../components/DraggableModal'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { OpsHostEnvPillBadge } from '../components/OpsHostEnvPillBadge'
@@ -94,6 +94,20 @@ function fmtRelative(epochSec: number | null): string {
   return `${Math.floor(delta / 86400)}d ago`
 }
 
+/** Local 1s tick only — avoids re-rendering the entire Celery dashboard every second. */
+const WorkerHeartbeatLine = memo(function WorkerHeartbeatLine({
+  epochSec,
+}: {
+  epochSec: number | null
+}) {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = window.setInterval(() => setTick(t => t + 1), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+  return <span>Heartbeat: {fmtRelative(epochSec)}</span>
+})
+
 /** Celery nodename is ``worker{id}@{hostname}`` — return host part for cross-machine hints. */
 function workerHostFromWorkerId(workerId: string): string | null {
   const i = workerId.indexOf('@')
@@ -152,6 +166,42 @@ function parseCeleryWorkerInstanceId(instanceId: string): { profileKey: string; 
   const m = instanceId.trim().match(/^([a-zA-Z0-9_]+)-(\d+)$/)
   if (!m) return null
   return { profileKey: m[1], cycle: parseInt(m[2], 10) }
+}
+
+/** One entry per profile key (first wins) so Add all / bubbles cannot repeat the same worker_type. */
+function dedupeWorkerProfilesByKey(profiles: WorkerProfileInfo[]): WorkerProfileInfo[] {
+  const seen = new Set<string>()
+  const out: WorkerProfileInfo[] = []
+  for (const p of profiles) {
+    if (seen.has(p.key)) continue
+    seen.add(p.key)
+    out.push(p)
+  }
+  return out
+}
+
+const PROFILE_MAX_WORKER_INSTANCES_CAP = 64
+
+function profileMaxInstances(p: WorkerProfileInfo): number {
+  const raw = p.max_worker_instances
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return Math.max(1, Math.min(PROFILE_MAX_WORKER_INSTANCES_CAP, Math.floor(raw)))
+  }
+  return 1
+}
+
+function countInstancesForProfile(insts: SystemdInstance[], profileKey: string): number {
+  const seenInstanceIds = new Set<string>()
+  let n = 0
+  for (const inst of insts) {
+    const iid = instanceIdFromWorkerUnit(inst.unit)
+    if (!iid || seenInstanceIds.has(iid)) continue
+    const parts = parseCeleryWorkerInstanceId(iid)
+    if (parts?.profileKey !== profileKey) continue
+    seenInstanceIds.add(iid)
+    n += 1
+  }
+  return n
 }
 
 function workerProfileForInstanceUnit(
@@ -681,7 +731,6 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
     setConfirmState(INITIAL_CONFIRM)
     setConfirmVariant('default')
   }, [])
-  const [tick, setTick] = useState(0)
 
   const [queueSummary, setQueueSummary] = useState<QueueSummaryRow[]>([])
   const [queueSummaryDb, setQueueSummaryDb] = useState<boolean | null>(null)
@@ -698,6 +747,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   // Worker scaling
   const [instances, setInstances] = useState<SystemdInstance[]>([])
   const [workerProfiles, setWorkerProfiles] = useState<WorkerProfileInfo[]>([])
+  const workerProfilesDistinct = useMemo(() => dedupeWorkerProfilesByKey(workerProfiles), [workerProfiles])
   const [scaleWorkerType, setScaleWorkerType] = useState(SCALE_SELECTION_ALL)
   const [scaleBusy, setScaleBusy] = useState(false)
   const [scaleMsg, setScaleMsg] = useState<{ text: string; isErr: boolean }>({ text: '', isErr: false })
@@ -972,10 +1022,10 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             setExtBroker(null)
           }
           if (pRes.ok && pRes.profiles.length > 0) {
-            setWorkerProfiles(pRes.profiles)
+            setWorkerProfiles(dedupeWorkerProfilesByKey(pRes.profiles))
             setScaleWorkerType(prev => {
               if (prev === SCALE_SELECTION_ALL) return prev
-              if (prev && pRes.profiles.some(p => p.key === prev)) return prev
+              if (prev && dedupeWorkerProfilesByKey(pRes.profiles).some(p => p.key === prev)) return prev
               return SCALE_SELECTION_ALL
             })
           }
@@ -1008,11 +1058,9 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
       loadAll()
     }, 5000)
     const capsTimer = setInterval(loadCaps, 30000)
-    const tickTimer = setInterval(() => setTick(n => n + 1), 1000)
     return () => {
       clearInterval(t)
       clearInterval(capsTimer)
-      clearInterval(tickTimer)
     }
   }, [loadAll, loadCaps])
 
@@ -1029,8 +1077,6 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
     setAuthPanelOpen(false)
     loadCaps()
   }, [loadCaps])
-
-  void tick
 
   // ── Scaling handlers ──────────────────────────────────────────────────
   /** Force-remove this unit, then add a new instance for the same worker profile key. */
@@ -1123,6 +1169,16 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
       setScaleMsg({ text: 'Select a worker profile', isErr: true })
       return
     }
+    const prof = workerProfilesDistinct.find(x => x.key === scaleWorkerType)
+    const maxN = prof ? profileMaxInstances(prof) : 1
+    const cur = countInstancesForProfile(instances, scaleWorkerType)
+    if (cur >= maxN) {
+      setScaleMsg({
+        text: `Already at configured maximum (${maxN}) for ${scaleWorkerType}`,
+        isErr: true,
+      })
+      return
+    }
     setScaleBusy(true)
     try {
       const res = await scaleWorker({ action: 'add', worker_type: scaleWorkerType })
@@ -1140,34 +1196,43 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
     }
   }
 
-  /** One add call per profile; shared by Add all profiles and Reset. */
-  const scaleAddAllProfilesLoop = useCallback(async () => {
+  /** Add worker units until each profile reaches ``max_worker_instances`` (current counts from *instances*). */
+  const scaleFillToConfiguredMaxLoop = useCallback(async () => {
     const okParts: string[] = []
     const errParts: string[] = []
-    for (const p of workerProfiles) {
-      const res = await scaleWorker({ action: 'add', worker_type: p.key })
-      if (res.ok) {
-        const iid = res.instance_id ?? res.unit ?? p.key
-        okParts.push(`${p.key} → ${iid}`)
-      } else {
-        errParts.push(`${p.key}: ${res.error ?? 'Failed'}`)
+    for (const p of workerProfilesDistinct) {
+      const maxN = profileMaxInstances(p)
+      const current = countInstancesForProfile(instances, p.key)
+      const need = Math.max(0, maxN - current)
+      for (let i = 0; i < need; i++) {
+        const res = await scaleWorker({ action: 'add', worker_type: p.key })
+        if (res.ok) {
+          const iid = res.instance_id ?? res.unit ?? p.key
+          okParts.push(`${p.key} → ${iid}`)
+        } else {
+          errParts.push(`${p.key}: ${res.error ?? 'Failed'}`)
+          break
+        }
       }
     }
     return { okParts, errParts }
-  }, [workerProfiles])
+  }, [workerProfilesDistinct, instances])
 
   /** One new instance per configured profile (same as choosing each type and clicking Add). */
   const onScaleAddAll = async () => {
-    if (workerProfiles.length === 0) {
+    if (workerProfilesDistinct.length === 0) {
       setScaleMsg({ text: 'No worker profiles configured', isErr: true })
       return
     }
     setScaleBusy(true)
     try {
-      const { okParts, errParts } = await scaleAddAllProfilesLoop()
+      const { okParts, errParts } = await scaleFillToConfiguredMaxLoop()
       if (errParts.length === 0) {
         setScaleMsg({
-          text: `Started ${okParts.length} instance(s). ${okParts.join('; ')}`,
+          text:
+            okParts.length > 0
+              ? `Started ${okParts.length} instance(s) (filled toward per-profile max). ${okParts.join('; ')}`
+              : 'All profiles already at or above configured worker limits on this host.',
           isErr: false,
         })
       } else {
@@ -1246,7 +1311,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           .filter((x): x is string => x != null),
       ),
     ]
-    if (ids.length === 0 && workerProfiles.length === 0) {
+    if (ids.length === 0 && workerProfilesDistinct.length === 0) {
       setScaleMsg({ text: 'No instances to remove and no profiles to add', isErr: true })
       return
     }
@@ -1254,10 +1319,10 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
     setConfirmState({
       open: true,
       title: 'Reset worker instances?',
-      message:
+        message:
         ids.length > 0
-          ? `This will force-remove ${ids.length} worker unit(s) on this Ops host (${ids.join(', ')}), then start one instance per configured profile. Force remove uses graceful stop first, then SIGKILL if a unit is still active. Workers on other machines using the same broker are not affected.`
-          : 'There are no worker units to remove on this host. One instance will be started for each configured profile.',
+          ? `This will force-remove ${ids.length} worker unit(s) on this Ops host (${ids.join(', ')}), then start workers up to each profile's max_worker_instances (see limits table). Force remove uses graceful stop first, then SIGKILL if a unit is still active. Workers on other machines using the same broker are not affected.`
+          : 'There are no worker units to remove on this host. Workers will be started up to each profile max_worker_instances.',
       confirming: false,
       confirmLabel: 'Confirm',
       action: async () => {
@@ -1279,7 +1344,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             })
             return
           }
-          if (workerProfiles.length === 0) {
+          if (workerProfilesDistinct.length === 0) {
             setScaleMsg({
               text:
                 ids.length > 0
@@ -1289,11 +1354,14 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             })
             return
           }
-          const { okParts, errParts } = await scaleAddAllProfilesLoop()
+          const { okParts, errParts } = await scaleFillToConfiguredMaxLoop()
           await loadAll()
           if (errParts.length === 0) {
             setScaleMsg({
-              text: `Reset complete. Started ${okParts.length} instance(s). ${okParts.join('; ')}`,
+              text:
+                okParts.length > 0
+                  ? `Reset complete. Started ${okParts.length} instance(s) (per-profile max). ${okParts.join('; ')}`
+                  : 'Reset complete. Nothing started (check max_worker_instances).',
               isErr: false,
             })
             await refreshOpsWorkersSnapshot({ forceRefresh: true })
@@ -1448,7 +1516,21 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
     jobListReloadRef.current = fn
   }, [])
 
-  const refreshAfterJobMutation = useCallback(() => void loadAll(), [loadAll])
+  /** Coalesce burst refreshes (toolbar + list + top summary) so enqueue spikes do not stack many loadAll calls. */
+  const jobCountsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (jobCountsDebounceRef.current) clearTimeout(jobCountsDebounceRef.current)
+    },
+    [],
+  )
+  const refreshAfterJobMutation = useCallback(() => {
+    if (jobCountsDebounceRef.current) clearTimeout(jobCountsDebounceRef.current)
+    jobCountsDebounceRef.current = setTimeout(() => {
+      jobCountsDebounceRef.current = null
+      void loadAll()
+    }, 400)
+  }, [loadAll])
 
   const navigateToJobQueueFromSummary = useCallback((celeryQueue: string) => {
     const q = String(celeryQueue).trim()
@@ -1456,6 +1538,15 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
     setCelerySectionTab('queues_instances')
     queueMicrotask(() => {
       jobQueuesNavRef.current?.navigateToQueue(q)
+      document.getElementById('celery-panel-queues-instances')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }, [])
+
+  /** Queue summary totals row: same as filter bar “Show all instances” (full list after UI restart had null filter). */
+  const clearWorkerInstancesQueueFilterFromTotals = useCallback(() => {
+    setWorkerInstancesQueueFilter(null)
+    setCelerySectionTab('queues_instances')
+    queueMicrotask(() => {
       document.getElementById('celery-panel-queues-instances')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     })
   }, [])
@@ -1676,8 +1767,8 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   const filteredWorkerInstances = useMemo(() => {
     const q = workerInstancesQueueFilter?.trim()
     if (!q) return instances
-    return instances.filter(inst => instanceConsumesCeleryQueue(inst.unit, q, workerProfiles))
-  }, [instances, workerInstancesQueueFilter, workerProfiles])
+    return instances.filter(inst => instanceConsumesCeleryQueue(inst.unit, q, workerProfilesDistinct))
+  }, [instances, workerInstancesQueueFilter, workerProfilesDistinct])
 
   const confirmDialog = (
     <DraggableModal
@@ -1849,6 +1940,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           onNavigateQueueCoverageConsole={navigateToConsoleForQueueCoverage}
           onNavigateAggregateCoverageConsole={navigateToBrokerConsoleFromQueueSummary}
           highlightQueueName={workerInstancesQueueFilter}
+          onTotalsRowClearWorkerFilter={clearWorkerInstancesQueueFilterFromTotals}
         />
         <CeleryBeatSchedulePanel
           entries={beatScheduleEntries}
@@ -1926,12 +2018,13 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               onJobCountsChanged={refreshAfterJobMutation}
               onProvideJobListReload={captureJobListReload}
             />
-          <div className="dashboard-celery-instances-broker-row">
-            {/* ── Worker Scaling ─────────────────────────────────── */}
+          <div className="dashboard-celery-worker-broker-split">
+            <div className="dashboard-celery-worker-instances-main">
+            {/* ── Worker Instances (8/12): running units + scale controls ─────────────────────────────────── */}
             <section className="replay-section dashboard-section dashboard-scaling" aria-labelledby="dashboard-scale-head">
               <h3 id="dashboard-scale-head" className="page-title-with-tooltip">
                 Worker Instances
-                <InfoTooltip text="Each profile consumes a single Celery queue; instance IDs are profile_key-sequence (Cycle). Queue summary: click a queue name or a Pending/Running/Done/Failed cell to jump here and filter rows to instances for that queue. Bubble ALL: Add all and Reset all are always available (with no instances, Reset confirms starting one worker per profile). Remove all appears only when at least one instance exists on this host. Pick a profile: Add Instance adds one worker for that profile. Per row: Recreate force-removes that unit then adds the same worker type again; Remove stops the unit (confirmation + optional Force). Row chip = Ops host profile (GET /ops/health)." />
+                <InfoTooltip text="Running systemd/Celery worker units on this Ops host. Instance IDs are profile_key-sequence (Cycle). Queue summary: click a queue cell to filter this list. Profile bubbles: Add Instance / ALL with Add all, Reset all, Remove all. Per row: Recreate / Remove. Limits and max counts are in Worker Instance Config (right). Host chip = GET /ops/health." />
               </h3>
               {scaleMsg.text && (
                 <span className={`settings-page-msg ${scaleMsg.isErr ? 'msg-error' : 'msg-ok'}`}>{scaleMsg.text}</span>
@@ -1962,6 +2055,12 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                     <thead>
                       <tr>
                         <th scope="col">Host</th>
+                        <th
+                          scope="col"
+                          title="ops.worker_profiles key / systemd instance prefix (distinct from broker queue label)."
+                        >
+                          Profile
+                        </th>
                         <th scope="col">Queue</th>
                         <th scope="col" title="Sequence number within the worker profile (e.g. bars-3 → 3).">
                           Cycle
@@ -1974,13 +2073,13 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                     <tbody>
                       {filteredWorkerInstances.length === 0 ? (
                         <tr>
-                          <td colSpan={4} className="dashboard-worker-instances-empty-filter">
+                          <td colSpan={5} className="dashboard-worker-instances-empty-filter">
                             {`No worker instance on this host for queue “${workerInstancesQueueFilter?.trim() ?? ''}”. Clear the filter or start an instance whose profile consumes this queue.`}
                           </td>
                         </tr>
                       ) : (
                         filteredWorkerInstances.map(inst => {
-                          const profile = workerProfileForInstanceUnit(inst.unit, workerProfiles)
+                          const profile = workerProfileForInstanceUnit(inst.unit, workerProfilesDistinct)
                           const iid = instanceIdFromWorkerUnit(inst.unit)
                           const idParts = iid ? parseCeleryWorkerInstanceId(iid) : null
                           const rawQueues = profile?.queues ?? []
@@ -1988,6 +2087,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                           const queueTitle =
                             rawQueues.length > 1 ? rawQueues.join(', ') : (rawQueue ?? inst.unit)
                           const queueDisplay = rawQueue ? formatQueueLabel(rawQueue) : '—'
+                          const profileKeyDisplay = idParts?.profileKey ?? profile?.key ?? null
                           const cycleDisplay = idParts != null ? String(idParts.cycle) : '—'
                           const workerTypeKey = idParts?.profileKey ?? profile?.key ?? null
                           const rowLabel =
@@ -2002,6 +2102,14 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                                   className="dashboard-celery-env-pill"
                                   title={opsHostEnvPillTitle}
                                 />
+                              </td>
+                              <td className="dashboard-worker-instances-td-profile">
+                                <span
+                                  className="dashboard-instance-profile-key"
+                                  title={iid ?? inst.unit}
+                                >
+                                  {profileKeyDisplay ?? '—'}
+                                </span>
                               </td>
                               <td className="dashboard-worker-instances-td-queue">
                                 <span className="dashboard-instance-queue-display" title={queueTitle}>
@@ -2068,7 +2176,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                 </div>
               )}
               <div className="dashboard-scale-add-row">
-                {workerProfiles.length === 0 ? (
+                {workerProfilesDistinct.length === 0 ? (
                   <span className="dashboard-empty-inline">No profiles</span>
                 ) : (
                   <div
@@ -2087,7 +2195,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                     >
                       ALL
                     </button>
-                    {workerProfiles.map(p => {
+                    {workerProfilesDistinct.map(p => {
                       const queuesHint = p.queues.length ? p.queues.join(', ') : '—'
                       const selected = scaleWorkerType === p.key
                       return (
@@ -2098,7 +2206,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                           role="radio"
                           aria-checked={selected}
                           disabled={scaleBusy}
-                          title={queuesHint}
+                          title={`${p.key} — ${queuesHint}`}
                           onClick={() => setScaleWorkerType(p.key)}
                         >
                           {p.label}
@@ -2123,7 +2231,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                   </button>
                 )}
               </div>
-              {scaleWorkerType === SCALE_SELECTION_ALL && workerProfiles.length > 0 && (
+              {scaleWorkerType === SCALE_SELECTION_ALL && workerProfilesDistinct.length > 0 && (
               <div className="dashboard-scale-bulk-row">
                 <div
                   className="dashboard-scale-bulk-icons"
@@ -2134,9 +2242,9 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                     type="button"
                     className="celery-queue-icon-btn celery-queue-icon-btn--scale-add-all celery-queue-icon-btn--with-label"
                     onClick={() => void onScaleAddAll()}
-                    disabled={scaleBusy || workerProfiles.length === 0 || !canOperate}
-                    title="Add all profiles — start one worker instance for each profile in config (ops.worker_profiles)"
-                    aria-label="Add all profiles: start one instance per configured worker profile"
+                    disabled={scaleBusy || workerProfilesDistinct.length === 0 || !canOperate}
+                    title="Add all — for each profile, start worker units until on-host count reaches max_worker_instances (config)"
+                    aria-label="Add all profiles: fill toward configured max_worker_instances per profile"
                   >
                     <IcoWorkerScaleAddAll />
                     <span className="celery-queue-icon-btn__label">Add all</span>
@@ -2148,13 +2256,13 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                     disabled={scaleBusy || !canOperate}
                     title={
                       instances.length > 0
-                        ? 'Reset all — force-remove all worker instances on this host, then add one per profile'
-                        : 'Reset all — start one worker instance for each configured profile (none on this host yet)'
+                        ? 'Reset all — remove all worker units on this host, then refill to max_worker_instances per profile'
+                        : 'Reset all — start workers up to each profile max_worker_instances (none on this host yet)'
                     }
                     aria-label={
                       instances.length > 0
-                        ? 'Reset all: force-remove all worker instances on this host, then add one instance per profile'
-                        : 'Reset all: start one instance per configured profile'
+                        ? 'Reset all: remove all on this host then fill to configured max per profile'
+                        : 'Reset all: start workers up to configured max per profile'
                     }
                   >
                     <IcoWorkerScaleReset />
@@ -2216,8 +2324,66 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               </div>
               )}
             </section>
+            </div>
 
-            {/* ── Broker Control ─────────────────────────────────── */}
+            <div className="dashboard-celery-worker-broker-side">
+            {/* ── Worker Instance Config (4/12): per-profile max vs on-host count ───────────────── */}
+            <section
+              className="replay-section dashboard-section dashboard-worker-instance-config"
+              aria-labelledby="dashboard-worker-instance-config-head"
+            >
+              <h3 id="dashboard-worker-instance-config-head" className="page-title-with-tooltip">
+                Worker Instance Config
+                <InfoTooltip text="max_worker_instances and on-host counts from ops.worker_profiles (GET /ops/workers/profiles). Add all / Reset fill toward these limits. Edit config.yaml and reload Ops to change limits. default_max_worker_instances applies when a profile omits max_worker_instances." />
+              </h3>
+              {workerProfilesDistinct.length > 0 ? (
+                <div className="dashboard-worker-instance-limits" role="region" aria-label="Worker instance limits on this host">
+                  <table className="table-operations dashboard-worker-instance-limits-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Profile</th>
+                        <th
+                          scope="col"
+                          title="Target bifrost-celery-worker units for this profile on this Ops host (config max_worker_instances)."
+                        >
+                          Max workers
+                        </th>
+                        <th scope="col">On this host</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {workerProfilesDistinct.map(p => {
+                        const maxN = profileMaxInstances(p)
+                        const cur = countInstancesForProfile(instances, p.key)
+                        const atCap = cur >= maxN
+                        return (
+                          <tr key={`lim-${p.key}`}>
+                            <td>
+                              <span className="dashboard-worker-limit-label">{p.label}</span>
+                              <code className="dashboard-worker-limit-key">{p.key}</code>
+                            </td>
+                            <td className="dashboard-worker-limit-num">{maxN}</td>
+                            <td
+                              className={`dashboard-worker-limit-num ${atCap ? 'dashboard-worker-limit-at-cap' : ''}`}
+                              title={atCap ? 'At or above configured max' : 'Below max — Add all will add more'}
+                            >
+                              {cur}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                  <p className="dashboard-worker-limit-footnote">
+                    Limits are read from config (reload Ops after editing YAML). default_max_worker_instances applies when a profile omits max_worker_instances.
+                  </p>
+                </div>
+              ) : (
+                <p className="dashboard-empty-inline">No profiles</p>
+              )}
+            </section>
+
+            {/* ── Broker Control (4/12 column, below Worker Instance Config) ─────────────────────────────────── */}
             <section
               className="replay-section dashboard-section dashboard-broker-ctrl dashboard-broker-ctrl--celery-column"
               aria-labelledby="dashboard-broker-ctrl-head"
@@ -2282,6 +2448,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                 <div className="dashboard-empty">Loading broker status…</div>
               )}
             </section>
+            </div>
           </div>
           </div>
 
@@ -2491,7 +2658,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                         <span>Queues: {w.queues.length > 0 ? w.queues.join(', ') : '—'}</span>
                         <span>Concurrency: {w.concurrency}</span>
                         <span>Active: {w.active_tasks} / Reserved: {w.reserved_tasks}</span>
-                        <span>Heartbeat: {fmtRelative(w.last_heartbeat)}</span>
+                        <WorkerHeartbeatLine epochSec={w.last_heartbeat} />
                       </div>
                     </div>
                   )

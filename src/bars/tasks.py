@@ -62,6 +62,28 @@ def _is_bars_skip_ib(status_cfg: Optional[Dict[str, Any]] = None) -> bool:
         return False
 
 
+def _celery_worker_consumes_stocks_ib_queue() -> bool:
+    """True when this worker should open a TWS/IB connection (``stocks_ib`` queue only).
+
+    ``scripts/systemd/run_celery.py`` sets ``BIFROST_CELERY_QUEUES`` to the ``-Q`` list. Massive-only workers
+    skip IB connect so prefork children do not contend for ``client_id``. If the env var is unset (manual
+    ``celery`` invocation), parse ``-Q`` from ``sys.argv``.
+    """
+    raw = (os.environ.get("BIFROST_CELERY_QUEUES") or "").strip()
+    if not raw:
+        try:
+            argv = sys.argv
+            for i, a in enumerate(argv):
+                if a == "-Q" and i + 1 < len(argv):
+                    raw = str(argv[i + 1]).strip()
+                    break
+        except Exception:
+            pass
+    if not raw:
+        return True
+    return "stocks_ib" in {x.strip() for x in raw.split(",") if x.strip()}
+
+
 def _connect_ib_at_startup() -> None:
     """Called from worker_process_init: ensure loop is running and schedule IB connect in background (persistent connection).
     Actual connect runs shortly after in the loop; we avoid blocking process init for more than ~2s.
@@ -382,6 +404,12 @@ def disconnect_worker_ib_sync(timeout: float = 5.0) -> None:
 
 def _worker_process_init_connect_ib() -> None:
     """Signal handler: connect to IB when worker process is ready (persistent connection like Monitor/Daemon)."""
+    if not _celery_worker_consumes_stocks_ib_queue():
+        logger.info(
+            "Skipping IB connect (worker queues %r do not include stocks_ib)",
+            (os.environ.get("BIFROST_CELERY_QUEUES") or "").strip(),
+        )
+        return
     _connect_ib_at_startup()
 
 

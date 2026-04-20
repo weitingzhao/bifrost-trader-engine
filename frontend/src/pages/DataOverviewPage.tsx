@@ -5,7 +5,7 @@ import {
   fetchMassiveCeleryBeatSchedule,
   fetchMassiveJobsList,
   fetchMassiveJobsSummary,
-  fetchOptionContractsReferenceGap,
+  postOptionContractsReferenceGapBatch,
   fetchOptionSnapshotsContractsGap,
   fetchWatchlistDbCoverage,
 } from '../api'
@@ -20,6 +20,7 @@ import type {
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { DataOverviewWatchlistOptions, type OptionsSubTab } from './dataOverview/DataOverviewWatchlistOptions'
+import { DataOverviewWatchlistStocks } from './dataOverview/DataOverviewWatchlistStocks'
 import { COVERAGE_OPTION_SUBSECTION, COVERAGE_STOCK_SUBSECTIONS, FEED_MASSIVE_STOCK_ID } from './settings/settingsConstants'
 
 interface DataOverviewPageProps {
@@ -31,12 +32,6 @@ function detailLabel(hash: string): string {
   if (hash === COVERAGE_STOCK_SUBSECTIONS[0].id) return 'Stock — IB Live (Redis)'
   if (hash === COVERAGE_STOCK_SUBSECTIONS[1].id) return 'Stock — Massive Delay (DB)'
   return 'Open'
-}
-
-function fmtTs(iso: string | null): string {
-  if (!iso) return '—'
-  if (iso.length >= 16) return iso.slice(0, 16).replace('T', ' ')
-  return iso
 }
 
 function fmtAgeSeconds(sec: number | null | undefined): string {
@@ -90,6 +85,15 @@ function queueSummaryLine(c: JobQueueStatusCounts): string {
   return `pending ${c.pending} · running ${c.running} · failed ${c.failed} · done ${c.done}`
 }
 
+function delayMs(ms: number): Promise<void> {
+  return new Promise(resolve => {
+    window.setTimeout(resolve, ms)
+  })
+}
+
+const REF_GAP_BATCH_SIZE = 10
+const REF_GAP_CHUNK_DELAY_MS = 75
+
 type WatchlistSectionTab = 'options' | 'stocks'
 
 const emptyCounts = (): JobQueueStatusCounts => ({
@@ -136,6 +140,122 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
   /** Option jobs sheet (By symbol bar) — button next to Refresh when that bar is visible. */
   const [optionJobsSheetOpen, setOptionJobsSheetOpen] = useState(false)
 
+  /** Shared fetch body: updates watchlist, global summary, beat, job queues — does not reset compare pool or gap maps. */
+  const applyPipelineFetchResults = useCallback((settled: readonly PromiseSettledResult<unknown>[]) => {
+      type Wl = Awaited<ReturnType<typeof fetchWatchlistDbCoverage>>
+      type G = Awaited<ReturnType<typeof fetchDbCoverageSummary>>
+      type Beat = Awaited<ReturnType<typeof fetchMassiveCeleryBeatSchedule>>
+      type Jq = Awaited<ReturnType<typeof fetchMassiveJobsSummary>>
+      type Jlist = Awaited<ReturnType<typeof fetchMassiveJobsList>>
+      const wl = settled[0].status === 'fulfilled' ? (settled[0].value as Wl) : null
+      const g = settled[1].status === 'fulfilled' ? (settled[1].value as G) : null
+      const beat = settled[2].status === 'fulfilled' ? (settled[2].value as Beat) : null
+      const jq = settled[3].status === 'fulfilled' ? (settled[3].value as Jq) : null
+      const js = settled[4].status === 'fulfilled' ? (settled[4].value as Jq) : null
+      const jlist = settled[5].status === 'fulfilled' ? (settled[5].value as Jlist) : null
+
+      if (wl?.ok) {
+        setWlRows(wl.symbols ?? [])
+        setWlGeneratedAt(wl.generated_at ?? null)
+        setWlMessage(typeof wl.message === 'string' ? wl.message : null)
+        setWlError(null)
+      } else {
+        setWlRows([])
+        setWlGeneratedAt(null)
+        setWlMessage(null)
+        setWlError(
+          wl && !wl.ok
+            ? wl.error ?? 'Watchlist coverage failed'
+            : settled[0].status === 'rejected'
+              ? (settled[0].reason instanceof Error ? settled[0].reason.message : 'Watchlist coverage failed')
+              : 'Watchlist coverage failed',
+        )
+      }
+
+      if (g?.ok) {
+        setRows(g.tables ?? [])
+        setGeneratedAt(g.generated_at ?? null)
+        setGlobalError(null)
+      } else {
+        setRows([])
+        setGeneratedAt(null)
+        setGlobalError(
+          g && !g.ok
+            ? g.error ?? 'Global summary failed'
+            : settled[1].status === 'rejected'
+              ? (settled[1].reason instanceof Error ? settled[1].reason.message : 'Global summary failed')
+              : 'Global summary failed',
+        )
+      }
+
+      if (beat?.ok && Array.isArray(beat.entries)) {
+        setBeatEntries(beat.entries)
+        setBeatError(null)
+      } else {
+        setBeatEntries([])
+        setBeatError(
+          beat && beat.ok === false
+            ? beat.error ?? 'Failed to load Celery Beat schedule'
+            : settled[2].status === 'rejected'
+              ? (settled[2].reason instanceof Error ? settled[2].reason.message : 'Failed to load Celery Beat schedule')
+              : 'Failed to load Celery Beat schedule',
+        )
+      }
+
+      const optOk = Boolean(jq?.ok && jq.counts)
+      const stOk = Boolean(js?.ok && js.counts)
+      if (optOk) {
+        setJobsOpt(jq!.counts!)
+      } else {
+        setJobsOpt(emptyCounts())
+      }
+      if (stOk) {
+        setJobsStock(js!.counts!)
+      } else {
+        setJobsStock(emptyCounts())
+      }
+      if (optOk && stOk) {
+        setJobsSummaryError(null)
+      } else {
+        const parts: string[] = []
+        if (!optOk) {
+          parts.push(
+            jq && !jq.ok
+              ? jq.error ?? 'Options Massive queue unavailable'
+              : settled[3].status === 'rejected'
+                ? (settled[3].reason instanceof Error ? settled[3].reason.message : 'Options Massive queue unavailable')
+                : 'Options Massive queue unavailable',
+          )
+        }
+        if (!stOk) {
+          parts.push(
+            js && !js.ok
+              ? js.error ?? 'Stocks Massive queue unavailable'
+              : settled[4].status === 'rejected'
+                ? (settled[4].reason instanceof Error ? settled[4].reason.message : 'Stocks Massive queue unavailable')
+                : 'Stocks Massive queue unavailable',
+          )
+        }
+        setJobsSummaryError(parts.join(' · '))
+      }
+
+      if (jlist?.ok && Array.isArray(jlist.jobs)) {
+        setRecentJobs(jlist.jobs)
+        setJobsListError(null)
+      } else {
+        setRecentJobs([])
+        setJobsListError(
+          jlist && !jlist.ok
+            ? jlist.error ?? 'Recent jobs unavailable'
+            : settled[5].status === 'rejected'
+              ? (settled[5].reason instanceof Error ? settled[5].reason.message : 'Recent jobs unavailable')
+              : 'Recent jobs unavailable',
+        )
+      }
+    },
+    [],
+  )
+
   const loadAll = useCallback(async () => {
     setLoading(true)
     setWlError(null)
@@ -144,11 +264,6 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
     setBeatError(null)
     setJobsSummaryError(null)
     setJobsListError(null)
-    setRefGapBySymbol({})
-    setRefGapError(null)
-    setSnapshotGapBySymbol({})
-    setSnapshotGapError(null)
-    setComparePool([])
 
     const settled = await Promise.allSettled([
       fetchWatchlistDbCoverage(),
@@ -159,114 +274,22 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
       fetchMassiveJobsList({ limit: 10 }),
     ])
 
-    const wl = settled[0].status === 'fulfilled' ? settled[0].value : null
-    const g = settled[1].status === 'fulfilled' ? settled[1].value : null
-    const beat = settled[2].status === 'fulfilled' ? settled[2].value : null
-    const jq = settled[3].status === 'fulfilled' ? settled[3].value : null
-    const js = settled[4].status === 'fulfilled' ? settled[4].value : null
-    const jlist = settled[5].status === 'fulfilled' ? settled[5].value : null
-
-    if (wl?.ok) {
-      setWlRows(wl.symbols ?? [])
-      setWlGeneratedAt(wl.generated_at ?? null)
-      setWlMessage(typeof wl.message === 'string' ? wl.message : null)
-      setWlError(null)
-    } else {
-      setWlRows([])
-      setWlGeneratedAt(null)
-      setWlMessage(null)
-      setWlError(
-        wl && !wl.ok
-          ? wl.error ?? 'Watchlist coverage failed'
-          : settled[0].status === 'rejected'
-            ? (settled[0].reason instanceof Error ? settled[0].reason.message : 'Watchlist coverage failed')
-            : 'Watchlist coverage failed',
-      )
-    }
-
-    if (g?.ok) {
-      setRows(g.tables ?? [])
-      setGeneratedAt(g.generated_at ?? null)
-      setGlobalError(null)
-    } else {
-      setRows([])
-      setGeneratedAt(null)
-      setGlobalError(
-        g && !g.ok
-          ? g.error ?? 'Global summary failed'
-          : settled[1].status === 'rejected'
-            ? (settled[1].reason instanceof Error ? settled[1].reason.message : 'Global summary failed')
-            : 'Global summary failed',
-      )
-    }
-
-    if (beat?.ok && Array.isArray(beat.entries)) {
-      setBeatEntries(beat.entries)
-      setBeatError(null)
-    } else {
-      setBeatEntries([])
-      setBeatError(
-        beat && beat.ok === false
-          ? beat.error ?? 'Failed to load Celery Beat schedule'
-          : settled[2].status === 'rejected'
-            ? (settled[2].reason instanceof Error ? settled[2].reason.message : 'Failed to load Celery Beat schedule')
-            : 'Failed to load Celery Beat schedule',
-      )
-    }
-
-    const optOk = Boolean(jq?.ok && jq.counts)
-    const stOk = Boolean(js?.ok && js.counts)
-    if (optOk) {
-      setJobsOpt(jq!.counts!)
-    } else {
-      setJobsOpt(emptyCounts())
-    }
-    if (stOk) {
-      setJobsStock(js!.counts!)
-    } else {
-      setJobsStock(emptyCounts())
-    }
-    if (optOk && stOk) {
-      setJobsSummaryError(null)
-    } else {
-      const parts: string[] = []
-      if (!optOk) {
-        parts.push(
-          jq && !jq.ok
-            ? jq.error ?? 'Options Massive queue unavailable'
-            : settled[3].status === 'rejected'
-              ? (settled[3].reason instanceof Error ? settled[3].reason.message : 'Options Massive queue unavailable')
-              : 'Options Massive queue unavailable',
-        )
-      }
-      if (!stOk) {
-        parts.push(
-          js && !js.ok
-            ? js.error ?? 'Stocks Massive queue unavailable'
-            : settled[4].status === 'rejected'
-              ? (settled[4].reason instanceof Error ? settled[4].reason.message : 'Stocks Massive queue unavailable')
-              : 'Stocks Massive queue unavailable',
-        )
-      }
-      setJobsSummaryError(parts.join(' · '))
-    }
-
-    if (jlist?.ok && Array.isArray(jlist.jobs)) {
-      setRecentJobs(jlist.jobs)
-      setJobsListError(null)
-    } else {
-      setRecentJobs([])
-      setJobsListError(
-        jlist && !jlist.ok
-          ? jlist.error ?? 'Recent jobs unavailable'
-          : settled[5].status === 'rejected'
-            ? (settled[5].reason instanceof Error ? settled[5].reason.message : 'Recent jobs unavailable')
-            : 'Recent jobs unavailable',
-      )
-    }
-
+    applyPipelineFetchResults(settled)
     setLoading(false)
-  }, [])
+  }, [applyPipelineFetchResults])
+
+  /** Background refresh after Massive jobs: no full-page loading spinner, preserves compare pool and Check results. */
+  const refreshPipelineAfterJobs = useCallback(async () => {
+    const settled = await Promise.allSettled([
+      fetchWatchlistDbCoverage(),
+      fetchDbCoverageSummary(),
+      fetchMassiveCeleryBeatSchedule(),
+      fetchMassiveJobsSummary('options_massive'),
+      fetchMassiveJobsSummary('stocks_massive'),
+      fetchMassiveJobsList({ limit: 10 }),
+    ])
+    applyPipelineFetchResults(settled)
+  }, [applyPipelineFetchResults])
 
   const handleCompareMassiveReference = useCallback(
     async (
@@ -276,9 +299,11 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
         onSymbolDone?: (symbol: string, result: OptionContractsReferenceGapResult) => void
         onSymbolError?: (symbol: string, message: string) => void
       },
+      options?: { maxExpiries?: number },
     ) => {
       setRefGapLoading(true)
       setRefGapError(null)
+      const maxExpiries = options?.maxExpiries ?? 60
       try {
         const raw = symbols.map(s => s.trim().toUpperCase()).filter(Boolean)
         const seen = new Set<string>()
@@ -295,22 +320,42 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
           )
           return
         }
-        for (const sym of eligible) {
-          progress?.onSymbolStart?.(sym)
+        for (let off = 0; off < eligible.length; off += REF_GAP_BATCH_SIZE) {
+          const chunk = eligible.slice(off, off + REF_GAP_BATCH_SIZE)
+          for (const sym of chunk) {
+            progress?.onSymbolStart?.(sym)
+          }
           try {
-            const res = await fetchOptionContractsReferenceGap(sym)
-            if (!res.ok) {
-              const msg = typeof res.error === 'string' ? res.error : 'Compare failed'
-              progress?.onSymbolError?.(sym, msg)
-              continue
+            const batchRes = await postOptionContractsReferenceGapBatch(chunk, { max_expiries: maxExpiries })
+            if (!batchRes.ok || !batchRes.results) {
+              const msg = typeof batchRes.error === 'string' ? batchRes.error : 'Compare failed'
+              for (const sym of chunk) {
+                progress?.onSymbolError?.(sym, msg)
+              }
+            } else {
+              for (const sym of chunk) {
+                const res = batchRes.results[sym]
+                if (!res) {
+                  progress?.onSymbolError?.(sym, 'No result')
+                  continue
+                }
+                if (!res.ok) {
+                  const msg = typeof res.error === 'string' ? res.error : 'Compare failed'
+                  progress?.onSymbolError?.(sym, msg)
+                  continue
+                }
+                setRefGapBySymbol(prev => ({ ...prev, [sym]: res }))
+                progress?.onSymbolDone?.(sym, res)
+              }
             }
-            setRefGapBySymbol(prev => ({ ...prev, [sym]: res }))
-            progress?.onSymbolDone?.(sym, res)
           } catch (err) {
-            progress?.onSymbolError?.(
-              sym,
-              err instanceof Error ? err.message : 'Compare failed',
-            )
+            const msg = err instanceof Error ? err.message : 'Compare failed'
+            for (const sym of chunk) {
+              progress?.onSymbolError?.(sym, msg)
+            }
+          }
+          if (off + REF_GAP_BATCH_SIZE < eligible.length) {
+            await delayMs(REF_GAP_CHUNK_DELAY_MS)
           }
         }
       } catch (e) {
@@ -442,7 +487,7 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
       <section className="replay-section" aria-labelledby="data-overview-wl-head" style={{ marginBottom: 'var(--space-4)' }}>
         <h3 id="data-overview-wl-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
           Watchlist coverage
-          <InfoTooltip text="Options: Summary aggregates by table; By symbol shows per-ticker detail. Stocks: stock_day (Massive). Same symbol universe as Daily Data Status (max 80)." />
+          <InfoTooltip text="Options: Summary aggregates by table; By symbol shows per-ticker detail. Stocks: same universe (max 80) — fundamental stock_day, stock_min, tickers, ticker_overview, ticker_types (global dictionary)." />
         </h3>
         {wlError ? <p className="status-page-msg err" role="alert">{wlError}</p> : null}
         {wlGeneratedAt ? (
@@ -488,7 +533,7 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
                 wlRows={wlRows}
                 subTab={wlOptionsSubTab}
                 onSubTabChange={setWlOptionsSubTab}
-                onWatchlistRefreshRequested={loadAll}
+                onWatchlistRefreshRequested={refreshPipelineAfterJobs}
                 refGapBySymbol={refGapBySymbol}
                 onCompareMassiveReference={handleCompareMassiveReference}
                 refGapLoading={refGapLoading}
@@ -505,32 +550,7 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
                 onJobsSheetOpenChange={setOptionJobsSheetOpen}
               />
             ) : (
-              <div className="feed-massive-table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Symbol</th>
-                      <th scope="col">Last bar</th>
-                      <th scope="col">stock_day created</th>
-                      <th scope="col">OK</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {wlRows.map(r => (
-                      <tr key={r.symbol}>
-                        <th scope="row"><strong>{r.symbol}</strong></th>
-                        <td style={{ fontSize: 'var(--text-caption)' }}>
-                          {r.stock_day.has_data ? fmtTs(r.stock_day.stock_day_last_bar) : '—'}
-                        </td>
-                        <td style={{ fontSize: 'var(--text-caption)' }}>
-                          {r.stock_day.has_data ? fmtTs(r.stock_day.stock_day_last_created_at) : '—'}
-                        </td>
-                        <td>{r.stock_day.has_data ? 'Yes' : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataOverviewWatchlistStocks wlRows={wlRows} />
             )}
           </>
         ) : null}

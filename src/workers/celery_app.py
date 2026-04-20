@@ -2,14 +2,15 @@
 
 Usage:
   celery -A src.workers.celery_app worker -l info -Q stocks_ib --pool=solo
-  celery -A src.workers.celery_app worker -l info -Q options_massive --pool=solo   # Massive/Polygon options (no IB)
+  celery -A src.workers.celery_app worker -l info -Q options_massive --pool=prefork --concurrency=4   # Massive (no IB in worker)
   # Stock reference jobs use queues stocks_massive / stocks_massive_high (see src.massive.celery_queues).
 
-Or: python scripts/systemd/run_celery.py [config_path]
+Or: python scripts/systemd/run_celery.py [config_path]  # pool from profile; sets BIFROST_CELERY_QUEUES
 
 Celery Beat (Massive schedules): python scripts/init/run_celery_beat.py
 
-Solo pool: single process, one IB connection (client_id). Stop-poll runs in worker_init so Stop button works.
+``stocks_ib``: solo pool, one IB connection (client_id). Massive profiles: prefork (see ``build_celery_worker_pool_argv``).
+Stop-poll runs in worker_init (solo) or worker_process_init (prefork) so Stop button works.
 """
 
 from __future__ import annotations

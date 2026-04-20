@@ -136,6 +136,40 @@ function fmtMassiveJobResult(j: MassiveJobApiRow): string {
   return '—'
 }
 
+const MASSIVE_RESULT_DETAIL_MAX = 240
+
+/** Second line: key `summary` fields for comparison with Goal (full text in cell `title`). */
+function fmtMassiveJobResultDetail(j: MassiveJobApiRow): string {
+  const r = j.result as Record<string, unknown> | undefined
+  if (!r || typeof r !== 'object') return ''
+  const sum = r.summary as Record<string, unknown> | undefined
+  if (!sum || typeof sum !== 'object') return ''
+  const parts: string[] = []
+  if (sum.targets_found != null) parts.push(`targets ${String(sum.targets_found)}`)
+  if (sum.contracts_ok != null) parts.push(`contracts_ok ${String(sum.contracts_ok)}`)
+  if (sum.contracts_failed != null && Number(sum.contracts_failed) > 0) {
+    parts.push(`contracts_failed ${String(sum.contracts_failed)}`)
+  }
+  if (sum.contracts_processed != null) parts.push(`contracts_processed ${String(sum.contracts_processed)}`)
+  if (sum.bars_upserted != null) parts.push(`bars_upserted ${String(sum.bars_upserted)}`)
+  if (sum.fan_out_chunk_index != null && sum.fan_out_chunks_total != null) {
+    parts.push(`chunk ${String(sum.fan_out_chunk_index)}/${String(sum.fan_out_chunks_total)}`)
+  }
+  if (sum.pct != null) parts.push(`${String(sum.pct)}%`)
+  if (sum.processed != null && sum.total_symbols != null) {
+    parts.push(`progress ${String(sum.processed)}/${String(sum.total_symbols)}`)
+  }
+  if (sum.rows_written != null) parts.push(`rows ${String(sum.rows_written)}`)
+  const errs = sum.errors
+  if (Array.isArray(errs) && errs.length > 0) {
+    const es = errs.map(e => String(e)).join('; ')
+    parts.push(es.length > 140 ? `${es.slice(0, 137)}…` : es)
+  }
+  let out = parts.join(' · ')
+  if (out.length > MASSIVE_RESULT_DETAIL_MAX) out = `${out.slice(0, MASSIVE_RESULT_DETAIL_MAX - 1)}…`
+  return out
+}
+
 function jobStatusBadgeClass(st: string | undefined): string {
   const s = (st || '').toLowerCase()
   if (s === 'done') return 'feed-massive-badge feed-massive-badge--done'
@@ -225,8 +259,12 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
 
+  /** Invalidate in-flight list fetches when tab/filter changes or refresh is spammed (avoids stale UI + loading stuck). */
+  const listLoadSeqRef = useRef(0)
+
   const loadMassiveQueue = useCallback(
     async (celeryQueue: string) => {
+      const seq = ++listLoadSeqRef.current
       setMassiveLoading(true)
       setMassiveError(null)
       try {
@@ -236,6 +274,7 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
           status: statusFilter === 'all' ? undefined : statusFilter,
           celery_queue: celeryQueue,
         })
+        if (seq !== listLoadSeqRef.current) return
         if (!res.ok) {
           setMassiveError(res.error ?? 'Failed to load jobs')
           setMassiveJobs([])
@@ -243,28 +282,32 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
         }
         setMassiveJobs(res.jobs)
       } catch (e) {
+        if (seq !== listLoadSeqRef.current) return
         setMassiveError(e instanceof Error ? e.message : 'Failed to load jobs')
         setMassiveJobs([])
       } finally {
-        setMassiveLoading(false)
+        if (seq === listLoadSeqRef.current) setMassiveLoading(false)
       }
     },
     [limit, statusFilter],
   )
 
   const loadBarsQueue = useCallback(async () => {
+    const seq = ++listLoadSeqRef.current
     setBarsLoading(true)
     setBarsError(null)
     try {
       const statusParam = statusFilter === 'all' ? null : statusFilter
       const res = await fetchBarsJobs(limit, 0, statusParam)
+      if (seq !== listLoadSeqRef.current) return
       setBarsJobs(res.jobs ?? [])
       if (res.error) setBarsError(res.error)
     } catch (e) {
+      if (seq !== listLoadSeqRef.current) return
       setBarsError(e instanceof Error ? e.message : 'Failed to load jobs')
       setBarsJobs([])
     } finally {
-      setBarsLoading(false)
+      if (seq === listLoadSeqRef.current) setBarsLoading(false)
     }
   }, [limit, statusFilter])
 
@@ -648,6 +691,7 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
               <tr>
                 <th scope="col">ID</th>
                 <th scope="col">Kind</th>
+                <th scope="col">Goal</th>
                 <th scope="col">Status</th>
                 <th scope="col">Created</th>
                 <th scope="col">Result</th>
@@ -656,29 +700,40 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
             <tbody>
               {massiveJobs.length === 0 && !massiveLoading ? (
                 <tr>
-                  <td colSpan={5}>
+                  <td colSpan={6}>
                     <div className="feed-massive-empty">No jobs match the filter.</div>
                   </td>
                 </tr>
               ) : (
-                massiveJobs.map(row => (
+                massiveJobs.map(row => {
+                  const resultPrimary = fmtMassiveJobResult(row)
+                  const resultDetail = fmtMassiveJobResultDetail(row)
+                  const resultTitle = resultDetail ? `${resultPrimary}\n${resultDetail}` : resultPrimary
+                  return (
                   <tr key={row.job_id}>
                     <td>
                       <span className="feed-massive-job-id">{row.job_id}</span>
                     </td>
                     <td>{row.kind ?? '—'}</td>
+                    <td
+                      className="celery-massive-job-goal-cell"
+                      title={row.goal ?? undefined}
+                    >
+                      {row.goal ?? '—'}
+                    </td>
                     <td>
                       <span className={jobStatusBadgeClass(row.status)}>{row.status ?? '—'}</span>
                     </td>
                     <td>{row.created_ts != null ? fmtTs(row.created_ts) : '—'}</td>
-                    <td
-                      style={{ maxWidth: '12rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                      title={fmtMassiveJobResult(row)}
-                    >
-                      {fmtMassiveJobResult(row)}
+                    <td className="celery-massive-job-result-cell" title={resultTitle}>
+                      <div className="celery-massive-job-result-primary">{resultPrimary}</div>
+                      {resultDetail ? (
+                        <div className="celery-massive-job-result-detail">{resultDetail}</div>
+                      ) : null}
                     </td>
                   </tr>
-                ))
+                  )
+                })
               )}
             </tbody>
           </table>

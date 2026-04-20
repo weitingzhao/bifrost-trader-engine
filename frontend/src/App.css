@@ -21607,6 +21607,22 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   flex-shrink: 0;
 }
 
+.ref-jobs-sheet.data-overview-option-jobs-sheet .ref-jobs-sheet-meta--sub {
+  margin-top: 0.35rem;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.ref-jobs-sheet.data-overview-option-jobs-sheet .ref-jobs-sheet-meta--warn {
+  margin-top: 0.35rem;
+  font-size: var(--text-caption);
+  color: var(--color-warning-strong, #b8860b);
+}
+
+.data-overview-all-gaps-sheet__trunc-banner {
+  margin-bottom: var(--space-3);
+}
+
 .data-overview-all-gaps-sheet__sym {
   padding: var(--space-3) 0;
   border-bottom: 1px solid var(--color-border);

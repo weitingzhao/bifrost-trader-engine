@@ -1098,6 +1098,36 @@
   min-width: 0;
 }
 
+.dashboard-celery-queues .celery-massive-job-goal-cell {
+  max-width: 18rem;
+  white-space: normal;
+  vertical-align: top;
+  font-size: var(--text-small, 0.8125rem);
+  line-height: 1.35;
+}
+
+.dashboard-celery-queues .celery-massive-job-result-cell {
+  max-width: 16rem;
+  min-width: 8rem;
+  white-space: normal;
+  vertical-align: top;
+}
+
+.dashboard-celery-queues .celery-massive-job-result-primary {
+  font-weight: 500;
+}
+
+.dashboard-celery-queues .celery-massive-job-result-detail {
+  margin-top: 0.2rem;
+  font-size: var(--text-small, 0.8125rem);
+  line-height: 1.35;
+  color: var(--color-text-muted, rgba(255, 255, 255, 0.65));
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 /* Settings sidebar layout: prevent grid tracks from expanding past main column */
 .celery-page--embedded .celery-page-grid {
   width: 100%;
@@ -3543,6 +3573,26 @@ button.dashboard-queue-summary-status-console-nav:focus-visible {
   padding-top: var(--space-2);
 }
 
+button.dashboard-queue-summary-totals-queue-clear {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+}
+
+button.dashboard-queue-summary-totals-queue-clear:hover strong {
+  text-decoration: underline;
+}
+
+button.dashboard-queue-summary-totals-queue-clear:focus-visible {
+  outline: 2px solid var(--color-focus-ring, var(--color-primary));
+  outline-offset: 2px;
+}
+
 .dashboard-queue-summary-table-wrap {
   overflow-x: auto;
 }
@@ -3713,6 +3763,54 @@ button.dashboard-queue-summary-status-console-nav:focus-visible {
   flex-shrink: 0;
 }
 
+.dashboard-worker-instance-limits {
+  margin-bottom: var(--space-3);
+}
+
+.dashboard-worker-instance-limits-table {
+  margin: 0;
+  width: 100%;
+  max-width: 36rem;
+  font-size: 0.8125rem;
+}
+
+.dashboard-worker-instance-limits-table th,
+.dashboard-worker-instance-limits-table td {
+  vertical-align: middle;
+  padding: 0.35rem 0.5rem;
+}
+
+.dashboard-worker-limit-label {
+  display: block;
+  font-weight: 500;
+}
+
+.dashboard-worker-limit-key {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--color-text-dim);
+}
+
+.dashboard-worker-limit-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.dashboard-worker-limit-at-cap {
+  color: var(--color-success, #15803d);
+  font-weight: 600;
+}
+
+.dashboard-worker-limit-footnote {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+  line-height: 1.4;
+  max-width: 40rem;
+}
+
 .dashboard-instances-sheet-wrap {
   overflow-x: auto;
   margin-bottom: var(--space-3);
@@ -3765,6 +3863,18 @@ button.dashboard-queue-summary-status-console-nav:focus-visible {
 
 .dashboard-worker-instances-td-host {
   vertical-align: middle;
+}
+
+.dashboard-worker-instances-td-profile {
+  vertical-align: middle;
+  max-width: 12rem;
+}
+
+.dashboard-instance-profile-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--color-text-dim);
 }
 
 .dashboard-worker-instances-td-queue {
@@ -3860,17 +3970,36 @@ button.dashboard-queue-summary-status-console-nav:focus-visible {
   line-height: 1.35;
 }
 
-/* Worker Instances (9/12) + Redis/Broker (3/12) on Celery page */
-.dashboard-celery-instances-broker-row {
+/* Queues & Instances: 8/12 Worker Instances | 4/12 (Worker Instance Config + Redis/Broker) */
+.dashboard-celery-worker-broker-split {
   display: grid;
-  grid-template-columns: minmax(0, 9fr) minmax(0, 3fr);
+  grid-template-columns: minmax(0, 8fr) minmax(0, 4fr);
   gap: var(--space-5);
   align-items: start;
+  margin-top: var(--space-5);
+  margin-bottom: var(--space-5);
   min-width: 0;
 }
 
-.dashboard-celery-instances-broker-row > .dashboard-section {
+.dashboard-celery-worker-instances-main,
+.dashboard-celery-worker-broker-side {
   min-width: 0;
+}
+
+.dashboard-celery-worker-broker-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.dashboard-celery-worker-broker-side .dashboard-worker-instance-limits-table {
+  max-width: none;
+}
+
+@media (max-width: 1100px) {
+  .dashboard-celery-worker-broker-split {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Console & Runtime tab: console, then runtime snapshot */
@@ -4107,9 +4236,6 @@ button.dashboard-queue-summary-status-console-nav:focus-visible {
   }
   .dashboard-console-selector {
     flex-direction: column;
-  }
-  .dashboard-celery-instances-broker-row {
-    grid-template-columns: 1fr;
   }
   .settings-page-header--celery {
     flex-direction: column;

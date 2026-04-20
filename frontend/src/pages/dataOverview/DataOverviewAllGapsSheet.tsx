@@ -667,6 +667,14 @@ export function DataOverviewAllGapsSheet({
     [gapsWlRows, refGapBySymbol],
   )
 
+  const poolReferenceTruncated = useMemo(() => {
+    for (const s of poolUpperSet) {
+      const g = refGapBySymbol[s]
+      if (g?.ok && (g.expiries_truncated || g.truncated)) return true
+    }
+    return false
+  }, [poolUpperSet, refGapBySymbol])
+
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -718,6 +726,14 @@ export function DataOverviewAllGapsSheet({
 
         <div className="data-overview-all-gaps-sheet__body">
           <AllGapsOptionContractsColumnGuide />
+          {poolReferenceTruncated ? (
+            <p className="data-overview-gap-sheet__note data-overview-all-gaps-sheet__trunc-banner" role="status">
+              One or more pooled symbols hit the server <strong>max expiries</strong> limit and/or a per-expiry Massive API{' '}
+              <strong>page</strong> cap. Rollup Gap / per-expiry tables only cover what that Compare run scanned — open{' '}
+              <strong>Advanced · reference compare</strong> in the bar, raise Max expiries, and run <strong>Check</strong>{' '}
+              again if you need tail expiries.
+            </p>
+          ) : null}
           {poolUpperSet.size === 0 ? (
             <p className="data-overview-all-gaps-sheet__empty-pool" role="status">
               No symbols in the compare pool. Add symbols in the matrix (Symbol column) or <strong>Select all</strong>, then

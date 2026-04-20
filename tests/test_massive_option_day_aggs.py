@@ -212,7 +212,7 @@ def test_option_day_pool_row_gap_passes_expiration_date(monkeypatch: pytest.Monk
         return []
 
     monkeypatch.setattr(
-        "src.massive.option_day_pool_fill._fetch_option_day_row_gap_targets",
+        "src.massive.option_day_pool_fill.list_option_day_row_gap_targets",
         fake_fetch,
     )
 
@@ -243,3 +243,85 @@ def test_option_day_pool_row_gap_passes_expiration_date(monkeypatch: pytest.Monk
     assert out.get("ok") is True
     assert captured.get("expiration_date") == "20250620"
     assert out["summary"].get("expiration_date") == "20250620"
+
+
+def test_chunk_option_day_row_gap_targets() -> None:
+    from src.massive.option_day_pool_fill import chunk_option_day_row_gap_targets
+
+    t = [("O:A", "X", "20250101", 1.0, "C"), ("O:B", "X", "20250102", 2.0, "P"), ("O:C", "X", "20250103", 3.0, "C")]
+    assert chunk_option_day_row_gap_targets(t, 2) == [t[:2], t[2:]]
+    assert chunk_option_day_row_gap_targets(t, 10) == [t]
+    assert chunk_option_day_row_gap_targets([], 5) == []
+
+
+def test_parse_row_gap_targets_from_payload() -> None:
+    from src.massive.option_day_pool_fill import parse_row_gap_targets_from_payload
+
+    raw = [
+        {"options_ticker": "O:TEST1", "symbol": "QQQ", "expiry": "20251219", "strike": 100, "option_right": "C"},
+    ]
+    out = parse_row_gap_targets_from_payload(raw, "NVDA")
+    assert len(out) == 1
+    assert out[0][0] == "O:TEST1"
+    assert out[0][1] == "QQQ"
+
+
+def test_option_day_pool_row_gap_explicit_targets_skips_db_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.massive.option_day_pool_fill import run_option_day_pool_aggregates
+
+    called = {"n": 0}
+
+    def should_not_list(*_a: object, **_k: object) -> list:
+        called["n"] += 1
+        return []
+
+    monkeypatch.setattr(
+        "src.massive.option_day_pool_fill.list_option_day_row_gap_targets",
+        should_not_list,
+    )
+
+    mock_conn = MagicMock()
+    client = MagicMock()
+    client.fetch_option_aggs.return_value = {"results": [], "error": None}
+
+    out = run_option_day_pool_aggregates(
+        mock_conn,
+        client,
+        {
+            "underlying": "NVDA",
+            "row_gap_targets": [
+                {
+                    "options_ticker": "O:NVDA251219C00100000",
+                    "symbol": "NVDA",
+                    "expiry": "20251219",
+                    "strike": 100.0,
+                    "option_right": "C",
+                },
+            ],
+        },
+        mode="option_day_pool_row_gap",
+        apply_open_close_update=lambda *a, **k: 0,
+        apply_option_day_aggs=lambda *a, **k: 2,
+        patch_vwap=lambda *a, **k: 0,
+        rest_throttle=lambda: None,
+    )
+    assert called["n"] == 0
+    assert out["summary"]["targets_found"] == 1
+    assert out["summary"]["targets_source"] == "explicit"
+    assert client.fetch_option_aggs.call_count == 1
+    assert out["summary"]["contracts_ok"] == 1
+    assert out["summary"]["bars_upserted"] == 2
+
+
+def test_fetch_option_aggs_with_retry_succeeds_after_transient() -> None:
+    from src.massive.option_day_pool_fill import fetch_option_aggs_with_retry
+
+    client = MagicMock()
+    client.fetch_option_aggs.side_effect = [
+        {"results": [], "error": "Remote end closed connection without response"},
+        {"results": [{"t": 1}]},
+    ]
+    out = fetch_option_aggs_with_retry(client, "O:X", 1, "day", 0, 1, lambda: None, max_attempts=3)
+    assert not out.get("error")
+    assert out.get("results") == [{"t": 1}]
+    assert client.fetch_option_aggs.call_count == 2

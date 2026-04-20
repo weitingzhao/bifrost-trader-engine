@@ -136,7 +136,8 @@ class TestMassiveHealth:
             [("NVDA", 100, newest, 90, 80, 2, 50, 45, 4, 12)],  # option_contracts
             [("NVDA", 50, newest, 45, 40, 30, 3)],               # option_snapshots
             [("NVDA", newest.date(), newest)],                   # report_option_atm_iv_daily
-            [("NVDA", newest, newest)],                          # stock_day
+            [("NVDA", 200, newest, newest, 99.1, 98.0, 95.0, 180)],  # stock_day aggregate
+            [],  # stock_min
             [],  # option_day
             [],  # option_min
             [],  # option_snapshots_with_underlying_day
@@ -144,6 +145,7 @@ class TestMassiveHealth:
             [],  # option_expiration_cache
             [],  # option_open_interest_daily
             [],  # report_option_max_pain_daily
+            [("NVDA", 1, newest, newest, newest)],  # tickers + ticker_overview join (no o.created_at in DDL)
         ]
         cursor_cm = MagicMock()
         cursor_cm.__enter__.return_value = cur
@@ -151,6 +153,7 @@ class TestMassiveHealth:
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = cursor_cm
         mock_connect.return_value = mock_conn
+        cur.fetchone.return_value = (128, newest)  # ticker_types global COUNT + MAX(created_at)
 
         client = _make_client()
         r = client.get("/research/massive/watchlist-db-coverage")
@@ -186,6 +189,15 @@ class TestMassiveHealth:
         row0 = syms[0]
         assert row0.get("option_day", {}).get("has_data") is False
         assert row0.get("report_option_max_pain_daily", {}).get("has_data") is False
+        sd = row0["stock_day"]
+        assert sd["has_data"] is True
+        assert sd["row_count"] == 200
+        assert sd["ohlc_complete_pct"] == 99.1
+        assert row0["ticker_types"]["has_data"] is True
+        assert row0["ticker_types"]["dictionary_row_count"] == 128
+        assert row0["tickers"]["has_data"] is True
+        assert row0["tickers"]["tickers_id"] == 1
+        assert row0["ticker_overview"]["has_data"] is True
 
     @patch("src.vendor.massive.contracts_reference_gap.compute_option_contracts_reference_gap")
     @patch("psycopg2.connect")
@@ -225,6 +237,45 @@ class TestMassiveHealth:
     @patch("src.vendor.massive.contracts_reference_gap.compute_option_contracts_reference_gap")
     @patch("psycopg2.connect")
     @patch("backend.massive.routers.routes._db_config", return_value={"host": "h", "database": "d"})
+    def test_option_contracts_reference_gap_get_passes_max_expiries(self, _mock_db, mock_connect, mock_compute):
+        mock_compute.return_value = {
+            "ok": True,
+            "symbol": "NVDA",
+            "has_rows": True,
+            "db_row_count": 10,
+            "distinct_expiry_total": 70,
+            "expiries_scanned": 60,
+            "pg_total": 10,
+            "massive_total": 12,
+            "gap": 2,
+            "coverage_pct": 83.3,
+            "compared_at": "2026-01-01T00:00:00Z",
+            "expiries": [],
+            "truncated": False,
+            "expiries_truncated": True,
+        }
+        cur = MagicMock()
+        cursor_cm = MagicMock()
+        cursor_cm.__enter__.return_value = cur
+        cursor_cm.__exit__.return_value = None
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor_cm
+        mock_connect.return_value = mock_conn
+
+        client = _make_client(reader_config={"massive": {"api_key": "test-key"}})
+        r = client.get("/research/massive/option-contracts-reference-gap?symbol=NVDA&max_expiries=90&max_pages_per_expiry=25")
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is True
+        assert body.get("distinct_expiry_total") == 70
+        mock_compute.assert_called_once()
+        kwargs = mock_compute.call_args[1]
+        assert kwargs.get("max_expiries") == 90
+        assert kwargs.get("max_pages_per_expiry") == 25
+
+    @patch("src.vendor.massive.contracts_reference_gap.compute_option_contracts_reference_gap")
+    @patch("psycopg2.connect")
+    @patch("backend.massive.routers.routes._db_config", return_value={"host": "h", "database": "d"})
     def test_option_contracts_reference_gap_batch_ok(self, _mock_db, mock_connect, mock_compute):
         mock_compute.side_effect = [
             {"ok": True, "symbol": "NVDA", "has_rows": True, "pg_total": 1, "massive_total": 1, "gap": 0},
@@ -250,6 +301,33 @@ class TestMassiveHealth:
         assert res.get("NVDA", {}).get("gap") == 0
         assert res.get("AAPL", {}).get("gap") == 1
         assert mock_compute.call_count == 2
+
+    @patch("src.vendor.massive.contracts_reference_gap.compute_option_contracts_reference_gap")
+    @patch("psycopg2.connect")
+    @patch("backend.massive.routers.routes._db_config", return_value={"host": "h", "database": "d"})
+    def test_option_contracts_reference_gap_batch_passes_max_expiries(self, _mock_db, mock_connect, mock_compute):
+        mock_compute.side_effect = [
+            {"ok": True, "symbol": "NVDA", "has_rows": True, "pg_total": 1, "massive_total": 1, "gap": 0},
+        ]
+        cur = MagicMock()
+        cursor_cm = MagicMock()
+        cursor_cm.__enter__.return_value = cur
+        cursor_cm.__exit__.return_value = None
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor_cm
+        mock_connect.return_value = mock_conn
+
+        client = _make_client(reader_config={"massive": {"api_key": "test-key"}})
+        r = client.post(
+            "/research/massive/option-contracts-reference-gap/batch",
+            json={"symbols": ["NVDA"], "max_expiries": 100, "max_pages_per_expiry": "bad"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is True
+        kwargs = mock_compute.call_args[1]
+        assert kwargs.get("max_expiries") == 100
+        assert kwargs.get("max_pages_per_expiry") == 20
 
     def test_option_contracts_reference_gap_requires_postgres(self):
         client = _make_client()

@@ -849,13 +849,19 @@ class SubprocessLocalExecutor:
         text = (stdout or b"").decode(errors="replace").strip()
         if not text:
             return []
+        # One logical worker unit may match multiple PIDs: prefork pool children inherit the same argv
+        # (``run_celery.py --instance profile-N``), so ``pgrep -fl`` returns a line per process.
         inst_re = re.compile(r"--instance\s+(\S+)")
+        seen_instance_ids: set[str] = set()
         instances: List[Dict[str, str]] = []
         for line in text.splitlines():
             m = inst_re.search(line)
             if not m:
                 continue
             instance_id = m.group(1)
+            if instance_id in seen_instance_ids:
+                continue
+            seen_instance_ids.add(instance_id)
             unit = f"{_WORKER_UNIT_BASE}@{instance_id}.service"
             parts = line.split(None, 1)
             pid = parts[0] if parts else "?"

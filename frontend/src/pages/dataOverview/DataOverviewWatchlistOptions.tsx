@@ -555,6 +555,7 @@ export interface DataOverviewWatchlistOptionsProps {
       onSymbolDone?: (symbol: string, result: OptionContractsReferenceGapResult) => void
       onSymbolError?: (symbol: string, message: string) => void
     },
+    options?: { maxExpiries?: number },
   ) => void | Promise<void>
   refGapLoading?: boolean
   refGapError?: string | null
@@ -1151,16 +1152,30 @@ export function DataOverviewWatchlistOptions({
                               ↗
                             </button>
                           ) : null}
-                          {(focusDataset === 'option_day' || focusDataset === 'option_min') ? (
+                          {(focusDataset === 'option_day' ||
+                            focusDataset === 'option_min' ||
+                            focusDataset === 'option_contracts') ? (
                             <button
                               type="button"
                               className="data-overview-wl-matrix__sym-detail-btn"
                               onClick={() => {
-                                setBarQualityTable(focusDataset)
+                                if (focusDataset === 'option_contracts') {
+                                  setBarQualityTable('option_day')
+                                } else {
+                                  setBarQualityTable(focusDataset)
+                                }
                                 setBarQualitySymbol(r.symbol)
                               }}
-                              title="Open bar quality detail"
-                              aria-label={`Bar quality detail for ${r.symbol}`}
+                              title={
+                                focusDataset === 'option_contracts'
+                                  ? 'Open bar quality detail (option_day daily bars)'
+                                  : 'Open bar quality detail'
+                              }
+                              aria-label={
+                                focusDataset === 'option_contracts'
+                                  ? `Bar quality for ${r.symbol} (option_day)`
+                                  : `Bar quality detail for ${r.symbol}`
+                              }
                             >
                               ↗
                             </button>
