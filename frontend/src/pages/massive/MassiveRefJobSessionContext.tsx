@@ -46,7 +46,7 @@ export type MassiveRefJobSessionApi = {
     payload: Record<string, unknown>,
     priority?: string,
   ) => Promise<{ ok: boolean; error?: string; job_id?: string; deduplicated?: boolean }>
-  /** Call after successful `postMassiveSync('stock_ohlc_sync', …)` — adds row, opens sheet, subscribes to SSE. */
+  /** Call after successful `postMassiveSync('feed_stocks_aggregate', …)` — adds row, opens sheet, subscribes to SSE. */
   trackStockOhlcSyncJob: (res: { job_id?: string; deduplicated?: boolean }) => void
   /** Wrap `postMassiveSync` so ticker reference UI is disabled while the request runs (same as Universe enqueue). */
   withStockOhlcHttp: <T,>(fn: () => Promise<T>) => Promise<T>
@@ -199,7 +199,7 @@ export function MassiveRefJobSessionProvider({ children }: { children: ReactNode
       if (!jid) return
       pushJob({
         jobId: jid,
-        kind: 'stock_ohlc_sync',
+        kind: 'feed_stocks_aggregate',
         deduplicated: Boolean(res.deduplicated),
         domain: 'ohlc',
       })
@@ -208,7 +208,7 @@ export function MassiveRefJobSessionProvider({ children }: { children: ReactNode
   )
 
   const withStockOhlcHttp = useCallback(async <T,>(fn: () => Promise<T>): Promise<T> => {
-    setJobBusyKind('stock_ohlc_sync')
+    setJobBusyKind('feed_stocks_aggregate')
     try {
       return await fn()
     } finally {

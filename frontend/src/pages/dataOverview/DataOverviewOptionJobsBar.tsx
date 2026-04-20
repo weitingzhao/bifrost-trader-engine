@@ -257,7 +257,7 @@ export function buildDataOverviewOptionEnqueuePlan(
       if (!u) return { ok: false, error: 'Pick an underlying symbol.' }
       return {
         ok: true,
-        syncKind: 'contracts',
+        syncKind: 'feed_option_contracts',
         payload: { mode: 'reference_upsert', underlying: u },
         kindLabel: 'Reference contracts upsert',
         needsSymbol: true,
@@ -924,7 +924,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
       for (let i = 0; i < pool.length; i++) {
         const sym = pool[i]!
         const tk = `fill-row-${batchId}-${sym}`
-        const res = await postMassiveSync('contracts', {
+        const res = await postMassiveSync('feed_option_contracts', {
           mode: 'reference_upsert',
           underlying: sym,
         })
@@ -1004,7 +1004,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
       for (let i = 0; i < pool.length; i++) {
         const sym = pool[i]!
         const tk = `fill-col-${batchId}-${sym}`
-        const res = await postMassiveSync('contracts', {
+        const res = await postMassiveSync('feed_option_contracts', {
           mode: 'nullable_column_backfill',
           underlying: sym,
           columns: ['exercise_style', 'shares_per_contract'],
@@ -1085,7 +1085,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
       for (let i = 0; i < pool.length; i++) {
         const sym = pool[i]!
         const tk = `opt-min-row-${batchId}-${sym}`
-        const res = await postMassiveSync('aggregates', {
+        const res = await postMassiveSync('feed_options_aggregate', {
           mode: 'option_min_pool_row_gap',
           underlying: sym,
           period: optionMinPeriod,
@@ -1168,7 +1168,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
       for (let i = 0; i < pool.length; i++) {
         const sym = pool[i]!
         const tk = `opt-min-col-${batchId}-${sym}`
-        const res = await postMassiveSync('aggregates', {
+        const res = await postMassiveSync('feed_options_aggregate', {
           mode: 'option_min_pool_column_fill',
           underlying: sym,
           period: optionMinPeriod,
@@ -1251,7 +1251,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
       for (let i = 0; i < pool.length; i++) {
         const sym = pool[i]!
         const tk = `opt-day-row-${batchId}-${sym}`
-        const res = await postMassiveSync('aggregates', {
+        const res = await postMassiveSync('feed_options_aggregate', {
           mode: 'option_day_pool_row_gap',
           underlying: sym,
           row_lookback_days: 730,
@@ -1347,7 +1347,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
         } catch {
           priority_dates = undefined
         }
-        const res = await postMassiveSync('aggregates', {
+        const res = await postMassiveSync('feed_options_aggregate', {
           mode: 'option_day_pool_column_fill',
           underlying: sym,
           column_lookback_days: 30,
@@ -1502,7 +1502,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
       for (let i = 0; i < pool.length; i++) {
         const sym = pool[i]!
         const tk = `snap-col-${batchId}-${sym}`
-        const res = await postMassiveSync('aggregates', {
+        const res = await postMassiveSync('feed_options_aggregate', {
           mode: 'option_snapshots_pool_contract_fill',
           underlying: sym,
           max_contracts: 80,
@@ -2158,7 +2158,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
         }
         const exp = options?.expiration_date?.trim()
         if (exp) payload.expiration_date = exp
-        const res = await postMassiveSync('contracts', payload)
+        const res = await postMassiveSync('feed_option_contracts', payload)
         if (!res.ok) {
           throw new Error(res.error ?? res.message ?? 'Enqueue failed')
         }
@@ -2179,7 +2179,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
             mode: 'reference_upsert',
             underlying: u,
           }
-          const res = await postMassiveSync('contracts', payload)
+          const res = await postMassiveSync('feed_option_contracts', payload)
           if (!res.ok) {
             throw new Error(res.error ?? res.message ?? 'Enqueue failed')
           }
@@ -2194,7 +2194,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
           scheduleWatchlistRefresh()
           return
         }
-        const res = await postMassiveSync('contracts', {
+        const res = await postMassiveSync('feed_option_contracts', {
           mode: 'nullable_column_backfill',
           underlying: u,
           column,
@@ -2238,7 +2238,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
       enqueueOptionSnapshotsContractColumnFill: async (underlying: string) => {
         const u = underlying.trim().toUpperCase()
         if (!u) throw new Error('Underlying symbol is required.')
-        const res = await postMassiveSync('aggregates', {
+        const res = await postMassiveSync('feed_options_aggregate', {
           mode: 'option_snapshots_pool_contract_fill',
           underlying: u,
           max_contracts: 80,
@@ -2262,7 +2262,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
         const u = underlying.trim().toUpperCase()
         if (!u) throw new Error('Underlying symbol is required.')
         const exp = (options?.expiration_date ?? '').trim().slice(0, 32)
-        const res = await postMassiveSync('aggregates', {
+        const res = await postMassiveSync('feed_options_aggregate', {
           mode: 'option_day_pool_row_gap',
           underlying: u,
           row_lookback_days: 730,
@@ -2300,7 +2300,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
         } catch {
           priority_dates = undefined
         }
-        const res = await postMassiveSync('aggregates', {
+        const res = await postMassiveSync('feed_options_aggregate', {
           mode: 'option_day_pool_column_fill',
           underlying: u,
           column_lookback_days: 30,
@@ -2325,7 +2325,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
         const u = underlying.trim().toUpperCase()
         if (!u) throw new Error('Underlying symbol is required.')
         const exp = (options?.expiration_date ?? '').trim().slice(0, 32)
-        const res = await postMassiveSync('aggregates', {
+        const res = await postMassiveSync('feed_options_aggregate', {
           mode: 'option_min_pool_row_gap',
           underlying: u,
           period: optionMinPeriod,
@@ -2349,7 +2349,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
       enqueueOptionMinPoolColumnFill: async (underlying: string) => {
         const u = underlying.trim().toUpperCase()
         if (!u) throw new Error('Underlying symbol is required.')
-        const res = await postMassiveSync('aggregates', {
+        const res = await postMassiveSync('feed_options_aggregate', {
           mode: 'option_min_pool_column_fill',
           underlying: u,
           period: optionMinPeriod,

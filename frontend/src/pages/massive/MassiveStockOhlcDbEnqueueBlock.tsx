@@ -21,7 +21,7 @@ import {
 const STOCK_CUSTOM_BARS_DEFAULT_START_MS = 1717421400000
 const STOCK_CUSTOM_BARS_DEFAULT_END_MS = 1717444800000
 
-/** Matches POST /research/massive/sync validation for payload.symbols (stock_ohlc_sync custom_bars). */
+/** Matches POST /research/massive/sync validation for payload.symbols (feed_stocks_aggregate custom_bars). */
 const CUSTOM_BARS_SYMBOL_BATCH = 50
 
 /** Backend: sync_all_periods with custom_bars_period_group — daily (1 D) vs intraday (1m, 5m, 1h). */
@@ -95,7 +95,7 @@ export interface MassiveStockOhlcDbEnqueueBlockProps {
 }
 
 /**
- * Stock OHLC → PostgreSQL (Celery stock_ohlc_sync). Same session Jobs sheet + SSE as ticker reference enqueue.
+ * Stock OHLC → PostgreSQL (Celery feed_stocks_aggregate). Same session Jobs sheet + SSE as ticker reference enqueue.
  */
 export function MassiveStockOhlcDbEnqueueBlock({
   configured,
@@ -180,7 +180,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
       await refJobSession.withStockOhlcHttp(async () => {
         try {
           const res = await postMassiveSync(
-            'stock_ohlc_sync',
+            'feed_stocks_aggregate',
             payload,
             priorityHigh ? { priority: 'high' } : undefined,
           )
@@ -197,7 +197,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
             deduplicated: res.deduplicated,
           })
           const tag = res.deduplicated ? `${res.job_id} (deduplicated)` : res.job_id
-          setOhlcMsg(`Enqueued stock_ohlc_sync: job ${tag}. Open Jobs for details.`)
+          setOhlcMsg(`Enqueued feed_stocks_aggregate: job ${tag}. Open Jobs for details.`)
         } catch (e: unknown) {
           setOhlcMsg(e instanceof Error ? e.message : 'Enqueue failed')
         }
@@ -256,7 +256,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
       try {
         for (let i = 0; i < chunks.length; i++) {
           const res = await postMassiveSync(
-            'stock_ohlc_sync',
+            'feed_stocks_aggregate',
             { ...basePayload, symbols: chunks[i] },
             priorityHigh ? { priority: 'high' } : undefined,
           )
@@ -288,7 +288,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
             ? `daily smart (~${backfillYears}y full if empty, else gap-fill)`
             : 'intraday (1m / 5m / 1h)'
         setOhlcMsg(
-          `Enqueued ${jobs} stock_ohlc_sync job(s) (${scope}) for ${allCoverageSymbols.length} symbol(s). Open Jobs for details.`,
+          `Enqueued ${jobs} feed_stocks_aggregate job(s) (${scope}) for ${allCoverageSymbols.length} symbol(s). Open Jobs for details.`,
         )
       }
     })
@@ -384,7 +384,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
     await runOhlcEnqueue({ mode: 'previous_day_bar', ticker: t })
   }, [delayDbOhlcTab, dbGdDate, dbOcTicker, dbOcDate, dbPrevTicker, runOhlcEnqueue])
 
-  const ohlcHttpBusy = refJobSession.jobBusyKind === 'stock_ohlc_sync'
+  const ohlcHttpBusy = refJobSession.jobBusyKind === 'feed_stocks_aggregate'
   const disabled = !configured || refJobSession.jobBusyKind != null
 
   const modeMeta = OHLC_MODES.find(m => m.id === delayDbOhlcTab)
@@ -399,7 +399,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
     >
       <div className="massive-delay-ohlc-queue-topline">
         <p className="feed-massive-agg-sub-doc massive-delay-ohlc-queue-topline-doc">
-          Celery job <code>stock_ohlc_sync</code> upserts into <code>stock_day</code> / <code>stock_min</code> (source &quot;massive&quot;). Modes align with Settings → Feed → Massive Stock → Aggregate Bars (OHLC). Enqueued jobs appear in the same <strong>Jobs</strong> sheet as ticker reference tasks.
+          Celery job <code>feed_stocks_aggregate</code> upserts into <code>stock_day</code> / <code>stock_min</code> (source &quot;massive&quot;). Modes align with Settings → Feed → Massive Stock → Aggregate Bars (OHLC). Enqueued jobs appear in the same <strong>Jobs</strong> sheet as ticker reference tasks.
         </p>
         <div className="massive-delay-ohlc-queue-switch-wrap">
           <span className="form-label massive-delay-ohlc-queue-label" id="massive-delay-ohlc-queue-label">
@@ -429,7 +429,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
               High
             </button>
           </div>
-          <InfoTooltip text="Standard uses Celery queue massive_stocks. High uses massive_stocks_high for stock_ohlc_sync." />
+          <InfoTooltip text="Standard uses Celery queue massive_stocks. High uses massive_stocks_high for feed_stocks_aggregate." />
         </div>
       </div>
 
@@ -466,7 +466,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
           <div className="ref-jobs-md-meta">
             <div className="ref-jobs-md-meta-row">
               <span className="ref-jobs-md-meta-label">Job</span>
-              <span><strong>stock_ohlc_sync</strong></span>
+              <span><strong>feed_stocks_aggregate</strong></span>
             </div>
             <div className="ref-jobs-md-meta-row">
               <span className="ref-jobs-md-meta-label">Mode</span>

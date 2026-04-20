@@ -6,8 +6,8 @@ export const MAX_REF_JOBS_TRACKED = 20
 /** Session-tracked Massive stock job scope (extend for future REST domains). */
 export type MassiveStockRefJobDomain = 'tickers' | 'ohlc'
 
-/** Jobs shown in the shared session sheet (ticker_reference_* and stock_ohlc_sync). */
-export type TrackedMassiveDbJobKind = TickerReferenceJobKind | 'stock_ohlc_sync'
+/** Jobs shown in the shared session sheet (ticker_reference_* and feed_stocks_aggregate; legacy `stock_ohlc_sync`). */
+export type TrackedMassiveDbJobKind = TickerReferenceJobKind | 'feed_stocks_aggregate' | 'stock_ohlc_sync'
 
 export type RefJobTrackItem = {
   jobId: string
@@ -116,7 +116,7 @@ export function validateSingleTickerSymbol(
 
 export type OverviewEnqueueMode = 'missing' | 'stale' | 'symbols' | 'all'
 
-/** Same scope modes as Overview; used for ``ticker_reference_related`` enqueue payload. */
+/** Same scope modes as Overview; used for ``feed_stocks_tickers_related`` enqueue payload. */
 export type RelatedEnqueueMode = OverviewEnqueueMode
 
 /** Subtitles for PostgreSQL column (English UI). */
@@ -140,7 +140,7 @@ export const REF_TICKER_JOB_ROWS: ReadonlyArray<{
   jobTables: readonly string[]
 }> = [
   {
-    kind: 'ticker_reference_universe',
+    kind: 'feed_stocks_tickers_reference_universe',
     queueNote: 'massive_stocks_high',
     hint: 'Full pagination until no cursor (1000 rows/page, sort ticker asc).',
     needsSymbols: false,
@@ -150,7 +150,7 @@ export const REF_TICKER_JOB_ROWS: ReadonlyArray<{
     jobTables: ['job_ticker_reference_state'],
   },
   {
-    kind: 'ticker_reference_instrument_types',
+    kind: 'feed_stocks_tickers_types',
     queueNote: 'massive_stocks_high',
     hint: 'Replaces all rows from the API (truncate + insert).',
     needsSymbols: false,
@@ -160,7 +160,7 @@ export const REF_TICKER_JOB_ROWS: ReadonlyArray<{
     jobTables: [],
   },
   {
-    kind: 'ticker_reference_overview',
+    kind: 'feed_stocks_tickers_overview',
     queueNote: 'massive_stocks',
     hint:
       'Payload mode: missing (no ticker_overview row), stale (missing or older than stale_hours), symbols (list), or all tickers.',
@@ -171,7 +171,7 @@ export const REF_TICKER_JOB_ROWS: ReadonlyArray<{
     jobTables: [],
   },
   {
-    kind: 'ticker_reference_related',
+    kind: 'feed_stocks_tickers_related',
     queueNote: 'massive_stocks',
     hint:
       'Payload mode: missing (no related rows), stale (missing or older than stale_hours by MAX(fetched_at)), symbols (list), or all tickers.',
@@ -186,22 +186,67 @@ export const REF_TICKER_JOB_ROWS: ReadonlyArray<{
 export type RefTickerCatalogRow = (typeof REF_TICKER_JOB_ROWS)[number]
 
 export function getRefCatalogRow(kind: TickerReferenceJobKind) {
-  return REF_TICKER_JOB_ROWS.find(r => r.kind === kind)
+  return REF_TICKER_JOB_ROWS.find(
+    r =>
+      r.kind === kind ||
+      ((kind === 'ticker_reference_universe' || kind === 'stock_reference_universe') &&
+        r.kind === 'feed_stocks_tickers_reference_universe') ||
+      ((kind === 'ticker_reference_ticker_types' ||
+        kind === 'ticker_reference_instrument_types' ||
+        kind === 'stock_reference_instrument_types') &&
+        r.kind === 'feed_stocks_tickers_types') ||
+      (kind === 'ticker_reference_related' && r.kind === 'feed_stocks_tickers_related') ||
+      (kind === 'ticker_reference_overview' && r.kind === 'feed_stocks_tickers_overview'),
+  )
+}
+
+/** Related-tickers backfill job (canonical ``feed_stocks_tickers_related``; legacy ``ticker_reference_related``). */
+export function isFeedStocksTickersRelatedRefKind(kind: string | undefined): boolean {
+  return kind === 'feed_stocks_tickers_related' || kind === 'ticker_reference_related'
+}
+
+/** Ticker overview backfill job (canonical feed_stocks_tickers_overview; legacy ticker_reference_overview). */
+export function isFeedStocksTickersOverviewRefKind(kind: string | undefined): boolean {
+  return kind === 'feed_stocks_tickers_overview' || kind === 'ticker_reference_overview'
+}
+
+/** Full tickers universe sync (canonical feed_stocks_tickers_reference_universe; legacy names). */
+export function isFeedStocksTickersReferenceUniverseRefKind(kind: string | undefined): boolean {
+  return (
+    kind === 'feed_stocks_tickers_reference_universe' ||
+    kind === 'ticker_reference_universe' ||
+    kind === 'stock_reference_universe'
+  )
+}
+
+/** Ticker types dictionary job (canonical feed_stocks_tickers_types; legacy names). */
+export function isFeedStocksTickersTypesRefKind(kind: string | undefined): boolean {
+  return (
+    kind === 'feed_stocks_tickers_types' ||
+    kind === 'ticker_reference_ticker_types' ||
+    kind === 'ticker_reference_instrument_types' ||
+    kind === 'stock_reference_instrument_types'
+  )
 }
 
 export function refJobKindShortLabel(kind: TrackedMassiveDbJobKind): string {
   switch (kind) {
+    case 'feed_stocks_aggregate':
     case 'stock_ohlc_sync':
       return 'Stock OHLC'
+    case 'feed_stocks_tickers_reference_universe':
     case 'ticker_reference_universe':
     case 'stock_reference_universe':
       return 'Universe'
+    case 'feed_stocks_tickers_overview':
     case 'ticker_reference_overview':
     case 'stock_reference_overview':
       return 'Overview'
+    case 'feed_stocks_tickers_related':
     case 'ticker_reference_related':
     case 'stock_reference_related':
       return 'Related'
+    case 'feed_stocks_tickers_types':
     case 'ticker_reference_ticker_types':
     case 'ticker_reference_instrument_types':
     case 'stock_reference_instrument_types':
@@ -212,7 +257,7 @@ export function refJobKindShortLabel(kind: TrackedMassiveDbJobKind): string {
 }
 
 export function refJobKindDisplayLabel(item: RefJobTrackItem): string {
-  if (item.kind !== 'stock_ohlc_sync') {
+  if (item.kind !== 'feed_stocks_aggregate' && item.kind !== 'stock_ohlc_sync') {
     return refJobKindShortLabel(item.kind)
   }
   const r = item.job?.result as Record<string, unknown> | undefined

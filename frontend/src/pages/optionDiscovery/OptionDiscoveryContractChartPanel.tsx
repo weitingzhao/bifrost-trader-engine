@@ -109,7 +109,7 @@ export function OptionDiscoveryContractChartPanel({
         timespan = 'minute'
         multiplier = 1
       }
-      const res = await postMassiveSync('aggregates', {
+      const res = await postMassiveSync('feed_options_aggregate', {
         options_ticker: optionsTicker,
         symbol: sym,
         expiry: exp,

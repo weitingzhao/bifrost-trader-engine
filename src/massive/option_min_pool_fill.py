@@ -225,7 +225,7 @@ def run_option_min_pool_aggregates(
     }
     return {
         "ok": ok,
-        "kind": "aggregates",
+        "kind": "feed_options_aggregate",
         "mode": mode,
         "bars_upserted": bars_upserted,
         "summary": summary,

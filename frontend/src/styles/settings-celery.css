@@ -1246,17 +1246,152 @@
   color: var(--color-accent);
 }
 
+/* Queue summary + Beat schedule row (above main tabs) */
+.dashboard-celery-queue-and-beat {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--space-4);
+  align-items: flex-start;
+  margin-bottom: var(--space-4);
+  min-width: 0;
+}
+/* Top-align both panels: neutralize global .replay-section margin/padding/border in this row */
+.dashboard-celery-queue-and-beat > .replay-section {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+/* Queue summary 7/12 · Beat 5/12 — flex-grow ratio (remaining width after gap splits 7:5) */
+.dashboard-celery-queue-and-beat .dashboard-celery-top-queue-summary {
+  flex: 7 1 0%;
+  margin-bottom: 0;
+  min-width: 0;
+}
+.dashboard-celery-beat-schedule-panel {
+  flex: 5 1 0%;
+  min-width: 0;
+  margin-bottom: 0;
+}
+.dashboard-celery-beat-schedule-head .dashboard-celery-beat-schedule-head-tz {
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  letter-spacing: normal;
+}
+.dashboard-celery-beat-schedule-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.dashboard-celery-beat-schedule-table {
+  width: 100%;
+  font-size: var(--text-small);
+}
+.dashboard-celery-beat-schedule-crontab {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.dashboard-celery-beat-schedule-task {
+  font-size: var(--text-caption);
+  word-break: break-all;
+}
+
 /* Merged queue summary: above main tabs (broker + PG + actions) */
 .dashboard-celery-top-queue-summary {
   margin-bottom: var(--space-4);
 }
+/* Fit inside flex column: no inner horizontal scrollbar squeezing the panel */
 .dashboard-celery-top-queue-summary .dashboard-queue-summary-table-wrap {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow-x: visible;
+  max-width: 100%;
 }
 .dashboard-celery-top-queue-summary-table {
-  min-width: 58rem;
+  width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
+  min-width: 0;
   font-size: var(--text-small);
+}
+.dashboard-celery-top-queue-summary-table thead th:nth-child(1) {
+  width: 12%;
+}
+.dashboard-celery-top-queue-summary-table thead th:nth-child(2) {
+  width: 26%;
+}
+.dashboard-celery-top-queue-summary-table thead th.dashboard-queue-summary-th-rc {
+  width: 9%;
+}
+.dashboard-celery-top-queue-summary-table thead th.dashboard-queue-summary-th-pg {
+  width: 5.5%;
+}
+.dashboard-celery-top-queue-summary-table thead th:nth-child(8) {
+  width: 14%;
+}
+.dashboard-celery-top-queue-summary-table tbody td:nth-child(2) {
+  min-width: 0;
+  vertical-align: top;
+}
+.dashboard-celery-top-queue-summary .dashboard-queue-summary-queue-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.25rem;
+  min-width: 0;
+  max-width: 100%;
+}
+.dashboard-celery-top-queue-summary .dashboard-queue-summary-queue-nav {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  white-space: normal;
+}
+.dashboard-celery-top-queue-summary .dashboard-queue-summary-support-filter {
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+.dashboard-celery-top-queue-summary .dashboard-queue-name {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.dashboard-celery-top-queue-summary .dashboard-celery-top-queue-summary-actions {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.dashboard-queue-summary-th-rc {
+  width: 3.75rem;
+  text-align: right;
+}
+.dashboard-queue-summary-rc-cell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-size: var(--text-caption);
+}
+.dashboard-queue-summary-actions-placeholder {
+  display: inline-block;
+  min-width: 1.25rem;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--text-caption);
+}
+.dashboard-queue-summary-host-cell {
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.dashboard-queue-summary-host-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: nowrap;
+}
+.dashboard-queue-summary-th-host {
+  min-width: 5.25rem;
+}
+.dashboard-queue-summary-th-pg {
+  width: 2rem;
+  text-align: right;
+  padding-left: 0.2rem;
+  padding-right: 0.35rem;
 }
 .dashboard-celery-top-queue-summary-pg {
   text-align: right;

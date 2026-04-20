@@ -264,6 +264,16 @@ export interface RunMassiveJobMatrixRow {
   mode_source: string
   broker_queue_standard: string
   broker_queue_high: string
+  /** Celery task: Beat insert task for scheduled kinds, else ``src.massive.tasks.run_massive_job``. Omitted on older backends; UI derives from ``kind``. */
+  task_name?: string
+  /** ``scheduled`` = kind also enqueued by Celery Beat; ``on_demand`` = API/manual only. Omitted on older backends. */
+  job_style?: 'scheduled' | 'on_demand'
+  /** Massive / Polygon REST endpoints used by this job path (documented in ``run_massive_job_matrix_effects``). */
+  feed_apis: string[]
+  /** PostgreSQL tables written or refreshed by this path. */
+  db_tables: string[]
+  /** Redis key patterns or logical nodes invalidated/used (ingestor cache namespace). */
+  redis_nodes: string[]
 }
 
 export interface CeleryBeatTaskRow {

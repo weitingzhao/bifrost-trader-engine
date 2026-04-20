@@ -109,7 +109,7 @@ export function MassiveStockCoveragePage({ status }: MassiveStockCoveragePagePro
           <div className="massive-delay-ref-heading">
             <h3 id="massive-stock-coverage-refdb-title" className="page-title-with-tooltip massive-delay-ref-heading-title">
               Reference (PostgreSQL)
-              <InfoTooltip text="All reference sync and verification is coordinated through Jobs: ticker_reference_* tasks and stock_ohlc_sync on massive_stocks / massive_stocks_high." />
+              <InfoTooltip text="All reference sync and verification is coordinated through Jobs: ticker_reference_* tasks and feed_stocks_aggregate on massive_stocks / massive_stocks_high." />
             </h3>
             <MassiveDelayDbRefJobsBar />
           </div>

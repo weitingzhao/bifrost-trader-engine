@@ -91,14 +91,53 @@ def test_next_cursor_plain():
 
 
 def test_normalize_ticker_ref_kind_maps_legacy_instrument_types():
-    assert normalize_ticker_ref_kind("ticker_reference_instrument_types") == "ticker_reference_ticker_types"
-    assert normalize_ticker_ref_kind("stock_reference_instrument_types") == "ticker_reference_ticker_types"
-    assert normalize_ticker_ref_kind("ticker_reference_ticker_types") == "ticker_reference_ticker_types"
+    assert normalize_ticker_ref_kind("ticker_reference_instrument_types") == "feed_stocks_tickers_types"
+    assert normalize_ticker_ref_kind("stock_reference_instrument_types") == "feed_stocks_tickers_types"
+    assert normalize_ticker_ref_kind("ticker_reference_ticker_types") == "feed_stocks_tickers_types"
+    assert normalize_ticker_ref_kind("feed_stocks_tickers_types") == "feed_stocks_tickers_types"
 
 
 def test_normalize_ticker_ref_kind_maps_snapshot_to_feed_option_snapshots():
     assert normalize_ticker_ref_kind("snapshot") == "feed_option_snapshots"
     assert normalize_ticker_ref_kind("feed_option_snapshots") == "feed_option_snapshots"
+
+
+def test_normalize_ticker_ref_kind_maps_stock_ohlc_sync_to_feed_stocks_aggregate():
+    assert normalize_ticker_ref_kind("stock_ohlc_sync") == "feed_stocks_aggregate"
+    assert normalize_ticker_ref_kind("feed_stocks_aggregate") == "feed_stocks_aggregate"
+
+
+def test_normalize_ticker_ref_kind_maps_aggregates_to_feed_options_aggregate():
+    assert normalize_ticker_ref_kind("aggregates") == "feed_options_aggregate"
+    assert normalize_ticker_ref_kind("feed_options_aggregate") == "feed_options_aggregate"
+
+
+def test_normalize_ticker_ref_kind_maps_related_to_feed_stocks_tickers_related():
+    assert normalize_ticker_ref_kind("ticker_reference_related") == "feed_stocks_tickers_related"
+    assert normalize_ticker_ref_kind("stock_reference_related") == "feed_stocks_tickers_related"
+    assert normalize_ticker_ref_kind("feed_stocks_tickers_related") == "feed_stocks_tickers_related"
+
+
+def test_normalize_ticker_ref_kind_maps_overview_to_feed_stocks_tickers_overview():
+    assert normalize_ticker_ref_kind("ticker_reference_overview") == "feed_stocks_tickers_overview"
+    assert normalize_ticker_ref_kind("stock_reference_overview") == "feed_stocks_tickers_overview"
+    assert normalize_ticker_ref_kind("feed_stocks_tickers_overview") == "feed_stocks_tickers_overview"
+
+
+def test_normalize_ticker_ref_kind_maps_trades_quotes_to_feed_options_trades_quotes():
+    assert normalize_ticker_ref_kind("trades_quotes") == "feed_options_trades_quotes"
+    assert normalize_ticker_ref_kind("feed_options_trades_quotes") == "feed_options_trades_quotes"
+
+
+def test_normalize_ticker_ref_kind_maps_contracts_to_feed_option_contracts():
+    assert normalize_ticker_ref_kind("contracts") == "feed_option_contracts"
+    assert normalize_ticker_ref_kind("feed_option_contracts") == "feed_option_contracts"
+
+
+def test_normalize_ticker_ref_kind_maps_universe_to_feed_stocks_tickers_reference_universe():
+    assert normalize_ticker_ref_kind("stock_reference_universe") == "feed_stocks_tickers_reference_universe"
+    assert normalize_ticker_ref_kind("ticker_reference_universe") == "feed_stocks_tickers_reference_universe"
+    assert normalize_ticker_ref_kind("feed_stocks_tickers_reference_universe") == "feed_stocks_tickers_reference_universe"
 
 
 def test_overview_stub_cols_api_not_found_sets_timestamp():

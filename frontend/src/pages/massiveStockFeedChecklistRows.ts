@@ -95,15 +95,16 @@ const rows: ChecklistRow[] = [
     service: 'Corporate Actions',
     group: 'rest',
     description:
-      'Dividends and stock splits synced via Massive REST to massive_corporate_action table. '
+      'Dividends, splits, IPOs, and ticker events synced via Massive REST into massive_corporate_action. '
       + 'Already implemented and shared with Massive Option.',
     tierMin: 'starter',
     projectStatus: 'implemented',
     verification:
       'Settings → Feed → Massive Option → Corporate actions: enqueue sync for a ticker, then Load from DB.',
-    purpose: 'Sync stock dividends and splits from Massive reference APIs into PostgreSQL.',
+    purpose:
+      'Sync stock dividends, splits, IPOs, and ticker lifecycle events from Massive Stocks REST and reference APIs into PostgreSQL.',
     helpVerification:
-      'POST /research/massive/sync with kind corporate_action and payload { "symbol": "AAPL" }. '
+      'POST /research/massive/sync with kind feed_stocks_corporate_action and payload { "symbol": "AAPL" }. '
       + 'Then GET /research/massive/corporate-actions?symbol=AAPL&limit=50. '
       + 'UI: Massive Option → Corporate actions → Enqueue sync, then Load from DB.',
   },

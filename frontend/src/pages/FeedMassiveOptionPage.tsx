@@ -47,12 +47,14 @@ const checklistRows = optionFeedChecklistRows()
 
 /** Legacy hash / deep-link id before kind rename (``feed_option_snapshots``). */
 const LEGACY_FEED_OPTION_SNAPSHOTS_ID = 'snapshot'
+/** Legacy hash / deep-link id before kind rename (``feed_options_aggregate``). */
+const LEGACY_FEED_OPTIONS_AGGREGATE_ID = 'aggregates'
 
 /** Second-level tabs inside REST API on Massive Option. */
-const OPTION_REST_SECTION_ORDER = ['contracts', 'aggregates', 'feed_option_snapshots', 'trades-quotes'] as const
+const OPTION_REST_SECTION_ORDER = ['contracts', 'feed_options_aggregate', 'feed_option_snapshots', 'trades-quotes'] as const
 const OPTION_REST_SECTION_LABELS: Record<(typeof OPTION_REST_SECTION_ORDER)[number], string> = {
   contracts: 'Contracts',
-  aggregates: 'Aggregate Bars (OHLC)',
+  feed_options_aggregate: 'Aggregate Bars (OHLC)',
   feed_option_snapshots: 'Snapshots',
   'trades-quotes': 'Trade & Quotes',
 }
@@ -90,6 +92,15 @@ function latestJobForKind(jobs: MassiveJobApiRow[], kind: string): MassiveJobApi
     const x = jk.toLowerCase()
     if (k === 'feed_option_snapshots') {
       return x === 'feed_option_snapshots' || x === 'snapshot'
+    }
+    if (k === 'feed_options_aggregate') {
+      return x === 'feed_options_aggregate' || x === 'aggregates'
+    }
+    if (k === 'feed_option_contracts') {
+      return x === 'feed_option_contracts' || x === 'contracts'
+    }
+    if (k === 'feed_stocks_corporate_action') {
+      return x === 'feed_stocks_corporate_action' || x === 'corporate_action'
     }
     return x === k
   }
@@ -512,7 +523,9 @@ export function FeedMassiveOptionPage({
       const fromTab = parseFeedMassiveTabFromHash(hash)
       const fromSvc = parseFeedMassiveSvcFromHash(hash)
       const raw = fromTab ?? fromSvc
-      const id = raw === LEGACY_FEED_OPTION_SNAPSHOTS_ID ? 'feed_option_snapshots' : raw
+      let id = raw
+      if (raw === LEGACY_FEED_OPTION_SNAPSHOTS_ID) id = 'feed_option_snapshots'
+      else if (raw === LEGACY_FEED_OPTIONS_AGGREGATE_ID) id = 'feed_options_aggregate'
       if (id && checklistRows.some(r => r.id === id)) return id
       return null
     }
@@ -529,7 +542,9 @@ export function FeedMassiveOptionPage({
     const raw =
       parseFeedMassiveTabFromHash(window.location.hash) ??
       parseFeedMassiveSvcFromHash(window.location.hash)
-    const id = raw === LEGACY_FEED_OPTION_SNAPSHOTS_ID ? 'feed_option_snapshots' : raw
+    let id = raw
+    if (raw === LEGACY_FEED_OPTION_SNAPSHOTS_ID) id = 'feed_option_snapshots'
+    else if (raw === LEGACY_FEED_OPTIONS_AGGREGATE_ID) id = 'feed_options_aggregate'
     if (id && checklistRows.some(r => r.id === id)) {
       requestAnimationFrame(() => scrollToSection(id))
     }
@@ -589,7 +604,7 @@ export function FeedMassiveOptionPage({
       if (ctListContractType) payload.contract_type = ctListContractType
       const lim = parseInt(ctListLimit, 10)
       if (lim > 0) payload.limit = lim
-      const res = await postMassiveSync('contracts', payload)
+      const res = await postMassiveSync('feed_option_contracts', payload)
       if (!res.ok) { setCtListErr(res.error ?? res.message ?? 'Enqueue failed'); setCtListBusy(false); return }
       if (!res.job_id) { setCtListErr('No job_id'); setCtListBusy(false); return }
       const sub = subscribeMassiveJobEvents(
@@ -621,7 +636,7 @@ export function FeedMassiveOptionPage({
     setCtDetailResult(null)
     setCtDetailBusy(true)
     try {
-      const res = await postMassiveSync('contracts', { mode: 'detail', options_ticker: t })
+      const res = await postMassiveSync('feed_option_contracts', { mode: 'detail', options_ticker: t })
       if (!res.ok) { setCtDetailErr(res.error ?? res.message ?? 'Enqueue failed'); setCtDetailBusy(false); return }
       if (!res.job_id) { setCtDetailErr('No job_id'); setCtDetailBusy(false); return }
       const sub = subscribeMassiveJobEvents(
@@ -874,7 +889,7 @@ export function FeedMassiveOptionPage({
         start_ms: parseInt(aggStartMs, 10),
         end_ms: parseInt(aggEndMs, 10),
       }
-      const res = await postMassiveSync('aggregates', payload)
+      const res = await postMassiveSync('feed_options_aggregate', payload)
       if (!res.ok) {
         setAggErr(res.error ?? res.message ?? 'Enqueue failed')
         setAggBusy(false)
@@ -917,7 +932,7 @@ export function FeedMassiveOptionPage({
         date: ocDate.trim(),
         mode: 'open_close',
       }
-      const res = await postMassiveSync('aggregates', payload)
+      const res = await postMassiveSync('feed_options_aggregate', payload)
       if (!res.ok) {
         setOcErr(res.error ?? res.message ?? 'Enqueue failed')
         setOcBusy(false)
@@ -947,7 +962,7 @@ export function FeedMassiveOptionPage({
         options_ticker: prevTicker.trim(),
         mode: 'prev',
       }
-      const res = await postMassiveSync('aggregates', payload)
+      const res = await postMassiveSync('feed_options_aggregate', payload)
       if (!res.ok) {
         setPrevErr(res.error ?? res.message ?? 'Enqueue failed')
         setPrevBusy(false)
@@ -1001,7 +1016,7 @@ export function FeedMassiveOptionPage({
     setCorpErr(null)
     setCorpBusy(true)
     try {
-      const res = await postMassiveSync('corporate_action', { symbol: sym })
+      const res = await postMassiveSync('feed_stocks_corporate_action', { symbol: sym })
       if (!res.ok) {
         setCorpErr(res.error ?? res.message ?? 'Enqueue failed')
         setCorpBusy(false)
@@ -1058,7 +1073,7 @@ export function FeedMassiveOptionPage({
     tierOkForRow(rSnap, massiveStatus, Boolean(configured)),
     tradesOkForRow(rSnap, massiveStatus),
   )
-  const rAgg = checklistRowById('aggregates')
+  const rAgg = checklistRowById('feed_options_aggregate')
   const effAgg = effectiveChecklistProjectStatus(
     rAgg,
     Boolean(configured),
@@ -1135,7 +1150,7 @@ export function FeedMassiveOptionPage({
   const contractsEvidence = (() => {
     const cov = ctCoverage
     if (!cov || !cov.ok || !cov.total) {
-      const latest = latestJobForKind(jobs, 'contracts')
+      const latest = latestJobForKind(jobs, 'feed_option_contracts')
       return latest ? jobEvidenceLine(latest) : 'No contracts data loaded. Use All Contracts tab to fetch.'
     }
     const c = cov.coverage
@@ -1201,7 +1216,7 @@ export function FeedMassiveOptionPage({
               </>
             ) : null}
             {breadcrumbLabel}{' '}
-            <InfoTooltip text="Enqueue Massive REST sync on the Celery `massive` queue; quotes are delayed (tier-dependent). Verify reads latest rows from PostgreSQL option_snapshots (source=massive). Worker implements feed_option_snapshots, aggregates, and oi placeholder; other kinds may fail until implemented." />
+            <InfoTooltip text="Enqueue Massive REST sync on the Celery `massive` queue; quotes are delayed (tier-dependent). Verify reads latest rows from PostgreSQL option_snapshots (source=massive). Worker implements feed_option_snapshots, feed_options_aggregate, and oi placeholder; other kinds may fail until implemented." />
           </h2>
           {configured && (
             <span className="feed-massive-delay-pill" title={massiveStatus?.delay_notice}>
@@ -1712,22 +1727,22 @@ export function FeedMassiveOptionPage({
         </>
         ) : null}
 
-        {deliveryRestSubTab === 'aggregates' ? (
+        {deliveryRestSubTab === 'feed_options_aggregate' ? (
         <>
         {/* REST Aggregate Bars (OHLC): three DocPage rows — Custom / Daily Ticker Summary / Previous Day Bar (see massive_api_coverage.csv). WS aggregates are separate sections below. */}
         <FeedMassiveCapabilityPanel
-          capId="aggregates"
+          capId="feed_options_aggregate"
           checklistRow={rAgg}
           effectiveStatus={effAgg}
-          expanded={capExpanded.aggregates === true}
-          onToggle={() => toggleCap('aggregates')}
-          highlight={highlightedCapabilityId === 'aggregates'}
+          expanded={capExpanded.feed_options_aggregate === true}
+          onToggle={() => toggleCap('feed_options_aggregate')}
+          highlight={highlightedCapabilityId === 'feed_options_aggregate'}
           ariaLabel={rAgg.service}
         >
           <FeedMassiveServiceBlock
             effectiveStatus={effAgg}
             checklistRow={rAgg}
-            evidence={jobEvidenceLine(latestJobForKind(jobs, 'aggregates'))}
+            evidence={jobEvidenceLine(latestJobForKind(jobs, 'feed_options_aggregate'))}
           >
             <div className="feed-massive-card-head">
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
@@ -3106,8 +3121,8 @@ export function FeedMassiveOptionPage({
             checklistRow={rCorp}
             evidence={
               corpRows.length > 0
-                ? `${corpRows.length} row(s) loaded from DB for current query. ${jobEvidenceLine(latestJobForKind(jobs, 'corporate_action'))}`
-                : jobEvidenceLine(latestJobForKind(jobs, 'corporate_action'))
+                ? `${corpRows.length} row(s) loaded from DB for current query. ${jobEvidenceLine(latestJobForKind(jobs, 'feed_stocks_corporate_action'))}`
+                : jobEvidenceLine(latestJobForKind(jobs, 'feed_stocks_corporate_action'))
             }
             testArea={
               <div className="feed-massive-inline-actions" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -3139,7 +3154,7 @@ export function FeedMassiveOptionPage({
               </div>
             </div>
             <p className="feed-massive-card-lead">
-              Dividends and stock splits via Massive REST. Enter a stock ticker, sync from API, then load persisted rows from PostgreSQL.
+              Dividends, splits, IPOs, and ticker events via Massive REST (Stocks v1 dividends/splits plus reference IPOs and ticker events). Enter a stock ticker, sync from API, then load persisted rows from PostgreSQL.
             </p>
           </FeedMassiveServiceBlock>
           {corpErr ? (

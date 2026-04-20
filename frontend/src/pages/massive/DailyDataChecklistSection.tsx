@@ -187,9 +187,9 @@ export function DailyDataChecklistSection({
         } else if (dimKey === 'daily-oi') {
           post = await postMassiveSync('oi', { mode: 'watchlist_eod', symbols: [sym], trade_date: tradeDate })
         } else if (dimKey === 'daily-max-pain') {
-          post = await postMassiveSync('max_pain', { symbols: [sym], trade_date: tradeDate })
+          post = await postMassiveSync('report_option_max_pain', { symbols: [sym], trade_date: tradeDate })
         } else if (dimKey === 'daily-corporate') {
-          post = await postMassiveSync('corporate_action', { symbol: sym })
+          post = await postMassiveSync('feed_stocks_corporate_action', { symbol: sym })
         }
         if (!post.ok) {
           appendLog(`[${sym} ${dimKey}] ${post.error ?? 'enqueue failed'}`)

@@ -9,6 +9,10 @@ import {
   type OverviewEnqueueMode,
   type RelatedEnqueueMode,
   refJobKindShortLabel,
+  isFeedStocksTickersRelatedRefKind,
+  isFeedStocksTickersOverviewRefKind,
+  isFeedStocksTickersReferenceUniverseRefKind,
+  isFeedStocksTickersTypesRefKind,
   type RefTickerCatalogRow,
   type TrackedMassiveDbJobKind,
 } from './stockReferenceJobHelpers'
@@ -266,7 +270,7 @@ export function RefJobDetailPanel({
       <h4 className="ref-jobs-md-section-title">Enqueue</h4>
       <div className="ref-jobs-md-enqueue-row">
         <div className="ref-jobs-md-enqueue-fields">
-          {kind === 'ticker_reference_universe' ? (
+          {isFeedStocksTickersReferenceUniverseRefKind(kind) ? (
             <div>
               <p className="ref-jobs-md-enqueue-hint">Full pagination sync (1000 rows/page) until cursor ends. No extra fields.</p>
               <div className="ref-overview-coverage-strip" style={{ marginTop: 'var(--space-2)' }} aria-live="polite">
@@ -284,7 +288,7 @@ export function RefJobDetailPanel({
               </div>
             </div>
           ) : null}
-          {kind === 'ticker_reference_instrument_types' ? (
+          {isFeedStocksTickersTypesRefKind(kind) ? (
             <div>
               <p className="ref-jobs-md-enqueue-hint">Replaces all rows in ticker_types from the API. No extra fields.</p>
               <div className="ref-overview-coverage-strip" style={{ marginTop: 'var(--space-2)' }} aria-live="polite">
@@ -303,7 +307,7 @@ export function RefJobDetailPanel({
             </div>
           ) : null}
 
-          {kind === 'ticker_reference_overview' ? (
+          {isFeedStocksTickersOverviewRefKind(kind) ? (
             <div className="feed-massive-refdb-overview-scope">
               <div className="feed-massive-field" style={{ display: 'block' }}>
                 <div className="form-label" id="ref-overview-scope-label-panel">
@@ -386,7 +390,7 @@ export function RefJobDetailPanel({
             </div>
           ) : null}
 
-          {kind === 'ticker_reference_related' ? (
+          {isFeedStocksTickersRelatedRefKind(kind) ? (
             <div className="feed-massive-refdb-overview-scope" style={{ marginTop: 'var(--space-2)' }}>
               <div className="feed-massive-field" style={{ display: 'block' }}>
                 <div className="form-label" id="ref-related-scope-label-panel">
@@ -470,14 +474,16 @@ export function RefJobDetailPanel({
             </div>
           ) : null}
 
-          {(kind === 'ticker_reference_overview' && overviewEnqueueMode === 'symbols') ||
-          (kind === 'ticker_reference_related' && relatedEnqueueMode === 'symbols') ? (
+          {(isFeedStocksTickersOverviewRefKind(kind) && overviewEnqueueMode === 'symbols') ||
+          (isFeedStocksTickersRelatedRefKind(kind) && relatedEnqueueMode === 'symbols') ? (
             <label
               className="feed-massive-field"
               style={{
                 display: 'block',
                 marginTop:
-                  kind === 'ticker_reference_overview' || kind === 'ticker_reference_related' ? 'var(--space-2)' : 0,
+                  isFeedStocksTickersOverviewRefKind(kind) || isFeedStocksTickersRelatedRefKind(kind)
+                    ? 'var(--space-2)'
+                    : 0,
               }}
             >
               <span className="form-label">Symbols (comma or space separated)</span>
@@ -517,7 +523,7 @@ export function RefJobDetailPanel({
         Verify (PostgreSQL)
       </h4>
 
-      {kind === 'ticker_reference_universe' ? (
+      {isFeedStocksTickersReferenceUniverseRefKind(kind) ? (
         <>
           <label className="feed-massive-field" style={{ display: 'block' }}>
             <span className="form-label">Search query</span>
@@ -556,7 +562,7 @@ export function RefJobDetailPanel({
         </>
       ) : null}
 
-      {kind === 'ticker_reference_instrument_types' ? (
+      {isFeedStocksTickersTypesRefKind(kind) ? (
         <div className="ref-jobs-md-actions">
           <button type="button" className="btn btn-secondary" disabled={busyVerify} onClick={onVerifyInstrumentTypes}>
             {busyVerify ? 'Loading…' : 'Instrument types (DB)'}
@@ -564,7 +570,7 @@ export function RefJobDetailPanel({
         </div>
       ) : null}
 
-      {kind === 'ticker_reference_overview' ? (
+      {isFeedStocksTickersOverviewRefKind(kind) ? (
         <>
           <label className="feed-massive-field" style={{ display: 'block' }}>
             <span className="form-label">Symbol (merged ticker + overview row)</span>
@@ -640,7 +646,7 @@ export function RefJobDetailPanel({
         </>
       ) : null}
 
-      {kind === 'ticker_reference_related' ? (
+      {isFeedStocksTickersRelatedRefKind(kind) ? (
         <>
           <label className="feed-massive-field" style={{ display: 'block' }}>
             <span className="form-label">Symbol (single-ticker related rows)</span>

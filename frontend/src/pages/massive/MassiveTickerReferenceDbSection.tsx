@@ -27,6 +27,10 @@ import {
   validateSearchLimit,
   validateSingleTickerSymbol,
   validateTickerRefSearchQuery,
+  isFeedStocksTickersRelatedRefKind,
+  isFeedStocksTickersOverviewRefKind,
+  isFeedStocksTickersReferenceUniverseRefKind,
+  isFeedStocksTickersTypesRefKind,
   type OverviewEnqueueMode,
   type RelatedEnqueueMode,
 } from './stockReferenceJobHelpers'
@@ -144,7 +148,7 @@ export function MassiveTickerReferenceDbSection({
   }, [selectedRefJobKind])
 
   useEffect(() => {
-    if (selectedRefJobKind !== 'ticker_reference_overview') {
+    if (!isFeedStocksTickersOverviewRefKind(selectedRefJobKind)) {
       return
     }
     let cancelled = false
@@ -169,7 +173,7 @@ export function MassiveTickerReferenceDbSection({
   }, [selectedRefJobKind])
 
   useEffect(() => {
-    if (selectedRefJobKind !== 'ticker_reference_related') {
+    if (!isFeedStocksTickersRelatedRefKind(selectedRefJobKind)) {
       return
     }
     let cancelled = false
@@ -194,7 +198,7 @@ export function MassiveTickerReferenceDbSection({
   }, [selectedRefJobKind])
 
   useEffect(() => {
-    if (selectedRefJobKind !== 'ticker_reference_universe') {
+    if (!isFeedStocksTickersReferenceUniverseRefKind(selectedRefJobKind)) {
       return
     }
     let cancelled = false
@@ -218,7 +222,7 @@ export function MassiveTickerReferenceDbSection({
   }, [selectedRefJobKind])
 
   useEffect(() => {
-    if (selectedRefJobKind !== 'ticker_reference_instrument_types') {
+    if (!isFeedStocksTickersTypesRefKind(selectedRefJobKind)) {
       return
     }
     let cancelled = false
@@ -268,14 +272,14 @@ export function MassiveTickerReferenceDbSection({
 
   const runEnqueueUniverse = useCallback(() => {
     void enqueueOne(
-      'ticker_reference_universe',
+      'feed_stocks_tickers_reference_universe',
       { full_universe: true, limit: 1000, sort: 'ticker', order: 'asc' },
       'high',
     )
   }, [enqueueOne])
 
   const runEnqueueTickerTypes = useCallback(() => {
-    void enqueueOne('ticker_reference_instrument_types', {}, 'high')
+    void enqueueOne('feed_stocks_tickers_types', {}, 'high')
   }, [enqueueOne])
 
   const runEnqueueOverview = useCallback(() => {
@@ -286,19 +290,19 @@ export function MassiveTickerReferenceDbSection({
         setRefJobSymbolsErr(v.message)
         return
       }
-      void enqueueOne('ticker_reference_overview', { mode: 'symbols', symbols })
+      void enqueueOne('feed_stocks_tickers_overview', { mode: 'symbols', symbols })
       return
     }
     if (overviewEnqueueMode === 'stale') {
       const h = Math.max(1, Math.floor(Number(overviewStaleHours) || 720))
-      void enqueueOne('ticker_reference_overview', { mode: 'stale', stale_hours: h })
+      void enqueueOne('feed_stocks_tickers_overview', { mode: 'stale', stale_hours: h })
       return
     }
     if (overviewEnqueueMode === 'missing') {
-      void enqueueOne('ticker_reference_overview', { mode: 'missing' })
+      void enqueueOne('feed_stocks_tickers_overview', { mode: 'missing' })
       return
     }
-    void enqueueOne('ticker_reference_overview', { mode: 'all' })
+    void enqueueOne('feed_stocks_tickers_overview', { mode: 'all' })
   }, [enqueueOne, overviewEnqueueMode, overviewStaleHours, refJobSymbols])
 
   const runEnqueueRelated = useCallback(() => {
@@ -309,25 +313,25 @@ export function MassiveTickerReferenceDbSection({
         setRefJobSymbolsErr(v.message)
         return
       }
-      void enqueueOne('ticker_reference_related', { mode: 'symbols', symbols })
+      void enqueueOne('feed_stocks_tickers_related', { mode: 'symbols', symbols })
       return
     }
     if (relatedEnqueueMode === 'stale') {
       const h = Math.max(1, Math.floor(Number(relatedStaleHours) || 720))
-      void enqueueOne('ticker_reference_related', { mode: 'stale', stale_hours: h })
+      void enqueueOne('feed_stocks_tickers_related', { mode: 'stale', stale_hours: h })
       return
     }
     if (relatedEnqueueMode === 'missing') {
-      void enqueueOne('ticker_reference_related', { mode: 'missing' })
+      void enqueueOne('feed_stocks_tickers_related', { mode: 'missing' })
       return
     }
-    void enqueueOne('ticker_reference_related', { mode: 'all' })
+    void enqueueOne('feed_stocks_tickers_related', { mode: 'all' })
   }, [enqueueOne, relatedEnqueueMode, relatedStaleHours, refJobSymbols])
 
   const onDetailEnqueue = useCallback(() => {
-    if (selectedRefJobKind === 'ticker_reference_universe') runEnqueueUniverse()
-    else if (selectedRefJobKind === 'ticker_reference_instrument_types') runEnqueueTickerTypes()
-    else if (selectedRefJobKind === 'ticker_reference_overview') runEnqueueOverview()
+    if (isFeedStocksTickersReferenceUniverseRefKind(selectedRefJobKind)) runEnqueueUniverse()
+    else if (isFeedStocksTickersTypesRefKind(selectedRefJobKind)) runEnqueueTickerTypes()
+    else if (isFeedStocksTickersOverviewRefKind(selectedRefJobKind)) runEnqueueOverview()
     else runEnqueueRelated()
   }, [selectedRefJobKind, runEnqueueUniverse, runEnqueueTickerTypes, runEnqueueOverview, runEnqueueRelated])
 
@@ -766,7 +770,7 @@ export function MassiveTickerReferenceDbSection({
         </p>
       ) : null}
 
-      {selectedRefJobKind === 'ticker_reference_universe' && searchRows.length > 0 ? (
+      {isFeedStocksTickersReferenceUniverseRefKind(selectedRefJobKind) && searchRows.length > 0 ? (
         <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
           <summary>Search results ({searchRows.length})</summary>
           <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '16rem' }}>
@@ -775,7 +779,7 @@ export function MassiveTickerReferenceDbSection({
         </details>
       ) : null}
 
-      {selectedRefJobKind === 'ticker_reference_overview' && detail ? (
+      {isFeedStocksTickersOverviewRefKind(selectedRefJobKind) && detail ? (
         <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
           <summary>Merged ticker row (DB)</summary>
           <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '24rem' }}>
@@ -784,7 +788,7 @@ export function MassiveTickerReferenceDbSection({
         </details>
       ) : null}
 
-      {selectedRefJobKind === 'ticker_reference_overview' && missingOverviewTickers != null ? (
+      {isFeedStocksTickersOverviewRefKind(selectedRefJobKind) && missingOverviewTickers != null ? (
         <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
           <summary>
             Tickers without overview ({missingOverviewTickers.length}
@@ -803,7 +807,7 @@ export function MassiveTickerReferenceDbSection({
         </details>
       ) : null}
 
-      {selectedRefJobKind === 'ticker_reference_related' && related ? (
+      {isFeedStocksTickersRelatedRefKind(selectedRefJobKind) && related ? (
         <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
           <summary>Single symbol — related peers (DB)</summary>
           <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '20rem' }}>
@@ -812,7 +816,7 @@ export function MassiveTickerReferenceDbSection({
         </details>
       ) : null}
 
-      {selectedRefJobKind === 'ticker_reference_related' && missingRelatedTickers != null ? (
+      {isFeedStocksTickersRelatedRefKind(selectedRefJobKind) && missingRelatedTickers != null ? (
         <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
           <summary>
             Tickers without related rows ({missingRelatedTickers.length}
@@ -832,7 +836,7 @@ export function MassiveTickerReferenceDbSection({
         </details>
       ) : null}
 
-      {selectedRefJobKind === 'ticker_reference_related' && filledRelatedTickers != null ? (
+      {isFeedStocksTickersRelatedRefKind(selectedRefJobKind) && filledRelatedTickers != null ? (
         <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
           <summary>
             Tickers with related rows ({filledRelatedTickers.length}
@@ -851,7 +855,7 @@ export function MassiveTickerReferenceDbSection({
         </details>
       ) : null}
 
-      {selectedRefJobKind === 'ticker_reference_instrument_types' && typesRows ? (
+      {isFeedStocksTickersTypesRefKind(selectedRefJobKind) && typesRows ? (
         <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
           <summary>Instrument types ({typesRows.length})</summary>
           <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '24rem' }}>

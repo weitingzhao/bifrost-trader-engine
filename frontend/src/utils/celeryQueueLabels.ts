@@ -15,9 +15,9 @@ export const BROKER_QUEUE_BARS = 'bars' as const
 /** Human-readable label for a broker queue key (Queue summary, Support Tasks, worker badges). */
 export function formatQueueLabel(brokerKey: string): string {
   const k = (brokerKey || '').trim()
-  if (k === BROKER_QUEUE_MASSIVE_STOCKS_HIGH) return 'Massive stocks (high priority)'
+  if (k === BROKER_QUEUE_MASSIVE_STOCKS_HIGH) return 'Massive stocks (H)'
   if (k === BROKER_QUEUE_MASSIVE_STOCKS) return 'Massive stocks'
-  if (k === BROKER_QUEUE_MASSIVE_OPTIONS_HIGH) return 'Massive options (high priority)'
+  if (k === BROKER_QUEUE_MASSIVE_OPTIONS_HIGH) return 'Massive options (H)'
   if (k === BROKER_QUEUE_MASSIVE_OPTIONS) return 'Massive options'
   if (k === BROKER_QUEUE_BARS) return 'Bars (IB)'
   return k

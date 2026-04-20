@@ -32,6 +32,7 @@ export type SettingsSidebarLampGlyphId =
   | 'feed_option_snapshots'
   | 'snapshot'
   | 'aggregates'
+  | 'feed_options_aggregate'
   | 'daily-oi'
   | 'trades-quotes'
   | 'corporate-actions'
@@ -182,6 +183,7 @@ export function SettingsSidebarLampGlyph({ id }: { id: SettingsSidebarLampGlyphI
         </svg>
       )
     /** Option aggregates (bars): OHLC bars */
+    case 'feed_options_aggregate':
     case 'aggregates':
       return (
         <svg {...SVG_COMMON}>

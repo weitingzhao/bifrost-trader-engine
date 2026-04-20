@@ -317,7 +317,7 @@ def run_option_day_pool_aggregates(
         }
         return {
             "ok": ok,
-            "kind": "aggregates",
+            "kind": "feed_options_aggregate",
             "mode": mode,
             "bars_upserted": bars_upserted,
             "summary": summary,
@@ -380,7 +380,7 @@ def run_option_day_pool_aggregates(
         }
         return {
             "ok": ok,
-            "kind": "aggregates",
+            "kind": "feed_options_aggregate",
             "mode": mode,
             "rows_updated": rows_touched,
             "summary": summary,

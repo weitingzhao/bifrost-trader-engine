@@ -2330,7 +2330,7 @@ export async function fetchTickerReferenceRelated(symbol: string): Promise<{
 /** @deprecated use fetchTickerReferenceRelated */
 export const fetchStockReferenceRelated = fetchTickerReferenceRelated
 
-/** Rows from ``ticker_types`` (synced via Celery ``ticker_reference_ticker_types``). */
+/** Rows from ``ticker_types`` (synced via Celery ``feed_stocks_tickers_types``). */
 export async function fetchTickerTypesFromDb(opts?: {
   asset_class?: string
   locale?: string
@@ -2363,14 +2363,25 @@ export const fetchTickerReferenceInstrumentTypes = fetchTickerTypesFromDb
 export const fetchStockReferenceInstrumentTypes = fetchTickerTypesFromDb
 
 export type TickerReferenceJobKind =
+  | 'feed_stocks_tickers_reference_universe'
+  /** @deprecated Historical job rows only; prefer feed_stocks_tickers_reference_universe for new work. */
   | 'ticker_reference_universe'
+  | 'feed_stocks_tickers_overview'
+  /** @deprecated Historical job rows only; prefer feed_stocks_tickers_overview for new work. */
   | 'ticker_reference_overview'
+  | 'feed_stocks_tickers_related'
+  /** @deprecated Historical job rows only; prefer feed_stocks_tickers_related for new work. */
   | 'ticker_reference_related'
+  | 'feed_stocks_tickers_types'
+  /** @deprecated Historical job rows only; prefer feed_stocks_tickers_types for new work. */
   | 'ticker_reference_ticker_types'
+  /** @deprecated Historical job rows only; prefer feed_stocks_tickers_types for new work. */
   | 'ticker_reference_instrument_types'
+  /** @deprecated Historical job rows only; prefer feed_stocks_tickers_reference_universe for new work. */
   | 'stock_reference_universe'
   | 'stock_reference_overview'
   | 'stock_reference_related'
+  /** @deprecated Historical job rows only; prefer feed_stocks_tickers_types for new work. */
   | 'stock_reference_instrument_types'
 
 /** @deprecated use TickerReferenceJobKind */

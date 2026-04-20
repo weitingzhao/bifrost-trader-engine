@@ -20546,6 +20546,285 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   border-bottom: 1px solid var(--color-border);
 }
 
+.feed-massive-table-wrap .data-table thead th .table-sort-header {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  text-transform: inherit;
+  letter-spacing: inherit;
+}
+
+.feed-massive-table-wrap .data-table thead th .table-sort-header:hover {
+  text-decoration: underline;
+}
+
+.celery-matrix-th-with-tooltip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+/* Celery Support Tasks — Queue kind/mode matrix: one column for std + high broker queues */
+.celery-matrix-broker-cell {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.3rem;
+  max-width: min(22rem, 100%);
+  line-height: 1.2;
+  font-size: 0.8125rem;
+}
+
+.celery-matrix-broker-cell__tag {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  letter-spacing: 0.03em;
+}
+
+.celery-matrix-broker-cell__sep {
+  color: var(--color-text-muted);
+  opacity: 0.5;
+  user-select: none;
+  padding: 0 0.05rem;
+}
+
+.celery-matrix-effects-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  max-width: min(28rem, 100%);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+}
+
+.celery-matrix-effects-list li {
+  margin: 0 0 0.15rem;
+}
+
+.celery-matrix-task-name-cell {
+  word-break: break-word;
+  font-size: 0.8rem;
+}
+
+.celery-matrix-mode-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  line-height: 1.25;
+}
+
+.celery-matrix-mode-cell__source {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.celery-matrix-mode-cell--empty,
+.celery-matrix-effects-empty {
+  color: var(--color-text-muted);
+}
+
+/* Queue kind matrix: single control bar — text filters + Mode column + Effects + Broker (one row, scroll if needed). */
+.celery-matrix-control-bar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  gap: 0.55rem 0.45rem;
+  margin-bottom: 0.9rem;
+  padding: 0.65rem 0.85rem;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 2px 8px rgba(0, 0, 0, 0.18);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+[data-theme="light"] .celery-matrix-control-bar {
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.95) 0%, rgba(246, 248, 250, 0.98) 100%);
+  border-color: rgba(0, 0, 0, 0.09);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset, 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.celery-matrix-control-bar__match {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  gap: 0.45rem 0.5rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.celery-matrix-control-bar__divider {
+  display: block;
+  align-self: stretch;
+  width: 1px;
+  min-width: 1px;
+  margin: 0 0.15rem 0.2rem;
+  flex-shrink: 0;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.14) 15%,
+    rgba(255, 255, 255, 0.14) 85%,
+    transparent 100%
+  );
+}
+
+[data-theme="light"] .celery-matrix-control-bar__divider {
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(0, 0, 0, 0.08) 20%,
+    rgba(0, 0, 0, 0.08) 80%,
+    transparent 100%
+  );
+}
+
+.celery-matrix-text-match-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  flex: 0 1 9rem;
+}
+
+.celery-matrix-text-match-field--grow {
+  flex: 1 1 11rem;
+  min-width: 7rem;
+  max-width: 17rem;
+}
+
+.celery-matrix-text-match-field__label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  opacity: 0.95;
+}
+
+.celery-matrix-text-match-input {
+  width: 100%;
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  padding: 0.32rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.15);
+  color: var(--color-text, inherit);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+[data-theme="light"] .celery-matrix-text-match-input {
+  border-color: rgba(0, 0, 0, 0.12);
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.celery-matrix-text-match-input:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+[data-theme="light"] .celery-matrix-text-match-input:hover {
+  border-color: rgba(0, 0, 0, 0.18);
+}
+
+.celery-matrix-text-match-input:focus {
+  outline: none;
+  border-color: var(--color-primary, #5b8cff);
+  box-shadow: 0 0 0 2px rgba(91, 140, 255, 0.22);
+}
+
+.celery-matrix-clear-row-filters {
+  flex-shrink: 0;
+  align-self: flex-end;
+  margin-bottom: 0.05rem;
+  white-space: nowrap;
+}
+
+.celery-matrix-filter-toolbar.celery-matrix-control-segment {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  gap: 0.28rem;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.celery-matrix-filter-toolbar.celery-matrix-control-segment .celery-matrix-filter-toolbar__label {
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.celery-matrix-filter-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.celery-matrix-filter-toolbar--broker {
+  flex: 0 0 auto;
+}
+
+.celery-matrix-filter-toolbar__label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  min-width: 4.5rem;
+  flex-shrink: 0;
+  opacity: 0.95;
+}
+
+.celery-matrix-bubble-row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.celery-matrix-filter-toolbar--broker .celery-matrix-bubble-row {
+  flex: 0 0 auto;
+}
+
+.celery-matrix-effects-stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  max-width: min(30rem, 100%);
+}
+
+.celery-matrix-effects-section {
+  min-width: 0;
+}
+
+.celery-matrix-effects-section__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.15rem;
+}
+
+.celery-matrix-effects-section__label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
 .feed-massive-table-wrap .data-table td {
   font-family: var(--font-mono);
   font-size: var(--text-caption);

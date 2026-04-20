@@ -744,15 +744,31 @@ def all_ticker_symbols(cur: Any) -> List[str]:
 
 
 def normalize_ticker_ref_kind(kind: str) -> str:
-    """Normalize Celery/API kinds: legacy ``stock_reference_*``, ``*_instrument_types``, and Massive option snapshot job."""
+    """Normalize Celery/API kinds: legacy ``stock_reference_*``, ``*_instrument_types``, Massive option snapshot, stock OHLC aggregate, option contracts reference."""
     k = (kind or "").strip().lower()
     legacy = {
-        "stock_reference_universe": "ticker_reference_universe",
-        "stock_reference_overview": "ticker_reference_overview",
-        "stock_reference_related": "ticker_reference_related",
-        "stock_reference_instrument_types": "ticker_reference_ticker_types",
-        "ticker_reference_instrument_types": "ticker_reference_ticker_types",
+        "stock_reference_universe": "feed_stocks_tickers_reference_universe",
+        "ticker_reference_universe": "feed_stocks_tickers_reference_universe",
+        "stock_reference_overview": "feed_stocks_tickers_overview",
+        "ticker_reference_overview": "feed_stocks_tickers_overview",
+        "stock_reference_related": "feed_stocks_tickers_related",
+        "ticker_reference_related": "feed_stocks_tickers_related",
+        "stock_reference_instrument_types": "feed_stocks_tickers_types",
+        "ticker_reference_instrument_types": "feed_stocks_tickers_types",
+        "ticker_reference_ticker_types": "feed_stocks_tickers_types",
         # Massive REST option chain/contract/unified ingest (was ``snapshot``)
         "snapshot": "feed_option_snapshots",
+        # Stock OHLC → PG via Massive REST (was ``stock_ohlc_sync``)
+        "stock_ohlc_sync": "feed_stocks_aggregate",
+        # Option bars / pool fills on Massive options queues (was ``aggregates``)
+        "aggregates": "feed_options_aggregate",
+        # Options last trade / quotes / trades proxy jobs (was ``trades_quotes``)
+        "trades_quotes": "feed_options_trades_quotes",
+        # Option reference contracts API jobs (was ``contracts``)
+        "contracts": "feed_option_contracts",
+        # Stocks corporate actions cache (dividends, splits, IPOs, ticker events)
+        "corporate_action": "feed_stocks_corporate_action",
+        # Max Pain report job (DB-only; was ``max_pain``)
+        "max_pain": "report_option_max_pain",
     }
     return legacy.get(k, k)

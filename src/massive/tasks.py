@@ -356,7 +356,7 @@ def _run_max_pain(
         sym_list = get_watchlist_optionable_stk_symbols(status_cfg)
 
     if not sym_list:
-        return {"ok": True, "kind": "max_pain", "rows_upserted": 0, "trade_date": td_s, "message": "no symbols"}
+        return {"ok": True, "kind": "report_option_max_pain", "rows_upserted": 0, "trade_date": td_s, "message": "no symbols"}
 
     rows_written = 0
     detail_out: List[Dict[str, Any]] = []
@@ -406,10 +406,10 @@ def _run_max_pain(
                 rows_written += 1
                 detail_out.append({"symbol": sym, "expiry": exp, "max_pain_strike": mp_strike, "total_oi": total_oi})
     conn.commit()
-    logger.info("max_pain: trade_date=%s rows=%s", td_s, rows_written)
+    logger.info("report_option_max_pain: trade_date=%s rows=%s", td_s, rows_written)
     return {
         "ok": True,
-        "kind": "max_pain",
+        "kind": "report_option_max_pain",
         "trade_date": td_s,
         "rows_upserted": rows_written,
         "expiries": detail_out[:50],
@@ -841,12 +841,12 @@ def _option_day_patch_vwap_from_day_aggs(
         return int(cur.rowcount or 0)
 
 
-def _apply_corporate_actions(
+def _apply_feed_stocks_corporate_actions(
     conn: Any,
     client: Any,
     symbol: str,
 ) -> int:
-    """Fetch dividends + splits from Massive/Polygon and upsert into massive_corporate_action."""
+    """Fetch dividends, splits, IPOs, ticker events from Massive/Polygon and upsert into massive_corporate_action."""
     total = 0
     with conn.cursor() as cur:
         divs = client.fetch_dividends(symbol)
@@ -856,17 +856,28 @@ def _apply_corporate_actions(
             ex = d.get("ex_dividend_date") or ""
             if not ex:
                 continue
+            desc_parts = [
+                x
+                for x in (
+                    d.get("distribution_type"),
+                    d.get("description"),
+                    d.get("dividend_type"),
+                )
+                if x
+            ]
+            desc = " — ".join(str(x) for x in desc_parts) if desc_parts else None
             cur.execute(
                 """
                 INSERT INTO massive_corporate_action
                   (symbol, action_type, ex_date, record_date, payment_date,
-                   amount, description, source, created_at)
-                VALUES (%s, 'dividend', %s, %s, %s, %s, %s, 'massive', now())
+                   amount, currency, description, source, created_at)
+                VALUES (%s, 'dividend', %s, %s, %s, %s, %s, %s, 'massive', now())
                 ON CONFLICT (symbol, action_type, ex_date, source)
                 DO UPDATE SET
                   record_date   = EXCLUDED.record_date,
                   payment_date  = EXCLUDED.payment_date,
                   amount        = EXCLUDED.amount,
+                  currency      = EXCLUDED.currency,
                   description   = EXCLUDED.description
                 """,
                 (
@@ -875,11 +886,13 @@ def _apply_corporate_actions(
                     d.get("record_date"),
                     d.get("pay_date"),
                     float(d["cash_amount"]) if d.get("cash_amount") is not None else None,
-                    d.get("description") or d.get("dividend_type") or None,
+                    (d.get("currency") or "").strip() or None,
+                    desc,
                 ),
             )
             total += 1
 
+        _rest_throttle()
         splits = client.fetch_splits(symbol)
         for s in splits.get("results") or []:
             if not isinstance(s, dict):
@@ -887,6 +900,12 @@ def _apply_corporate_actions(
             ex = s.get("execution_date") or ""
             if not ex:
                 continue
+            adj = (s.get("adjustment_type") or "").strip()
+            desc = (
+                f"{adj}: {s.get('split_from')}:{s.get('split_to')}"
+                if adj
+                else f'{s.get("split_from")}:{s.get("split_to")}'
+            )
             cur.execute(
                 """
                 INSERT INTO massive_corporate_action
@@ -904,10 +923,81 @@ def _apply_corporate_actions(
                     ex,
                     float(s["split_from"]) if s.get("split_from") is not None else None,
                     float(s["split_to"]) if s.get("split_to") is not None else None,
-                    f'{s.get("split_from")}:{s.get("split_to")}',
+                    desc,
                 ),
             )
             total += 1
+
+        _rest_throttle()
+        ipos = client.fetch_ipos_for_ticker(symbol)
+        if not ipos.get("error"):
+            for ipo in ipos.get("results") or []:
+                if not isinstance(ipo, dict):
+                    continue
+                tk = (ipo.get("ticker") or "").strip().upper()
+                if tk != symbol:
+                    continue
+                listing = (ipo.get("listing_date") or "").strip()
+                if not listing:
+                    continue
+                issuer = (ipo.get("issuer_name") or "").strip()
+                st = (ipo.get("ipo_status") or "").strip()
+                desc = " | ".join(
+                    x for x in (issuer, st, f"listing {listing}") if x
+                )
+                cur.execute(
+                    """
+                    INSERT INTO massive_corporate_action
+                      (symbol, action_type, ex_date, amount, currency, description, source, created_at)
+                    VALUES (%s, 'ipo', %s, %s, %s, %s, 'massive', now())
+                    ON CONFLICT (symbol, action_type, ex_date, source)
+                    DO UPDATE SET
+                      amount = EXCLUDED.amount,
+                      currency = EXCLUDED.currency,
+                      description = EXCLUDED.description
+                    """,
+                    (
+                        symbol,
+                        listing,
+                        float(ipo["final_issue_price"])
+                        if ipo.get("final_issue_price") is not None
+                        else None,
+                        (ipo.get("currency_code") or "").strip() or None,
+                        desc or None,
+                    ),
+                )
+                total += 1
+
+        _rest_throttle()
+        tev = client.fetch_ticker_events(symbol)
+        if not tev.get("error"):
+            res_obj = tev.get("results")
+            if isinstance(res_obj, dict):
+                events = res_obj.get("events") or []
+            else:
+                events = []
+            for ev in events:
+                if not isinstance(ev, dict):
+                    continue
+                ed = (ev.get("date") or "").strip()
+                if not ed:
+                    continue
+                typ = (ev.get("type") or "").strip() or "event"
+                tc = ev.get("ticker_change") if isinstance(ev.get("ticker_change"), dict) else {}
+                to_t = (tc.get("ticker") or "").strip()
+                desc = f"{typ}: {to_t}" if to_t else typ
+                cur.execute(
+                    """
+                    INSERT INTO massive_corporate_action
+                      (symbol, action_type, ex_date, description, source, created_at)
+                    VALUES (%s, 'ticker_event', %s, %s, 'massive', now())
+                    ON CONFLICT (symbol, action_type, ex_date, source)
+                    DO UPDATE SET
+                      description = EXCLUDED.description
+                    """,
+                    (symbol, ed, desc),
+                )
+                total += 1
     return total
 
 
@@ -936,7 +1026,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
 
     ms = get_massive_settings(config)
     client = MassiveClient(ms["api_key"], ms["rest_base"])
-    if not client.configured and kind not in ("trim_jobs", "max_pain"):
+    if not client.configured and kind not in ("trim_jobs", "report_option_max_pain"):
         update_job_massive_backfill_result(status_cfg, job_id, "failed", {"ok": False, "error": "Massive API key not configured"})
         return {"ok": False, "error": "no api key"}
     payload = job.get("payload")
@@ -1154,7 +1244,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 
-            if kind == "stock_ohlc_sync":
+            if kind == "feed_stocks_aggregate":
                 from src.massive.polygon_stock_tickers import polygon_ticker_for_massive_aggs
                 from src.persistence.postgres.stock_ohlc_massive import (
                     apply_stock_custom_bars,
@@ -1524,11 +1614,11 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                             "summary": {"ticker": t},
                         }
                     else:
-                        raise ValueError(f"unknown stock_ohlc_sync mode: {mode}")
+                        raise ValueError(f"unknown feed_stocks_aggregate mode: {mode}")
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 
-            if kind == "aggregates":
+            if kind == "feed_options_aggregate":
                 mode = (payload.get("mode") or "custom_bars").strip()
 
                 if mode == "open_close":
@@ -1698,11 +1788,11 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     return result
                 oi_res = _run_oi_watchlist_eod(conn, client, status_cfg, payload)
                 mp_res = _run_max_pain(conn, status_cfg, payload)
-                result = {"ok": True, "kind": kind, "oi": oi_res, "max_pain": mp_res}
+                result = {"ok": True, "kind": kind, "oi": oi_res, "report_option_max_pain": mp_res}
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 
-            if kind == "max_pain":
+            if kind == "report_option_max_pain":
                 result = _run_max_pain(conn, status_cfg, payload)
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
@@ -1717,7 +1807,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 
-            if kind == "corporate_action":
+            if kind == "feed_stocks_corporate_action":
                 syms = payload.get("symbols")
                 if isinstance(syms, list) and syms:
                     total = 0
@@ -1725,7 +1815,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                         sym_one = str(raw_s).strip().upper()
                         if not sym_one:
                             continue
-                        total += _apply_corporate_actions(conn, client, sym_one)
+                        total += _apply_feed_stocks_corporate_actions(conn, client, sym_one)
                         _rest_throttle()
                     conn.commit()
                     result = {
@@ -1739,13 +1829,13 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 sym = (payload.get("symbol") or "").strip().upper()
                 if not sym:
                     raise ValueError("payload.symbol or payload.symbols required")
-                count = _apply_corporate_actions(conn, client, sym)
+                count = _apply_feed_stocks_corporate_actions(conn, client, sym)
                 conn.commit()
                 result = {"ok": True, "kind": kind, "rows_upserted": count}
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 
-            if kind == "contracts":
+            if kind == "feed_option_contracts":
                 mode = (payload.get("mode") or "list").strip().lower()
                 if mode == "detail":
                     ot = (payload.get("options_ticker") or "").strip()
@@ -2012,7 +2102,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 
-            if kind == "trades_quotes":
+            if kind == "feed_options_trades_quotes":
                 mode = (payload.get("mode") or "last_trade").strip().lower()
                 ot = (payload.get("options_ticker") or "").strip()
                 if not ot:
@@ -2091,19 +2181,14 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                     return result
 
-                raise ValueError(f"unknown trades_quotes mode: {mode}")
+                raise ValueError(f"unknown feed_options_trades_quotes mode: {mode}")
 
             _ticker_ref_kinds = frozenset(
                 {
-                    "ticker_reference_universe",
-                    "ticker_reference_overview",
-                    "ticker_reference_related",
-                    "ticker_reference_ticker_types",
-                    "ticker_reference_instrument_types",
-                    "stock_reference_universe",
-                    "stock_reference_overview",
-                    "stock_reference_related",
-                    "stock_reference_instrument_types",
+                    "feed_stocks_tickers_reference_universe",
+                    "feed_stocks_tickers_overview",
+                    "feed_stocks_tickers_related",
+                    "feed_stocks_tickers_types",
                 }
             )
             if kind in _ticker_ref_kinds:
@@ -2139,7 +2224,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 rds = redis_client_from_status_config(status_cfg)
                 cur = conn.cursor()
 
-                if kind == "ticker_reference_universe":
+                if kind == "feed_stocks_tickers_reference_universe":
                     reset = bool(payload.get("reset_cursor"))
                     full_u = bool(payload.get("full_universe"))
                     mp_raw = payload.get("max_pages")
@@ -2214,7 +2299,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                     return result
 
-                if kind == "ticker_reference_overview":
+                if kind == "feed_stocks_tickers_overview":
                     mode = (payload.get("mode") or "stale").strip().lower()
                     stale_h = int(payload.get("stale_hours") or 720)
                     if mode == "all":
@@ -2245,7 +2330,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                         _emit_massive_job_running_progress(
                             status_cfg,
                             job_id,
-                            kind="ticker_reference_overview",
+                            kind="feed_stocks_tickers_overview",
                             work_mode=mode,
                             total=total_sym,
                             processed=0,
@@ -2292,7 +2377,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                             _emit_massive_job_running_progress(
                                 status_cfg,
                                 job_id,
-                                kind="ticker_reference_overview",
+                                kind="feed_stocks_tickers_overview",
                                 work_mode=mode,
                                 total=total_sym,
                                 processed=processed,
@@ -2317,7 +2402,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                     return result
 
-                if kind == "ticker_reference_related":
+                if kind == "feed_stocks_tickers_related":
                     mode = (payload.get("mode") or "symbols").strip().lower()
                     stale_h = int(payload.get("stale_hours") or 720)
                     if mode == "all":
@@ -2357,7 +2442,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                         _emit_massive_job_running_progress(
                             status_cfg,
                             job_id,
-                            kind="ticker_reference_related",
+                            kind="feed_stocks_tickers_related",
                             work_mode=mode,
                             total=total_rel,
                             processed=0,
@@ -2389,7 +2474,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                             _emit_massive_job_running_progress(
                                 status_cfg,
                                 job_id,
-                                kind="ticker_reference_related",
+                                kind="feed_stocks_tickers_related",
                                 work_mode=mode,
                                 total=total_rel,
                                 processed=processed,
@@ -2412,7 +2497,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                     return result
 
-                if kind == "ticker_reference_ticker_types":
+                if kind == "feed_stocks_tickers_types":
                     ac = (payload.get("asset_class") or "").strip() or None
                     loc = (payload.get("locale") or "").strip() or None
                     data = client.fetch_ticker_types(asset_class=ac, locale=loc)
@@ -2449,8 +2534,9 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
 
 
 def _enqueue_massive_job(kind: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Insert job_massive_backfill and dispatch to Celery ``massive`` queue."""
+    """Insert job_massive_backfill and dispatch to the broker queue for this job kind."""
     from src.app.config import read_config
+    from src.massive.celery_queues import celery_queue_for_massive_job
     from src.vendor.massive.reader import (
         insert_job_massive_backfill,
         update_job_massive_backfill_celery_task_id,
@@ -2464,7 +2550,8 @@ def _enqueue_massive_job(kind: str, payload: Optional[Dict[str, Any]] = None) ->
     if dedup:
         logger.info("Massive beat: deduplicated kind=%s job_id=%s", kind, jid)
         return {"ok": True, "deduplicated": True, "job_id": jid}
-    async_result = run_massive_job.apply_async(args=[jid], queue="massive")
+    queue_name = celery_queue_for_massive_job(kind, priority_high=False)
+    async_result = run_massive_job.apply_async(args=[jid], queue=queue_name)
     update_job_massive_backfill_celery_task_id(config, jid, async_result.id)
     return {"ok": True, "job_id": jid, "celery_task_id": async_result.id}
 
@@ -2477,7 +2564,7 @@ def beat_eod_pipeline() -> Dict[str, Any]:
 
 @app.task(name="src.massive.tasks.beat_corporate_watchlist")
 def beat_corporate_watchlist() -> Dict[str, Any]:
-    """Celery Beat: enqueue ``corporate_action`` for all Watchlist optionable STK symbols."""
+    """Celery Beat: enqueue ``feed_stocks_corporate_action`` for all Watchlist optionable STK symbols."""
     from src.app.config import read_config
     from src.vendor.massive.reader import get_watchlist_optionable_stk_symbols
 
@@ -2487,7 +2574,7 @@ def beat_corporate_watchlist() -> Dict[str, Any]:
     if not symbols:
         logger.info("beat_corporate_watchlist: empty watchlist, skip")
         return {"ok": True, "skipped": True, "reason": "empty watchlist"}
-    return _enqueue_massive_job("corporate_action", {"symbols": symbols})
+    return _enqueue_massive_job("feed_stocks_corporate_action", {"symbols": symbols})
 
 
 @app.task(name="src.massive.tasks.beat_reconcile")

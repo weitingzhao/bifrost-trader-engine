@@ -30,11 +30,11 @@ def build_celery_capabilities_payload(celery_app: Any) -> Dict[str, Any]:
     beat_tasks: List[Dict[str, str]] = [
         {
             "name": "src.massive.tasks.beat_eod_pipeline",
-            "note": "Inserts eod_pipeline job: watchlist EOD OI + max pain for the trade date.",
+            "note": "Inserts eod_pipeline job: watchlist EOD OI + report_option_max_pain for the trade date.",
         },
         {
             "name": "src.massive.tasks.beat_corporate_watchlist",
-            "note": "Inserts corporate_action job with all watchlist optionable STK symbols.",
+            "note": "Inserts feed_stocks_corporate_action job with all watchlist optionable STK symbols.",
         },
         {
             "name": "src.massive.tasks.beat_reconcile",

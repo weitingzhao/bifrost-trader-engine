@@ -41,13 +41,13 @@ const rows: ChecklistRow[] = [
     purpose:
       'Discover, inspect, and verify option contract reference data from Massive. Coverage and mapping metrics quantify local data quality against the API source of truth.',
     helpVerification:
-      '1) All Contracts tab — maps to All Contracts: underlying_ticker, contract_type, expiration_date (YYYY-MM-DD), limit (API default 10, max 1000; UI caps limit). Enqueue contracts list job; expect results[].ticker, contract_type, exercise_style, expiration_date, strike_price, etc. '
-      + '2) Contract Overview tab — maps to Contract Overview: path parameter options_ticker (deprecated list query param ticker per Massive docs). Enqueue contracts mode=detail; expect results object with same contract fields. '
+      '1) All Contracts tab — maps to All Contracts: underlying_ticker, contract_type, expiration_date (YYYY-MM-DD), limit (API default 10, max 1000; UI caps limit). Enqueue feed_option_contracts list job; expect results[].ticker, contract_type, exercise_style, expiration_date, strike_price, etc. '
+      + '2) Contract Overview tab — maps to Contract Overview: path parameter options_ticker (deprecated list query param ticker per Massive docs). Enqueue feed_option_contracts mode=detail; expect results object with same contract fields. '
       + '3) DB Verify tab: Check Coverage → GET /research/massive/contracts-coverage (local PG vs API workflow). '
       + '4) Snapshot Link tab: contract-level snapshot job for end-to-end verification.',
   },
   {
-    id: 'aggregates',
+    id: 'feed_options_aggregate',
     service: 'Aggregate Bars (OHLC)',
     group: 'rest',
     description:
@@ -55,11 +55,11 @@ const rows: ChecklistRow[] = [
     tierMin: 'starter',
     projectStatus: 'implemented',
     verification:
-      'REST: Enqueue aggregates with mode custom_bars | open_close | prev → check Job queue result.',
+      'REST: Enqueue feed_options_aggregate with mode custom_bars | open_close | prev → check Job queue result.',
     purpose:
       'Custom Bars (OHLC): per-contract OHLCV backfills for charting and backtesting. Daily Ticker Summary (OHLC): single-day OHLC with pre/after-hours context. Previous Day Bar (OHLC): prior session OHLC without calendar math.',
     helpVerification:
-      'Custom Bars (OHLC): Enqueue aggregates (mode custom_bars or omit mode) with options_ticker, symbol, expiry, strike, right, start_ms, end_ms. '
+      'Custom Bars (OHLC): Enqueue feed_options_aggregate (mode custom_bars or omit mode) with options_ticker, symbol, expiry, strike, right, start_ms, end_ms. '
       + 'Daily Ticker Summary (OHLC): mode open_close with options_ticker + date (YYYY-MM-DD). '
       + 'Previous Day Bar (OHLC): mode prev with options_ticker.',
   },
@@ -163,14 +163,15 @@ const rows: ChecklistRow[] = [
     service: 'Corporate actions',
     group: 'project',
     description:
-      'Dividends and splits synced via Massive REST to massive_corporate_action table.',
+      'Dividends, splits, IPOs, and ticker events synced via Massive REST into massive_corporate_action.',
     tierMin: 'starter',
     projectStatus: 'implemented',
     verification:
-      'Settings → Feed → Massive Option → Corporate actions: Enqueue sync for a ticker, then Load from DB. Or: POST /research/massive/sync kind=corporate_action, then GET /research/massive/corporate-actions?symbol=AAPL.',
-    purpose: 'Sync stock dividends and splits from Massive reference APIs into PostgreSQL for corporate-action awareness.',
+      'Settings → Feed → Massive Option → Corporate actions: Enqueue sync for a ticker, then Load from DB. Or: POST /research/massive/sync kind=feed_stocks_corporate_action, then GET /research/massive/corporate-actions?symbol=AAPL.',
+    purpose:
+      'Sync dividends, splits, IPOs, and ticker events from Massive Stocks REST and reference APIs into PostgreSQL for corporate-action awareness.',
     helpVerification:
-      'POST /research/massive/sync with kind corporate_action and payload { "symbol": "AAPL" }. Then GET /research/massive/corporate-actions?symbol=AAPL&limit=50. UI: Enqueue sync, then Load from DB.',
+      'POST /research/massive/sync with kind feed_stocks_corporate_action and payload { "symbol": "AAPL" }. Then GET /research/massive/corporate-actions?symbol=AAPL&limit=50. UI: Enqueue sync, then Load from DB.',
   },
   // ── WebSocket (5 Sections, matching coverage CSV order) ──
   {

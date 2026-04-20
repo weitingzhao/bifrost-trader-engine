@@ -322,7 +322,7 @@
 
 ### 2.13 表 `stock_day`（阶段 3 R-A3 扩展：股票日 K 线）
 
-- **用途**：存**股票**的**日线** OHLC 数据，供复盘、回测与风控分析；数据来源可为 **IB 历史拉取**、**Massive REST**（延迟数据，job kind `stock_ohlc_sync`、`POST /indices/refresh` 参考指数日线等），由 **`source`** 区分。
+- **用途**：存**股票**的**日线** OHLC 数据，供复盘、回测与风控分析；数据来源可为 **IB 历史拉取**、**Massive REST**（延迟数据，job kind `feed_stocks_aggregate`（历史行可能为 `stock_ohlc_sync`）、`POST /indices/refresh` 参考指数日线等），由 **`source`** 区分。
 - **写入**：监控端 POST /bars/fetch（或等效）按标的与周期 `1 D` 从 IB 拉取并 UPSERT（`source='ib'`）；Massive Worker 写入 `source='massive'`（含 Daily Market Summary、Daily Ticker Summary、Previous Day、Custom Bars 日级等）。
 - **列**：
 
@@ -350,7 +350,7 @@
 ### 2.14 表 `stock_min`（阶段 3 R-A3 扩展：股票分钟/小时 K 线）
 
 - **用途**：存**股票**的**分钟线、小时线**等日内 OHLC 数据；供复盘与短期回测。来源由 **`source`** 区分（IB vs Massive 等）。
-- **写入**：POST /bars/fetch 等写入 `source='ib'`；Massive Custom Bars（非 day/week/month timespan）由 job `stock_ohlc_sync` 写入 `source='massive'`。
+- **写入**：POST /bars/fetch 等写入 `source='ib'`；Massive Custom Bars（非 day/week/month timespan）由 job `feed_stocks_aggregate` 写入 `source='massive'`。
 - **列**：
 
 | 列名 | 类型 | 说明 |
@@ -390,7 +390,7 @@
 
 ### 2.14.3 表 `ticker_types`（类型词典）
 
-- **用途**：存 Massive `GET /v3/reference/tickers/types` 返回的类型码与描述；由任务 `ticker_reference_ticker_types`（兼容旧名 `ticker_reference_instrument_types`）全量替换写入。历史表名 `ticker_instrument_types` 已重命名。
+- **用途**：存 Massive `GET /v3/reference/tickers/types` 返回的类型码与描述；由任务 `feed_stocks_tickers_types`（兼容旧名 `ticker_reference_ticker_types` / `ticker_reference_instrument_types` / `stock_reference_instrument_types`）全量替换写入。历史表名 `ticker_instrument_types` 已重命名。
 - **列**：`ticker_types_id` (bigserial PK)、`code` (text NOT NULL)、`description` (text)、`asset_class` (text NOT NULL DEFAULT '')、`locale` (text NOT NULL DEFAULT '')、`created_at` (timestamptz)。**UNIQUE (code, asset_class, locale)**。
 
 ### 2.14.4 表 `ticker_related_tickers`（关联标的边）
@@ -583,7 +583,7 @@
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | job_massive_backfill_id | bigserial | 自增主键（作为 job_id 返回给客户端） |
-| kind | text NOT NULL | 任务类型：`aggregates` \| `feed_option_snapshots`（期权链/单合约/统一快照拉取；历史行可能为 `snapshot`）\| `oi` \| `trades` \| `reference` \| `corporate_action` \| `stock_ohlc_sync`（股票 OHLC 落库）\| `ticker_reference_*` / `stock_reference_*` 等 |
+| kind | text NOT NULL | 任务类型：`feed_options_aggregate`（期权 OHLC / 池化任务；历史行可能为 `aggregates`）\| `feed_option_snapshots`（期权链/单合约/统一快照拉取；历史行可能为 `snapshot`）\| `feed_options_trades_quotes`（期权 last trade / quotes / trades 代理；历史行可能为 `trades_quotes`）\| `feed_option_contracts`（期权 reference contracts list/detail/upsert/backfill；历史行可能为 `contracts`）\| `oi` \| `trades` \| `reference` \| `feed_stocks_corporate_action`（股票公司行动 → `massive_corporate_action`；历史行可能为 `corporate_action`）\| `feed_stocks_aggregate`（股票 OHLC 落库；历史行可能为 `stock_ohlc_sync`）\| `feed_stocks_tickers_reference_universe`（全市场 tickers 列表同步；历史行可能为 `ticker_reference_universe` / `stock_reference_universe`）\| `feed_stocks_tickers_overview`（标的详情/ ticker_overview；历史行可能为 `ticker_reference_overview`）\| `feed_stocks_tickers_related`（关联公司 peer；历史行可能为 `ticker_reference_related`）\| `feed_stocks_tickers_types`（`GET /v3/reference/tickers/types` → `ticker_types`；历史行可能为 `ticker_reference_ticker_types` / `ticker_reference_instrument_types` / `stock_reference_instrument_types`）\| `ticker_reference_*` / `stock_reference_*` 等 |
 | payload | jsonb NOT NULL | 任务参数（如 { symbol, expiry, start_date, end_date } 等，仅参数） |
 | status | text NOT NULL | pending \| running \| done \| failed |
 | result | jsonb | 执行结果：{ ok, count?, message? } 或 { ok: false, error } |
@@ -594,13 +594,13 @@
 
 - **索引**：`(status, created_at)` 便于 Worker 取最旧 pending 任务；GET /research/massive/jobs 按 job_massive_backfill_id DESC 分页。
 - **去重索引**：`UNIQUE (kind, payload_hash) WHERE status IN ('pending', 'running') AND payload_hash IS NOT NULL`——防止同一 payload 同时存在多条 pending/running 任务。
-- **stock_ohlc_sync（`mode: custom_bars`）**：`payload` 可为单标的 `ticker` **或** 批量 `symbols`（字符串数组，与 `ticker` 二选一；API 校验最多 50 个），共用 `start_ms` / `end_ms`；可选 `sync_all_periods: true` 时在同一时间窗内依次拉取 **1 D / 1 min / 5 mins / 1 hour**（忽略单次 `timespan`/`multiplier`）；否则按 `multiplier`+`timespan` 单次拉取。参考指数在库内可为 `^GSPC` 等，Worker 对 Polygon v2 aggs 会映射为 `I:SPX` 等，**写入仍用配置 symbol**。`result.summary` 可含 `symbols_requested`、`symbols_ok`、`failures`、`per_symbol`。
+- **feed_stocks_aggregate（`mode: custom_bars`）**：`payload` 可为单标的 `ticker` **或** 批量 `symbols`（字符串数组，与 `ticker` 二选一；API 校验最多 50 个），共用 `start_ms` / `end_ms`；可选 `sync_all_periods: true` 时在同一时间窗内依次拉取 **1 D / 1 min / 5 mins / 1 hour**（忽略单次 `timespan`/`multiplier`）；否则按 `multiplier`+`timespan` 单次拉取。参考指数在库内可为 `^GSPC` 等，Worker 对 Polygon v2 aggs 会映射为 `I:SPX` 等，**写入仍用配置 symbol**。`result.summary` 可含 `symbols_requested`、`symbols_ok`、`failures`、`per_symbol`。
 - **Trim**：可选保留最近 500 条。
 
 ### 2.16.5a 表 `report_option_max_pain_daily`（R-A6：Max Pain 日报表）
 
 - **用途**：每日按标的/到期计算的 **Max Pain**（使期权买方总损失最大的行权价），基于 `option_open_interest_daily` 的 EOD OI 数据。属 Gold / 报表层，由日批 Worker 计算写入。
-- **写入**：日终 OI 拉取完成后 Worker 计算并 UPSERT；`POST /research/massive/sync kind=max_pain` 手动触发。
+- **写入**：日终 OI 拉取完成后 Worker 计算并 UPSERT；`POST /research/massive/sync kind=report_option_max_pain` 手动触发（历史 `kind=max_pain` 仍接受并规范化为 `report_option_max_pain`）。
 - **列**：
 
 | 列名 | 类型 | 说明 |
@@ -645,14 +645,14 @@
 
 ### 2.16.6 表 `massive_corporate_action`（R-A6：公司行动缓存）
 
-- **用途**：缓存 Massive 返回的**公司行动**数据（拆股、股息等），供期权分析时对照历史价格与合约调整。轻量缓存表，按需拉取。
+- **用途**：缓存 Massive 返回的**公司行动**数据（股息、拆股、IPO、ticker 生命周期事件等），供期权分析时对照历史价格与合约调整。轻量缓存表，按需拉取。
 - **列**：
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | massive_corporate_action_id | bigserial | 自增主键 |
 | symbol | text NOT NULL | 标的代码 |
-| action_type | text NOT NULL | 行动类型：split \| dividend \| spinoff \| rights 等 |
+| action_type | text NOT NULL | 行动类型：`dividend` \| `split` \| `ipo` \| `ticker_event` 等（含历史 `spinoff` / `rights` 占位） |
 | ex_date | date | 除权日 |
 | record_date | date | 登记日（可空） |
 | payment_date | date | 支付日（可空） |
@@ -1518,9 +1518,18 @@ python scripts/db/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-04-17 option_snapshots 收窄 + 标的视图 | 删除列 `last`、`bid`、`ask`、`mid`、`underlying_price`、`break_even_price`、`fmv`、`fmv_last_updated`；新增生成列 `day_last_updated_day`。新增视图 `option_snapshots_with_underlying_day`（左连 `stock_day`，`source=massive`，`underlying_price` = `stock_day.close`）。`option_snapshots_latest` 与 EOD 读路径（`get_option_snapshots_eod_per_day`）同步。§2.16.2。 | Massive / Option Discovery |
 | 2026-04-18 option_contracts 列级覆盖与参考对拍 | §2.16.1 增补「Massive 字段与写入路径」与 L1/L2/L3 说明。`watchlist-db-coverage` / `contracts-coverage` 增加 `exercise_style`/`shares_per_contract` 非空计数与占比；新增 `GET/POST .../option-contracts-reference-column-parity`（L2，与 reference 分页上限一致）。无表结构变更。 | 研究 / Massive |
 | 2026-04-18 option_snapshots 主键、幂等写入 | §2.16.2：主键为 `PRIMARY KEY (contract_key, snapshot_ts)`（`option_snapshots_id` 为序列列）；存量库由 `pg_ddl` 从旧 `(option_snapshots_id, snapshot_ts)` + 可选 `UNIQUE` 迁移；`DROP` 冗余索引 `option_snapshots_contract_key_ts`。去重脚本 `dedupe_option_snapshots.py`；链快照与 WS 为 `ON CONFLICT (contract_key, snapshot_ts) DO UPDATE`。 | Massive / Option Discovery |
-| 2026-04-19 option_day 池化补齐任务 | `job_massive_backfill` 在 `kind=aggregates` 下支持 `option_day_pool_row_gap`（v2 日线 aggs 补「有合约无 bar」）与 `option_day_pool_column_fill`（v1 open-close 刷新不完整行，可选再补 vwap）；`mode=open_close` 在 `persist=true` 时可 `UPDATE option_day`。无新表；环境变量 `BIFROST_OPTION_DAY_ROW_LOOKBACK_DAYS` 控制默认回溯窗口。 | Massive / Data Overview |
+| 2026-04-19 option_day 池化补齐任务 | `job_massive_backfill` 在 `kind=feed_options_aggregate`（历史行可能为 `aggregates`）下支持 `option_day_pool_row_gap`（v2 日线 aggs 补「有合约无 bar」）与 `option_day_pool_column_fill`（v1 open-close 刷新不完整行，可选再补 vwap）；`mode=open_close` 在 `persist=true` 时可 `UPDATE option_day`。无新表；环境变量 `BIFROST_OPTION_DAY_ROW_LOOKBACK_DAYS` 控制默认回溯窗口。 | Massive / Data Overview |
 | 2026-04-19 Massive 期权快照任务 kind 更名 | `job_massive_backfill.kind`：期权链/单合约/统一快照 ingest 由 `snapshot` 更名为 **`feed_option_snapshots`**；`POST /research/massive/sync` 与 Worker 经 `normalize_ticker_ref_kind` 仍接受旧名；存量行仍可执行。§2.16。 | Massive |
-| 2026-04-19 Massive 快照按合约补列 + bars 池 expiry | `kind=aggregates` 新增 `option_snapshots_pool_contract_fill`：按 `option_snapshots_latest` 语义选出 IV/Greeks/OI 可空合约，调用 `GET /v3/snapshot/options/{underlying}/{option_ticker}`，经 `apply_chain_snapshot_item` **UPSERT `option_snapshots`**（与链式快照列一致），并 `REFRESH` `option_snapshots_latest`。`kind=feed_option_snapshots` 且 `mode=contract`（旧 payload `snapshot_type` 仍兼容；历史 `kind=snapshot` 行 Worker 仍识别）在默认 persist 下同样落库。`option_day_pool_row_gap` / `option_min_pool_row_gap` 的 payload 可选 **`expiration_date`**，将行缺口池限制到单到期（Data Overview All gaps 表内「Fill row gap (expiry)」）。 | Massive / Data Overview |
+| 2026-04-19 Massive 股票聚合 OHLC 任务 kind 更名 | `job_massive_backfill.kind`：股票 Massive REST OHLC 落库由 `stock_ohlc_sync` 更名为 **`feed_stocks_aggregate`**；API 与 Worker 经 `normalize_ticker_ref_kind` 仍接受旧名；路由键 `massive_stocks` / `massive_stocks_high` 不变。§2.16。 | Massive |
+| 2026-04-19 Massive 快照按合约补列 + bars 池 expiry | `kind=feed_options_aggregate`（历史行可能为 `aggregates`）新增 `option_snapshots_pool_contract_fill`：按 `option_snapshots_latest` 语义选出 IV/Greeks/OI 可空合约，调用 `GET /v3/snapshot/options/{underlying}/{option_ticker}`，经 `apply_chain_snapshot_item` **UPSERT `option_snapshots`**（与链式快照列一致），并 `REFRESH` `option_snapshots_latest`。`kind=feed_option_snapshots` 且 `mode=contract`（旧 payload `snapshot_type` 仍兼容；历史 `kind=snapshot` 行 Worker 仍识别）在默认 persist 下同样落库。`option_day_pool_row_gap` / `option_min_pool_row_gap` 的 payload 可选 **`expiration_date`**，将行缺口池限制到单到期（Data Overview All gaps 表内「Fill row gap (expiry)」）。 | Massive / Data Overview |
+| 2026-04-19 Massive 期权 bars 聚合任务 kind 更名 | `job_massive_backfill.kind`：期权 OHLC / 池化 ingest 由 `aggregates` 更名为 **`feed_options_aggregate`**；`POST /research/massive/sync` 与 Worker 经 `normalize_ticker_ref_kind` 仍接受旧名；路由 `massive` / `massive_high` 不变。§2.16。 | Massive |
+| 2026-04-19 Massive 股票参考 related peers 任务 kind 更名 | `job_massive_backfill.kind`：关联公司 peer 拉取由 `ticker_reference_related` 更名为 **`feed_stocks_tickers_related`**；`normalize_ticker_ref_kind` 将 `ticker_reference_related` 与 `stock_reference_related` 映射至新名；路由仍为 `massive_stocks` / `massive_stocks_high`。§2.14 / §2.16。 | Massive |
+| 2026-04-19 Massive 股票参考 overview 任务 kind 更名 | `job_massive_backfill.kind`：标的详情 / `ticker_overview` 拉取由 `ticker_reference_overview` 更名为 **`feed_stocks_tickers_overview`**；`normalize_ticker_ref_kind` 将 `ticker_reference_overview` 与 `stock_reference_overview` 映射至新名；路由仍为 `massive_stocks` / `massive_stocks_high`。§2.14 / §2.16。 | Massive |
+| 2026-04-19 Massive 期权 Trade & Quotes 代理任务 kind 更名 | `job_massive_backfill.kind`：期权 last trade / quotes / historical trades 代理由 `trades_quotes` 更名为 **`feed_options_trades_quotes`**；`normalize_ticker_ref_kind` 仍接受旧名；路由仍为 `massive` / `massive_high`。§2.16。 | Massive |
+| 2026-04-19 Massive 期权 reference contracts 任务 kind 更名 | `job_massive_backfill.kind`：期权合约参考 API 任务由 `contracts` 更名为 **`feed_option_contracts`**；`normalize_ticker_ref_kind` 仍接受旧名；路由仍为 `massive` / `massive_high`。§2.16。 | Massive |
+| 2026-04-19 Massive 股票参考 universe 任务 kind 合并更名 | `job_massive_backfill.kind`：`ticker_reference_universe` 与 `stock_reference_universe` 合并规范名为 **`feed_stocks_tickers_reference_universe`**；`normalize_ticker_ref_kind` 将两旧名映射至新名；路由仍为 `massive_stocks` / `massive_stocks_high`。§2.16。 | Massive |
+| 2026-04-19 Massive ticker types 任务 kind 合并更名 | `job_massive_backfill.kind`：`ticker_reference_ticker_types` 与 `ticker_reference_instrument_types` / `stock_reference_instrument_types` 合并规范名为 **`feed_stocks_tickers_types`**；`normalize_ticker_ref_kind` 将旧名映射至新名；路由仍为 `massive_stocks` / `massive_stocks_high`。§2.14 / §2.16。 | Massive |
+| 2026-04-19 Massive 股票公司行动任务 kind 更名与 API | `job_massive_backfill.kind`：公司行动同步（dividends / splits / IPOs / ticker events → `massive_corporate_action`）规范名为 **`feed_stocks_corporate_action`**；`normalize_ticker_ref_kind` 将 `corporate_action` 映射至新名；REST 使用 `GET /stocks/v1/dividends`、`GET /stocks/v1/splits`（替代已弃用的 v3 reference），并补充 `GET /v3/reference/ipos`、`GET /v3/reference/tickers/{ticker}/events`。§2.16。 | Massive |
 
 ---
 

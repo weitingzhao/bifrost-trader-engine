@@ -1,4 +1,4 @@
-"""UTC ms range for stock_ohlc_sync daily_smart (gap-fill vs full empty-DB backfill).
+"""UTC ms range for feed_stocks_aggregate daily_smart (gap-fill vs full empty-DB backfill).
 
 When the DB has no Massive daily bars, we request a calendar window of
 ``full_backfill_years`` (from server config: Starter default 5y, Developer default 20y).

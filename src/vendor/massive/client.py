@@ -920,34 +920,83 @@ class MassiveClient:
     def fetch_dividends(
         self, ticker: str, limit: int = 1000
     ) -> Dict[str, Any]:
-        """GET /v3/reference/dividends?ticker=…  (Polygon Stocks reference)."""
+        """GET /stocks/v1/dividends — current Stocks REST (replaces deprecated /v3/reference/dividends)."""
         ticker = (ticker or "").strip().upper()
         if not ticker or not self._api_key:
             return {"results": [], "error": "ticker or api key missing"}
-        status, data = self._get(
-            "/v3/reference/dividends",
-            {"ticker": ticker, "limit": limit, "order": "desc", "sort": "ex_dividend_date"},
-        )
+        lim = min(max(int(limit), 1), 5000)
+        params: Dict[str, Any] = {
+            "ticker": ticker,
+            "limit": lim,
+            "sort": "ex_dividend_date.desc",
+        }
+        status, data = self._get("/stocks/v1/dividends", params)
         if status >= 400:
             err = data.get("error", data) if isinstance(data, dict) else str(data)
             return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
         return data if isinstance(data, dict) else {"results": []}
 
     def fetch_splits(
         self, ticker: str, limit: int = 1000
     ) -> Dict[str, Any]:
-        """GET /v3/reference/splits?ticker=…  (Polygon Stocks reference)."""
+        """GET /stocks/v1/splits — current Stocks REST (replaces deprecated /v3/reference/splits)."""
         ticker = (ticker or "").strip().upper()
         if not ticker or not self._api_key:
             return {"results": [], "error": "ticker or api key missing"}
+        lim = min(max(int(limit), 1), 5000)
+        params: Dict[str, Any] = {
+            "ticker": ticker,
+            "limit": lim,
+            "sort": "execution_date.desc",
+        }
+        status, data = self._get("/stocks/v1/splits", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_ipos_for_ticker(self, ticker: str, limit: int = 100) -> Dict[str, Any]:
+        """GET /v3/reference/ipos?ticker=… — IPO reference (per-ticker filter)."""
+        ticker = (ticker or "").strip().upper()
+        if not ticker or not self._api_key:
+            return {"results": [], "error": "ticker or api key missing"}
+        lim = min(max(int(limit), 1), 1000)
         status, data = self._get(
-            "/v3/reference/splits",
-            {"ticker": ticker, "limit": limit, "order": "desc", "sort": "execution_date"},
+            "/v3/reference/ipos",
+            {"ticker": ticker, "limit": lim},
         )
         if status >= 400:
             err = data.get("error", data) if isinstance(data, dict) else str(data)
             return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
         return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_ticker_events(self, ticker: str) -> Dict[str, Any]:
+        """GET /v3/reference/tickers/{ticker}/events — ticker lifecycle (e.g. symbol changes)."""
+        ticker = (ticker or "").strip().upper()
+        if not ticker or not self._api_key:
+            return {"results": {}, "error": "ticker or api key missing"}
+        enc = quote(ticker, safe="")
+        status, data = self._get(f"/v3/reference/tickers/{enc}/events", {})
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": {}, "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": {}, "error": logical}
+        return data if isinstance(data, dict) else {"results": {}}
 
     # ── Tickers reference (Stocks REST, read-only) ──
 

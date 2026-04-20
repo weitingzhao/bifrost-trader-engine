@@ -2548,7 +2548,7 @@ def get_instrument_types_db(
 @router.post("/research/massive/jobs/ticker-reference")
 @router.post("/research/massive/jobs/stock-reference")
 def post_jobs_ticker_reference(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """Enqueue ticker reference Celery job (``ticker_reference_*`` kinds; legacy ``stock_reference_*`` accepted)."""
+    """Enqueue ticker reference Celery job (canonical ``feed_stocks_tickers_*`` kinds; legacy ``ticker_reference_*`` / ``stock_reference_*`` normalized)."""
     from src.vendor.massive.config import get_massive_settings
     from src.massive.tasks import run_massive_job
     from src.vendor.massive.reader import insert_job_massive_backfill, update_job_massive_backfill_celery_task_id
@@ -2563,10 +2563,10 @@ def post_jobs_ticker_reference(request: Request, body: Dict[str, Any] = Body(...
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
     allowed = frozenset(
         {
-            "ticker_reference_universe",
-            "ticker_reference_overview",
-            "ticker_reference_related",
-            "ticker_reference_ticker_types",
+            "feed_stocks_tickers_reference_universe",
+            "feed_stocks_tickers_overview",
+            "feed_stocks_tickers_related",
+            "feed_stocks_tickers_types",
         }
     )
     if kind not in allowed:
@@ -2815,28 +2815,38 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
     allowed = frozenset(
         {
+            "feed_options_aggregate",
             "aggregates",
             "feed_option_snapshots",
             "snapshot",
             "oi",
             "reference",
             "corporate_action",
+            "feed_stocks_corporate_action",
             "trades",
+            "feed_options_trades_quotes",
             "trades_quotes",
+            "feed_option_contracts",
             "contracts",
             "eod_pipeline",
+            "report_option_max_pain",
             "max_pain",
             "reconcile",
             "trim_jobs",
+            "feed_stocks_tickers_reference_universe",
             "ticker_reference_universe",
+            "feed_stocks_tickers_overview",
             "ticker_reference_overview",
+            "feed_stocks_tickers_related",
             "ticker_reference_related",
+            "feed_stocks_tickers_types",
             "ticker_reference_ticker_types",
             "ticker_reference_instrument_types",
             "stock_reference_universe",
             "stock_reference_overview",
             "stock_reference_related",
             "stock_reference_instrument_types",
+            "feed_stocks_aggregate",
             "stock_ohlc_sync",
         }
     )
@@ -2851,7 +2861,7 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
                 "message": "Option trades sync is disabled. Enable massive.features.trades_enabled or use Developer tier.",
             },
         )
-    if kind == "trades_quotes":
+    if kind == "feed_options_trades_quotes":
         mode = (payload.get("mode") or "").strip().lower()
         if mode == "trades" and not ms["trades_enabled"]:
             return JSONResponse(
@@ -2862,7 +2872,7 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
                 },
             )
 
-    if kind == "stock_ohlc_sync":
+    if kind == "feed_stocks_aggregate":
         mode_ohlc = (payload.get("mode") or "custom_bars").strip().lower()
         if mode_ohlc == "custom_bars":
             syms = payload.get("symbols")

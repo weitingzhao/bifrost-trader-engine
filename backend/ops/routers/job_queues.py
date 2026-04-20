@@ -29,9 +29,9 @@ router = APIRouter(tags=["ops-job-queues"])
 _FALLBACK_QUEUE_LABELS: Dict[str, str] = {
     "bars": "IB",
     "massive": "Massive options",
-    "massive_high": "Massive options (high priority)",
+    "massive_high": "Massive options (H)",
     "massive_stocks": "Massive stocks",
-    "massive_stocks_high": "Massive stocks (high priority)",
+    "massive_stocks_high": "Massive stocks (H)",
 }
 
 
