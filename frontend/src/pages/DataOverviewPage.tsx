@@ -233,19 +233,19 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
       if (!optOk) {
         parts.push(
           jq && !jq.ok
-            ? jq.error ?? 'Massive options queue unavailable'
+            ? jq.error ?? 'Options Massive queue unavailable'
             : settled[3].status === 'rejected'
-              ? (settled[3].reason instanceof Error ? settled[3].reason.message : 'Massive options queue unavailable')
-              : 'Massive options queue unavailable',
+              ? (settled[3].reason instanceof Error ? settled[3].reason.message : 'Options Massive queue unavailable')
+              : 'Options Massive queue unavailable',
         )
       }
       if (!stOk) {
         parts.push(
           js && !js.ok
-            ? js.error ?? 'Massive stocks queue unavailable'
+            ? js.error ?? 'Stocks Massive queue unavailable'
             : settled[4].status === 'rejected'
-              ? (settled[4].reason instanceof Error ? settled[4].reason.message : 'Massive stocks queue unavailable')
-              : 'Massive stocks queue unavailable',
+              ? (settled[4].reason instanceof Error ? settled[4].reason.message : 'Stocks Massive queue unavailable')
+              : 'Stocks Massive queue unavailable',
         )
       }
       setJobsSummaryError(parts.join(' · '))
@@ -560,7 +560,7 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
             className="replay-section"
             style={{ flex: '1 1 260px', margin: 0, padding: 'var(--space-3)' }}
           >
-            <h4 className="mp-chart-subtitle" style={{ marginTop: 0 }}>Massive options queue</h4>
+            <h4 className="mp-chart-subtitle" style={{ marginTop: 0 }}>Options Massive queue</h4>
             <p style={{ fontSize: 'var(--text-caption)', marginBottom: 'var(--space-2)' }}>{queueSummaryLine(jobsOpt)}</p>
             <button
               type="button"
@@ -574,7 +574,7 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
             className="replay-section"
             style={{ flex: '1 1 260px', margin: 0, padding: 'var(--space-3)' }}
           >
-            <h4 className="mp-chart-subtitle" style={{ marginTop: 0 }}>Massive stocks queue</h4>
+            <h4 className="mp-chart-subtitle" style={{ marginTop: 0 }}>Stocks Massive queue</h4>
             <p style={{ fontSize: 'var(--text-caption)', marginBottom: 'var(--space-2)' }}>{queueSummaryLine(jobsStock)}</p>
             <button
               type="button"

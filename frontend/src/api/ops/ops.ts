@@ -312,6 +312,8 @@ export async function fetchOpsAudit(limit = 100): Promise<{
 
 export interface QueueSummaryRow {
   name: string
+  /** From config ``ops.celery.broker_queue_display_names`` (Ops queue summary). */
+  display_name?: string
   pending_broker: number | null
   running_celery: number | null
   done_db: number | null

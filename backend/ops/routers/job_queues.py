@@ -26,15 +26,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["ops-job-queues"])
 
-_FALLBACK_QUEUE_LABELS: Dict[str, str] = {
-    "stocks_ib": "IB",
-    "options_massive": "Massive options",
-    "options_massive_high": "Massive options (H)",
-    "stocks_massive": "Massive stocks",
-    "stocks_massive_high": "Massive stocks (H)",
-}
-
-
 def _db_config(request: Request) -> Optional[dict]:
     return request.app.state.control_via_db or getattr(request.app.state, "status_cfg_for_read", None)
 
@@ -89,13 +80,14 @@ def ops_aggregated_job_queues_summary(request: Request) -> Dict[str, Any]:
                     )
 
     if not rows:
-        from src.workers.celery_queue_names import load_canonical_broker_queue_names
+        from src.workers.celery_queue_names import build_broker_queue_labels, load_canonical_broker_queue_names
 
         cfg = getattr(request.app.state, "bifrost_config", None)
         if not isinstance(cfg, dict):
             cfg = {}
+        labels = build_broker_queue_labels(cfg)
         for qn in load_canonical_broker_queue_names(cfg):
-            label = _FALLBACK_QUEUE_LABELS.get(qn, qn)
+            label = labels.get(qn, qn)
             if qn == "stocks_ib":
                 counts = count_job_bars_backfill_by_status(db)
                 rows.append(

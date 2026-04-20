@@ -2344,7 +2344,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               <span className={`dashboard-snapshot-celery-lamp-status dashboard-svc-status--${runtimeCeleryLamp}`}>
                 {runtimeCeleryStatusText}
               </span>
-              <InfoTooltip text="Red: broker unreachable. Yellow: broker OK but no workers, or workers’ queue list does not include every supported queue (Bars (IB), Massive stocks (H), Massive stocks, Massive options (H), Massive options — Redis keys stocks_ib, stocks_massive_high, stocks_massive, options_massive_high, options_massive). Green: at least one worker and their combined queues cover all supported queues." />
+              <InfoTooltip text="Red: broker unreachable. Yellow: broker OK but no workers, or workers’ queue list does not include every supported queue (Stocks IB, Stocks Massive (H), Stocks Massive, Massive Options (H), Options Massive — Redis keys stocks_ib, stocks_massive_high, stocks_massive, options_massive_high, options_massive). Green: at least one worker and their combined queues cover all supported queues." />
             </div>
 
             {/* Broker */}

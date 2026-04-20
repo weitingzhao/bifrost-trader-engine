@@ -19,6 +19,7 @@ import {
   BROKER_QUEUE_OPTIONS_MASSIVE_HIGH,
   BROKER_QUEUE_STOCKS_MASSIVE,
   BROKER_QUEUE_STOCKS_MASSIVE_HIGH,
+  formatQueueLabel,
 } from '../../utils/celeryQueueLabels'
 import {
   CeleryQueueDeleteFailedIcon,
@@ -49,28 +50,28 @@ export interface JobQueueTab {
 }
 
 const FALLBACK_JOB_QUEUE_TABS: JobQueueTab[] = [
-  { id: 'stocks_ib', label: 'IB', celeryQueue: BROKER_QUEUE_STOCKS_IB, pipeline: 'stocks_ib' },
+  { id: 'stocks_ib', label: formatQueueLabel(BROKER_QUEUE_STOCKS_IB), celeryQueue: BROKER_QUEUE_STOCKS_IB, pipeline: 'stocks_ib' },
   {
     id: 'options_massive',
-    label: 'Massive options',
+    label: formatQueueLabel(BROKER_QUEUE_OPTIONS_MASSIVE),
     celeryQueue: BROKER_QUEUE_OPTIONS_MASSIVE,
     pipeline: 'massive_async',
   },
   {
     id: 'options_massive_high',
-    label: 'Massive options (H)',
+    label: formatQueueLabel(BROKER_QUEUE_OPTIONS_MASSIVE_HIGH),
     celeryQueue: BROKER_QUEUE_OPTIONS_MASSIVE_HIGH,
     pipeline: 'massive_async',
   },
   {
     id: 'stocks_massive',
-    label: 'Massive stocks',
+    label: formatQueueLabel(BROKER_QUEUE_STOCKS_MASSIVE),
     celeryQueue: BROKER_QUEUE_STOCKS_MASSIVE,
     pipeline: 'massive_async',
   },
   {
     id: 'stocks_massive_high',
-    label: 'Massive stocks (H)',
+    label: formatQueueLabel(BROKER_QUEUE_STOCKS_MASSIVE_HIGH),
     celeryQueue: BROKER_QUEUE_STOCKS_MASSIVE_HIGH,
     pipeline: 'massive_async',
   },

@@ -1,6 +1,7 @@
 /**
  * Celery broker queue: Redis LIST key (celery -Q) ↔ human label used across Settings → Celery.
- * Keys must stay stable for workers; labels are the mental model in the UI (e.g. Massive options).
+ * Keys must stay stable for workers; authoritative labels come from GET /ops/celery/capabilities
+ * (``broker_queue_labels`` from ``ops.celery.broker_queue_display_names`` in config.yaml).
  */
 
 /** IB historical bars backfill (job_bars_backfill). */
@@ -13,7 +14,7 @@ export const BROKER_QUEUE_OPTIONS_MASSIVE_HIGH = 'options_massive_high' as const
 export const BROKER_QUEUE_STOCKS_MASSIVE = 'stocks_massive' as const
 export const BROKER_QUEUE_STOCKS_MASSIVE_HIGH = 'stocks_massive_high' as const
 
-/** Set by Settings → Celery after GET /ops/celery/capabilities (ops.worker_profiles labels). */
+/** Set by Settings → Celery after GET /ops/celery/capabilities (``broker_queue_labels``). */
 let brokerQueueLabelsFromApi: Record<string, string> | null = null
 
 /** Call when Celery capabilities load so labels match config without redeploying the SPA. */
@@ -30,11 +31,11 @@ export function formatQueueLabel(brokerKey: string): string {
   const k = (brokerKey || '').trim()
   const fromApi = brokerQueueLabelsFromApi?.[k]
   if (fromApi) return fromApi
-  if (k === BROKER_QUEUE_STOCKS_MASSIVE_HIGH) return 'Massive stocks (H)'
-  if (k === BROKER_QUEUE_STOCKS_MASSIVE) return 'Massive stocks'
-  if (k === BROKER_QUEUE_OPTIONS_MASSIVE_HIGH) return 'Massive options (H)'
-  if (k === BROKER_QUEUE_OPTIONS_MASSIVE) return 'Massive options'
-  if (k === BROKER_QUEUE_STOCKS_IB) return 'Bars (IB)'
+  if (k === BROKER_QUEUE_STOCKS_IB) return 'Stocks IB'
+  if (k === BROKER_QUEUE_OPTIONS_MASSIVE) return 'Options Massive'
+  if (k === BROKER_QUEUE_OPTIONS_MASSIVE_HIGH) return 'Massive Options (H)'
+  if (k === BROKER_QUEUE_STOCKS_MASSIVE) return 'Stocks Massive'
+  if (k === BROKER_QUEUE_STOCKS_MASSIVE_HIGH) return 'Stocks Massive (H)'
   return k
 }
 

@@ -20,7 +20,9 @@ Ticker types dictionary jobs (GET /v3/reference/tickers/types) use kind ``feed_s
 
 IB historical bars backfill uses queue ``stocks_ib``.
 
-Display names: prefer ``broker_queue_labels`` from GET /ops/celery/capabilities (from ``ops.worker_profiles``); fallback in ``frontend/src/utils/celeryQueueLabels.ts``.
+Display names: **authoritative** map ``ops.celery.broker_queue_display_names`` in YAML; merged into
+GET /ops/celery/capabilities ``broker_queue_labels`` and Ops queue summary ``display_name`` per row.
+Optional fallback from ``ops.worker_profiles`` ``label`` when a queue key is missing from the map.
 """
 
 from __future__ import annotations
@@ -122,6 +124,36 @@ def ops_celery_config_validation_errors(config: Optional[dict]) -> List[str]:
                 f"canonical_queue_order entry {qn!r} is not listed under ops.worker_profiles[*].queues",
             )
     return errors
+
+
+def parse_broker_queue_display_names(config: Optional[dict]) -> Dict[str, str]:
+    """Load ``ops.celery.broker_queue_display_names`` (broker queue key → UI label)."""
+    out: Dict[str, str] = {}
+    if not config or not isinstance(config, dict):
+        return out
+    ops = config.get("ops") or {}
+    if not isinstance(ops, dict):
+        return out
+    celery = ops.get("celery") or {}
+    if not isinstance(celery, dict):
+        return out
+    raw = celery.get("broker_queue_display_names")
+    if not isinstance(raw, dict):
+        return out
+    for k, v in raw.items():
+        ks, vs = str(k).strip(), str(v).strip()
+        if ks and vs:
+            out[ks] = vs
+    return out
+
+
+def build_broker_queue_labels(config: Optional[dict]) -> Dict[str, str]:
+    """Map broker queue key → display label: ``broker_queue_display_names`` first, then worker_profiles."""
+    out = parse_broker_queue_display_names(config)
+    for k, v in build_broker_queue_labels_from_worker_profiles(config).items():
+        if k not in out:
+            out[k] = v
+    return out
 
 
 def build_broker_queue_labels_from_worker_profiles(config: Optional[dict]) -> Dict[str, str]:

@@ -15,6 +15,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from src.workers.celery_queue_names import parse_broker_queue_display_names
+
 logger = logging.getLogger(__name__)
 
 _PROFILE_KEY_RE = re.compile(r"^[a-zA-Z0-9_]+$")
@@ -36,6 +38,7 @@ class WorkerProfileRegistry:
     @classmethod
     def from_config(cls, config: dict) -> "WorkerProfileRegistry":
         ops = config.get("ops") or {}
+        display = parse_broker_queue_display_names(config)
         raw = ops.get("worker_profiles") or {}
         profiles: Dict[str, WorkerProfile] = {}
         for key, entry in raw.items():
@@ -44,7 +47,7 @@ class WorkerProfileRegistry:
                 continue
             if not isinstance(entry, dict):
                 continue
-            label = str(entry.get("label", key))
+            label_in = str(entry.get("label", "")).strip()
             queues = entry.get("queues") or []
             if isinstance(queues, str):
                 queues = [queues]
@@ -52,6 +55,11 @@ class WorkerProfileRegistry:
             if not queues:
                 logger.warning("worker_profile %r has no queues; skipping", key)
                 continue
+            if len(queues) == 1:
+                q0 = queues[0]
+                label = display.get(q0, label_in or key)
+            else:
+                label = label_in or key
             profiles[key] = WorkerProfile(key=key, label=label, queues=queues)
         return cls(profiles=profiles)
 

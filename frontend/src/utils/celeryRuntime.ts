@@ -1,7 +1,7 @@
 /**
  * Celery runtime lamp + queue totals — aligned with Dashboard Runtime Snapshot / Ops API.
  * Supported queue names mirror backend ``SUPPORTED_CELERY_QUEUES`` / ``CANONICAL_BROKER_QUEUE_NAMES``.
- * UI labels: ``frontend/src/utils/celeryQueueLabels.ts`` (e.g. Massive options = broker key options_massive).
+ * UI labels: ``frontend/src/utils/celeryQueueLabels.ts`` + Ops ``broker_queue_labels`` (from config YAML).
  */
 
 import type { QueueSummaryRow, WorkerSummary } from '../api/ops/ops'

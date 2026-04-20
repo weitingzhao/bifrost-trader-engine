@@ -9,7 +9,7 @@ from backend.ops.services.celery_supported_tasks import build_supported_tasks_pa
 from src.massive.beat_schedule_public import beat_tasks_payload_for_capabilities
 from src.massive.run_massive_job_manifest import RUN_MASSIVE_JOB_MATRIX
 from src.workers.celery_queue_names import (
-    build_broker_queue_labels_from_worker_profiles,
+    build_broker_queue_labels,
     load_canonical_broker_queue_names,
     ops_celery_config_validation_errors,
 )
@@ -51,7 +51,7 @@ def build_celery_capabilities_payload(celery_app: Any) -> Dict[str, Any]:
 
     beat_tasks = beat_tasks_payload_for_capabilities()
     matrix = [r.to_api_dict() for r in RUN_MASSIVE_JOB_MATRIX]
-    broker_queue_labels = build_broker_queue_labels_from_worker_profiles(cfg)
+    broker_queue_labels = build_broker_queue_labels(cfg)
 
     out: Dict[str, Any] = {
         "ok": bool(base.get("ok")),

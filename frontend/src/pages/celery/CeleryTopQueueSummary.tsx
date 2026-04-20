@@ -18,17 +18,24 @@ export { formatQueueLabel } from '../../utils/celeryQueueLabels'
 
 type LampColor = 'green' | 'yellow' | 'red' | 'none'
 
+function queueSummaryDisplayName(qs: QueueSummaryRow): string {
+  const d = qs.display_name?.trim()
+  if (d) return d
+  return formatQueueLabel(qs.name)
+}
+
 /** Per-queue consumer coverage (Celery inspect + broker). */
 function queueCoverageLamp(
   queueName: string,
   brokerConnected: boolean | undefined,
   workerList: WorkerSummary[],
+  displayLabel?: string,
 ): { lamp: LampColor; title: string } {
   if (brokerConnected !== true) {
     return { lamp: 'red', title: 'Broker not connected' }
   }
   const covered = workerList.some(w => (w.queues ?? []).includes(queueName))
-  const label = formatQueueLabel(queueName)
+  const label = (displayLabel && displayLabel.trim()) || formatQueueLabel(queueName)
   if (covered) {
     return {
       lamp: 'green',
@@ -210,7 +217,7 @@ export function CeleryTopQueueSummary({
             </thead>
             <tbody>
               {merged.map(({ qs, agg }) => {
-                const qCov = queueCoverageLamp(qs.name, brokerConnected, workers)
+                const qCov = queueCoverageLamp(qs.name, brokerConnected, workers, qs.display_name)
                 return (
                   <tr
                     key={qs.name}
@@ -256,7 +263,7 @@ export function CeleryTopQueueSummary({
                             onClick={() => onNavigateToJobQueue(qs.name)}
                           >
                             <code className="dashboard-queue-name" title={brokerQueueKeyTitle(qs.name)}>
-                              {formatQueueLabel(qs.name)}
+                              {queueSummaryDisplayName(qs)}
                             </code>
                             {qs.db_totals_shared ? (
                               <span
@@ -271,7 +278,7 @@ export function CeleryTopQueueSummary({
                         ) : (
                           <>
                             <code className="dashboard-queue-name" title={brokerQueueKeyTitle(qs.name)}>
-                              {formatQueueLabel(qs.name)}
+                              {queueSummaryDisplayName(qs)}
                             </code>
                             {qs.db_totals_shared ? (
                               <span
@@ -293,7 +300,7 @@ export function CeleryTopQueueSummary({
                                 : 'dashboard-queue-summary-support-filter'
                             }
                             title="Open Support Tasks and filter by this queue; click again to clear filter"
-                            aria-label={`Filter Support Tasks by ${formatQueueLabel(qs.name)}; click again to clear`}
+                            aria-label={`Filter Support Tasks by ${queueSummaryDisplayName(qs)}; click again to clear`}
                             onClick={e => {
                               e.preventDefault()
                               e.stopPropagation()

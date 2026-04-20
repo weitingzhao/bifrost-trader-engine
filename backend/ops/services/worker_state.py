@@ -15,7 +15,11 @@ from src.workers.celery_app import (
     CELERY_INSPECT_TIMEOUT_SEC,
     OPS_WORKER_PRESENCE_KEY_PREFIX,
 )
-from src.workers.celery_queue_names import CANONICAL_BROKER_QUEUE_NAMES, load_canonical_broker_queue_names
+from src.workers.celery_queue_names import (
+    CANONICAL_BROKER_QUEUE_NAMES,
+    build_broker_queue_labels,
+    load_canonical_broker_queue_names,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -578,12 +582,15 @@ class WorkerStateService:
             for q in ordered:
                 llens[q] = None
 
+        labels = build_broker_queue_labels(self._config if isinstance(self._config, dict) else {})
         rows: List[Dict[str, Any]] = []
         for q in ordered:
             pending_broker = llens.get(q)
+            display_name = labels.get(q) or q
             if q == "stocks_ib":
                 row = {
                     "name": q,
+                    "display_name": display_name,
                     "pending_broker": pending_broker,
                     "running_celery": (bars_db.get("running") if bars_db else None),
                     "done_db": (bars_db.get("done") if bars_db else None),
@@ -592,6 +599,7 @@ class WorkerStateService:
             elif q in supported:
                 row = {
                     "name": q,
+                    "display_name": display_name,
                     "pending_broker": pending_broker,
                     "running_celery": (massive_db.get("running") if massive_db else None),
                     "done_db": (massive_db.get("done") if massive_db else None),
@@ -601,6 +609,7 @@ class WorkerStateService:
             else:
                 row = {
                     "name": q,
+                    "display_name": display_name,
                     "pending_broker": pending_broker,
                     "running_celery": None,
                     "done_db": None,
