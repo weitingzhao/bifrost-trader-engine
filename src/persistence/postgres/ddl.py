@@ -373,7 +373,6 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS stock_day (
-                id bigserial PRIMARY KEY,
                 symbol text NOT NULL,
                 bar_time date NOT NULL,
                 open double precision,
@@ -382,8 +381,9 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 close double precision,
                 volume double precision,
                 created_at timestamptz DEFAULT now(),
-                UNIQUE(symbol, bar_time)
-            )
+                source text NOT NULL DEFAULT 'ib',
+                CONSTRAINT stock_day_symbol_bar_time_source_key PRIMARY KEY (symbol, bar_time, source)
+            ) PARTITION BY RANGE (bar_time)
         """
         )
         # Migrate: if bar_time is still timestamptz from an older schema, convert to date.
@@ -467,12 +467,123 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS stock_day_symbol_source_time ON stock_day (symbol, source, bar_time DESC)"
         )
+        cur.execute(
+            """
+            DO $stock_day_part$
+            DECLARE
+              rk char;
+              m_start date;
+              m_end date;
+              part_name text;
+              r record;
+              min_bt date;
+              max_bt date;
+            BEGIN
+              SELECT c.relkind INTO rk FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = 'public' AND c.relname = 'stock_day';
+              IF rk IS NULL THEN
+                RETURN;
+              END IF;
+
+              IF rk = 'p' THEN
+                SELECT date_trunc('month', COALESCE((SELECT MIN(bar_time) FROM public.stock_day), CURRENT_DATE))::date
+                  INTO m_start;
+                max_bt := COALESCE((SELECT MAX(bar_time) FROM public.stock_day), CURRENT_DATE);
+                m_end := (date_trunc('month', GREATEST(max_bt, CURRENT_DATE))::date + interval '4 months')::date;
+                WHILE m_start < m_end LOOP
+                  part_name := 'stock_day_y' || to_char(m_start, 'YYYY') || 'm' || to_char(m_start, 'MM');
+                  IF to_regclass('public.' || part_name) IS NULL THEN
+                    EXECUTE format(
+                      'CREATE TABLE %I PARTITION OF public.stock_day FOR VALUES FROM (%L) TO (%L)',
+                      part_name, m_start, (m_start + interval '1 month')::date
+                    );
+                  END IF;
+                  m_start := (m_start + interval '1 month')::date;
+                END LOOP;
+                IF to_regclass('public.stock_day_default') IS NULL THEN
+                  CREATE TABLE stock_day_default PARTITION OF public.stock_day DEFAULT;
+                END IF;
+                RETURN;
+              END IF;
+
+              RAISE NOTICE 'Migrating stock_day heap to RANGE partitions on bar_time (date) ...';
+              DROP VIEW IF EXISTS public.option_snapshots_with_underlying_day;
+
+              CREATE TABLE stock_day_new (
+                symbol text NOT NULL,
+                bar_time date NOT NULL,
+                open double precision,
+                high double precision,
+                low double precision,
+                close double precision,
+                volume double precision,
+                created_at timestamptz DEFAULT now(),
+                source text NOT NULL DEFAULT 'ib',
+                vwap double precision,
+                trade_count bigint,
+                adjusted boolean,
+                extras jsonb,
+                CONSTRAINT stock_day_mig_pkey PRIMARY KEY (symbol, bar_time, source)
+              ) PARTITION BY RANGE (bar_time);
+
+              SELECT MIN(bar_time), MAX(bar_time) INTO min_bt, max_bt FROM public.stock_day;
+              m_start := date_trunc('month', COALESCE(min_bt, CURRENT_DATE))::date;
+              IF max_bt IS NULL THEN
+                max_bt := COALESCE(min_bt, CURRENT_DATE);
+              END IF;
+              m_end := (date_trunc('month', GREATEST(max_bt, CURRENT_DATE))::date + interval '4 months')::date;
+              WHILE m_start < m_end LOOP
+                part_name := 'stock_day_new_y' || to_char(m_start, 'YYYY') || 'm' || to_char(m_start, 'MM');
+                EXECUTE format(
+                  'CREATE TABLE %I PARTITION OF stock_day_new FOR VALUES FROM (%L) TO (%L)',
+                  part_name, m_start, (m_start + interval '1 month')::date
+                );
+                m_start := (m_start + interval '1 month')::date;
+              END LOOP;
+              CREATE TABLE stock_day_new_default PARTITION OF stock_day_new DEFAULT;
+
+              INSERT INTO stock_day_new (
+                symbol, bar_time, open, high, low, close, volume, created_at,
+                source, vwap, trade_count, adjusted, extras
+              )
+              SELECT
+                symbol, bar_time::date, open, high, low, close, volume, created_at,
+                COALESCE(source, 'ib'), vwap, trade_count, adjusted, extras
+              FROM public.stock_day;
+
+              DROP TABLE public.stock_day;
+              ALTER TABLE stock_day_new RENAME TO stock_day;
+
+              FOR r IN
+                SELECT c.relname AS tname FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relname LIKE 'stock_day_new_y%'
+              LOOP
+                EXECUTE format(
+                  'ALTER TABLE %I RENAME TO %I',
+                  r.tname,
+                  replace(r.tname, 'stock_day_new_', 'stock_day_')
+                );
+              END LOOP;
+              IF to_regclass('public.stock_day_new_default') IS NOT NULL THEN
+                ALTER TABLE stock_day_new_default RENAME TO stock_day_default;
+              END IF;
+
+              ALTER TABLE public.stock_day RENAME CONSTRAINT stock_day_mig_pkey TO stock_day_symbol_bar_time_source_key;
+
+              CREATE INDEX IF NOT EXISTS stock_day_symbol_time ON public.stock_day (symbol, bar_time DESC);
+              CREATE INDEX IF NOT EXISTS stock_day_symbol_source_time ON public.stock_day (symbol, source, bar_time DESC);
+              RAISE NOTICE 'stock_day: RANGE partition migration complete.';
+            END
+            $stock_day_part$;
+            """
+        )
         _log("stock_min table + index")
         _log_table("stock_min", "Stock minute OHLC bars")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS stock_min (
-                id bigserial PRIMARY KEY,
                 symbol text NOT NULL,
                 period text NOT NULL,
                 bar_time timestamptz NOT NULL,
@@ -482,8 +593,9 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 close double precision,
                 volume double precision,
                 created_at timestamptz DEFAULT now(),
-                UNIQUE(symbol, period, bar_time)
-            )
+                source text NOT NULL DEFAULT 'ib',
+                CONSTRAINT stock_min_symbol_period_bar_time_source_key PRIMARY KEY (symbol, period, bar_time, source)
+            ) PARTITION BY RANGE (bar_time)
         """
         )
         cur.execute(
@@ -548,6 +660,118 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS stock_min_sym_per_src_time ON stock_min (symbol, period, source, bar_time DESC)"
+        )
+        cur.execute(
+            """
+            DO $stock_min_part$
+            DECLARE
+              rk char;
+              m_start date;
+              m_end date;
+              part_name text;
+              r record;
+              min_bt timestamptz;
+              max_bt timestamptz;
+            BEGIN
+              SELECT c.relkind INTO rk FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = 'public' AND c.relname = 'stock_min';
+              IF rk IS NULL THEN
+                RETURN;
+              END IF;
+
+              IF rk = 'p' THEN
+                SELECT date_trunc('month', COALESCE((SELECT MIN(bar_time) FROM public.stock_min), now()))::date
+                  INTO m_start;
+                max_bt := COALESCE((SELECT MAX(bar_time) FROM public.stock_min), now());
+                m_end := (date_trunc('month', GREATEST(max_bt, now()))::date + interval '4 months')::date;
+                WHILE m_start < m_end LOOP
+                  part_name := 'stock_min_y' || to_char(m_start, 'YYYY') || 'm' || to_char(m_start, 'MM');
+                  IF to_regclass('public.' || part_name) IS NULL THEN
+                    EXECUTE format(
+                      'CREATE TABLE %I PARTITION OF public.stock_min FOR VALUES FROM (%L) TO (%L)',
+                      part_name, m_start, (m_start + interval '1 month')::date
+                    );
+                  END IF;
+                  m_start := (m_start + interval '1 month')::date;
+                END LOOP;
+                IF to_regclass('public.stock_min_default') IS NULL THEN
+                  CREATE TABLE stock_min_default PARTITION OF public.stock_min DEFAULT;
+                END IF;
+                RETURN;
+              END IF;
+
+              RAISE NOTICE 'Migrating stock_min heap to RANGE partitions on bar_time ...';
+
+              CREATE TABLE stock_min_new (
+                symbol text NOT NULL,
+                period text NOT NULL,
+                bar_time timestamptz NOT NULL,
+                open double precision,
+                high double precision,
+                low double precision,
+                close double precision,
+                volume double precision,
+                created_at timestamptz DEFAULT now(),
+                source text NOT NULL DEFAULT 'ib',
+                vwap double precision,
+                trade_count bigint,
+                adjusted boolean,
+                extras jsonb,
+                CONSTRAINT stock_min_mig_pkey PRIMARY KEY (symbol, period, bar_time, source)
+              ) PARTITION BY RANGE (bar_time);
+
+              SELECT MIN(bar_time), MAX(bar_time) INTO min_bt, max_bt FROM public.stock_min;
+              m_start := date_trunc('month', COALESCE(min_bt, now()))::date;
+              IF max_bt IS NULL THEN
+                max_bt := COALESCE(min_bt, now());
+              END IF;
+              m_end := (date_trunc('month', GREATEST(max_bt, now()))::date + interval '4 months')::date;
+              WHILE m_start < m_end LOOP
+                part_name := 'stock_min_new_y' || to_char(m_start, 'YYYY') || 'm' || to_char(m_start, 'MM');
+                EXECUTE format(
+                  'CREATE TABLE %I PARTITION OF stock_min_new FOR VALUES FROM (%L) TO (%L)',
+                  part_name, m_start, (m_start + interval '1 month')::date
+                );
+                m_start := (m_start + interval '1 month')::date;
+              END LOOP;
+              CREATE TABLE stock_min_new_default PARTITION OF stock_min_new DEFAULT;
+
+              INSERT INTO stock_min_new (
+                symbol, period, bar_time, open, high, low, close, volume, created_at,
+                source, vwap, trade_count, adjusted, extras
+              )
+              SELECT
+                symbol, period, bar_time, open, high, low, close, volume, created_at,
+                COALESCE(source, 'ib'), vwap, trade_count, adjusted, extras
+              FROM public.stock_min;
+
+              DROP TABLE public.stock_min;
+              ALTER TABLE stock_min_new RENAME TO stock_min;
+
+              FOR r IN
+                SELECT c.relname AS tname FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relname LIKE 'stock_min_new_y%'
+              LOOP
+                EXECUTE format(
+                  'ALTER TABLE %I RENAME TO %I',
+                  r.tname,
+                  replace(r.tname, 'stock_min_new_', 'stock_min_')
+                );
+              END LOOP;
+              IF to_regclass('public.stock_min_new_default') IS NOT NULL THEN
+                ALTER TABLE stock_min_new_default RENAME TO stock_min_default;
+              END IF;
+
+              ALTER TABLE public.stock_min RENAME CONSTRAINT stock_min_mig_pkey TO stock_min_symbol_period_bar_time_source_key;
+
+              CREATE INDEX IF NOT EXISTS stock_min_symbol_period_time ON public.stock_min (symbol, period, bar_time DESC);
+              CREATE INDEX IF NOT EXISTS stock_min_sym_per_src_time ON public.stock_min (symbol, period, source, bar_time DESC);
+              RAISE NOTICE 'stock_min: RANGE partition migration complete.';
+            END
+            $stock_min_part$;
+            """
         )
         _log("tickers table (Massive reference universe)")
         _log_table("tickers", "Ticker symbol reference (All Tickers)")
@@ -774,10 +998,11 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         )
         _log("option_day, option_min tables + indexes")
         _log_table("option_day", "Option daily OHLC bars")
+        cur.execute("CREATE SEQUENCE IF NOT EXISTS option_day_option_day_id_seq AS bigint")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS option_day (
-                option_day_id bigserial PRIMARY KEY,
+                option_day_id bigint NOT NULL DEFAULT nextval('option_day_option_day_id_seq'),
                 symbol text NOT NULL,
                 expiry text NOT NULL,
                 strike double precision NOT NULL,
@@ -791,18 +1016,22 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 vwap double precision,
                 source text NOT NULL DEFAULT 'ib',
                 created_at timestamptz DEFAULT now(),
-                UNIQUE(symbol, expiry, strike, option_right, bar_time, source)
-            )
+                CONSTRAINT option_day_bar_uidx PRIMARY KEY (symbol, expiry, strike, option_right, bar_time, source)
+            ) PARTITION BY RANGE (bar_time)
         """
+        )
+        cur.execute(
+            "ALTER SEQUENCE option_day_option_day_id_seq OWNED BY option_day.option_day_id"
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS option_day_symbol_expiry_strike_right_time ON option_day (symbol, expiry, strike, option_right, bar_time DESC)"
         )
         _log_table("option_min", "Option minute OHLC bars")
+        cur.execute("CREATE SEQUENCE IF NOT EXISTS option_min_option_min_id_seq AS bigint")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS option_min (
-                option_min_id bigserial PRIMARY KEY,
+                option_min_id bigint NOT NULL DEFAULT nextval('option_min_option_min_id_seq'),
                 symbol text NOT NULL,
                 expiry text NOT NULL,
                 strike double precision NOT NULL,
@@ -817,9 +1046,12 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 vwap double precision,
                 source text NOT NULL DEFAULT 'ib',
                 created_at timestamptz DEFAULT now(),
-                UNIQUE(symbol, expiry, strike, option_right, period, bar_time, source)
-            )
+                CONSTRAINT option_min_bar_uidx PRIMARY KEY (symbol, expiry, strike, option_right, period, bar_time, source)
+            ) PARTITION BY RANGE (bar_time)
         """
+        )
+        cur.execute(
+            "ALTER SEQUENCE option_min_option_min_id_seq OWNED BY option_min.option_min_id"
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS option_min_symbol_expiry_strike_right_period_time ON option_min (symbol, expiry, strike, option_right, period, bar_time DESC)"
@@ -1451,6 +1683,272 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
               END IF;
             END
             $migrate_opt$;
+            """
+        )
+        cur.execute(
+            """
+            DO $option_day_part$
+            DECLARE
+              rk char;
+              m_start date;
+              m_end date;
+              part_name text;
+              r record;
+              min_bt timestamptz;
+              max_bt timestamptz;
+              mx bigint;
+            BEGIN
+              SELECT c.relkind INTO rk FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = 'public' AND c.relname = 'option_day';
+              IF rk IS NULL THEN
+                RETURN;
+              END IF;
+
+              IF rk = 'p' THEN
+                SELECT date_trunc('month', COALESCE((SELECT MIN(bar_time) FROM public.option_day), now()))::date
+                  INTO m_start;
+                max_bt := COALESCE((SELECT MAX(bar_time) FROM public.option_day), now());
+                m_end := (date_trunc('month', GREATEST(max_bt, now()))::date + interval '4 months')::date;
+                WHILE m_start < m_end LOOP
+                  part_name := 'option_day_y' || to_char(m_start, 'YYYY') || 'm' || to_char(m_start, 'MM');
+                  IF to_regclass('public.' || part_name) IS NULL THEN
+                    EXECUTE format(
+                      'CREATE TABLE %I PARTITION OF public.option_day FOR VALUES FROM (%L) TO (%L)',
+                      part_name, m_start, (m_start + interval '1 month')::date
+                    );
+                  END IF;
+                  m_start := (m_start + interval '1 month')::date;
+                END LOOP;
+                IF to_regclass('public.option_day_default') IS NULL THEN
+                  CREATE TABLE option_day_default PARTITION OF public.option_day DEFAULT;
+                END IF;
+                RETURN;
+              END IF;
+
+              RAISE NOTICE 'Migrating option_day heap to RANGE partitions on bar_time ...';
+
+              DELETE FROM public.option_day od
+              WHERE EXISTS (
+                SELECT 1 FROM public.option_day od2
+                WHERE od2.symbol = od.symbol
+                  AND od2.expiry = od.expiry
+                  AND od2.strike = od.strike
+                  AND od2.option_right = od.option_right
+                  AND od2.bar_time = od.bar_time
+                  AND od2.source = od.source
+                  AND od2.option_day_id < od.option_day_id
+              );
+
+              CREATE TABLE option_day_new (
+                option_day_id bigint NOT NULL DEFAULT nextval('option_day_option_day_id_seq'),
+                symbol text NOT NULL,
+                expiry text NOT NULL,
+                strike double precision NOT NULL,
+                option_right text NOT NULL,
+                bar_time timestamptz NOT NULL,
+                open double precision,
+                high double precision,
+                low double precision,
+                close double precision,
+                volume double precision,
+                vwap double precision,
+                source text NOT NULL DEFAULT 'ib',
+                created_at timestamptz DEFAULT now(),
+                CONSTRAINT option_day_mig_pkey PRIMARY KEY (symbol, expiry, strike, option_right, bar_time, source)
+              ) PARTITION BY RANGE (bar_time);
+
+              SELECT MIN(bar_time), MAX(bar_time) INTO min_bt, max_bt FROM public.option_day;
+              m_start := date_trunc('month', COALESCE(min_bt, now()))::date;
+              IF max_bt IS NULL THEN
+                max_bt := COALESCE(min_bt, now());
+              END IF;
+              m_end := (date_trunc('month', GREATEST(max_bt, now()))::date + interval '4 months')::date;
+              WHILE m_start < m_end LOOP
+                part_name := 'option_day_new_y' || to_char(m_start, 'YYYY') || 'm' || to_char(m_start, 'MM');
+                EXECUTE format(
+                  'CREATE TABLE %I PARTITION OF option_day_new FOR VALUES FROM (%L) TO (%L)',
+                  part_name, m_start, (m_start + interval '1 month')::date
+                );
+                m_start := (m_start + interval '1 month')::date;
+              END LOOP;
+              CREATE TABLE option_day_new_default PARTITION OF option_day_new DEFAULT;
+
+              INSERT INTO option_day_new (
+                option_day_id, symbol, expiry, strike, option_right, bar_time,
+                open, high, low, close, volume, vwap, source, created_at
+              )
+              SELECT
+                option_day_id, symbol, expiry, strike, option_right, bar_time,
+                open, high, low, close, volume, vwap, source, created_at
+              FROM public.option_day;
+
+              SELECT COALESCE(MAX(option_day_id), 1) INTO mx FROM option_day_new;
+              PERFORM setval('option_day_option_day_id_seq', GREATEST(mx, 1));
+
+              ALTER SEQUENCE option_day_option_day_id_seq OWNED BY NONE;
+              DROP TABLE public.option_day;
+              ALTER TABLE option_day_new RENAME TO option_day;
+              ALTER SEQUENCE option_day_option_day_id_seq OWNED BY option_day.option_day_id;
+              ALTER TABLE public.option_day
+                ALTER COLUMN option_day_id SET DEFAULT nextval('option_day_option_day_id_seq');
+
+              FOR r IN
+                SELECT c.relname AS tname FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relname LIKE 'option_day_new_y%'
+              LOOP
+                EXECUTE format(
+                  'ALTER TABLE %I RENAME TO %I',
+                  r.tname,
+                  replace(r.tname, 'option_day_new_', 'option_day_')
+                );
+              END LOOP;
+              IF to_regclass('public.option_day_new_default') IS NOT NULL THEN
+                ALTER TABLE option_day_new_default RENAME TO option_day_default;
+              END IF;
+
+              ALTER TABLE public.option_day RENAME CONSTRAINT option_day_mig_pkey TO option_day_bar_uidx;
+
+              CREATE INDEX IF NOT EXISTS option_day_symbol_expiry_strike_right_time
+                ON public.option_day (symbol, expiry, strike, option_right, bar_time DESC);
+              RAISE NOTICE 'option_day: RANGE partition migration complete.';
+            END
+            $option_day_part$;
+            """
+        )
+        cur.execute(
+            """
+            DO $option_min_part$
+            DECLARE
+              rk char;
+              m_start date;
+              m_end date;
+              part_name text;
+              r record;
+              min_bt timestamptz;
+              max_bt timestamptz;
+              mx bigint;
+            BEGIN
+              SELECT c.relkind INTO rk FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = 'public' AND c.relname = 'option_min';
+              IF rk IS NULL THEN
+                RETURN;
+              END IF;
+
+              IF rk = 'p' THEN
+                SELECT date_trunc('month', COALESCE((SELECT MIN(bar_time) FROM public.option_min), now()))::date
+                  INTO m_start;
+                max_bt := COALESCE((SELECT MAX(bar_time) FROM public.option_min), now());
+                m_end := (date_trunc('month', GREATEST(max_bt, now()))::date + interval '4 months')::date;
+                WHILE m_start < m_end LOOP
+                  part_name := 'option_min_y' || to_char(m_start, 'YYYY') || 'm' || to_char(m_start, 'MM');
+                  IF to_regclass('public.' || part_name) IS NULL THEN
+                    EXECUTE format(
+                      'CREATE TABLE %I PARTITION OF public.option_min FOR VALUES FROM (%L) TO (%L)',
+                      part_name, m_start, (m_start + interval '1 month')::date
+                    );
+                  END IF;
+                  m_start := (m_start + interval '1 month')::date;
+                END LOOP;
+                IF to_regclass('public.option_min_default') IS NULL THEN
+                  CREATE TABLE option_min_default PARTITION OF public.option_min DEFAULT;
+                END IF;
+                RETURN;
+              END IF;
+
+              RAISE NOTICE 'Migrating option_min heap to RANGE partitions on bar_time ...';
+
+              DELETE FROM public.option_min om
+              WHERE EXISTS (
+                SELECT 1 FROM public.option_min om2
+                WHERE om2.symbol = om.symbol
+                  AND om2.expiry = om.expiry
+                  AND om2.strike = om.strike
+                  AND om2.option_right = om.option_right
+                  AND om2.period = om.period
+                  AND om2.bar_time = om.bar_time
+                  AND om2.source = om.source
+                  AND om2.option_min_id < om.option_min_id
+              );
+
+              CREATE TABLE option_min_new (
+                option_min_id bigint NOT NULL DEFAULT nextval('option_min_option_min_id_seq'),
+                symbol text NOT NULL,
+                expiry text NOT NULL,
+                strike double precision NOT NULL,
+                option_right text NOT NULL,
+                period text NOT NULL,
+                bar_time timestamptz NOT NULL,
+                open double precision,
+                high double precision,
+                low double precision,
+                close double precision,
+                volume double precision,
+                vwap double precision,
+                source text NOT NULL DEFAULT 'ib',
+                created_at timestamptz DEFAULT now(),
+                CONSTRAINT option_min_mig_pkey PRIMARY KEY (symbol, expiry, strike, option_right, period, bar_time, source)
+              ) PARTITION BY RANGE (bar_time);
+
+              SELECT MIN(bar_time), MAX(bar_time) INTO min_bt, max_bt FROM public.option_min;
+              m_start := date_trunc('month', COALESCE(min_bt, now()))::date;
+              IF max_bt IS NULL THEN
+                max_bt := COALESCE(min_bt, now());
+              END IF;
+              m_end := (date_trunc('month', GREATEST(max_bt, now()))::date + interval '4 months')::date;
+              WHILE m_start < m_end LOOP
+                part_name := 'option_min_new_y' || to_char(m_start, 'YYYY') || 'm' || to_char(m_start, 'MM');
+                EXECUTE format(
+                  'CREATE TABLE %I PARTITION OF option_min_new FOR VALUES FROM (%L) TO (%L)',
+                  part_name, m_start, (m_start + interval '1 month')::date
+                );
+                m_start := (m_start + interval '1 month')::date;
+              END LOOP;
+              CREATE TABLE option_min_new_default PARTITION OF option_min_new DEFAULT;
+
+              INSERT INTO option_min_new (
+                option_min_id, symbol, expiry, strike, option_right, period, bar_time,
+                open, high, low, close, volume, vwap, source, created_at
+              )
+              SELECT
+                option_min_id, symbol, expiry, strike, option_right, period, bar_time,
+                open, high, low, close, volume, vwap, source, created_at
+              FROM public.option_min;
+
+              SELECT COALESCE(MAX(option_min_id), 1) INTO mx FROM option_min_new;
+              PERFORM setval('option_min_option_min_id_seq', GREATEST(mx, 1));
+
+              ALTER SEQUENCE option_min_option_min_id_seq OWNED BY NONE;
+              DROP TABLE public.option_min;
+              ALTER TABLE option_min_new RENAME TO option_min;
+              ALTER SEQUENCE option_min_option_min_id_seq OWNED BY option_min.option_min_id;
+              ALTER TABLE public.option_min
+                ALTER COLUMN option_min_id SET DEFAULT nextval('option_min_option_min_id_seq');
+
+              FOR r IN
+                SELECT c.relname AS tname FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relname LIKE 'option_min_new_y%'
+              LOOP
+                EXECUTE format(
+                  'ALTER TABLE %I RENAME TO %I',
+                  r.tname,
+                  replace(r.tname, 'option_min_new_', 'option_min_')
+                );
+              END LOOP;
+              IF to_regclass('public.option_min_new_default') IS NOT NULL THEN
+                ALTER TABLE option_min_new_default RENAME TO option_min_default;
+              END IF;
+
+              ALTER TABLE public.option_min RENAME CONSTRAINT option_min_mig_pkey TO option_min_bar_uidx;
+
+              CREATE INDEX IF NOT EXISTS option_min_symbol_expiry_strike_right_period_time
+                ON public.option_min (symbol, expiry, strike, option_right, period, bar_time DESC);
+              RAISE NOTICE 'option_min: RANGE partition migration complete.';
+            END
+            $option_min_part$;
             """
         )
         conn.commit()

@@ -3067,7 +3067,7 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
             except (TypeError, ValueError):
                 chunk_sz = 0
             if chunk_sz >= 2:
-                chunk_sz = max(5, min(chunk_sz, 100))
+                chunk_sz = max(5, min(chunk_sz, 200))
                 import psycopg2
 
                 from src.massive.option_day_pool_fill import (

@@ -1993,6 +1993,27 @@ button.dashboard-queue-summary-status-console-nav:focus-visible {
   margin-top: 0;
   margin-bottom: var(--space-2);
 }
+
+/* Hash shortcuts under Queues tabs: parent .section-hint uses --color-text-muted; give links theme tokens so dark/light both read clearly. */
+.dashboard-celery-queues .celery-queue-hint a {
+  color: var(--color-link);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-link) 55%, transparent);
+  text-underline-offset: 2px;
+  font-weight: 500;
+  transition: color var(--transition-fast), text-decoration-color var(--transition-fast);
+}
+
+.dashboard-celery-queues .celery-queue-hint a:hover {
+  color: var(--color-link-hover);
+  text-decoration-color: var(--color-link-hover);
+}
+
+.dashboard-celery-queues .celery-queue-hint a:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
 .celery-queue-confirm-overlay {
   position: fixed;
   inset: 0;

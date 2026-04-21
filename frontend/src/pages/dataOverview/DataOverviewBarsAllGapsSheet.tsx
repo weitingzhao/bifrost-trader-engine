@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { OptionBarsContractsGapResult } from '../../api'
 import type { DataOverviewOptionJobsBarHandle } from './DataOverviewOptionJobsBar'
+import { DataOverviewBarsGapQueriesSheet } from './DataOverviewBarsGapQueriesSheet'
 
 export function DataOverviewBarsAllGapsSheet({
   open,
@@ -22,6 +23,7 @@ export function DataOverviewBarsAllGapsSheet({
 }) {
   const asideRef = useRef<HTMLDivElement | null>(null)
   const [localErr, setLocalErr] = useState<string | null>(null)
+  const [queriesCtx, setQueriesCtx] = useState<{ sym: string; exp: string } | null>(null)
 
   const poolUpperSet = useMemo(
     () => new Set(comparePool.map(s => s.trim().toUpperCase()).filter(Boolean)),
@@ -52,6 +54,10 @@ export function DataOverviewBarsAllGapsSheet({
     if (!open) return
     const t = window.setTimeout(() => asideRef.current?.focus(), 0)
     return () => window.clearTimeout(t)
+  }, [open])
+
+  useEffect(() => {
+    if (!open) setQueriesCtx(null)
   }, [open])
 
   const title = table === 'option_min' ? 'All option_min gaps' : 'All option_day gaps'
@@ -136,6 +142,7 @@ export function DataOverviewBarsAllGapsSheet({
   if (!open) return null
 
   return (
+    <>
     <div className="ref-jobs-sheet-backdrop" role="presentation" onClick={onClose}>
       <aside
         ref={asideRef}
@@ -214,6 +221,7 @@ export function DataOverviewBarsAllGapsSheet({
                             <th scope="col">Covered</th>
                             <th scope="col">Gap</th>
                             <th scope="col">Row fill</th>
+                            <th scope="col">Queries</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -234,6 +242,15 @@ export function DataOverviewBarsAllGapsSheet({
                                   Fill row gap (expiry)
                                 </button>
                               </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="data-overview-all-gaps-sheet__queries-link"
+                                  onClick={() => setQueriesCtx({ sym: symU, exp: row.expiry })}
+                                >
+                                  SQL &amp; API
+                                </button>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -247,5 +264,16 @@ export function DataOverviewBarsAllGapsSheet({
         </div>
       </aside>
     </div>
+    {queriesCtx ? (
+      <DataOverviewBarsGapQueriesSheet
+        open
+        onClose={() => setQueriesCtx(null)}
+        symbol={queriesCtx.sym}
+        expiry={queriesCtx.exp}
+        table={table}
+        optionMinPeriod={optionMinPeriod}
+      />
+    ) : null}
+    </>
   )
 }

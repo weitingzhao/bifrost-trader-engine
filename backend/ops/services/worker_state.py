@@ -643,13 +643,17 @@ class WorkerStateService:
             result["used_memory_human"] = mem.get("used_memory_human", "N/A")
             clients = r.info(section="clients")
             result["connected_clients"] = clients.get("connected_clients", 0)
+            # Query only canonical queue names to avoid scanning celery-task-meta-* result keys.
+            # r.keys("celery*") can return thousands of result keys (result_expires=86400) and
+            # calling r.type() for each one blocks the event loop when invoked from async handlers.
             queues: Dict[str, int] = {}
-            for key in r.keys("celery*") or []:
-                k = key if isinstance(key, str) else key.decode()
-                qtype = r.type(key)
-                t = qtype if isinstance(qtype, str) else qtype.decode()
-                if t == "list":
-                    queues[k] = r.llen(key)
+            for q in self._canonical_celery_queues():
+                try:
+                    depth = r.llen(q)
+                    if depth is not None:
+                        queues[q] = int(depth)
+                except Exception:
+                    pass
             if queues:
                 result["queues"] = queues
         except Exception as e:

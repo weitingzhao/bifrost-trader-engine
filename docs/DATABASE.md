@@ -328,7 +328,6 @@
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
-| id | bigserial | 自增主键 |
 | symbol | text NOT NULL | 股票代码（如 NVDA） |
 | bar_time | date NOT NULL | K 线日期（纯日期，不含时间；如 2026-01-15） |
 | open | double precision | 开 |
@@ -343,7 +342,8 @@
 | extras | jsonb | 可选，扩展字段（如盘前/盘后价） |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
-- **唯一约束**：`UNIQUE(symbol, bar_time, source)`，便于多来源并存与 UPSERT。
+- **主键 / 唯一**：`PRIMARY KEY (symbol, bar_time, source)`（与 UPSERT 目标一致；旧版曾使用 surrogate `id` + UNIQUE，已由 `pg_ddl` 迁移）。
+- **分区**：`PARTITION BY RANGE (bar_time)`，按月子分区（`stock_day_yYYYYmMM`）+ `stock_day_default`；`db_refresh_schema` 会补齐当月及未来数月分区。
 - **索引**：`(symbol, bar_time DESC)`；补充 `(symbol, source, bar_time DESC)`（见 DDL）。
 - **读取**：GET /bars?sec_type=STK&period=1 D 在应用层对同一 `(symbol, bar_time)` 按来源优先级去重（优先 `ib`，其次 `tv`，再 `massive`）；复盘/市场数据页按 symbol、时间范围查询。
 
@@ -355,7 +355,6 @@
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
-| id | bigserial | 自增主键 |
 | symbol | text NOT NULL | 股票代码 |
 | period | text NOT NULL | 周期：如 `1 min`、`5 min`、`1 hour`（与 Massive multiplier×timespan 映射一致） |
 | bar_time | timestamptz NOT NULL | K 线周期起始时间 |
@@ -371,7 +370,8 @@
 | extras | jsonb | 可选 |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
-- **唯一约束**：`UNIQUE(symbol, period, bar_time, source)`。
+- **主键 / 唯一**：`PRIMARY KEY (symbol, period, bar_time, source)`（旧版曾使用 surrogate `id` + UNIQUE，已由 `pg_ddl` 迁移）。
+- **分区**：`PARTITION BY RANGE (bar_time)`，按月子分区 + `stock_min_default`；`db_refresh_schema` 会补齐当月及未来数月分区。
 - **索引**：建议 `(symbol, period, bar_time DESC)`；补充 `(symbol, period, source, bar_time DESC)`（见 DDL）。
 - **读取**：GET /bars?sec_type=STK&period=1 min（或 5 mins、1 hour）按 symbol、时间范围查询，并对同键多来源去重（优先级同 `stock_day`）。
 
@@ -411,7 +411,7 @@
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
-| option_day_id | bigserial | 自增主键（符合「表名_id」约定） |
+| option_day_id | bigint | 序列自增（`option_day_option_day_id_seq`），**非主键**；稳定行引用 |
 | symbol | text NOT NULL | 标的代码（期权 underlying，如 NVDA） |
 | expiry | text NOT NULL | 到期（lastTradeDateOrContractMonth，YYYYMM 或 YYYYMMDD） |
 | strike | double precision NOT NULL | 行权价 |
@@ -426,7 +426,8 @@
 | source | text NOT NULL DEFAULT 'ib' | 数据来源：`ib` 或 `massive` |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
-- **唯一约束**：`UNIQUE(symbol, expiry, strike, option_right, bar_time, source)`。
+- **主键**：`PRIMARY KEY (symbol, expiry, strike, option_right, bar_time, source)`（约束名 `option_day_bar_uidx`）；`option_day_id` 为序列列，不参与主键。
+- **分区**：`PARTITION BY RANGE (bar_time)`，按月子分区 + `option_day_default`；`db_refresh_schema` 会补齐分区。
 - **索引**：建议 `(symbol, expiry, strike, option_right, bar_time DESC)`。
 - **读取**：GET /bars?sec_type=OPT&period=1 D 并传 symbol+expiry+strike+right 或 contract_key 查询；可选 `source` 参数筛选。
 
@@ -437,7 +438,7 @@
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
-| option_min_id | bigserial | 自增主键（符合「表名_id」约定） |
+| option_min_id | bigint | 序列自增（`option_min_option_min_id_seq`），**非主键** |
 | symbol | text NOT NULL | 标的代码（期权 underlying） |
 | expiry | text NOT NULL | 到期（YYYYMM 或 YYYYMMDD） |
 | strike | double precision NOT NULL | 行权价 |
@@ -453,7 +454,8 @@
 | source | text NOT NULL DEFAULT 'ib' | 数据来源：`ib` 或 `massive` |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
-- **唯一约束**：`UNIQUE(symbol, expiry, strike, option_right, period, bar_time, source)`。
+- **主键**：`PRIMARY KEY (symbol, expiry, strike, option_right, period, bar_time, source)`（约束名 `option_min_bar_uidx`）；`option_min_id` 为序列列，不参与主键。
+- **分区**：`PARTITION BY RANGE (bar_time)`，按月子分区 + `option_min_default`；`db_refresh_schema` 会补齐分区。
 - **索引**：建议 `(symbol, expiry, strike, option_right, period, bar_time DESC)`。
 
 ### 2.16.1 表 `option_contracts`（期权合约定义）
@@ -1530,6 +1532,7 @@ python scripts/db/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-04-19 Massive 股票参考 universe 任务 kind 合并更名 | `job_massive_backfill.kind`：`ticker_reference_universe` 与 `stock_reference_universe` 合并规范名为 **`feed_stocks_tickers_reference_universe`**；`normalize_ticker_ref_kind` 将两旧名映射至新名；路由仍为 `massive_stocks` / `massive_stocks_high`。§2.16。 | Massive |
 | 2026-04-19 Massive ticker types 任务 kind 合并更名 | `job_massive_backfill.kind`：`ticker_reference_ticker_types` 与 `ticker_reference_instrument_types` / `stock_reference_instrument_types` 合并规范名为 **`feed_stocks_tickers_types`**；`normalize_ticker_ref_kind` 将旧名映射至新名；路由仍为 `massive_stocks` / `massive_stocks_high`。§2.14 / §2.16。 | Massive |
 | 2026-04-19 Massive 股票公司行动任务 kind 更名与 API | `job_massive_backfill.kind`：公司行动同步（dividends / splits / IPOs / ticker events → `massive_corporate_action`）规范名为 **`feed_stocks_corporate_action`**；`normalize_ticker_ref_kind` 将 `corporate_action` 映射至新名；REST 使用 `GET /stocks/v1/dividends`、`GET /stocks/v1/splits`（替代已弃用的 v3 reference），并补充 `GET /v3/reference/ipos`、`GET /v3/reference/tickers/{ticker}/events`。§2.16。 | Massive |
+| 2026-04-20 K 线表 RANGE 分区（时序） | `stock_day`、`stock_min`、`option_day`、`option_min` 改为 `PARTITION BY RANGE (bar_time)`（`stock_day` 分区键为 `date`），按月子分区 + DEFAULT 分区；业务主键与 `ON CONFLICT` 目标一致（`stock_day`/`stock_min` 去掉 surrogate `id`）；`option_day_id` / `option_min_id` 保留为序列列。存量堆表由 `db_refresh_schema`（`pg_ddl`）自动迁移。`option_contracts` 不变。§2.13–§2.16。 | 研究 / 运维 |
 
 ---
 

@@ -37,7 +37,10 @@ const MAX_CONCURRENT_JOB_SSE = 8
 const OPTION_CONTRACTS_COLUMN_HEALTH_PCT = 97
 
 /** Massive option_day row-gap: POST /research/massive/sync fan-out chunk size (contracts per Celery job). */
-const OPTION_DAY_ROW_GAP_FANOUT_CHUNK_SIZE = 35
+const OPTION_DAY_ROW_GAP_FANOUT_CHUNK_SIZE = 200
+
+/** Max missing option_day contracts pulled per symbol per enqueue (matches worker cap 2000). */
+const OPTION_DAY_ROW_GAP_MAX_CONTRACTS = 2000
 
 /** Parallel POST /research/massive/sync per Fill row gap batch so one slow symbol does not block the rest. */
 const OPTION_DAY_ROW_GAP_ENQUEUE_CONCURRENCY = 4
@@ -1441,7 +1444,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
                   mode: 'option_day_pool_row_gap',
                   underlying: sym,
                   row_lookback_days: 730,
-                  max_contracts: 300,
+                  max_contracts: OPTION_DAY_ROW_GAP_MAX_CONTRACTS,
                   max_expiries: 60,
                   chunk_size: OPTION_DAY_ROW_GAP_FANOUT_CHUNK_SIZE,
                 },
@@ -1914,7 +1917,8 @@ export const DataOverviewOptionJobsBar = forwardRef<
       comparedAt = g.compared_at
     }
     if (!allCompared) return { kind: 'partial' as const, n: poolUpper.length }
-    return { kind: 'sum' as const, n: poolUpper.length, pg, refTot, gapSum, comparedAt }
+    const coveragePct = refTot > 0 ? Math.round((pg / refTot) * 1000) / 10 : null
+    return { kind: 'sum' as const, n: poolUpper.length, pg, refTot, gapSum, comparedAt, coveragePct }
   }, [poolUpper, refGapBySymbol])
 
   const poolSnapshotGapRollup = useMemo(() => {
@@ -1936,8 +1940,33 @@ export const DataOverviewOptionJobsBar = forwardRef<
       comparedAt = g.compared_at
     }
     if (!allCompared) return { kind: 'partial' as const, n: poolUpper.length }
-    return { kind: 'sum' as const, n: poolUpper.length, pg, refTot, gapSum, comparedAt }
+    const coveragePct = refTot > 0 ? Math.round((pg / refTot) * 1000) / 10 : null
+    return { kind: 'sum' as const, n: poolUpper.length, pg, refTot, gapSum, comparedAt, coveragePct }
   }, [poolUpper, snapshotGapBySymbol])
+
+  /** Pool-level Cov% = 100 × ΣPG ÷ ΣRef (same as per-symbol definition, aggregated). */
+  const poolBarsGapRollup = useMemo(() => {
+    if (poolUpper.length < 2) return null
+    let pg = 0
+    let refTot = 0
+    let gapSum = 0
+    let allCompared = true
+    let comparedAt: string | undefined
+    for (const su of poolUpper) {
+      const g = barsGapBySymbol[su]
+      if (!g?.ok || !g.compared_at) {
+        allCompared = false
+        break
+      }
+      if (g.pg_total != null) pg += g.pg_total
+      if (g.massive_total != null) refTot += g.massive_total
+      if (typeof g.gap === 'number') gapSum += g.gap
+      comparedAt = g.compared_at
+    }
+    if (!allCompared) return { kind: 'partial' as const, n: poolUpper.length }
+    const coveragePct = refTot > 0 ? Math.round((pg / refTot) * 1000) / 10 : null
+    return { kind: 'sum' as const, n: poolUpper.length, pg, refTot, gapSum, comparedAt, coveragePct }
+  }, [poolUpper, barsGapBySymbol])
 
   const runCompareWithSheetTracking = useCallback(async () => {
     if (!onCompareMassiveReference || compareEligible.length === 0) return
@@ -2130,7 +2159,9 @@ export const DataOverviewOptionJobsBar = forwardRef<
     ? poolGapRollup
     : isSnapshotsFocus
       ? poolSnapshotGapRollup
-      : null
+      : isBarsFocus
+        ? poolBarsGapRollup
+        : null
   const selectedActiveGap: OptionContractsReferenceGapResult | OptionSnapshotsContractsGapResult | undefined =
     isContractsFocus ? selectedRefGap : isSnapshotsFocus ? selectedSnapshotGap : isBarsFocus ? selectedBarsGap : undefined
   const gapLoading = (isContractsFocus && refGapLoading) || (isSnapshotsFocus && snapshotGapLoading) || (isBarsFocus && barsGapLoading)
@@ -2300,7 +2331,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
       }
       return 'Every checked symbol has Gap 0 — no daily aggregates backfill is needed for missing contract coverage.'
     }
-    return 'Enqueue Celery option_day_pool_row_gap: Massive GET /v2/aggs (daily), fan-out into multiple jobs (~35 contracts each, up to 300 total per symbol, ~2y window).'
+    return 'Enqueue Celery option_day_pool_row_gap: Massive GET /v2/aggs (daily), fan-out into multiple jobs (~200 contracts each, up to 2000 total per symbol, ~2y window).'
   }, [
     isDayFocus,
     optionDayFillBusy,
@@ -2404,6 +2435,13 @@ export const DataOverviewOptionJobsBar = forwardRef<
         ? 'data-overview-ref-strip__gap-num data-overview-ref-strip__gap-num--ok'
         : 'data-overview-ref-strip__gap-num data-overview-ref-strip__gap-num--warn'
       : 'data-overview-ref-strip__gap-num'
+
+  const rollupCovPctClass =
+    activeGapRollup?.kind === 'sum' && activeGapRollup.coveragePct != null
+      ? activeGapRollup.coveragePct === 100
+        ? 'data-overview-ref-strip__cov-pct data-overview-ref-strip__cov-pct--ok'
+        : 'data-overview-ref-strip__cov-pct data-overview-ref-strip__cov-pct--warn'
+      : 'data-overview-ref-strip__cov-pct'
 
   const symbolSelectDisabled =
     !plan.ok ||
@@ -2537,7 +2575,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
           mode: 'option_day_pool_row_gap',
           underlying: u,
           row_lookback_days: 730,
-          max_contracts: 300,
+          max_contracts: OPTION_DAY_ROW_GAP_MAX_CONTRACTS,
           max_expiries: 60,
           chunk_size: OPTION_DAY_ROW_GAP_FANOUT_CHUNK_SIZE,
           ...(exp ? { expiration_date: exp } : {}),
@@ -3016,6 +3054,14 @@ export const DataOverviewOptionJobsBar = forwardRef<
                     ? `+${activeGapRollup.gapSum.toLocaleString()}`
                     : activeGapRollup.gapSum.toLocaleString()}
                 </span>
+                {activeGapRollup.coveragePct != null ? (
+                  <>
+                    {' · '}
+                    <span className={rollupCovPctClass} title="Pool Cov% = 100 × ΣPG ÷ ΣRef">
+                      {activeGapRollup.coveragePct}%
+                    </span>
+                  </>
+                ) : null}
                 <span className="data-overview-ref-strip__time" title="compared_at (UTC, last symbol in batch)">
                   {' '}
                   · {activeGapRollup.comparedAt}

@@ -7,7 +7,9 @@ import logging
 import re
 import ssl
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -15,6 +17,19 @@ from urllib.request import Request, urlopen
 logger = logging.getLogger(__name__)
 
 DEFAULT_REST_BASE = "https://api.polygon.io"
+
+# Polygon/Massive: day-range `from`/`to` may be YYYY-MM-DD or ms; use NY calendar dates for `day` bars.
+_ET = ZoneInfo("America/New_York")
+
+
+def _ny_date_range_strings_from_ms(start_ms: int, end_ms: int) -> Tuple[str, str]:
+    """Inclusive America/New_York calendar dates for a wall-clock ms interval."""
+    a, b = int(start_ms), int(end_ms)
+    if b < a:
+        a, b = b, a
+    d0 = datetime.fromtimestamp(a / 1000.0, tz=timezone.utc).astimezone(_ET).date()
+    d1 = datetime.fromtimestamp(b / 1000.0, tz=timezone.utc).astimezone(_ET).date()
+    return d0.isoformat(), d1.isoformat()
 
 
 def _as_error_str(err: Any) -> str:
@@ -759,7 +774,11 @@ class MassiveClient:
         start_ms: int,
         end_ms: int,
     ) -> Dict[str, Any]:
-        """GET /v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from}/{to} (ms).
+        """GET /v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from}/{to}.
+
+        ``from`` / ``to`` per Polygon docs: YYYY-MM-DD or millisecond timestamp. For
+        ``timespan`` ``day`` we use inclusive NY calendar dates derived from ``start_ms`` /
+        ``end_ms`` (same window as ms, easier to match REST docs / console).
 
         Follows ``next_url`` and merges ``results`` from all pages (Polygon caps page size).
         """
@@ -767,7 +786,12 @@ class MassiveClient:
         if not ot or not self._api_key:
             return {"results": [], "error": "ticker or api key missing"}
         enc = quote(ot, safe="")
-        path = f"/v2/aggs/ticker/{enc}/range/{multiplier}/{timespan}/{start_ms}/{end_ms}"
+        ts = (timespan or "").strip().lower()
+        if ts == "day":
+            d_from, d_to = _ny_date_range_strings_from_ms(start_ms, end_ms)
+            path = f"/v2/aggs/ticker/{enc}/range/{multiplier}/day/{d_from}/{d_to}"
+        else:
+            path = f"/v2/aggs/ticker/{enc}/range/{multiplier}/{timespan}/{start_ms}/{end_ms}"
         params = self._v2_range_aggs_query_params(ot)
         status, data = self._get(path, params)
         if status >= 400:

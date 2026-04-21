@@ -389,8 +389,10 @@ def queue_summary(request: Request) -> Dict[str, Any]:
 @router.get("/ops/broker/status")
 async def broker_status_extended(request: Request) -> Dict[str, Any]:
     """Extended broker status including local-management detection."""
+    import anyio
     svc = _worker_svc(request)
-    status = svc.broker_status()
+    # broker_status() makes blocking Redis/network calls; run in thread pool to avoid blocking the event loop.
+    status = await anyio.to_thread.run_sync(svc.broker_status)
     exc = _executor(request)
     locally_managed = await exc.redis_is_local()
     status["locally_managed"] = locally_managed
