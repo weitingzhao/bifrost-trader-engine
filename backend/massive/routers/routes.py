@@ -3371,6 +3371,123 @@ def get_snapshot_quality_detail(
                 "daily": [], "expiries": [], "error": str(exc)}
 
 
+@router.get("/research/massive/stock-day-gap")
+def get_stock_day_gap(
+    request: Request,
+    symbol: str = Query(..., description="Stock ticker (e.g. NVDA)"),
+    years: int = Query(10, ge=1, le=20, description="Lookback window in years"),
+) -> Dict[str, Any]:
+    """Compare stock_day bar coverage against the global trading-day calendar (purely local)."""
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.vendor.massive.stock_day_gap import compute_stock_day_gap
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"ok": False, "error": "symbol is required"}
+
+    try:
+        params = _get_conn_params(db)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                return compute_stock_day_gap(cur, sym, lookback_years=years)
+        finally:
+            conn.close()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@router.post("/research/massive/stock-day-gap/batch")
+def post_stock_day_gap_batch(
+    request: Request,
+    payload: Dict[str, Any] = Body(...),
+) -> Dict[str, Any]:
+    """Batch stock_day gap check — max 20 symbols, no external API."""
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.vendor.massive.stock_day_gap import compute_stock_day_gap
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+
+    raw = payload.get("symbols") if isinstance(payload, dict) else None
+    if not isinstance(raw, list):
+        return {"ok": False, "error": "payload.symbols must be a non-empty array"}
+
+    years = int(payload.get("years") or 10)
+    years = max(1, min(20, years))
+
+    syms: List[str] = []
+    seen: set = set()
+    for x in raw:
+        u = (str(x) or "").strip().upper()
+        if u and u not in seen:
+            seen.add(u)
+            syms.append(u)
+    if not syms:
+        return {"ok": False, "error": "payload.symbols must be a non-empty array"}
+    if len(syms) > 20:
+        return {"ok": False, "error": "At most 20 symbols per batch"}
+
+    results: Dict[str, Any] = {}
+    try:
+        params = _get_conn_params(db)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                for s in syms:
+                    try:
+                        results[s] = compute_stock_day_gap(cur, s, lookback_years=years)
+                    except Exception as exc:  # noqa: BLE001
+                        results[s] = {"ok": False, "symbol": s, "error": str(exc)}
+        finally:
+            conn.close()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+    return {"ok": True, "results": results}
+
+
+@router.get("/research/massive/stock-day-quality-detail")
+def get_stock_day_quality_detail(
+    request: Request,
+    symbol: str = Query(..., description="Stock ticker (e.g. NVDA)"),
+    days: int = Query(90, ge=1, le=365, description="Days of daily history to return"),
+) -> Dict[str, Any]:
+    """Per-day OHLC / volume / VWAP completeness for stock_day."""
+    import psycopg2
+
+    from src.persistence.postgres.connection import _get_conn_params
+    from src.vendor.massive.stock_day_gap import compute_stock_day_quality_detail
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "symbol": symbol, "latest_date": None, "daily": [], "error": "PostgreSQL not configured"}
+
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"ok": False, "symbol": "", "latest_date": None, "daily": [], "error": "symbol is required"}
+
+    try:
+        params = _get_conn_params(db)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                return compute_stock_day_quality_detail(cur, sym, days=days)
+        finally:
+            conn.close()
+    except Exception as exc:
+        return {"ok": False, "symbol": sym, "latest_date": None, "daily": [], "error": str(exc)}
+
+
 @router.get("/research/massive/corporate-actions")
 def get_massive_corporate_actions(
     request: Request,

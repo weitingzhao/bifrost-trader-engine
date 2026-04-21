@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { StatusResponse, IbAccountSnapshot } from '../types'
-import { apiBase } from '../api/shared/constants'
+import { getPortfolioApiBaseForBrowser, joinServiceBase } from '../api/shared/apiRouting'
 import { fmtUsd } from '../utils/format'
 import {
   CAR_SECTION_INTRO,
@@ -155,12 +155,21 @@ export function ModelAnalysisPage({ status }: Props) {
     setLoading(true)
     setError(null)
     try {
-      const r = await fetch(`${apiBase()}/portfolio/model-analysis?account_id=${encodeURIComponent(accountId)}`)
+      const url = joinServiceBase(
+        getPortfolioApiBaseForBrowser(),
+        `/portfolio/model-analysis?account_id=${encodeURIComponent(accountId)}`,
+      )
+      const r = await fetch(url)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const d: ModelAnalysisResponse = await r.json()
       setData(d)
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to fetch')
+      const m = e?.message ?? 'Failed to fetch'
+      setError(
+        m === 'Failed to fetch'
+          ? 'Failed to fetch (check Portfolio API is running, e.g. python scripts/run_server_portfolio.py, and same host/LAN as this UI)'
+          : m,
+      )
       setData(null)
     } finally {
       setLoading(false)

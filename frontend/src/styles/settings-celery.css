@@ -1276,7 +1276,7 @@
   color: var(--color-accent);
 }
 
-/* Queue summary + Beat schedule row (above main tabs) */
+/* Queue summary + Worker instance situation row (above main tabs) */
 .dashboard-celery-queue-and-beat {
   display: flex;
   flex-wrap: nowrap;
@@ -1291,13 +1291,13 @@
   padding-top: 0;
   border-top: none;
 }
-/* Queue summary 7/12 · Beat 5/12 — flex-grow ratio (remaining width after gap splits 7:5) */
+/* Queue summary 7/12 · Worker situation 5/12 — flex-grow ratio */
 .dashboard-celery-queue-and-beat .dashboard-celery-top-queue-summary {
   flex: 7 1 0%;
   margin-bottom: 0;
   min-width: 0;
 }
-.dashboard-celery-beat-schedule-panel {
+.dashboard-celery-queue-and-beat .dashboard-worker-instance-situation {
   flex: 5 1 0%;
   min-width: 0;
   margin-bottom: 0;
@@ -1342,10 +1342,10 @@
   font-size: var(--text-small);
 }
 .dashboard-celery-top-queue-summary-table thead th:nth-child(1) {
-  width: 12%;
+  width: 6%;
 }
 .dashboard-celery-top-queue-summary-table thead th:nth-child(2) {
-  width: 26%;
+  width: 30%;
 }
 .dashboard-celery-top-queue-summary-table thead th.dashboard-queue-summary-th-rc {
   width: 9%;
@@ -1408,18 +1408,22 @@
   color: var(--color-text-muted);
   font-size: var(--text-caption);
 }
-.dashboard-queue-summary-host-cell {
+.dashboard-queue-summary-host-cell,
+.dashboard-queue-summary-coverage-cell {
   vertical-align: middle;
   white-space: nowrap;
 }
-.dashboard-queue-summary-host-inner {
+.dashboard-queue-summary-host-inner,
+.dashboard-queue-summary-coverage-inner {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
   flex-wrap: nowrap;
 }
-.dashboard-queue-summary-th-host {
-  min-width: 5.25rem;
+.dashboard-queue-summary-th-host,
+.dashboard-queue-summary-th-coverage {
+  min-width: 2rem;
+  width: 2.25rem;
 }
 .dashboard-queue-summary-th-pg {
   width: 2rem;
@@ -3824,6 +3828,36 @@ button.dashboard-queue-summary-totals-queue-clear:focus-visible {
   font-weight: 600;
 }
 
+.dashboard-worker-limit-row--at-cap td {
+  background: color-mix(in srgb, var(--color-success, #15803d) 10%, transparent);
+}
+
+.dashboard-worker-limit-th-stack {
+  width: 3.25rem;
+  text-align: right;
+}
+
+.dashboard-worker-limit-stack-num {
+  width: 3.25rem;
+}
+
+.dashboard-worker-limit-stack-num--dev-on {
+  color: #38bdf8;
+  font-weight: 700;
+  text-shadow: 0 0 10px color-mix(in srgb, #38bdf8 28%, transparent);
+}
+
+.dashboard-worker-limit-stack-num--prod-on {
+  color: #fbbf24;
+  font-weight: 700;
+  text-shadow: 0 0 10px color-mix(in srgb, #fbbf24 28%, transparent);
+}
+
+.dashboard-worker-limit-stack-num--off {
+  color: var(--color-text-dim);
+  opacity: 0.7;
+}
+
 .dashboard-worker-limit-footnote {
   margin: 0.35rem 0 0;
   font-size: 0.75rem;
@@ -3991,10 +4025,10 @@ button.dashboard-queue-summary-totals-queue-clear:focus-visible {
   line-height: 1.35;
 }
 
-/* Queues & Instances: 8/12 Worker Instances | 4/12 (Worker Instance Config + Redis/Broker) */
+/* Queues & Instances: 7/12 Worker Instances | 5/12 (Worker instance situation + Redis/Broker) */
 .dashboard-celery-worker-broker-split {
   display: grid;
-  grid-template-columns: minmax(0, 8fr) minmax(0, 4fr);
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
   gap: var(--space-5);
   align-items: start;
   margin-top: var(--space-5);

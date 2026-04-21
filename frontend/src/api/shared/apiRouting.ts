@@ -382,6 +382,11 @@ export function getPortfolioApiBase(): string {
   return portfolioBase
 }
 
+/** Same loopback/LAN alignment as getServerApiBaseForBrowser: use same-origin /portfolio/* when page host ≠ API host. */
+export function getPortfolioApiBaseForBrowser(): string {
+  return _browserAlignApiBaseToPage(portfolioBase)
+}
+
 export function getMarketApiBase(): string {
   return marketBase
 }

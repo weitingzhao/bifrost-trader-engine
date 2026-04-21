@@ -155,6 +155,9 @@ export {
   fetchMaxPainComputeHistory,
   fetchIvTermStructure,
   fetchIvVolatilityCone,
+  fetchStockDayGap,
+  postStockDayGapBatch,
+  fetchStockDayQualityDetail,
 } from './research/research'
 export type {
   OptionSnapshotRow,
@@ -219,6 +222,11 @@ export type {
   BarQualityDetailResponse,
   OptionContractsReferenceColumnParityResult,
   OptionContractsReferenceColumnParityBatchResponse,
+  StockDayMissingYearRow,
+  StockDayGapResult,
+  StockDayGapBatchResponse,
+  StockDayQualityDailyRow,
+  StockDayQualityDetailResponse,
 } from './research/research'
 export {
   fetchTradingCapabilities,

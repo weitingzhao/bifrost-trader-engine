@@ -1,9 +1,7 @@
 import { useMemo, useState } from 'react'
 import { InfoTooltip } from '../../components/InfoTooltip'
-import { OpsHostEnvPillBadge } from '../../components/OpsHostEnvPillBadge'
 import type { AggregatedJobQueueSummaryRow } from '../../api'
 import type { QueueSummaryRow, WorkerSummary } from '../../api/ops/ops'
-import type { OpsHostEnvPill } from '../../utils/opsHostEnvPill'
 import { dedupedQueueSummaryTotals } from '../../utils/celeryRuntime'
 import { brokerQueueKeyTitle, formatQueueLabel } from '../../utils/celeryQueueLabels'
 import {
@@ -66,8 +64,6 @@ export interface CeleryTopQueueSummaryProps {
   actionBusyQueue: string | null
   workers: WorkerSummary[]
   brokerConnected: boolean | undefined
-  opsHostEnvPill: OpsHostEnvPill
-  opsHostEnvPillTitle: string
   runtimeCeleryLamp: LampColor
   runtimeCeleryStatusText: string
   onClearDone: (row: AggregatedJobQueueSummaryRow) => void | Promise<void>
@@ -102,7 +98,7 @@ export interface CeleryTopQueueSummaryProps {
 /**
  * Merged broker snapshot (Redis LLEN, Celery active/reserved from Ops) + PostgreSQL job counts
  * per queue (GET /ops/jobs/queues/summary). Shown above all Celery main tabs.
- * Host column: Ops env pill + consumer coverage lamp. R/C = Redis/Celery counts. PG columns P/R/D/F.
+ * St. column: per-queue consumer lamp only (broker-wide; not Dev/Prod). R/C = Redis/Celery counts. PG columns P/R/D/F.
  * Actions: one icon by default (delete pending); click a PG count to switch action.
  */
 export function CeleryTopQueueSummary({
@@ -113,8 +109,6 @@ export function CeleryTopQueueSummary({
   actionBusyQueue,
   workers,
   brokerConnected,
-  opsHostEnvPill,
-  opsHostEnvPillTitle,
   runtimeCeleryLamp,
   runtimeCeleryStatusText,
   onClearDone,
@@ -180,7 +174,7 @@ export function CeleryTopQueueSummary({
     >
       <h3 id="dashboard-celery-top-queue-summary-head" className="page-title-with-tooltip">
         Queue summary
-        <InfoTooltip text="R/C = Redis LLEN / Celery inspect (active + reserved). P/R/D/F = PostgreSQL job rows. If PostgreSQL P is non-zero but Redis R is 0, tasks may not be on the broker (stuck rows, deduplicated enqueue, or wrong Redis). Per-queue Host lamp yellow = no worker in inspect consumes that queue. Click a queue name or PG cell filters Worker Instances; click Total to show all instances. Default action: delete pending. Click a PG count to switch the action icon." />
+        <InfoTooltip text="R/C = Redis LLEN / Celery inspect (active + reserved). P/R/D/F = PostgreSQL job rows. If PostgreSQL P is non-zero but Redis R is 0, tasks may not be on the broker (stuck rows, deduplicated enqueue, or wrong Redis). St. = consumer status (lamp yellow if no worker in this snapshot consumes that queue). Dev vs Prod worker counts: Worker instance situation next to this table. Click a queue name or PG cell filters Worker Instances; click Total to show all instances. Default action: delete pending. Click a PG count to switch the action icon." />
       </h3>
       {queueSummaryDb === false && (
         <p className="dashboard-queue-summary-hint">PostgreSQL job totals unavailable (check ops config or DB).</p>
@@ -194,8 +188,11 @@ export function CeleryTopQueueSummary({
           <table className="table-operations dashboard-queue-summary-table dashboard-celery-top-queue-summary-table">
             <thead>
               <tr>
-                <th className="dashboard-queue-summary-th-host" title="Dev/Prod (Ops health) and queue consumer lamp (click for console)">
-                  Host
+                <th
+                  className="dashboard-queue-summary-th-coverage"
+                  title="Consumer status — whether any worker in the current snapshot consumes this queue (click lamp for console)"
+                >
+                  St.
                 </th>
                 <th scope="col">Queue</th>
                 <th scope="col" className="dashboard-queue-summary-th-rc" title="Redis LLEN / Celery inspect (active + reserved)">
@@ -230,8 +227,8 @@ export function CeleryTopQueueSummary({
                         : undefined
                     }
                   >
-                    <td className="dashboard-queue-summary-host-cell" title={opsHostEnvPillTitle}>
-                      <div className="dashboard-queue-summary-host-inner">
+                    <td className="dashboard-queue-summary-coverage-cell">
+                      <div className="dashboard-queue-summary-coverage-inner">
                         {onNavigateQueueCoverageConsole ? (
                           <button
                             type="button"
@@ -252,7 +249,6 @@ export function CeleryTopQueueSummary({
                             <span aria-hidden>●</span>
                           </span>
                         )}
-                        <OpsHostEnvPillBadge pill={opsHostEnvPill} className="dashboard-celery-env-pill" />
                       </div>
                     </td>
                     <td>
@@ -521,8 +517,8 @@ export function CeleryTopQueueSummary({
               })}
               {merged.length > 0 ? (
                 <tr className="dashboard-queue-summary-totals-row">
-                  <td className="dashboard-queue-summary-host-cell" title={opsHostEnvPillTitle}>
-                    <div className="dashboard-queue-summary-host-inner">
+                  <td className="dashboard-queue-summary-coverage-cell">
+                    <div className="dashboard-queue-summary-coverage-inner">
                       {onNavigateAggregateCoverageConsole ? (
                         <button
                           type="button"
@@ -543,7 +539,6 @@ export function CeleryTopQueueSummary({
                           <span aria-hidden>●</span>
                         </span>
                       )}
-                      <OpsHostEnvPillBadge pill={opsHostEnvPill} className="dashboard-celery-env-pill" />
                     </div>
                   </td>
                   <td>

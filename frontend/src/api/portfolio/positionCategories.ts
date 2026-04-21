@@ -1,8 +1,8 @@
 import type { PositionCategoriesResponse } from '../../types'
-import { getPortfolioApiBase, joinServiceBase } from '../shared/apiRouting'
+import { getPortfolioApiBaseForBrowser, joinServiceBase } from '../shared/apiRouting'
 
 function apiBase(): string {
-  return getPortfolioApiBase()
+  return getPortfolioApiBaseForBrowser()
 }
 
 function portfolioUrl(path: string): string {

@@ -111,6 +111,8 @@ export default defineConfig({
       '/portfolio': { target: PORTFOLIO, changeOrigin: true },
       '/positions': { target: MONITOR, changeOrigin: true },
       '/control': { target: MONITOR, changeOrigin: true },
+      // Account-sync daemon controls live under /account-sync/control/* (not /control/*).
+      '/account-sync': { target: MONITOR, changeOrigin: true },
       '/strategies': { target: STRATEGY, changeOrigin: true },
       '/api': { target: MONITOR, changeOrigin: true },
       '/config': { target: MONITOR, changeOrigin: true },

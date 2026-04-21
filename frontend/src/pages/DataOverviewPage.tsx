@@ -541,7 +541,10 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
                 onJobsSheetOpenChange={setOptionJobsSheetOpen}
               />
             ) : (
-              <DataOverviewWatchlistStocks wlRows={wlRows} />
+              <DataOverviewWatchlistStocks
+                wlRows={wlRows}
+                onWatchlistRefreshRequested={refreshPipelineAfterJobs}
+              />
             )}
           </>
         ) : null}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import type {
   WatchlistDbCoverageStockDay,
   WatchlistDbCoverageStockMin,
@@ -14,6 +14,7 @@ import {
   showStocksFocusTable,
   STOCKS_FOCUS_TABLE_IDS,
 } from './stockFocusDataset'
+import { DataOverviewStockDayJobsBar } from './DataOverviewStockDayJobsBar'
 
 const EMPTY_SD: WatchlistDbCoverageStockDay = {
   has_data: false,
@@ -204,11 +205,29 @@ function FocusStocksChipSelector({
 
 export interface DataOverviewWatchlistStocksProps {
   wlRows: WatchlistDbCoverageSymbolRow[]
+  onWatchlistRefreshRequested?: () => void
 }
 
-export function DataOverviewWatchlistStocks({ wlRows }: DataOverviewWatchlistStocksProps) {
+export function DataOverviewWatchlistStocks({ wlRows, onWatchlistRefreshRequested }: DataOverviewWatchlistStocksProps) {
   const [subTab, setSubTab] = useState<StocksSubTab>('summary')
   const [focusDataset, setFocusDataset] = useState<StocksFocusDataset>('all')
+
+  // ── stock_day pool management ──────────────────────────────────────────────
+  const [stockDayPool, setStockDayPool] = useState<string[]>([])
+
+  const handleTogglePool = useCallback((symbol: string) => {
+    const u = symbol.trim().toUpperCase()
+    if (!u) return
+    setStockDayPool(prev => prev.includes(u) ? prev.filter(s => s !== u) : [...prev, u])
+  }, [])
+
+  const handleSelectAllPool = useCallback(() => {
+    const all = wlRows.map(r => r.symbol.trim().toUpperCase()).filter(Boolean)
+    const seen = new Set<string>()
+    setStockDayPool(all.filter(s => (seen.has(s) ? false : (seen.add(s), true))))
+  }, [wlRows])
+
+  const handleClearPool = useCallback(() => setStockDayPool([]), [])
 
   const summaryRows = useMemo(() => buildStocksSummaryRows(wlRows), [wlRows])
 
@@ -286,6 +305,15 @@ export function DataOverviewWatchlistStocks({ wlRows }: DataOverviewWatchlistSto
           <div style={{ marginBottom: 'var(--space-3)' }}>
             <FocusStocksChipSelector value={focusDataset} onChange={setFocusDataset} />
           </div>
+
+          <DataOverviewStockDayJobsBar
+            wlRows={wlRows}
+            comparePool={stockDayPool}
+            onToggleComparePool={handleTogglePool}
+            onSelectAllComparePool={handleSelectAllPool}
+            onClearComparePool={handleClearPool}
+            onWatchlistRefreshRequested={onWatchlistRefreshRequested}
+          />
 
           <div className="replay-section data-overview-wl-matrix" style={{ marginBottom: 'var(--space-3)' }}>
             <div className="feed-massive-table-wrap">
@@ -391,10 +419,20 @@ export function DataOverviewWatchlistStocks({ wlRows }: DataOverviewWatchlistSto
                     const tt = rowTt(r)
                     const sdAge = sd.has_data ? isoAgeSeconds(sd.stock_day_last_bar ?? sd.stock_day_last_created_at) : null
                     const smAge = sm.has_data ? isoAgeSeconds(sm.last_bar_time ?? sm.last_created_at) : null
+                    const symU = r.symbol.trim().toUpperCase()
+                    const inPool = stockDayPool.includes(symU)
                     return (
-                      <tr key={r.symbol}>
+                      <tr key={r.symbol} className={inPool ? 'data-overview-wl-matrix__row--pool' : undefined}>
                         <th className="data-overview-wl-matrix__sticky-col" scope="row">
-                          <strong>{r.symbol}</strong>
+                          <button
+                            type="button"
+                            className={`data-overview-wl-matrix__sym-btn${inPool ? ' data-overview-wl-matrix__sym-btn--on' : ''}`}
+                            onClick={() => handleTogglePool(r.symbol)}
+                            aria-pressed={inPool}
+                            title={inPool ? 'Remove from pool' : 'Add to pool'}
+                          >
+                            {r.symbol}
+                          </button>
                         </th>
                         {show('stock_day') ? (
                           <>

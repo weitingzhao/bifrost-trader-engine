@@ -204,6 +204,41 @@ function countInstancesForProfile(insts: SystemdInstance[], profileKey: string):
   return n
 }
 
+/** Dev/prod/unknown from worker Redis presence (``worker_config_profile``), matched by profile key in nodename instance id. */
+function countWorkerStackByProfileKey(
+  workers: WorkerSummary[],
+  profileKey: string,
+): { dev: number; prod: number; unknown: number } {
+  const z = { dev: 0, prod: 0, unknown: 0 }
+  for (const w of workers) {
+    const iid = workerIdToInstanceId(w.worker_id)
+    if (!iid) continue
+    const parts = parseCeleryWorkerInstanceId(iid)
+    if (parts?.profileKey !== profileKey) continue
+    const cp = (w.worker_config_profile ?? '').toLowerCase().trim()
+    if (cp === 'dev') z.dev += 1
+    else if (cp === 'prod') z.prod += 1
+    else z.unknown += 1
+  }
+  return z
+}
+
+function workerSituationRowDetailTitle(
+  cur: number,
+  maxN: number,
+  atCap: boolean,
+  stack: { dev: number; prod: number; unknown: number },
+): string {
+  const sys = atCap
+    ? `Systemd units on this host for this profile: ${cur} (at or above max ${maxN}).`
+    : `Systemd units on this host for this profile: ${cur} / max ${maxN}.`
+  const unk =
+    stack.unknown > 0
+      ? ` Unknown (no dev/prod in Redis presence): ${stack.unknown}.`
+      : ''
+  return `${sys} Celery on broker — Dev ${stack.dev}, Prod ${stack.prod}.${unk}`
+}
+
 function workerProfileForInstanceUnit(
   unit: string,
   profiles: WorkerProfileInfo[],
@@ -1924,8 +1959,6 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           actionBusyQueue={topQueueActionBusy}
           workers={workers}
           brokerConnected={broker?.connected}
-          opsHostEnvPill={opsHostEnvPill}
-          opsHostEnvPillTitle={opsHostEnvPillTitle}
           runtimeCeleryLamp={runtimeCeleryLamp}
           runtimeCeleryStatusText={runtimeCeleryStatusText}
           onOpenSupportTasksFilter={openSupportTasksWithQueueFilter}
@@ -1942,12 +1975,91 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           highlightQueueName={workerInstancesQueueFilter}
           onTotalsRowClearWorkerFilter={clearWorkerInstancesQueueFilterFromTotals}
         />
-        <CeleryBeatSchedulePanel
-          entries={beatScheduleEntries}
-          timezone={beatScheduleTimezone}
-          loading={loading}
-          error={beatScheduleError}
-        />
+        <section
+          className="replay-section dashboard-section dashboard-worker-instance-situation"
+          aria-labelledby="dashboard-worker-instance-situation-head"
+        >
+          <h3 id="dashboard-worker-instance-situation-head" className="page-title-with-tooltip">
+            Worker instance situation
+            <InfoTooltip text="Per profile: max_worker_instances from ops.worker_profiles (GET /ops/workers/profiles). Dev and Prod columns count Celery workers on the broker whose nodename instance id matches the profile (GET /ops/workers), using worker_config_profile from Redis presence (BIFROST_CONFIG). Workers without dev/prod in presence are summarized in the row hover text. Add all / Reset use on-host systemd counts toward max. Edit config.yaml and reload Ops to change limits." />
+          </h3>
+          {workerProfilesDistinct.length > 0 ? (
+            <div className="dashboard-worker-instance-limits" role="region" aria-label="Worker instance limits and stack on this host">
+              <table className="table-operations dashboard-worker-instance-limits-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Profile</th>
+                    <th
+                      scope="col"
+                      title="Target bifrost-celery-worker units for this profile on this Ops host (config max_worker_instances)."
+                    >
+                      Max workers
+                    </th>
+                    <th
+                      scope="col"
+                      className="dashboard-worker-limit-th-stack"
+                      title="Celery workers for this profile (instance id in nodename) reporting dev stack (BIFROST_CONFIG via Redis presence)."
+                    >
+                      Dev
+                    </th>
+                    <th
+                      scope="col"
+                      className="dashboard-worker-limit-th-stack"
+                      title="Celery workers for this profile (instance id in nodename) reporting prod stack (BIFROST_CONFIG via Redis presence)."
+                    >
+                      Prod
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {workerProfilesDistinct.map(p => {
+                    const maxN = profileMaxInstances(p)
+                    const cur = countInstancesForProfile(instances, p.key)
+                    const stack = countWorkerStackByProfileKey(workers, p.key)
+                    const atCap = cur >= maxN
+                    const rowTitle = workerSituationRowDetailTitle(cur, maxN, atCap, stack)
+                    return (
+                      <tr
+                        key={`lim-${p.key}`}
+                        className={atCap ? 'dashboard-worker-limit-row--at-cap' : undefined}
+                        title={rowTitle}
+                      >
+                        <td>
+                          <span className="dashboard-worker-limit-label">{p.label}</span>
+                          <code className="dashboard-worker-limit-key">{p.key}</code>
+                        </td>
+                        <td className="dashboard-worker-limit-num">{maxN}</td>
+                        <td
+                          className={`dashboard-worker-limit-num dashboard-worker-limit-stack-num ${
+                            stack.dev > 0
+                              ? 'dashboard-worker-limit-stack-num--dev-on'
+                              : 'dashboard-worker-limit-stack-num--off'
+                          }`}
+                        >
+                          {stack.dev}
+                        </td>
+                        <td
+                          className={`dashboard-worker-limit-num dashboard-worker-limit-stack-num ${
+                            stack.prod > 0
+                              ? 'dashboard-worker-limit-stack-num--prod-on'
+                              : 'dashboard-worker-limit-stack-num--off'
+                          }`}
+                        >
+                          {stack.prod}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              <p className="dashboard-worker-limit-footnote">
+                Limits are read from config (reload Ops after editing YAML). default_max_worker_instances applies when a profile omits max_worker_instances. On this Ops host: systemd instances {instances.length} total.
+              </p>
+            </div>
+          ) : (
+            <p className="dashboard-empty-inline">No profiles</p>
+          )}
+        </section>
       </div>
 
       <div
@@ -2020,11 +2132,11 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             />
           <div className="dashboard-celery-worker-broker-split">
             <div className="dashboard-celery-worker-instances-main">
-            {/* ── Worker Instances (8/12): running units + scale controls ─────────────────────────────────── */}
+            {/* ── Worker Instances (7/12): running units + scale controls ─────────────────────────────────── */}
             <section className="replay-section dashboard-section dashboard-scaling" aria-labelledby="dashboard-scale-head">
               <h3 id="dashboard-scale-head" className="page-title-with-tooltip">
                 Worker Instances
-                <InfoTooltip text="Running systemd/Celery worker units on this Ops host. Instance IDs are profile_key-sequence (Cycle). Queue summary: click a queue cell to filter this list. Profile bubbles: Add Instance / ALL with Add all, Reset all, Remove all. Per row: Recreate / Remove. Limits and max counts are in Worker Instance Config (right). Host chip = GET /ops/health." />
+                <InfoTooltip text="Running systemd/Celery worker units on this Ops host. Instance IDs are profile_key-sequence (Cycle). Queue summary: click a queue cell to filter this list. Profile bubbles: Add Instance / ALL with Add all, Reset all, Remove all. Per row: Recreate / Remove. Limits and Dev/Prod stack counts are in Worker instance situation (next to Queue summary above). Host chip = Ops API environment (GET /ops/health), not broker queue scope." />
               </h3>
               {scaleMsg.text && (
                 <span className={`settings-page-msg ${scaleMsg.isErr ? 'msg-error' : 'msg-ok'}`}>{scaleMsg.text}</span>
@@ -2327,63 +2439,14 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             </div>
 
             <div className="dashboard-celery-worker-broker-side">
-            {/* ── Worker Instance Config (4/12): per-profile max vs on-host count ───────────────── */}
-            <section
-              className="replay-section dashboard-section dashboard-worker-instance-config"
-              aria-labelledby="dashboard-worker-instance-config-head"
-            >
-              <h3 id="dashboard-worker-instance-config-head" className="page-title-with-tooltip">
-                Worker Instance Config
-                <InfoTooltip text="max_worker_instances and on-host counts from ops.worker_profiles (GET /ops/workers/profiles). Add all / Reset fill toward these limits. Edit config.yaml and reload Ops to change limits. default_max_worker_instances applies when a profile omits max_worker_instances." />
-              </h3>
-              {workerProfilesDistinct.length > 0 ? (
-                <div className="dashboard-worker-instance-limits" role="region" aria-label="Worker instance limits on this host">
-                  <table className="table-operations dashboard-worker-instance-limits-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">Profile</th>
-                        <th
-                          scope="col"
-                          title="Target bifrost-celery-worker units for this profile on this Ops host (config max_worker_instances)."
-                        >
-                          Max workers
-                        </th>
-                        <th scope="col">On this host</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {workerProfilesDistinct.map(p => {
-                        const maxN = profileMaxInstances(p)
-                        const cur = countInstancesForProfile(instances, p.key)
-                        const atCap = cur >= maxN
-                        return (
-                          <tr key={`lim-${p.key}`}>
-                            <td>
-                              <span className="dashboard-worker-limit-label">{p.label}</span>
-                              <code className="dashboard-worker-limit-key">{p.key}</code>
-                            </td>
-                            <td className="dashboard-worker-limit-num">{maxN}</td>
-                            <td
-                              className={`dashboard-worker-limit-num ${atCap ? 'dashboard-worker-limit-at-cap' : ''}`}
-                              title={atCap ? 'At or above configured max' : 'Below max — Add all will add more'}
-                            >
-                              {cur}
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                  <p className="dashboard-worker-limit-footnote">
-                    Limits are read from config (reload Ops after editing YAML). default_max_worker_instances applies when a profile omits max_worker_instances.
-                  </p>
-                </div>
-              ) : (
-                <p className="dashboard-empty-inline">No profiles</p>
-              )}
-            </section>
+            <CeleryBeatSchedulePanel
+              entries={beatScheduleEntries}
+              timezone={beatScheduleTimezone}
+              loading={loading}
+              error={beatScheduleError}
+            />
 
-            {/* ── Broker Control (4/12 column, below Worker Instance Config) ─────────────────────────────────── */}
+            {/* ── Broker Control (side column, below Scheduled Celery Beat) ───────────────────────────────── */}
             <section
               className="replay-section dashboard-section dashboard-broker-ctrl dashboard-broker-ctrl--celery-column"
               aria-labelledby="dashboard-broker-ctrl-head"
@@ -3160,7 +3223,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                   <div className="celery-support-tasks-sheet__head-lead">
                     <h3 id="celery-scheduled-jobs-head" className="page-title-with-tooltip">
                       Scheduled Jobs
-                      <InfoTooltip text="Celery Beat task names from GET /ops/celery/capabilities (same source as the former Celery Beat block under Support Tasks). Most enqueue run_massive_job; beat_refresh_expirations runs in-process and does not correspond to a matrix row. UTC cron-style times are in Scheduled Celery Beat above the tabs." />
+                      <InfoTooltip text="Celery Beat task names from GET /ops/celery/capabilities (same source as the former Celery Beat block under Support Tasks). Most enqueue run_massive_job; beat_refresh_expirations runs in-process and does not correspond to a matrix row. UTC cron-style times are in Scheduled Celery Beat (Queues and Instances tab, above Redis/Broker)." />
                     </h3>
                   </div>
                   <button

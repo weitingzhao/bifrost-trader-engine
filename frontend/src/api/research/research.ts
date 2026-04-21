@@ -2936,6 +2936,114 @@ export interface SnapshotQualityDetailResponse {
   error?: string
 }
 
+// ── stock_day gap / quality ────────────────────────────────────────────────────
+
+export interface StockDayMissingYearRow {
+  year: number
+  count: number
+  first_missing: string | null
+  last_missing: string | null
+}
+
+export interface StockDayGapResult {
+  ok: boolean
+  symbol?: string
+  error?: string
+  has_rows?: boolean
+  /** Global trading-day count (all symbols, same window). */
+  ref_total?: number
+  /** Distinct bar_time count for this symbol. */
+  covered_total?: number
+  /** ref_total - covered_total */
+  gap?: number
+  coverage_pct?: number
+  missing_by_year?: StockDayMissingYearRow[]
+  compared_at?: string
+  message?: string
+}
+
+export interface StockDayGapBatchResponse {
+  ok: boolean
+  results?: Record<string, StockDayGapResult>
+  error?: string
+}
+
+export interface StockDayQualityDailyRow {
+  /** YYYY-MM-DD */
+  bar_date: string
+  ohlc_pct: number | null
+  volume_pct: number | null
+  vwap_pct: number | null
+}
+
+export interface StockDayQualityDetailResponse {
+  ok: boolean
+  symbol: string
+  latest_date: string | null
+  daily: StockDayQualityDailyRow[]
+  error?: string
+}
+
+/** GET /research/massive/stock-day-gap */
+export async function fetchStockDayGap(
+  symbol: string,
+  years = 10,
+): Promise<StockDayGapResult> {
+  const s = (symbol || '').trim().toUpperCase()
+  if (!s) return { ok: false, error: 'symbol is required' }
+  const q = new URLSearchParams({ symbol: s, years: String(years) })
+  try {
+    const r = await fetch(massiveUrl(`/research/massive/stock-day-gap?${q}`))
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) return { ok: false, error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}` }
+    return j as StockDayGapResult
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'fetch failed' }
+  }
+}
+
+/** POST /research/massive/stock-day-gap/batch — max 20 symbols */
+export async function postStockDayGapBatch(
+  symbols: string[],
+  years = 10,
+): Promise<StockDayGapBatchResponse> {
+  const uniq = [...new Set(symbols.map(x => (x || '').trim().toUpperCase()).filter(Boolean))]
+  if (uniq.length === 0) return { ok: false, error: 'symbols is required' }
+  try {
+    const r = await fetch(massiveUrl('/research/massive/stock-day-gap/batch'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbols: uniq, years }),
+    })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) return { ok: false, error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}` }
+    return j as StockDayGapBatchResponse
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'fetch failed' }
+  }
+}
+
+/** GET /research/massive/stock-day-quality-detail */
+export async function fetchStockDayQualityDetail(
+  symbol: string,
+  days = 90,
+): Promise<StockDayQualityDetailResponse> {
+  const s = (symbol || '').trim().toUpperCase()
+  if (!s) return { ok: false, symbol: '', latest_date: null, daily: [], error: 'symbol is required' }
+  const q = new URLSearchParams({ symbol: s, days: String(days) })
+  try {
+    const r = await fetch(massiveUrl(`/research/massive/stock-day-quality-detail?${q}`))
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) {
+      return { ok: false, symbol: s, latest_date: null, daily: [],
+        error: typeof j.error === 'string' ? j.error : `HTTP ${r.status}` }
+    }
+    return j as StockDayQualityDetailResponse
+  } catch (e) {
+    return { ok: false, symbol: s, latest_date: null, daily: [], error: e instanceof Error ? e.message : 'fetch failed' }
+  }
+}
+
 export async function fetchSnapshotQualityDetail(
   symbol: string,
   source = 'massive',
