@@ -1,11 +1,14 @@
 import { useCallback, useMemo, useState } from 'react'
-import type {
-  WatchlistDbCoverageStockDay,
-  WatchlistDbCoverageStockMin,
-  WatchlistDbCoverageSymbolRow,
-  WatchlistDbCoverageTickerOverview,
-  WatchlistDbCoverageTickerTypes,
-  WatchlistDbCoverageTickers,
+import {
+  fetchStockDayQualityDetail,
+  type StockDayGapResult,
+  type StockDayQualityDetailResponse,
+  type WatchlistDbCoverageStockDay,
+  type WatchlistDbCoverageStockMin,
+  type WatchlistDbCoverageSymbolRow,
+  type WatchlistDbCoverageTickerOverview,
+  type WatchlistDbCoverageTickerTypes,
+  type WatchlistDbCoverageTickers,
 } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import {
@@ -15,6 +18,7 @@ import {
   STOCKS_FOCUS_TABLE_IDS,
 } from './stockFocusDataset'
 import { DataOverviewStockDayJobsBar } from './DataOverviewStockDayJobsBar'
+import { DataOverviewStockDayQualitySheet } from './DataOverviewStockDayQualitySheet'
 
 const EMPTY_SD: WatchlistDbCoverageStockDay = {
   has_data: false,
@@ -41,8 +45,6 @@ function rowTo(r: WatchlistDbCoverageSymbolRow): WatchlistDbCoverageTickerOvervi
 function rowTt(r: WatchlistDbCoverageSymbolRow): WatchlistDbCoverageTickerTypes {
   return r.ticker_types ?? EMPTY_TT
 }
-
-export type StocksSubTab = 'summary' | 'by_symbol'
 
 function fmtTs(iso: string | null | undefined): string {
   if (!iso) return '—'
@@ -203,13 +205,57 @@ function FocusStocksChipSelector({
   )
 }
 
+export function DataOverviewWatchlistStocksSummaryTable({
+  wlRows,
+}: {
+  wlRows: WatchlistDbCoverageSymbolRow[]
+}) {
+  const summaryRows = useMemo(() => buildStocksSummaryRows(wlRows), [wlRows])
+  return (
+    <div className="feed-massive-table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th scope="col">Table</th>
+            <th scope="col">Pipeline</th>
+            <th scope="col">Coverage</th>
+            <th scope="col">
+              Freshness
+              <InfoTooltip text="Worst-case age across watchlist symbols where applicable; ticker_types uses the dictionary’s max(created_at)." />
+            </th>
+            <th scope="col">Health</th>
+          </tr>
+        </thead>
+        <tbody>
+          {summaryRows.map(row => (
+            <tr key={row.table}>
+              <td>
+                <code>{row.table}</code>
+              </td>
+              <td style={{ fontSize: 'var(--text-caption)' }}>{row.pipeline}</td>
+              <td style={{ fontSize: 'var(--text-caption)' }}>{row.coverage}</td>
+              <td style={{ fontSize: 'var(--text-caption)' }}>{row.freshness}</td>
+              <td style={{ fontSize: 'var(--text-caption)' }}>{row.health}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export interface DataOverviewWatchlistStocksProps {
   wlRows: WatchlistDbCoverageSymbolRow[]
+  /** When false, hide the collapsible watchlist summary block (Detail page only). */
+  showWatchlistSummary?: boolean
   onWatchlistRefreshRequested?: () => void
 }
 
-export function DataOverviewWatchlistStocks({ wlRows, onWatchlistRefreshRequested }: DataOverviewWatchlistStocksProps) {
-  const [subTab, setSubTab] = useState<StocksSubTab>('summary')
+export function DataOverviewWatchlistStocks({
+  wlRows,
+  showWatchlistSummary = true,
+  onWatchlistRefreshRequested,
+}: DataOverviewWatchlistStocksProps) {
   const [focusDataset, setFocusDataset] = useState<StocksFocusDataset>('all')
 
   // ── stock_day pool management ──────────────────────────────────────────────
@@ -229,76 +275,46 @@ export function DataOverviewWatchlistStocks({ wlRows, onWatchlistRefreshRequeste
 
   const handleClearPool = useCallback(() => setStockDayPool([]), [])
 
-  const summaryRows = useMemo(() => buildStocksSummaryRows(wlRows), [wlRows])
+  // ── Gap results (from JobsBar Check, used by matrix) ──────────────────────
+  const [matrixGapBySymbol, setMatrixGapBySymbol] = useState<Record<string, StockDayGapResult>>({})
+
+  // ── Quality sheet state ────────────────────────────────────────────────────
+  const [qualitySheetSymbol, setQualitySheetSymbol] = useState<string | null>(null)
+  const [qualitySheetData, setQualitySheetData] = useState<StockDayQualityDetailResponse | null>(null)
+  const [qualitySheetLoading, setQualitySheetLoading] = useState(false)
+
+  const handleOpenQualitySheet = useCallback(async (sym: string) => {
+    setQualitySheetSymbol(sym)
+    setQualitySheetData(null)
+    setQualitySheetLoading(true)
+    try {
+      const data = await fetchStockDayQualityDetail(sym, 90)
+      setQualitySheetData(data)
+    } catch {
+      setQualitySheetData({ ok: false, symbol: sym, latest_date: null, daily: [], error: 'fetch failed' })
+    } finally {
+      setQualitySheetLoading(false)
+    }
+  }, [])
 
   const show = (t: StocksFocusTableId) => showStocksFocusTable(focusDataset, t)
 
   return (
     <>
-      <div className="feed-massive-agg-tabs-wrap" style={{ marginBottom: 'var(--space-3)' }}>
-        <div className="feed-massive-agg-tabs" role="tablist" aria-label="Watchlist Stocks view">
-          <button
-            type="button"
-            role="tab"
-            className={`feed-massive-agg-tab${subTab === 'summary' ? ' feed-massive-agg-tab--active' : ''}`}
-            aria-selected={subTab === 'summary'}
-            tabIndex={subTab === 'summary' ? 0 : -1}
-            onClick={() => setSubTab('summary')}
+      {showWatchlistSummary ? (
+        <details open className="replay-section data-overview-watchlist-summary" style={{ marginBottom: 'var(--space-3)' }}>
+          <summary
+            className="page-title-with-tooltip data-overview-watchlist-summary__summary"
+            style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)', cursor: 'pointer' }}
           >
-            Summary
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className={`feed-massive-agg-tab${subTab === 'by_symbol' ? ' feed-massive-agg-tab--active' : ''}`}
-            aria-selected={subTab === 'by_symbol'}
-            tabIndex={subTab === 'by_symbol' ? 0 : -1}
-            onClick={() => setSubTab('by_symbol')}
-          >
-            By symbol
-          </button>
-        </div>
-      </div>
-
-      {subTab === 'summary' ? (
-        <div className="replay-section" style={{ marginBottom: 'var(--space-3)' }}>
-          <h4 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)' }}>
-            Stock datasets (watchlist summary)
+            Watchlist summary
             <InfoTooltip text="Watchlist-scoped aggregates (max 80 optionable STK). ticker_types is one global table — coverage shows total dictionary rows." />
-          </h4>
-          <div className="feed-massive-table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">Table</th>
-                  <th scope="col">Pipeline</th>
-                  <th scope="col">Coverage</th>
-                  <th scope="col">
-                    Freshness
-                    <InfoTooltip text="Worst-case age across watchlist symbols where applicable; ticker_types uses the dictionary’s max(created_at)." />
-                  </th>
-                  <th scope="col">Health</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summaryRows.map(row => (
-                  <tr key={row.table}>
-                    <td>
-                      <code>{row.table}</code>
-                    </td>
-                    <td style={{ fontSize: 'var(--text-caption)' }}>{row.pipeline}</td>
-                    <td style={{ fontSize: 'var(--text-caption)' }}>{row.coverage}</td>
-                    <td style={{ fontSize: 'var(--text-caption)' }}>{row.freshness}</td>
-                    <td style={{ fontSize: 'var(--text-caption)' }}>{row.health}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : (
-        <>
-          <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
+          </summary>
+          <DataOverviewWatchlistStocksSummaryTable wlRows={wlRows} />
+        </details>
+      ) : null}
+
+      <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
             One row per watchlist symbol. Fundamental datasets only (no staging/report). Scroll horizontally; Symbol stays
             fixed.
           </p>
@@ -313,6 +329,8 @@ export function DataOverviewWatchlistStocks({ wlRows, onWatchlistRefreshRequeste
             onSelectAllComparePool={handleSelectAllPool}
             onClearComparePool={handleClearPool}
             onWatchlistRefreshRequested={onWatchlistRefreshRequested}
+            onOpenQualitySheet={sym => void handleOpenQualitySheet(sym)}
+            onGapResultsUpdate={setMatrixGapBySymbol}
           />
 
           <div className="replay-section data-overview-wl-matrix" style={{ marginBottom: 'var(--space-3)' }}>
@@ -324,7 +342,7 @@ export function DataOverviewWatchlistStocks({ wlRows, onWatchlistRefreshRequeste
                       Symbol
                     </th>
                     {show('stock_day') ? (
-                      <th colSpan={5} scope="colgroup">
+                      <th colSpan={7} scope="colgroup">
                         <code>stock_day</code>
                       </th>
                     ) : null}
@@ -365,6 +383,14 @@ export function DataOverviewWatchlistStocks({ wlRows, onWatchlistRefreshRequeste
                         <th scope="col">Rows</th>
                         <th scope="col">Distinct dates</th>
                         <th scope="col">Last created</th>
+                        <th scope="col">
+                          Gap
+                          <InfoTooltip text="Missing trading days vs global calendar (populated after Check)." />
+                        </th>
+                        <th scope="col">
+                          Cov%
+                          <InfoTooltip text="Coverage % vs global trading-day calendar (populated after Check)." />
+                        </th>
                       </>
                     ) : null}
                     {show('stock_min') ? (
@@ -433,6 +459,13 @@ export function DataOverviewWatchlistStocks({ wlRows, onWatchlistRefreshRequeste
                           >
                             {r.symbol}
                           </button>
+                          <button
+                            type="button"
+                            className="data-overview-wl-matrix__sym-detail-btn"
+                            onClick={() => void handleOpenQualitySheet(symU)}
+                            title={`Open daily bar quality for ${r.symbol}`}
+                            aria-label={`Bar quality detail for ${r.symbol}`}
+                          >↗</button>
                         </th>
                         {show('stock_day') ? (
                           <>
@@ -466,6 +499,30 @@ export function DataOverviewWatchlistStocks({ wlRows, onWatchlistRefreshRequeste
                             <td>{sd.has_data && sd.row_count != null ? sd.row_count.toLocaleString() : '—'}</td>
                             <td>{sd.has_data && sd.distinct_bar_dates != null ? sd.distinct_bar_dates : '—'}</td>
                             <td style={{ fontSize: 'var(--text-caption)' }}>{fmtTs(sd.stock_day_last_created_at)}</td>
+                            <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                              {(() => {
+                                const g = matrixGapBySymbol[symU]
+                                if (!g?.ok || g.compared_at == null) return <span style={{ color: 'var(--color-text-muted)' }}>—</span>
+                                const hasGap = (g.gap ?? 0) > 0
+                                return (
+                                  <span className={hasGap ? 'data-overview-wl-matrix__completeness-pct data-overview-wl-matrix__completeness-pct--bad' : ''}>
+                                    {g.gap != null ? (hasGap ? `+${g.gap.toLocaleString()}` : '0') : '—'}
+                                  </span>
+                                )
+                              })()}
+                            </td>
+                            <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                              {(() => {
+                                const g = matrixGapBySymbol[symU]
+                                if (!g?.ok || g.compared_at == null) return <span style={{ color: 'var(--color-text-muted)' }}>—</span>
+                                if (g.coverage_pct == null) return '—'
+                                return (
+                                  <span className={completenessPctHealthClass(g.coverage_pct)}>
+                                    {g.coverage_pct}%
+                                  </span>
+                                )
+                              })()}
+                            </td>
                           </>
                         ) : null}
                         {show('stock_min') ? (
@@ -529,8 +586,13 @@ export function DataOverviewWatchlistStocks({ wlRows, onWatchlistRefreshRequeste
               </table>
             </div>
           </div>
-        </>
-      )}
+      <DataOverviewStockDayQualitySheet
+        open={qualitySheetSymbol != null}
+        onClose={() => { setQualitySheetSymbol(null); setQualitySheetData(null) }}
+        symbol={qualitySheetSymbol}
+        data={qualitySheetData}
+        loading={qualitySheetLoading}
+      />
     </>
   )
 }

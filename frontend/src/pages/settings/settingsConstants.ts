@@ -23,11 +23,37 @@ export const CONFIG_SECTIONS = [
   { id: 'settings-holidays', label: 'US market holidays', icon: 'calendar' as const },
 ] as const
 
-/** Data Coverage → Overview (PostgreSQL summary). */
-export const COVERAGE_OVERVIEW_SUBSECTION = {
-  id: 'coverage-overview' as const,
-  label: 'Overview' as const,
-  icon: 'coverage-overview' as const,
+/** Legacy hash before Overview was split; Settings redirects to summary. */
+export const COVERAGE_OVERVIEW_LEGACY_ID = 'coverage-overview' as const
+
+export const COVERAGE_OVERVIEW_GROUP_LABEL = 'Overview' as const
+
+/** Data Coverage → Overview → Summary (aggregates); Detail is per-symbol matrix. */
+export const COVERAGE_OVERVIEW_SUBSECTIONS = [
+  {
+    id: 'coverage-overview-summary' as const,
+    label: 'Summary' as const,
+    icon: 'coverage-overview' as const,
+  },
+  {
+    id: 'coverage-overview-detail' as const,
+    label: 'Detail' as const,
+    icon: 'coverage-overview-detail' as const,
+  },
+] as const
+
+/** Primary shortcut (summary aggregates) — same role as legacy single “Overview” page. */
+export const COVERAGE_OVERVIEW_SUBSECTION = COVERAGE_OVERVIEW_SUBSECTIONS[0]
+
+export const COVERAGE_OVERVIEW_SUMMARY_ID = COVERAGE_OVERVIEW_SUBSECTIONS[0].id
+export const COVERAGE_OVERVIEW_DETAIL_ID = COVERAGE_OVERVIEW_SUBSECTIONS[1].id
+
+export function isCoverageOverviewSectionHash(hash: string): boolean {
+  const h = hash.startsWith('#') ? hash.slice(1) : hash
+  return (
+    h === COVERAGE_OVERVIEW_LEGACY_ID ||
+    COVERAGE_OVERVIEW_SUBSECTIONS.some(s => s.id === h)
+  )
 }
 
 /** Data Coverage → Option (top-level). */

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import type { Operation, StatusResponse } from '../types'
 import type { FlexAccountItem } from '../types'
 import {
@@ -31,7 +31,12 @@ import {
   IB_CONNECTION_SUBSECTIONS,
   SETTINGS_SECTIONS,
   CONFIG_SECTIONS,
-  COVERAGE_OVERVIEW_SUBSECTION,
+  COVERAGE_OVERVIEW_SUBSECTIONS,
+  COVERAGE_OVERVIEW_GROUP_LABEL,
+  COVERAGE_OVERVIEW_LEGACY_ID,
+  COVERAGE_OVERVIEW_SUMMARY_ID,
+  COVERAGE_OVERVIEW_DETAIL_ID,
+  isCoverageOverviewSectionHash,
   COVERAGE_OPTION_SUBSECTION,
   COVERAGE_STOCK_GROUP_LABEL,
   COVERAGE_STOCK_SUBSECTIONS,
@@ -96,7 +101,8 @@ import { MarketIngestOpsPage } from './MarketIngestOpsPage'
 import { ApiHealthOverviewPage, computeApiHealthAggregateLamp } from './ApiHealthOverviewPage'
 import { SettingsShell } from './settings/SettingsShell'
 import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
-import { DataOverviewPage } from './DataOverviewPage'
+import { DataOverviewSummaryPage } from './DataOverviewSummaryPage'
+import { DataOverviewDetailPage } from './DataOverviewDetailPage'
 import { OptionCoveragePage } from './OptionCoveragePage'
 import { StockCoveragePage } from './StockCoveragePage'
 import { MassiveStockCoveragePage } from './MassiveStockCoveragePage'
@@ -322,6 +328,7 @@ export function SettingsPage({
   const [massiveOptionExpanded, setMassiveOptionExpanded] = useState(false)
   const [massiveStockExpanded, setMassiveStockExpanded] = useState(false)
   const [coverageStockExpanded, setCoverageStockExpanded] = useState(true)
+  const [coverageOverviewExpanded, setCoverageOverviewExpanded] = useState(true)
   const [massiveStockCapGroupExpanded, setMassiveStockCapGroupExpanded] = useState<Record<CapabilityGroup, boolean>>(() =>
     CAPABILITY_GROUP_ORDER.reduce(
       (acc, g) => { acc[g] = false; return acc },
@@ -663,7 +670,14 @@ export function SettingsPage({
   const isAppSection = isWsConnectorSection || isDaemonSection || isCeleryControlSection
   const isCoverageSection = activeSectionId === 'settings-coverage'
   const isStockCoverageParentActive = isCoverageSection && isCoverageStockHash(currentHash)
+  const isCoverageOverviewParentActive = isCoverageSection && isCoverageOverviewSectionHash(currentHash)
   const isFeedSection = activeSectionId === 'settings-feed'
+
+  useLayoutEffect(() => {
+    if (currentHash === COVERAGE_OVERVIEW_LEGACY_ID) {
+      window.location.replace(`#${COVERAGE_OVERVIEW_SUMMARY_ID}`)
+    }
+  }, [currentHash])
 
   const sidebarContent = (
     <>
@@ -824,13 +838,36 @@ export function SettingsPage({
         </div>
         <div className="settings-sidebar-inline-split" role="presentation" aria-hidden />
         <div className="settings-sidebar-group-label">Data Coverage</div>
-        <a
-          href={`#${COVERAGE_OVERVIEW_SUBSECTION.id}`}
-          className={`settings-sidebar-link ${isCoverageSection && currentHash === COVERAGE_OVERVIEW_SUBSECTION.id ? 'active' : ''}`}
-        >
-          <SettingsSectionIcon name={COVERAGE_OVERVIEW_SUBSECTION.icon} />
-          {COVERAGE_OVERVIEW_SUBSECTION.label}
-        </a>
+        <div className="settings-sidebar-group">
+          <div className={`settings-sidebar-parent ${isCoverageOverviewParentActive ? 'active' : ''}`}>
+            <a href={`#${COVERAGE_OVERVIEW_SUMMARY_ID}`} className="settings-sidebar-parent-label">
+              <SettingsSectionIcon name="coverage-overview" />
+              {COVERAGE_OVERVIEW_GROUP_LABEL}
+            </a>
+            <button
+              type="button"
+              className={`settings-sidebar-chevron ${coverageOverviewExpanded ? 'expanded' : ''}`}
+              onClick={() => setCoverageOverviewExpanded(e => !e)}
+              aria-expanded={coverageOverviewExpanded}
+              aria-controls="settings-coverage-overview-subs"
+              aria-label={coverageOverviewExpanded ? 'Collapse Overview' : 'Expand Overview'}
+            >
+              ▼
+            </button>
+          </div>
+          <div id="settings-coverage-overview-subs" className="settings-sidebar-subs" hidden={!coverageOverviewExpanded}>
+            {COVERAGE_OVERVIEW_SUBSECTIONS.map(sub => (
+              <a
+                key={sub.id}
+                href={`#${sub.id}`}
+                className={`settings-sidebar-link settings-sidebar-link-sub ${isCoverageSection && currentHash === sub.id ? 'active' : ''}`}
+              >
+                <SettingsSectionIcon name={sub.icon} />
+                {sub.label}
+              </a>
+            ))}
+          </div>
+        </div>
         <a
           href={`#${COVERAGE_OPTION_SUBSECTION.id}`}
           className={`settings-sidebar-link ${isCoverageSection && (currentHash === COVERAGE_OPTION_SUBSECTION.id || currentHash === FEED_MASSIVE_DAILY_DATA_ID) ? 'active' : ''
@@ -1271,8 +1308,10 @@ export function SettingsPage({
           <ApiHealthOverviewPage embeddedInSettings />
         )
       ) : isCoverageSection ? (
-        currentHash === COVERAGE_OVERVIEW_SUBSECTION.id ? (
-          <DataOverviewPage status={status} />
+        currentHash === COVERAGE_OVERVIEW_SUMMARY_ID ? (
+          <DataOverviewSummaryPage status={status} />
+        ) : currentHash === COVERAGE_OVERVIEW_DETAIL_ID ? (
+          <DataOverviewDetailPage status={status} />
         ) : currentHash === 'coverage-stock' ? (
           <StockCoveragePage status={status} />
         ) : currentHash === 'coverage-massive-stock' ? (

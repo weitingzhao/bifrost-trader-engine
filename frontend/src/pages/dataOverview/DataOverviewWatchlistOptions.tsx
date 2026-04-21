@@ -91,8 +91,6 @@ function rowMp(r: WatchlistDbCoverageSymbolRow): WatchlistDbCoverageReportDaily 
   return r.report_option_max_pain_daily ?? EMPTY_MP
 }
 
-export type OptionsSubTab = 'summary' | 'by_symbol'
-
 export type { OptionsFocusDataset, OptionsFocusTableId }
 export { OPTIONS_FOCUS_TABLE_IDS }
 
@@ -547,10 +545,48 @@ function buildSummaryRows(rows: WatchlistDbCoverageSymbolRow[]): SummaryRow[] {
   ]
 }
 
+/** Watchlist-scoped option dataset summary table (used on Data Overview Summary and inside Detail). */
+export function DataOverviewWatchlistOptionsSummaryTable({
+  wlRows,
+}: {
+  wlRows: WatchlistDbCoverageSymbolRow[]
+}) {
+  const summaryRows = buildSummaryRows(wlRows)
+  return (
+    <div className="feed-massive-table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th scope="col">Table</th>
+            <th scope="col">Pipeline</th>
+            <th scope="col">Coverage</th>
+            <th scope="col">
+              Freshness
+              <InfoTooltip text="Worst-case age across watchlist symbols for this table. option_contracts uses server age_seconds; others use parsed timestamps from the API." />
+            </th>
+            <th scope="col">Health</th>
+          </tr>
+        </thead>
+        <tbody>
+          {summaryRows.map(row => (
+            <tr key={row.table}>
+              <td><code>{row.table}</code></td>
+              <td style={{ fontSize: 'var(--text-caption)' }}>{row.pipeline}</td>
+              <td style={{ fontSize: 'var(--text-caption)' }}>{row.coverage}</td>
+              <td style={{ fontSize: 'var(--text-caption)' }}>{row.freshness}</td>
+              <td style={{ fontSize: 'var(--text-caption)' }}>{row.health}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export interface DataOverviewWatchlistOptionsProps {
   wlRows: WatchlistDbCoverageSymbolRow[]
-  subTab: OptionsSubTab
-  onSubTabChange: (t: OptionsSubTab) => void
+  /** When false, hide the collapsible watchlist summary block (Detail page only). */
+  showWatchlistSummary?: boolean
   /** After Massive option jobs complete, or when the user refreshes from the jobs sheet — reload watchlist coverage. */
   onWatchlistRefreshRequested?: () => void | Promise<void>
   /** Per-symbol GET /research/massive/option-contracts-reference-gap results after Compare. */
@@ -589,8 +625,7 @@ export interface DataOverviewWatchlistOptionsProps {
 
 export function DataOverviewWatchlistOptions({
   wlRows,
-  subTab,
-  onSubTabChange,
+  showWatchlistSummary = true,
   onWatchlistRefreshRequested,
   refGapBySymbol = {},
   onCompareMassiveReference,
@@ -607,7 +642,6 @@ export function DataOverviewWatchlistOptions({
   jobsSheetOpen,
   onJobsSheetOpenChange,
 }: DataOverviewWatchlistOptionsProps) {
-  const summaryRows = buildSummaryRows(wlRows)
   const [focusDataset, setFocusDataset] = useState<OptionsFocusDataset>('all')
   const prevFocusRef = useRef<OptionsFocusDataset>(focusDataset)
   const jobsBarRef = useRef<DataOverviewOptionJobsBarHandle | null>(null)
@@ -690,14 +724,6 @@ export function DataOverviewWatchlistOptions({
     }
   }, [focusDataset])
 
-  useEffect(() => {
-    if (subTab !== 'by_symbol') {
-      onJobsSheetOpenChange(false)
-      setAllGapsSheetMode(null)
-      setGapExplainSheetOpen(false)
-    }
-  }, [subTab, onJobsSheetOpenChange])
-
   const show = (t: OptionsFocusTableId) => showFocusTable(focusDataset, t)
 
   const optionContractsBySymbol = useMemo(() => {
@@ -727,70 +753,20 @@ export function DataOverviewWatchlistOptions({
 
   return (
     <>
-      <div className="feed-massive-agg-tabs-wrap" style={{ marginBottom: 'var(--space-3)' }}>
-        <div className="feed-massive-agg-tabs" role="tablist" aria-label="Watchlist Options view">
-          <button
-            type="button"
-            role="tab"
-            id="data-overview-wl-opt-sub-summary"
-            className={`feed-massive-agg-tab${subTab === 'summary' ? ' feed-massive-agg-tab--active' : ''}`}
-            aria-selected={subTab === 'summary'}
-            tabIndex={subTab === 'summary' ? 0 : -1}
-            onClick={() => onSubTabChange('summary')}
+      {showWatchlistSummary ? (
+        <details open className="replay-section data-overview-watchlist-summary" style={{ marginBottom: 'var(--space-3)' }}>
+          <summary
+            className="page-title-with-tooltip data-overview-watchlist-summary__summary"
+            style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)', cursor: 'pointer' }}
           >
-            Summary
-          </button>
-          <button
-            type="button"
-            role="tab"
-            id="data-overview-wl-opt-sub-bysymbol"
-            className={`feed-massive-agg-tab${subTab === 'by_symbol' ? ' feed-massive-agg-tab--active' : ''}`}
-            aria-selected={subTab === 'by_symbol'}
-            tabIndex={subTab === 'by_symbol' ? 0 : -1}
-            onClick={() => onSubTabChange('by_symbol')}
-          >
-            By symbol
-          </button>
-        </div>
-      </div>
-
-      {subTab === 'summary' ? (
-        <div className="replay-section" style={{ marginBottom: 'var(--space-3)' }}>
-          <h4 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)' }}>
-            Option datasets (watchlist summary)
+            Watchlist summary
             <InfoTooltip text="Watchlist-scoped aggregates across symbols (max 80). Freshness shows the worst (stalest) symbol per table. Compare with Global PostgreSQL coverage for whole-database distinct counts." />
-          </h4>
-          <div className="feed-massive-table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">Table</th>
-                  <th scope="col">Pipeline</th>
-                  <th scope="col">Coverage</th>
-                  <th scope="col">
-                    Freshness
-                    <InfoTooltip text="Worst-case age across watchlist symbols for this table. option_contracts uses server age_seconds; others use parsed timestamps from the API." />
-                  </th>
-                  <th scope="col">Health</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summaryRows.map(row => (
-                  <tr key={row.table}>
-                    <td><code>{row.table}</code></td>
-                    <td style={{ fontSize: 'var(--text-caption)' }}>{row.pipeline}</td>
-                    <td style={{ fontSize: 'var(--text-caption)' }}>{row.coverage}</td>
-                    <td style={{ fontSize: 'var(--text-caption)' }}>{row.freshness}</td>
-                    <td style={{ fontSize: 'var(--text-caption)' }}>{row.health}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : (
-        <>
-          <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
+          </summary>
+          <DataOverviewWatchlistOptionsSummaryTable wlRows={wlRows} />
+        </details>
+      ) : null}
+
+      <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
             One sheet per symbol: grouped columns for each dataset. The Symbol column stays fixed when the table is wider than the viewport.
           </p>
           <div style={{ marginBottom: 'var(--space-3)' }}>
@@ -1502,8 +1478,6 @@ export function DataOverviewWatchlistOptions({
               </table>
             </div>
           </div>
-        </>
-      )}
     </>
   )
 }

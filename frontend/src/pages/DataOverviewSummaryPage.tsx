@@ -5,8 +5,6 @@ import {
   fetchMassiveCeleryBeatSchedule,
   fetchMassiveJobsList,
   fetchMassiveJobsSummary,
-  postOptionContractsReferenceGapBatch,
-  fetchOptionSnapshotsContractsGap,
   fetchWatchlistDbCoverage,
 } from '../api'
 import type {
@@ -14,16 +12,19 @@ import type {
   JobQueueStatusCounts,
   MassiveCeleryBeatEntry,
   MassiveJobApiRow,
-  OptionContractsReferenceGapResult,
-  OptionSnapshotsContractsGapResult,
   WatchlistDbCoverageSymbolRow,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
-import { DataOverviewWatchlistOptions, type OptionsSubTab } from './dataOverview/DataOverviewWatchlistOptions'
-import { DataOverviewWatchlistStocks } from './dataOverview/DataOverviewWatchlistStocks'
-import { COVERAGE_OPTION_SUBSECTION, COVERAGE_STOCK_SUBSECTIONS, FEED_MASSIVE_STOCK_ID } from './settings/settingsConstants'
+import { DataOverviewWatchlistOptionsSummaryTable } from './dataOverview/DataOverviewWatchlistOptions'
+import { DataOverviewWatchlistStocksSummaryTable } from './dataOverview/DataOverviewWatchlistStocks'
+import {
+  COVERAGE_OPTION_SUBSECTION,
+  COVERAGE_OVERVIEW_DETAIL_ID,
+  COVERAGE_STOCK_SUBSECTIONS,
+  FEED_MASSIVE_STOCK_ID,
+} from './settings/settingsConstants'
 
-interface DataOverviewPageProps {
+interface DataOverviewSummaryPageProps {
   status: StatusResponse | null
 }
 
@@ -55,7 +56,6 @@ function isoToAgeSeconds(iso: string | null | undefined): number | null {
   return Math.max(0, Math.floor((Date.now() - t) / 1000))
 }
 
-/** Prefer row activity time; else approximate age from trade / bar date. */
 function globalRowFreshness(row: DbCoverageSummaryRow): string {
   if (row.error) return '—'
   const act = row.newest_activity
@@ -85,16 +85,7 @@ function queueSummaryLine(c: JobQueueStatusCounts): string {
   return `pending ${c.pending} · running ${c.running} · failed ${c.failed} · done ${c.done}`
 }
 
-function delayMs(ms: number): Promise<void> {
-  return new Promise(resolve => {
-    window.setTimeout(resolve, ms)
-  })
-}
-
-/** Pace between per-symbol reference gap requests (matches option_day Check pacing). */
-const REF_GAP_CHUNK_DELAY_MS = 75
-
-type WatchlistSectionTab = 'options' | 'stocks'
+type WatchlistSummaryTab = 'options' | 'stocks'
 
 const emptyCounts = (): JobQueueStatusCounts => ({
   pending: 0,
@@ -103,10 +94,9 @@ const emptyCounts = (): JobQueueStatusCounts => ({
   failed: 0,
 })
 
-export function DataOverviewPage(_props: DataOverviewPageProps) {
+export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
   const [wlRows, setWlRows] = useState<WatchlistDbCoverageSymbolRow[]>([])
-  const [wlTab, setWlTab] = useState<WatchlistSectionTab>('options')
-  const [wlOptionsSubTab, setWlOptionsSubTab] = useState<OptionsSubTab>('summary')
+  const [wlTab, setWlTab] = useState<WatchlistSummaryTab>('options')
   const [wlGeneratedAt, setWlGeneratedAt] = useState<string | null>(null)
   const [wlMessage, setWlMessage] = useState<string | null>(null)
   const [wlError, setWlError] = useState<string | null>(null)
@@ -125,136 +115,118 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
 
   const [loading, setLoading] = useState(true)
 
-  const [refGapBySymbol, setRefGapBySymbol] = useState<Record<string, OptionContractsReferenceGapResult>>({})
-  const [refGapLoading, setRefGapLoading] = useState(false)
-  const [refGapError, setRefGapError] = useState<string | null>(null)
-
-  const [snapshotGapBySymbol, setSnapshotGapBySymbol] = useState<
-    Record<string, OptionSnapshotsContractsGapResult>
-  >({})
-  const [snapshotGapLoading, setSnapshotGapLoading] = useState(false)
-  const [snapshotGapError, setSnapshotGapError] = useState<string | null>(null)
-
-  /** Uppercase symbols in By symbol → option_contracts compare / enqueue pool (click Symbol column to toggle). */
-  const [comparePool, setComparePool] = useState<string[]>([])
-  /** Option jobs sheet (By symbol bar) — button next to Refresh when that bar is visible. */
-  const [optionJobsSheetOpen, setOptionJobsSheetOpen] = useState(false)
-
-  /** Shared fetch body: updates watchlist, global summary, beat, job queues — does not reset compare pool or gap maps. */
   const applyPipelineFetchResults = useCallback((settled: readonly PromiseSettledResult<unknown>[]) => {
-      type Wl = Awaited<ReturnType<typeof fetchWatchlistDbCoverage>>
-      type G = Awaited<ReturnType<typeof fetchDbCoverageSummary>>
-      type Beat = Awaited<ReturnType<typeof fetchMassiveCeleryBeatSchedule>>
-      type Jq = Awaited<ReturnType<typeof fetchMassiveJobsSummary>>
-      type Jlist = Awaited<ReturnType<typeof fetchMassiveJobsList>>
-      const wl = settled[0].status === 'fulfilled' ? (settled[0].value as Wl) : null
-      const g = settled[1].status === 'fulfilled' ? (settled[1].value as G) : null
-      const beat = settled[2].status === 'fulfilled' ? (settled[2].value as Beat) : null
-      const jq = settled[3].status === 'fulfilled' ? (settled[3].value as Jq) : null
-      const js = settled[4].status === 'fulfilled' ? (settled[4].value as Jq) : null
-      const jlist = settled[5].status === 'fulfilled' ? (settled[5].value as Jlist) : null
+    type Wl = Awaited<ReturnType<typeof fetchWatchlistDbCoverage>>
+    type G = Awaited<ReturnType<typeof fetchDbCoverageSummary>>
+    type Beat = Awaited<ReturnType<typeof fetchMassiveCeleryBeatSchedule>>
+    type Jq = Awaited<ReturnType<typeof fetchMassiveJobsSummary>>
+    type Jlist = Awaited<ReturnType<typeof fetchMassiveJobsList>>
+    const wl = settled[0].status === 'fulfilled' ? (settled[0].value as Wl) : null
+    const g = settled[1].status === 'fulfilled' ? (settled[1].value as G) : null
+    const beat = settled[2].status === 'fulfilled' ? (settled[2].value as Beat) : null
+    const jq = settled[3].status === 'fulfilled' ? (settled[3].value as Jq) : null
+    const js = settled[4].status === 'fulfilled' ? (settled[4].value as Jq) : null
+    const jlist = settled[5].status === 'fulfilled' ? (settled[5].value as Jlist) : null
 
-      if (wl?.ok) {
-        setWlRows(wl.symbols ?? [])
-        setWlGeneratedAt(wl.generated_at ?? null)
-        setWlMessage(typeof wl.message === 'string' ? wl.message : null)
-        setWlError(null)
-      } else {
-        setWlRows([])
-        setWlGeneratedAt(null)
-        setWlMessage(null)
-        setWlError(
-          wl && !wl.ok
-            ? wl.error ?? 'Watchlist coverage failed'
-            : settled[0].status === 'rejected'
-              ? (settled[0].reason instanceof Error ? settled[0].reason.message : 'Watchlist coverage failed')
-              : 'Watchlist coverage failed',
+    if (wl?.ok) {
+      setWlRows(wl.symbols ?? [])
+      setWlGeneratedAt(wl.generated_at ?? null)
+      setWlMessage(typeof wl.message === 'string' ? wl.message : null)
+      setWlError(null)
+    } else {
+      setWlRows([])
+      setWlGeneratedAt(null)
+      setWlMessage(null)
+      setWlError(
+        wl && !wl.ok
+          ? wl.error ?? 'Watchlist coverage failed'
+          : settled[0].status === 'rejected'
+            ? (settled[0].reason instanceof Error ? settled[0].reason.message : 'Watchlist coverage failed')
+            : 'Watchlist coverage failed',
+      )
+    }
+
+    if (g?.ok) {
+      setRows(g.tables ?? [])
+      setGeneratedAt(g.generated_at ?? null)
+      setGlobalError(null)
+    } else {
+      setRows([])
+      setGeneratedAt(null)
+      setGlobalError(
+        g && !g.ok
+          ? g.error ?? 'Global summary failed'
+          : settled[1].status === 'rejected'
+            ? (settled[1].reason instanceof Error ? settled[1].reason.message : 'Global summary failed')
+            : 'Global summary failed',
+      )
+    }
+
+    if (beat?.ok && Array.isArray(beat.entries)) {
+      setBeatEntries(beat.entries)
+      setBeatError(null)
+    } else {
+      setBeatEntries([])
+      setBeatError(
+        beat && beat.ok === false
+          ? beat.error ?? 'Failed to load Celery Beat schedule'
+          : settled[2].status === 'rejected'
+            ? (settled[2].reason instanceof Error ? settled[2].reason.message : 'Failed to load Celery Beat schedule')
+            : 'Failed to load Celery Beat schedule',
+      )
+    }
+
+    const optOk = Boolean(jq?.ok && jq.counts)
+    const stOk = Boolean(js?.ok && js.counts)
+    if (optOk) {
+      setJobsOpt(jq!.counts!)
+    } else {
+      setJobsOpt(emptyCounts())
+    }
+    if (stOk) {
+      setJobsStock(js!.counts!)
+    } else {
+      setJobsStock(emptyCounts())
+    }
+    if (optOk && stOk) {
+      setJobsSummaryError(null)
+    } else {
+      const parts: string[] = []
+      if (!optOk) {
+        parts.push(
+          jq && !jq.ok
+            ? jq.error ?? 'Options Massive queue unavailable'
+            : settled[3].status === 'rejected'
+              ? (settled[3].reason instanceof Error ? settled[3].reason.message : 'Options Massive queue unavailable')
+              : 'Options Massive queue unavailable',
         )
       }
-
-      if (g?.ok) {
-        setRows(g.tables ?? [])
-        setGeneratedAt(g.generated_at ?? null)
-        setGlobalError(null)
-      } else {
-        setRows([])
-        setGeneratedAt(null)
-        setGlobalError(
-          g && !g.ok
-            ? g.error ?? 'Global summary failed'
-            : settled[1].status === 'rejected'
-              ? (settled[1].reason instanceof Error ? settled[1].reason.message : 'Global summary failed')
-              : 'Global summary failed',
+      if (!stOk) {
+        parts.push(
+          js && !js.ok
+            ? js.error ?? 'Stocks Massive queue unavailable'
+            : settled[4].status === 'rejected'
+              ? (settled[4].reason instanceof Error ? settled[4].reason.message : 'Stocks Massive queue unavailable')
+              : 'Stocks Massive queue unavailable',
         )
       }
+      setJobsSummaryError(parts.join(' · '))
+    }
 
-      if (beat?.ok && Array.isArray(beat.entries)) {
-        setBeatEntries(beat.entries)
-        setBeatError(null)
-      } else {
-        setBeatEntries([])
-        setBeatError(
-          beat && beat.ok === false
-            ? beat.error ?? 'Failed to load Celery Beat schedule'
-            : settled[2].status === 'rejected'
-              ? (settled[2].reason instanceof Error ? settled[2].reason.message : 'Failed to load Celery Beat schedule')
-              : 'Failed to load Celery Beat schedule',
-        )
-      }
-
-      const optOk = Boolean(jq?.ok && jq.counts)
-      const stOk = Boolean(js?.ok && js.counts)
-      if (optOk) {
-        setJobsOpt(jq!.counts!)
-      } else {
-        setJobsOpt(emptyCounts())
-      }
-      if (stOk) {
-        setJobsStock(js!.counts!)
-      } else {
-        setJobsStock(emptyCounts())
-      }
-      if (optOk && stOk) {
-        setJobsSummaryError(null)
-      } else {
-        const parts: string[] = []
-        if (!optOk) {
-          parts.push(
-            jq && !jq.ok
-              ? jq.error ?? 'Options Massive queue unavailable'
-              : settled[3].status === 'rejected'
-                ? (settled[3].reason instanceof Error ? settled[3].reason.message : 'Options Massive queue unavailable')
-                : 'Options Massive queue unavailable',
-          )
-        }
-        if (!stOk) {
-          parts.push(
-            js && !js.ok
-              ? js.error ?? 'Stocks Massive queue unavailable'
-              : settled[4].status === 'rejected'
-                ? (settled[4].reason instanceof Error ? settled[4].reason.message : 'Stocks Massive queue unavailable')
-                : 'Stocks Massive queue unavailable',
-          )
-        }
-        setJobsSummaryError(parts.join(' · '))
-      }
-
-      if (jlist?.ok && Array.isArray(jlist.jobs)) {
-        setRecentJobs(jlist.jobs)
-        setJobsListError(null)
-      } else {
-        setRecentJobs([])
-        setJobsListError(
-          jlist && !jlist.ok
-            ? jlist.error ?? 'Recent jobs unavailable'
-            : settled[5].status === 'rejected'
-              ? (settled[5].reason instanceof Error ? settled[5].reason.message : 'Recent jobs unavailable')
-              : 'Recent jobs unavailable',
-        )
-      }
-    },
-    [],
-  )
+    if (jlist?.ok && Array.isArray(jlist.jobs)) {
+      setRecentJobs(jlist.jobs)
+      setJobsListError(null)
+    } else {
+      setRecentJobs([])
+      setJobsListError(
+        jlist && !jlist.ok
+          ? jlist.error ?? 'Recent jobs unavailable'
+          : settled[5].status === 'rejected'
+            ? (settled[5].reason instanceof Error ? settled[5].reason.message : 'Recent jobs unavailable')
+            : 'Recent jobs unavailable',
+      )
+    }
+  }, [])
 
   const loadAll = useCallback(async () => {
     setLoading(true)
@@ -278,165 +250,9 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
     setLoading(false)
   }, [applyPipelineFetchResults])
 
-  /** Background refresh after Massive jobs: no full-page loading spinner, preserves compare pool and Check results. */
-  const refreshPipelineAfterJobs = useCallback(async () => {
-    const settled = await Promise.allSettled([
-      fetchWatchlistDbCoverage(),
-      fetchDbCoverageSummary(),
-      fetchMassiveCeleryBeatSchedule(),
-      fetchMassiveJobsSummary('options_massive'),
-      fetchMassiveJobsSummary('stocks_massive'),
-      fetchMassiveJobsList({ limit: 10 }),
-    ])
-    applyPipelineFetchResults(settled)
-  }, [applyPipelineFetchResults])
-
-  const handleCompareMassiveReference = useCallback(
-    async (
-      symbols: string[],
-      progress?: {
-        onSymbolStart?: (symbol: string) => void
-        onSymbolDone?: (symbol: string, result: OptionContractsReferenceGapResult) => void
-        onSymbolError?: (symbol: string, message: string) => void
-      },
-      options?: { maxExpiries?: number },
-    ) => {
-      setRefGapLoading(true)
-      setRefGapError(null)
-      const maxExpiries = options?.maxExpiries ?? 60
-      try {
-        const raw = symbols.map(s => s.trim().toUpperCase()).filter(Boolean)
-        const seen = new Set<string>()
-        const unique = raw.filter(s => (seen.has(s) ? false : (seen.add(s), true)))
-        const eligible = unique.filter(u => {
-          const row = wlRows.find(r => r.symbol.trim().toUpperCase() === u)
-          return row?.option_contracts.has_data
-        })
-        if (eligible.length === 0) {
-          setRefGapError(
-            unique.length === 0
-              ? 'Add symbols to the compare pool (click Symbol in the matrix).'
-              : 'No pool symbols have option_contracts rows yet.',
-          )
-          return
-        }
-        // One symbol per HTTP call so Jobs sheet "N active" decreases as each Check finishes (same as option_day).
-        for (let i = 0; i < eligible.length; i++) {
-          const sym = eligible[i]!
-          progress?.onSymbolStart?.(sym)
-          try {
-            const batchRes = await postOptionContractsReferenceGapBatch([sym], { max_expiries: maxExpiries })
-            if (!batchRes.ok || !batchRes.results) {
-              const msg = typeof batchRes.error === 'string' ? batchRes.error : 'Compare failed'
-              progress?.onSymbolError?.(sym, msg)
-            } else {
-              const res = batchRes.results[sym]
-              if (!res) {
-                progress?.onSymbolError?.(sym, 'No result')
-              } else if (!res.ok) {
-                const msg = typeof res.error === 'string' ? res.error : 'Compare failed'
-                progress?.onSymbolError?.(sym, msg)
-              } else {
-                setRefGapBySymbol(prev => ({ ...prev, [sym]: res }))
-                progress?.onSymbolDone?.(sym, res)
-              }
-            }
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : 'Compare failed'
-            progress?.onSymbolError?.(sym, msg)
-          }
-          if (i < eligible.length - 1) {
-            await delayMs(REF_GAP_CHUNK_DELAY_MS)
-          }
-        }
-      } catch (e) {
-        setRefGapError(e instanceof Error ? e.message : 'Compare failed')
-      } finally {
-        setRefGapLoading(false)
-      }
-    },
-    [wlRows],
-  )
-
-  const handleCompareSnapshotGap = useCallback(
-    async (
-      symbols: string[],
-      progress?: {
-        onSymbolStart?: (symbol: string) => void
-        onSymbolDone?: (symbol: string, result: OptionSnapshotsContractsGapResult) => void
-        onSymbolError?: (symbol: string, message: string) => void
-      },
-    ) => {
-      setSnapshotGapLoading(true)
-      setSnapshotGapError(null)
-      try {
-        const raw = symbols.map(s => s.trim().toUpperCase()).filter(Boolean)
-        const seen = new Set<string>()
-        const unique = raw.filter(s => (seen.has(s) ? false : (seen.add(s), true)))
-        const eligible = unique.filter(u => {
-          const row = wlRows.find(r => r.symbol.trim().toUpperCase() === u)
-          return row?.option_contracts.has_data
-        })
-        if (eligible.length === 0) {
-          setSnapshotGapError(
-            unique.length === 0
-              ? 'Add symbols to the compare pool (click Symbol in the matrix).'
-              : 'No pool symbols have option_contracts rows yet.',
-          )
-          return
-        }
-        for (const sym of eligible) {
-          progress?.onSymbolStart?.(sym)
-          try {
-            const res = await fetchOptionSnapshotsContractsGap(sym)
-            if (!res.ok) {
-              const msg = typeof res.error === 'string' ? res.error : 'Check failed'
-              progress?.onSymbolError?.(sym, msg)
-              continue
-            }
-            setSnapshotGapBySymbol(prev => ({ ...prev, [sym]: res }))
-            progress?.onSymbolDone?.(sym, res)
-          } catch (err) {
-            progress?.onSymbolError?.(
-              sym,
-              err instanceof Error ? err.message : 'Check failed',
-            )
-          }
-        }
-      } catch (e) {
-        setSnapshotGapError(e instanceof Error ? e.message : 'Check failed')
-      } finally {
-        setSnapshotGapLoading(false)
-      }
-    },
-    [wlRows],
-  )
-
-  const toggleComparePool = useCallback((symbol: string) => {
-    const u = symbol.trim().toUpperCase()
-    if (!u) return
-    setComparePool(prev => (prev.includes(u) ? prev.filter(s => s !== u) : [...prev, u]))
-  }, [])
-
-  const selectAllComparePool = useCallback(() => {
-    const all = wlRows.map(r => r.symbol.trim().toUpperCase()).filter(Boolean)
-    const seen = new Set<string>()
-    setComparePool(all.filter(s => (seen.has(s) ? false : (seen.add(s), true))))
-  }, [wlRows])
-
-  const clearComparePool = useCallback(() => {
-    setComparePool([])
-  }, [])
-
   useEffect(() => {
     void loadAll()
   }, [loadAll])
-
-  useEffect(() => {
-    if (wlTab !== 'options' || wlOptionsSubTab !== 'by_symbol') {
-      setOptionJobsSheetOpen(false)
-    }
-  }, [wlTab, wlOptionsSubTab])
 
   const openDetail = (hash: string) => {
     window.location.hash = `#${hash}`
@@ -454,31 +270,45 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
           Settings
         </button>
         {' / '}
-        Data Overview
-        <InfoTooltip text="Coverage counts and watchlist metrics use Massive-sourced PostgreSQL rows only (not IB). Global table is whole-database; watchlist is optionable STK (max 80)." />
+        <button
+          type="button"
+          className="page-title-breadcrumb-link"
+          onClick={() => { window.location.hash = `#${COVERAGE_OVERVIEW_DETAIL_ID}` }}
+          aria-label="Go to Data Overview Detail"
+        >
+          Data Overview
+        </button>
+        {' / '}
+        Summary
+        <InfoTooltip text="Aggregates only: watchlist summary tables, job queues, Celery Beat, global PostgreSQL coverage. Per-symbol matrix and jobs toolbar are on Data Overview → Detail." />
       </h2>
+
+      <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)' }}>
+        <button
+          type="button"
+          className="page-title-breadcrumb-link"
+          style={{ fontSize: 'inherit', padding: 0 }}
+          onClick={() => { window.location.hash = `#${COVERAGE_OVERVIEW_DETAIL_ID}` }}
+        >
+          Open Detail
+        </button>
+        {' — '}
+        per-symbol matrix, Focus dataset, and coverage jobs.
+      </p>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
         <span style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)' }}>
           Massive-only coverage and pipeline status.
         </span>
-        <div style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)' }}>
-          {wlTab === 'options' && wlOptionsSubTab === 'by_symbol' ? (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOptionJobsSheetOpen(true)}>
-              Jobs
-            </button>
-          ) : null}
-          <button type="button" className="btn btn-secondary btn-sm" disabled={loading} onClick={() => void loadAll()}>
-            {loading ? 'Loading…' : 'Refresh'}
-          </button>
-        </div>
+        <button type="button" className="btn btn-secondary btn-sm" disabled={loading} onClick={() => void loadAll()}>
+          {loading ? 'Loading…' : 'Refresh'}
+        </button>
       </div>
 
-      {/* Watchlist matrix */}
-      <section className="replay-section" aria-labelledby="data-overview-wl-head" style={{ marginBottom: 'var(--space-4)' }}>
-        <h3 id="data-overview-wl-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-          Watchlist coverage
-          <InfoTooltip text="Options: Summary aggregates by table; By symbol shows per-ticker detail. Stocks: same universe (max 80) — fundamental stock_day, stock_min, tickers, ticker_overview, ticker_types (global dictionary)." />
+      <section className="replay-section" aria-labelledby="data-overview-wl-summary-head" style={{ marginBottom: 'var(--space-4)' }}>
+        <h3 id="data-overview-wl-summary-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
+          Watchlist coverage (summary)
+          <InfoTooltip text="Watchlist-scoped aggregates by dataset. For per-symbol columns, use Data Overview → Detail." />
         </h3>
         {wlError ? <p className="status-page-msg err" role="alert">{wlError}</p> : null}
         {wlGeneratedAt ? (
@@ -493,11 +323,10 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
         {wlRows.length > 0 ? (
           <>
             <div className="feed-massive-agg-tabs-wrap" style={{ marginBottom: 'var(--space-3)' }}>
-              <div className="feed-massive-agg-tabs" role="tablist" aria-label="Watchlist coverage datasets">
+              <div className="feed-massive-agg-tabs" role="tablist" aria-label="Watchlist summary datasets">
                 <button
                   type="button"
                   role="tab"
-                  id="data-overview-wl-tab-options"
                   className={`feed-massive-agg-tab${wlTab === 'options' ? ' feed-massive-agg-tab--active' : ''}`}
                   aria-selected={wlTab === 'options'}
                   tabIndex={wlTab === 'options' ? 0 : -1}
@@ -508,7 +337,6 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
                 <button
                   type="button"
                   role="tab"
-                  id="data-overview-wl-tab-stocks"
                   className={`feed-massive-agg-tab${wlTab === 'stocks' ? ' feed-massive-agg-tab--active' : ''}`}
                   aria-selected={wlTab === 'stocks'}
                   tabIndex={wlTab === 'stocks' ? 0 : -1}
@@ -518,34 +346,13 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
                 </button>
               </div>
             </div>
-
-            {wlTab === 'options' ? (
-              <DataOverviewWatchlistOptions
-                wlRows={wlRows}
-                subTab={wlOptionsSubTab}
-                onSubTabChange={setWlOptionsSubTab}
-                onWatchlistRefreshRequested={refreshPipelineAfterJobs}
-                refGapBySymbol={refGapBySymbol}
-                onCompareMassiveReference={handleCompareMassiveReference}
-                refGapLoading={refGapLoading}
-                refGapError={refGapError}
-                snapshotGapBySymbol={snapshotGapBySymbol}
-                onCompareSnapshotGap={handleCompareSnapshotGap}
-                snapshotGapLoading={snapshotGapLoading}
-                snapshotGapError={snapshotGapError}
-                comparePool={comparePool}
-                onToggleComparePool={toggleComparePool}
-                onSelectAllComparePool={selectAllComparePool}
-                onClearComparePool={clearComparePool}
-                jobsSheetOpen={optionJobsSheetOpen}
-                onJobsSheetOpenChange={setOptionJobsSheetOpen}
-              />
-            ) : (
-              <DataOverviewWatchlistStocks
-                wlRows={wlRows}
-                onWatchlistRefreshRequested={refreshPipelineAfterJobs}
-              />
-            )}
+            <div className="replay-section" style={{ marginBottom: 0 }}>
+              {wlTab === 'options' ? (
+                <DataOverviewWatchlistOptionsSummaryTable wlRows={wlRows} />
+              ) : (
+                <DataOverviewWatchlistStocksSummaryTable wlRows={wlRows} />
+              )}
+            </div>
           </>
         ) : null}
         {!loading && !wlError && wlRows.length === 0 && !wlMessage ? (
@@ -553,7 +360,6 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
         ) : null}
       </section>
 
-      {/* Job queues, Beat schedule, recent jobs */}
       <section className="replay-section" aria-labelledby="data-overview-pipeline-head" style={{ marginBottom: 'var(--space-4)' }}>
         <h3 id="data-overview-pipeline-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
           Massive job queues and schedule
@@ -658,7 +464,6 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
         ) : null}
       </section>
 
-      {/* Global summary */}
       <section className="replay-section" aria-labelledby="data-overview-summary-head">
         <h3 id="data-overview-summary-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
           Global PostgreSQL coverage (Massive)

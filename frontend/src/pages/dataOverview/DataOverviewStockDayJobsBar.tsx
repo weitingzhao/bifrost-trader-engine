@@ -110,7 +110,7 @@ interface AllGapsSheetProps {
   onClose: () => void
   gapBySymbol: Record<string, StockDayGapResult>
   poolSymbols: string[]
-  onOpenQualitySheet: (symbol: string) => void
+  onOpenQualitySheet?: (symbol: string) => void
 }
 
 function AllGapsSheet({ open, onClose, gapBySymbol, poolSymbols, onOpenQualitySheet }: AllGapsSheetProps) {
@@ -131,11 +131,8 @@ function AllGapsSheet({ open, onClose, gapBySymbol, poolSymbols, onOpenQualitySh
 
   if (!open) return null
 
+  const checkedSymbols = poolSymbols.filter(s => gapBySymbol[s]?.ok && gapBySymbol[s]?.compared_at)
   const withGap = poolSymbols.filter(s => (gapBySymbol[s]?.gap ?? 0) > 0)
-  const noGap = poolSymbols.filter(s => {
-    const g = gapBySymbol[s]
-    return g?.ok && (g.gap ?? 0) === 0
-  })
   const notChecked = poolSymbols.filter(s => !gapBySymbol[s])
 
   function MissingYearTable({ rows }: { rows: StockDayMissingYearRow[] }) {
@@ -182,44 +179,90 @@ function AllGapsSheet({ open, onClose, gapBySymbol, poolSymbols, onOpenQualitySh
           <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Close">Close</button>
         </div>
         <div className="ref-jobs-sheet-body">
-          {notChecked.length > 0 && (
-            <p className="data-overview-gap-sheet__muted" style={{ marginBottom: 'var(--space-2)' }}>
-              {notChecked.length} symbol(s) not yet checked: {notChecked.join(', ')}
-            </p>
-          )}
-          {withGap.length === 0 && notChecked.length === 0 ? (
-            <p className="data-overview-gap-sheet__muted">No gaps found across all checked pool symbols.</p>
+          {checkedSymbols.length > 0 ? (
+            <div className="feed-massive-table-wrap" style={{ marginBottom: 'var(--space-4)' }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Symbol</th>
+                    <th scope="col">Gap (days)</th>
+                    <th scope="col">Cov%</th>
+                    <th scope="col">Covered</th>
+                    <th scope="col">Ref</th>
+                    <th scope="col">Checked at</th>
+                    <th scope="col"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {checkedSymbols.map(sym => {
+                    const g = gapBySymbol[sym]!
+                    const hasGap = (g.gap ?? 0) > 0
+                    return (
+                      <tr key={sym}>
+                        <td><strong>{sym}</strong></td>
+                        <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                          <span className={hasGap ? 'data-overview-wl-matrix__completeness-pct data-overview-wl-matrix__completeness-pct--bad' : ''}>
+                            {g.gap != null ? (hasGap ? `+${g.gap.toLocaleString()}` : g.gap.toLocaleString()) : '—'}
+                          </span>
+                        </td>
+                        <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                          {g.coverage_pct != null ? (
+                            <span className={
+                              g.coverage_pct >= 97
+                                ? 'data-overview-wl-matrix__completeness-pct data-overview-wl-matrix__completeness-pct--ok'
+                                : g.coverage_pct >= 85
+                                  ? 'data-overview-wl-matrix__completeness-pct data-overview-wl-matrix__completeness-pct--warn'
+                                  : 'data-overview-wl-matrix__completeness-pct data-overview-wl-matrix__completeness-pct--bad'
+                            }>
+                              {g.coverage_pct}%
+                            </span>
+                          ) : '—'}
+                        </td>
+                        <td style={{ fontVariantNumeric: 'tabular-nums' }}>{g.covered_total?.toLocaleString() ?? '—'}</td>
+                        <td style={{ fontVariantNumeric: 'tabular-nums' }}>{g.ref_total?.toLocaleString() ?? '—'}</td>
+                        <td style={{ fontSize: 'var(--text-caption)', fontVariantNumeric: 'tabular-nums' }}>{g.compared_at?.slice(0, 16) ?? '—'}</td>
+                        <td>
+                          {onOpenQualitySheet && (
+                            <button
+                              type="button"
+                              className="data-overview-wl-matrix__sym-detail-btn"
+                              onClick={() => onOpenQualitySheet(sym)}
+                              title={`Open daily bar quality for ${sym}`}
+                              aria-label={`Bar quality detail for ${sym}`}
+                            >↗</button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           ) : (
-            withGap.map(sym => {
-              const g = gapBySymbol[sym]!
-              return (
-                <div key={sym} style={{ marginBottom: 'var(--space-4)' }}>
-                  <h4 style={{ fontSize: 'var(--text-body)', marginBottom: 'var(--space-1)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <strong>{sym}</strong>
-                    <span style={{ color: 'var(--color-danger)' }}>{g.gap?.toLocaleString()} missing days</span>
-                    <span style={{ color: 'var(--color-text-muted)', fontWeight: 'normal' }}>
-                      {'Covered '}
-                      {g.covered_total?.toLocaleString() ?? '—'}
-                      {' · Ref '}
-                      {g.ref_total?.toLocaleString() ?? '—'}
-                      {g.coverage_pct != null ? ` · ${g.coverage_pct}%` : ''}
-                    </span>
-                    <button
-                      type="button"
-                      className="data-overview-wl-matrix__sym-detail-btn"
-                      onClick={() => onOpenQualitySheet(sym)}
-                      title={`Open daily bar quality for ${sym}`}
-                      aria-label={`Bar quality detail for ${sym}`}
-                    >↗</button>
-                  </h4>
-                  <MissingYearTable rows={g.missing_by_year ?? []} />
-                </div>
-              )
-            })
+            <p className="data-overview-gap-sheet__muted">No symbols checked yet. Run Check first.</p>
           )}
-          {noGap.length > 0 && (
-            <p className="data-overview-gap-sheet__muted" style={{ marginTop: 'var(--space-3)' }}>
-              {noGap.length} symbol(s) with no gap: {noGap.join(', ')}
+
+          {withGap.length > 0 && (
+            <>
+              <h4 style={{ fontSize: 'var(--text-body)', marginBottom: 'var(--space-2)' }}>Missing days by year</h4>
+              {withGap.map(sym => {
+                const g = gapBySymbol[sym]!
+                return (
+                  <details key={sym} style={{ marginBottom: 'var(--space-3)' }}>
+                    <summary style={{ cursor: 'pointer', fontSize: 'var(--text-body)', marginBottom: 'var(--space-1)' }}>
+                      <strong>{sym}</strong>
+                      {' — '}<span style={{ color: 'var(--color-danger)' }}>{g.gap?.toLocaleString()} missing days</span>
+                    </summary>
+                    <MissingYearTable rows={g.missing_by_year ?? []} />
+                  </details>
+                )
+              })}
+            </>
+          )}
+
+          {notChecked.length > 0 && (
+            <p className="data-overview-gap-sheet__muted" style={{ marginTop: 'var(--space-2)' }}>
+              {notChecked.length} symbol(s) not yet checked: {notChecked.join(', ')}
             </p>
           )}
         </div>
@@ -388,6 +431,8 @@ export interface DataOverviewStockDayJobsBarProps {
   onSelectAllComparePool: () => void
   onClearComparePool: () => void
   onWatchlistRefreshRequested?: () => void | Promise<void>
+  onOpenQualitySheet?: (symbol: string) => void
+  onGapResultsUpdate?: (results: Record<string, StockDayGapResult>) => void
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────────
@@ -399,6 +444,8 @@ export function DataOverviewStockDayJobsBar({
   onSelectAllComparePool,
   onClearComparePool,
   onWatchlistRefreshRequested,
+  onOpenQualitySheet,
+  onGapResultsUpdate,
 }: DataOverviewStockDayJobsBarProps) {
   // ── Job tracking ──────────────────────────────────────────────────────────
   const [items, setItems] = useState<StockJobTrackItem[]>([])
@@ -416,9 +463,6 @@ export function DataOverviewStockDayJobsBar({
 
   // ── Sheet state ───────────────────────────────────────────────────────────
   const [allGapsOpen, setAllGapsOpen] = useState(false)
-  const [qualitySheetSymbol, setQualitySheetSymbol] = useState<string | null>(null)
-  const [qualitySheetData, setQualitySheetData] = useState<StockDayQualityDetailResponse | null>(null)
-  const [qualitySheetLoading, setQualitySheetLoading] = useState(false)
 
   // ── SSE ───────────────────────────────────────────────────────────────────
   const sseClosersRef = useRef<Map<string, () => void>>(new Map())
@@ -604,12 +648,13 @@ export function DataOverviewStockDayJobsBar({
         newGap[sym.trim().toUpperCase()] = result
       }
       setGapBySymbol(newGap)
+      onGapResultsUpdate?.(newGap)
     } catch (e) {
       setGapError(e instanceof Error ? e.message : 'Check failed')
     } finally {
       setGapLoading(false)
     }
-  }, [canCheck, poolUpper, gapBySymbol])
+  }, [canCheck, poolUpper, gapBySymbol, onGapResultsUpdate])
 
   const handleFillRowGap = useCallback(async () => {
     setEnqueueErr(null)
@@ -725,21 +770,6 @@ export function DataOverviewStockDayJobsBar({
       setFillBatch(null)
     }
   }, [colFillTargets, scheduleWatchlistRefresh, startJobStream])
-
-  // ── Quality Sheet ─────────────────────────────────────────────────────────
-  const handleOpenQualitySheet = useCallback(async (sym: string) => {
-    setQualitySheetSymbol(sym)
-    setQualitySheetData(null)
-    setQualitySheetLoading(true)
-    try {
-      const data = await fetchStockDayQualityDetail(sym, 90)
-      setQualitySheetData(data)
-    } catch {
-      setQualitySheetData({ ok: false, symbol: sym, latest_date: null, daily: [], error: 'fetch failed' })
-    } finally {
-      setQualitySheetLoading(false)
-    }
-  }, [])
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -907,15 +937,7 @@ export function DataOverviewStockDayJobsBar({
         onClose={() => setAllGapsOpen(false)}
         gapBySymbol={gapBySymbol}
         poolSymbols={poolUpper}
-        onOpenQualitySheet={sym => void handleOpenQualitySheet(sym)}
-      />
-
-      <DataOverviewStockDayQualitySheet
-        open={qualitySheetSymbol != null}
-        onClose={() => { setQualitySheetSymbol(null); setQualitySheetData(null) }}
-        symbol={qualitySheetSymbol}
-        data={qualitySheetData}
-        loading={qualitySheetLoading}
+        onOpenQualitySheet={onOpenQualitySheet}
       />
 
       <StockDayJobsSheet

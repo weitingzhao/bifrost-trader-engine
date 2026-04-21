@@ -51,6 +51,10 @@ import { SettingsSidebarLampGlyph } from './pages/settings/settingsSidebarLampGl
 import type { SettingsSidebarLampGlyphId } from './pages/settings/settingsSidebarLampGlyphs'
 import {
   COVERAGE_OVERVIEW_SUBSECTION,
+  COVERAGE_OVERVIEW_GROUP_LABEL,
+  COVERAGE_OVERVIEW_LEGACY_ID,
+  COVERAGE_OVERVIEW_SUBSECTIONS,
+  COVERAGE_OVERVIEW_SUMMARY_ID,
   COVERAGE_OPTION_SUBSECTION,
   COVERAGE_STOCK_GROUP_LABEL,
   COVERAGE_STOCK_SUBSECTIONS,
@@ -321,7 +325,11 @@ function isCelerySettingsHash(hash: string): boolean {
 }
 
 function isCoverageOverviewHash(hash: string): boolean {
-  return settingsHashKey(hash) === COVERAGE_OVERVIEW_SUBSECTION.id
+  const h = settingsHashKey(hash)
+  return (
+    h === COVERAGE_OVERVIEW_LEGACY_ID ||
+    COVERAGE_OVERVIEW_SUBSECTIONS.some(s => s.id === h)
+  )
 }
 
 function isCoverageOptionHash(hash: string): boolean {
@@ -1492,11 +1500,11 @@ export default function App() {
                 type="button"
                 role="menuitem"
                 className={`app-header-menu-item ${activeTab === 'settings' && isCoverageOverviewHash(urlHash) ? 'active' : ''}`}
-                onClick={() => { openSettingsSectionById(COVERAGE_OVERVIEW_SUBSECTION.id); setHeaderMenuOpen(false) }}
-                title={`Settings → Data Coverage → ${COVERAGE_OVERVIEW_SUBSECTION.label}`}
+                onClick={() => { openSettingsSectionById(COVERAGE_OVERVIEW_SUMMARY_ID); setHeaderMenuOpen(false) }}
+                title={`Settings → Data Coverage → ${COVERAGE_OVERVIEW_GROUP_LABEL} → Summary`}
               >
                 <SettingsSectionIcon name={COVERAGE_OVERVIEW_SUBSECTION.icon} />
-                {COVERAGE_OVERVIEW_SUBSECTION.label}
+                {COVERAGE_OVERVIEW_GROUP_LABEL}
               </button>
               <button
                 type="button"
@@ -1760,7 +1768,7 @@ export default function App() {
           onGoToScreener={() => setResearchView('screener')}
           onOpenOptionCoverage={() => {
             setActiveTab('settings')
-            window.location.hash = `#${COVERAGE_OVERVIEW_SUBSECTION.id}`
+            window.location.hash = `#${COVERAGE_OVERVIEW_SUMMARY_ID}`
           }}
           breadcrumbLabel="Screener"
         />
