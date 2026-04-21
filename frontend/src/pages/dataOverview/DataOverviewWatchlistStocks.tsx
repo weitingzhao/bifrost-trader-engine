@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
+import type { CSSProperties } from 'react'
 import {
   fetchStockDayQualityDetail,
   type StockDayGapResult,
@@ -15,7 +16,6 @@ import {
   type StocksFocusDataset,
   type StocksFocusTableId,
   showStocksFocusTable,
-  STOCKS_FOCUS_TABLE_IDS,
 } from './stockFocusDataset'
 import { DataOverviewStockDayJobsBar } from './DataOverviewStockDayJobsBar'
 import { DataOverviewStockDayQualitySheet } from './DataOverviewStockDayQualitySheet'
@@ -82,34 +82,33 @@ function completenessPctHealthClass(pct: number): string {
 
 type SummaryRow = { table: string; pipeline: string; coverage: string; freshness: string; health: string }
 
-function buildStocksSummaryRows(rows: WatchlistDbCoverageSymbolRow[]): SummaryRow[] {
+function worstAgeAcrossWatchlist(
+  rows: WatchlistDbCoverageSymbolRow[],
+  isoPick: (r: WatchlistDbCoverageSymbolRow) => string | null | undefined,
+): string {
+  let worst: number | null = null
+  for (const r of rows) {
+    const a = isoAgeSeconds(isoPick(r))
+    if (a == null) continue
+    if (worst == null || a > worst) worst = a
+  }
+  return worst != null ? fmtAgeSeconds(worst) : '—'
+}
+
+/** Watchlist-scoped bar tables (per-symbol matrix). */
+export function buildWatchlistBarsSummaryRows(rows: WatchlistDbCoverageSymbolRow[]): SummaryRow[] {
   const n = rows.length
   if (n === 0) return []
 
   const withSd = rows.filter(r => rowSd(r).has_data).length
   const withSm = rows.filter(r => rowSm(r).has_data).length
-  const withTk = rows.filter(r => rowTk(r).has_data).length
-  const withTo = rows.filter(r => rowTo(r).has_data).length
-  const tt0 = rowTt(rows[0]!)
-  const ttRows = tt0.dictionary_row_count
-  const ttOk = tt0.has_data && ttRows != null && ttRows > 0
-
-  const worstAge = (isoPick: (r: WatchlistDbCoverageSymbolRow) => string | null | undefined) => {
-    let worst: number | null = null
-    for (const r of rows) {
-      const a = isoAgeSeconds(isoPick(r))
-      if (a == null) continue
-      if (worst == null || a > worst) worst = a
-    }
-    return worst != null ? fmtAgeSeconds(worst) : '—'
-  }
 
   return [
     {
       table: 'stock_day',
       pipeline: 'Fundamental · daily OHLC (Massive)',
       coverage: `${withSd}/${n} symbols`,
-      freshness: worstAge(r => {
+      freshness: worstAgeAcrossWatchlist(rows, r => {
         const sd = rowSd(r)
         return sd.has_data ? sd.stock_day_last_bar ?? sd.stock_day_last_created_at : null
       }),
@@ -119,17 +118,35 @@ function buildStocksSummaryRows(rows: WatchlistDbCoverageSymbolRow[]): SummaryRo
       table: 'stock_min',
       pipeline: 'Fundamental · intraday OHLC (Massive)',
       coverage: `${withSm}/${n} symbols`,
-      freshness: worstAge(r => {
+      freshness: worstAgeAcrossWatchlist(rows, r => {
         const sm = rowSm(r)
         return sm.has_data ? sm.last_bar_time ?? sm.last_created_at : null
       }),
       health: '—',
     },
+  ]
+}
+
+/**
+ * Reference utilities — full-universe PostgreSQL tables (not watchlist-specific).
+ * Coverage columns use watchlist rows as a convenience slice where per-symbol stats exist.
+ */
+export function buildStocksUtilitiesSummaryRows(rows: WatchlistDbCoverageSymbolRow[]): SummaryRow[] {
+  const n = rows.length
+  if (n === 0) return []
+
+  const withTk = rows.filter(r => rowTk(r).has_data).length
+  const withTo = rows.filter(r => rowTo(r).has_data).length
+  const tt0 = rowTt(rows[0]!)
+  const ttRows = tt0.dictionary_row_count
+  const ttOk = tt0.has_data && ttRows != null && ttRows > 0
+
+  return [
     {
       table: 'tickers',
-      pipeline: 'Fundamental · reference universe row',
-      coverage: `${withTk}/${n} symbols`,
-      freshness: worstAge(r => {
+      pipeline: 'Reference · universe row (Massive)',
+      coverage: `${withTk}/${n} symbols (watchlist slice)`,
+      freshness: worstAgeAcrossWatchlist(rows, r => {
         const tk = rowTk(r)
         return tk.has_data ? tk.tickers_updated_at ?? tk.last_updated_utc : null
       }),
@@ -137,9 +154,9 @@ function buildStocksSummaryRows(rows: WatchlistDbCoverageSymbolRow[]): SummaryRo
     },
     {
       table: 'ticker_overview',
-      pipeline: 'Fundamental · ticker details',
-      coverage: `${withTo}/${n} symbols`,
-      freshness: worstAge(r => {
+      pipeline: 'Reference · ticker details (Massive)',
+      coverage: `${withTo}/${n} symbols (watchlist slice)`,
+      freshness: worstAgeAcrossWatchlist(rows, r => {
         const o = rowTo(r)
         return o.has_data ? o.overview_updated_at : null
       }),
@@ -147,22 +164,36 @@ function buildStocksSummaryRows(rows: WatchlistDbCoverageSymbolRow[]): SummaryRo
     },
     {
       table: 'ticker_types',
-      pipeline: 'Fundamental · instrument type dictionary (global)',
-      coverage: ttOk ? `${ttRows} rows` : '—',
+      pipeline: 'Reference · instrument type dictionary (global)',
+      coverage: ttOk ? `${ttRows} rows (full table)` : '—',
       freshness: ttOk ? fmtAgeSeconds(isoAgeSeconds(tt0.dictionary_last_created_at)) : '—',
-      health: ttOk ? '—' : '—',
+      health: '—',
     },
   ]
 }
 
 const FOCUS_RADIO = 'data-overview-wl-stocks-focus-dataset'
 
-function FocusStocksChipSelector({
+const focusLegendSrOnly: CSSProperties = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: 'hidden',
+  clip: 'rect(0, 0, 0, 0)',
+  whiteSpace: 'nowrap',
+  border: 0,
+}
+
+export function FocusStocksChipSelector({
   value,
   onChange,
+  embedded = false,
 }: {
   value: StocksFocusDataset
   onChange: (v: StocksFocusDataset) => void
+  embedded?: boolean
 }) {
   const chip = (id: StocksFocusDataset, label: string, title: string) => (
     <label className="data-overview-focus-chips__chip" title={title}>
@@ -173,44 +204,40 @@ function FocusStocksChipSelector({
 
   return (
     <fieldset className="data-overview-focus-chips data-overview-focus-chips--compact">
-      <legend className="data-overview-focus-chips__legend">
-        <span className="data-overview-focus-chips__legend-text">
-          Focus dataset
-          <InfoTooltip text="Fundamental (FDN) stock reference and bars only. Staging/report layers are not wired here yet. ticker_types is a single global dictionary (GET /v3/reference/tickers/types); formerly ticker_instrument_types." />
+      <legend className={embedded ? undefined : 'data-overview-focus-chips__legend'} style={embedded ? focusLegendSrOnly : undefined}>
+        <span className={embedded ? undefined : 'data-overview-focus-chips__legend-text'}>
+          {embedded ? (
+            'Stocks — focus dataset'
+          ) : (
+            <>
+              Focus dataset
+              <InfoTooltip text="Watchlist matrix: stock_day and stock_min only. Reference utilities (tickers, ticker_overview, ticker_types) are under Utilities on Data Overview → Detail." />
+            </>
+          )}
         </span>
       </legend>
       <div className="data-overview-focus-chips__matrix" role="presentation">
-        <span className="data-overview-focus-chips__rk" title="Quick scope">
-          Quick
-        </span>
-        <div className="data-overview-focus-chips__row data-overview-focus-chips__row--quick">
-          {chip('all', 'All', 'Show every column group')}
-          {chip('fundamental', 'Fundamental', 'stock_day, stock_min, tickers, ticker_overview, ticker_types')}
-        </div>
-        <span className="data-overview-focus-chips__rk" title="Fundamental tables">
-          Fdn
+        <span className="data-overview-focus-chips__rk" title="Fundamental — stock bars">
+          FDN
         </span>
         <div className="data-overview-focus-chips__row">
-          {STOCKS_FOCUS_TABLE_IDS.map(id => (
-            <label key={id} className="data-overview-focus-chips__chip" title={id}>
-              <input type="radio" name={FOCUS_RADIO} checked={value === id} onChange={() => onChange(id)} />
-              <span>
-                <code>{id}</code>
-              </span>
-            </label>
-          ))}
+          {chip('all', 'All', 'Show every column group')}
+          {chip('stock_day', 'stock_day', 'Daily OHLC (Massive)')}
+          {chip('stock_min', 'stock_min', 'Intraday OHLC (Massive)')}
         </div>
       </div>
     </fieldset>
   )
 }
 
-export function DataOverviewWatchlistStocksSummaryTable({
-  wlRows,
+function StocksCoverageSummaryTable({
+  rows,
+  freshnessTooltip,
 }: {
-  wlRows: WatchlistDbCoverageSymbolRow[]
+  rows: SummaryRow[]
+  freshnessTooltip: string
 }) {
-  const summaryRows = useMemo(() => buildStocksSummaryRows(wlRows), [wlRows])
+  if (rows.length === 0) return null
   return (
     <div className="feed-massive-table-wrap">
       <table className="data-table">
@@ -221,13 +248,13 @@ export function DataOverviewWatchlistStocksSummaryTable({
             <th scope="col">Coverage</th>
             <th scope="col">
               Freshness
-              <InfoTooltip text="Worst-case age across watchlist symbols where applicable; ticker_types uses the dictionary’s max(created_at)." />
+              <InfoTooltip text={freshnessTooltip} />
             </th>
             <th scope="col">Health</th>
           </tr>
         </thead>
         <tbody>
-          {summaryRows.map(row => (
+          {rows.map(row => (
             <tr key={row.table}>
               <td>
                 <code>{row.table}</code>
@@ -244,19 +271,94 @@ export function DataOverviewWatchlistStocksSummaryTable({
   )
 }
 
+export function DataOverviewWatchlistStocksSummaryTable({
+  wlRows,
+}: {
+  wlRows: WatchlistDbCoverageSymbolRow[]
+}) {
+  const barRows = useMemo(() => buildWatchlistBarsSummaryRows(wlRows), [wlRows])
+  const utilRows = useMemo(() => buildStocksUtilitiesSummaryRows(wlRows), [wlRows])
+  return (
+    <div className="data-overview-stocks-summary-split">
+      <h4 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)' }}>
+        Watchlist bars
+        <InfoTooltip text="Per-watchlist-symbol OHLC coverage (stock_day, stock_min)." />
+      </h4>
+      <StocksCoverageSummaryTable
+        rows={barRows}
+        freshnessTooltip="Worst-case age across watchlist symbols for the latest bar or row activity."
+      />
+      <h4
+        className="page-title-with-tooltip"
+        style={{ marginTop: 'var(--space-4)', marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)' }}
+      >
+        Utilities
+        <InfoTooltip text="PostgreSQL reference tables for the full Massive instruments universe. Coverage uses the watchlist as a convenience slice where rows are per-symbol; ticker_types is one global dictionary." />
+      </h4>
+      <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
+        Not watchlist-specific — universe-wide reference data. Slice columns show how many watchlist symbols have rows where applicable.
+      </p>
+      <StocksCoverageSummaryTable
+        rows={utilRows}
+        freshnessTooltip="Worst-case age across watchlist symbols where applicable; ticker_types uses the global dictionary’s max(created_at)."
+      />
+    </div>
+  )
+}
+
+/** Detail page — same utilities summary as Summary, without the watchlist-bars block. */
+export function DataOverviewStocksUtilitiesSection({
+  wlRows,
+}: {
+  wlRows: WatchlistDbCoverageSymbolRow[]
+}) {
+  const utilRows = useMemo(() => buildStocksUtilitiesSummaryRows(wlRows), [wlRows])
+  return (
+    <section className="replay-section" aria-labelledby="data-overview-stocks-util-head" style={{ marginBottom: 'var(--space-4)' }}>
+      <h3 id="data-overview-stocks-util-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
+        Utilities
+        <InfoTooltip text="PostgreSQL reference tables covering the full Massive stocks universe (not scoped to the watchlist). Coverage uses the watchlist as a convenience slice for per-symbol tables; ticker_types is one global dictionary." />
+      </h3>
+      <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)' }}>
+        tickers, ticker_overview, and ticker_types hold universe-wide reference data. Figures below use the watchlist only as a slice where per-symbol stats apply. Planned table{' '}
+        <code>stock_snapshots</code> (Massive unified snapshot, GET /v3/snapshot) is not in PostgreSQL yet — see the SNP row in Watchlist coverage.
+      </p>
+      <StocksCoverageSummaryTable
+        rows={utilRows}
+        freshnessTooltip="Worst-case age across watchlist symbols where applicable; ticker_types uses the global dictionary’s max(created_at)."
+      />
+    </section>
+  )
+}
+
 export interface DataOverviewWatchlistStocksProps {
   wlRows: WatchlistDbCoverageSymbolRow[]
   /** When false, hide the collapsible watchlist summary block (Detail page only). */
   showWatchlistSummary?: boolean
   onWatchlistRefreshRequested?: () => void
+  embedFocusChips?: boolean
+  focusDataset?: StocksFocusDataset
+  onFocusDatasetChange?: (v: StocksFocusDataset) => void
 }
 
 export function DataOverviewWatchlistStocks({
   wlRows,
   showWatchlistSummary = true,
   onWatchlistRefreshRequested,
+  embedFocusChips = true,
+  focusDataset: focusDatasetProp,
+  onFocusDatasetChange: onFocusDatasetChangeProp,
 }: DataOverviewWatchlistStocksProps) {
-  const [focusDataset, setFocusDataset] = useState<StocksFocusDataset>('all')
+  const [focusUncontrolled, setFocusUncontrolled] = useState<StocksFocusDataset>('all')
+  const focusControlled = focusDatasetProp !== undefined && onFocusDatasetChangeProp !== undefined
+  const focusDataset = focusControlled ? focusDatasetProp : focusUncontrolled
+  const setFocusDataset = useCallback(
+    (v: StocksFocusDataset) => {
+      if (focusControlled) onFocusDatasetChangeProp(v)
+      else setFocusUncontrolled(v)
+    },
+    [focusControlled, onFocusDatasetChangeProp],
+  )
 
   // ── stock_day pool management ──────────────────────────────────────────────
   const [stockDayPool, setStockDayPool] = useState<string[]>([])
@@ -308,19 +410,21 @@ export function DataOverviewWatchlistStocks({
             style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)', cursor: 'pointer' }}
           >
             Watchlist summary
-            <InfoTooltip text="Watchlist-scoped aggregates (max 80 optionable STK). ticker_types is one global table — coverage shows total dictionary rows." />
+            <InfoTooltip text="Watchlist-scoped aggregates for bars and reference utilities (max 80 optionable STK). Utilities tables are universe-wide; slice counts are for the watchlist where applicable." />
           </summary>
           <DataOverviewWatchlistStocksSummaryTable wlRows={wlRows} />
         </details>
       ) : null}
 
       <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
-            One row per watchlist symbol. Fundamental datasets only (no staging/report). Scroll horizontally; Symbol stays
-            fixed.
+            One row per watchlist symbol for stock_day and stock_min only. Reference utilities (tickers, ticker_overview,
+            ticker_types) are listed under Utilities on this page. Scroll horizontally; Symbol stays fixed.
           </p>
-          <div style={{ marginBottom: 'var(--space-3)' }}>
-            <FocusStocksChipSelector value={focusDataset} onChange={setFocusDataset} />
-          </div>
+          {embedFocusChips !== false ? (
+            <div style={{ marginBottom: 'var(--space-3)' }}>
+              <FocusStocksChipSelector value={focusDataset} onChange={setFocusDataset} />
+            </div>
+          ) : null}
 
           <DataOverviewStockDayJobsBar
             wlRows={wlRows}
@@ -349,23 +453,6 @@ export function DataOverviewWatchlistStocks({
                     {show('stock_min') ? (
                       <th colSpan={5} scope="colgroup">
                         <code>stock_min</code>
-                      </th>
-                    ) : null}
-                    {show('tickers') ? (
-                      <th colSpan={4} scope="colgroup">
-                        <code>tickers</code>
-                      </th>
-                    ) : null}
-                    {show('ticker_overview') ? (
-                      <th colSpan={2} scope="colgroup">
-                        <code>ticker_overview</code>
-                      </th>
-                    ) : null}
-                    {show('ticker_types') ? (
-                      <th colSpan={2} scope="colgroup">
-                        <code title="Global instrument-type dictionary (GET /v3/reference/tickers/types). Former name: ticker_instrument_types.">
-                          ticker_types
-                        </code>
                       </th>
                     ) : null}
                   </tr>
@@ -408,41 +495,12 @@ export function DataOverviewWatchlistStocks({
                         <th scope="col">Last created</th>
                       </>
                     ) : null}
-                    {show('tickers') ? (
-                      <>
-                        <th scope="col">Present</th>
-                        <th scope="col">tickers_id</th>
-                        <th scope="col">PG updated</th>
-                        <th scope="col">API last_updated</th>
-                      </>
-                    ) : null}
-                    {show('ticker_overview') ? (
-                      <>
-                        <th scope="col">Present</th>
-                        <th scope="col">
-                          Overview updated
-                          <InfoTooltip text="ticker_overview.overview_updated_at (no separate created_at column in PostgreSQL)." />
-                        </th>
-                      </>
-                    ) : null}
-                    {show('ticker_types') ? (
-                      <>
-                        <th scope="col">
-                          Dictionary rows
-                          <InfoTooltip text="Total rows in the global ticker_types table — same value on every symbol row." />
-                        </th>
-                        <th scope="col">Last refresh</th>
-                      </>
-                    ) : null}
                   </tr>
                 </thead>
                 <tbody>
                   {wlRows.map(r => {
                     const sd = rowSd(r)
                     const sm = rowSm(r)
-                    const tk = rowTk(r)
-                    const to = rowTo(r)
-                    const tt = rowTt(r)
                     const sdAge = sd.has_data ? isoAgeSeconds(sd.stock_day_last_bar ?? sd.stock_day_last_created_at) : null
                     const smAge = sm.has_data ? isoAgeSeconds(sm.last_bar_time ?? sm.last_created_at) : null
                     const symU = r.symbol.trim().toUpperCase()
@@ -557,26 +615,6 @@ export function DataOverviewWatchlistStocks({
                             <td>{sm.has_data && sm.row_count != null ? sm.row_count.toLocaleString() : '—'}</td>
                             <td>{sm.has_data && sm.distinct_periods != null ? sm.distinct_periods : '—'}</td>
                             <td style={{ fontSize: 'var(--text-caption)' }}>{fmtTs(sm.last_created_at)}</td>
-                          </>
-                        ) : null}
-                        {show('tickers') ? (
-                          <>
-                            <td>{tk.has_data ? 'Yes' : '—'}</td>
-                            <td>{tk.has_data && tk.tickers_id != null ? tk.tickers_id : '—'}</td>
-                            <td style={{ fontSize: 'var(--text-caption)' }}>{fmtTs(tk.tickers_updated_at)}</td>
-                            <td style={{ fontSize: 'var(--text-caption)' }}>{fmtTs(tk.last_updated_utc)}</td>
-                          </>
-                        ) : null}
-                        {show('ticker_overview') ? (
-                          <>
-                            <td>{to.has_data ? 'Yes' : '—'}</td>
-                            <td style={{ fontSize: 'var(--text-caption)' }}>{fmtTs(to.overview_updated_at)}</td>
-                          </>
-                        ) : null}
-                        {show('ticker_types') ? (
-                          <>
-                            <td>{tt.has_data && tt.dictionary_row_count != null ? tt.dictionary_row_count.toLocaleString() : '—'}</td>
-                            <td style={{ fontSize: 'var(--text-caption)' }}>{fmtTs(tt.dictionary_last_created_at)}</td>
                           </>
                         ) : null}
                       </tr>

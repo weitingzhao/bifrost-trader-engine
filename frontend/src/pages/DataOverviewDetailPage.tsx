@@ -1,4 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { OptionsFocusDataset } from './dataOverview/optionFocusDataset'
+import type { StocksFocusDataset } from './dataOverview/stockFocusDataset'
+import {
+  optionsFocusDatasetToUnified,
+  stocksFocusDatasetToUnified,
+  type WatchlistUnifiedDataset,
+  unifiedFocusToOptions,
+  unifiedFocusToStocks,
+  watchlistUnifiedShowsOptionsMatrix,
+  watchlistUnifiedShowsStocksMatrix,
+} from './dataOverview/watchlistUnifiedFocus'
 import type { StatusResponse } from '../types'
 import {
   postOptionContractsReferenceGapBatch,
@@ -12,7 +23,8 @@ import type {
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { DataOverviewWatchlistOptions } from './dataOverview/DataOverviewWatchlistOptions'
-import { DataOverviewWatchlistStocks } from './dataOverview/DataOverviewWatchlistStocks'
+import { DataOverviewStocksUtilitiesSection, DataOverviewWatchlistStocks } from './dataOverview/DataOverviewWatchlistStocks'
+import { WatchlistCoverageFocusChips } from './dataOverview/WatchlistCoverageFocusChips'
 import {
   COVERAGE_OPTION_SUBSECTION,
   COVERAGE_OVERVIEW_SUMMARY_ID,
@@ -31,16 +43,14 @@ function delayMs(ms: number): Promise<void> {
 
 const REF_GAP_CHUNK_DELAY_MS = 75
 
-type WatchlistSectionTab = 'options' | 'stocks'
-
 export function DataOverviewDetailPage(_props: DataOverviewDetailPageProps) {
   const [wlRows, setWlRows] = useState<WatchlistDbCoverageSymbolRow[]>([])
-  const [wlTab, setWlTab] = useState<WatchlistSectionTab>('options')
+  const [unifiedFocus, setUnifiedFocus] = useState<WatchlistUnifiedDataset>(null)
   const [wlGeneratedAt, setWlGeneratedAt] = useState<string | null>(null)
   const [wlMessage, setWlMessage] = useState<string | null>(null)
   const [wlError, setWlError] = useState<string | null>(null)
 
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
 
   const [refGapBySymbol, setRefGapBySymbol] = useState<Record<string, OptionContractsReferenceGapResult>>({})
   const [refGapLoading, setRefGapLoading] = useState(false)
@@ -233,15 +243,31 @@ export function DataOverviewDetailPage(_props: DataOverviewDetailPageProps) {
     setComparePool([])
   }, [])
 
-  useEffect(() => {
-    void loadAll()
-  }, [loadAll])
+  const handleOptionsFocusChange = useCallback((v: OptionsFocusDataset) => {
+    const u = optionsFocusDatasetToUnified(v)
+    if (u !== null) setUnifiedFocus(u)
+  }, [])
+
+  const handleStocksFocusChange = useCallback((v: StocksFocusDataset) => {
+    const u = stocksFocusDatasetToUnified(v)
+    if (u !== null) setUnifiedFocus(u)
+  }, [])
+
+  const showOptionsMatrix = watchlistUnifiedShowsOptionsMatrix(unifiedFocus)
+  const showStocksMatrix = watchlistUnifiedShowsStocksMatrix(unifiedFocus)
 
   useEffect(() => {
-    if (wlTab !== 'options') {
+    if (!watchlistUnifiedShowsOptionsMatrix(unifiedFocus)) {
       setOptionJobsSheetOpen(false)
     }
-  }, [wlTab])
+  }, [unifiedFocus])
+
+  /** Load watchlist coverage only after the user picks a table chip; reuse rows when switching tables. */
+  useEffect(() => {
+    if (unifiedFocus == null) return
+    if (wlRows.length > 0) return
+    void loadAll()
+  }, [unifiedFocus, wlRows.length, loadAll])
 
   return (
     <div className="card process-section market-data-page market-data-page--settings-embed">
@@ -265,115 +291,136 @@ export function DataOverviewDetailPage(_props: DataOverviewDetailPageProps) {
         </button>
         {' / '}
         Detail
-        <InfoTooltip text="Per-symbol watchlist matrix, Focus dataset, Compare / Check tools, and option coverage jobs. Aggregates and global coverage are on Data Overview → Summary." />
+        {wlGeneratedAt ? (
+          <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', fontSize: 'var(--text-body)' }}>
+            {' · '}
+            Generated at {wlGeneratedAt}
+          </span>
+        ) : null}
+        <InfoTooltip text="Per-symbol watchlist matrix, table focus chips, Compare / Check tools, and option coverage jobs. Aggregates and global coverage are on Data Overview → Summary." />
       </h2>
-
-      <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)' }}>
-        <button
-          type="button"
-          className="page-title-breadcrumb-link"
-          style={{ fontSize: 'inherit', padding: 0 }}
-          onClick={() => { window.location.hash = `#${COVERAGE_OVERVIEW_SUMMARY_ID}` }}
-        >
-          Open Summary
-        </button>
-        {' — '}
-        aggregates, job queues, and global PostgreSQL coverage.
-      </p>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
         <span style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)' }}>
           Watchlist matrix and Massive coverage jobs.
         </span>
         <div style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)' }}>
-          {wlTab === 'options' ? (
+          {wlRows.length > 0 && watchlistUnifiedShowsOptionsMatrix(unifiedFocus) ? (
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOptionJobsSheetOpen(true)}>
               Jobs
             </button>
           ) : null}
-          <button type="button" className="btn btn-secondary btn-sm" disabled={loading} onClick={() => void loadAll()}>
-            {loading ? 'Loading…' : 'Refresh'}
-          </button>
         </div>
       </div>
 
       <section className="replay-section" aria-labelledby="data-overview-wl-head" style={{ marginBottom: 'var(--space-4)' }}>
-        <h3 id="data-overview-wl-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-          Watchlist coverage
-          <InfoTooltip text="Options and Stocks: per-symbol matrix. Summary tables are on Data Overview → Summary." />
-        </h3>
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 'var(--space-2)',
+            marginBottom: 'var(--space-2)',
+          }}
+        >
+          <h3 id="data-overview-wl-head" className="page-title-with-tooltip" style={{ marginBottom: 0 }}>
+            Watchlist coverage
+            <InfoTooltip text="Select one PostgreSQL table chip — watchlist coverage loads after you pick. Options vs Stocks by asset class. Summary tables are on Data Overview → Summary." />
+          </h3>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={loading || unifiedFocus == null}
+            onClick={() => void loadAll()}
+          >
+            {loading ? 'Loading…' : 'Refresh'}
+          </button>
+        </div>
         {wlError ? <p className="status-page-msg err" role="alert">{wlError}</p> : null}
-        {wlGeneratedAt ? (
-          <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
-            Generated at {wlGeneratedAt}
-          </p>
-        ) : null}
         {wlMessage && !wlError ? (
           <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>{wlMessage}</p>
         ) : null}
 
-        {wlRows.length > 0 ? (
+        <div className="replay-section" style={{ marginBottom: 'var(--space-4)' }}>
+          <WatchlistCoverageFocusChips embedded value={unifiedFocus} onChange={setUnifiedFocus} />
+        </div>
+
+        {unifiedFocus == null ? (
+          <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-caption)', marginBottom: 'var(--space-3)' }}>
+            Select a table chip to load watchlist coverage.
+          </p>
+        ) : null}
+
+        {unifiedFocus != null && loading ? (
+          <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-caption)', marginBottom: 'var(--space-3)' }}>
+            Loading watchlist coverage…
+          </p>
+        ) : null}
+
+        {unifiedFocus != null && !loading && !wlError && wlRows.length > 0 ? (
           <>
-            <div className="feed-massive-agg-tabs-wrap" style={{ marginBottom: 'var(--space-3)' }}>
-              <div className="feed-massive-agg-tabs" role="tablist" aria-label="Watchlist coverage datasets">
-                <button
-                  type="button"
-                  role="tab"
-                  id="data-overview-wl-tab-options"
-                  className={`feed-massive-agg-tab${wlTab === 'options' ? ' feed-massive-agg-tab--active' : ''}`}
-                  aria-selected={wlTab === 'options'}
-                  tabIndex={wlTab === 'options' ? 0 : -1}
-                  onClick={() => setWlTab('options')}
-                >
+            {showOptionsMatrix ? (
+              <>
+                <h4 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)' }}>
                   Options
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  id="data-overview-wl-tab-stocks"
-                  className={`feed-massive-agg-tab${wlTab === 'stocks' ? ' feed-massive-agg-tab--active' : ''}`}
-                  aria-selected={wlTab === 'stocks'}
-                  tabIndex={wlTab === 'stocks' ? 0 : -1}
-                  onClick={() => setWlTab('stocks')}
+                </h4>
+                <DataOverviewWatchlistOptions
+                  wlRows={wlRows}
+                  showWatchlistSummary={false}
+                  embedFocusChips={false}
+                  focusDataset={unifiedFocusToOptions(unifiedFocus)}
+                  onFocusDatasetChange={handleOptionsFocusChange}
+                  onWatchlistRefreshRequested={refreshPipelineAfterJobs}
+                  refGapBySymbol={refGapBySymbol}
+                  onCompareMassiveReference={handleCompareMassiveReference}
+                  refGapLoading={refGapLoading}
+                  refGapError={refGapError}
+                  snapshotGapBySymbol={snapshotGapBySymbol}
+                  onCompareSnapshotGap={handleCompareSnapshotGap}
+                  snapshotGapLoading={snapshotGapLoading}
+                  snapshotGapError={snapshotGapError}
+                  comparePool={comparePool}
+                  onToggleComparePool={toggleComparePool}
+                  onSelectAllComparePool={selectAllComparePool}
+                  onClearComparePool={clearComparePool}
+                  jobsSheetOpen={optionJobsSheetOpen}
+                  onJobsSheetOpenChange={setOptionJobsSheetOpen}
+                />
+              </>
+            ) : null}
+
+            {showStocksMatrix ? (
+              <>
+                <h4
+                  className="page-title-with-tooltip"
+                  style={{
+                    marginTop: showOptionsMatrix ? 'var(--space-4)' : undefined,
+                    marginBottom: 'var(--space-2)',
+                    fontSize: 'var(--text-body)',
+                  }}
                 >
                   Stocks
-                </button>
-              </div>
-            </div>
-
-            {wlTab === 'options' ? (
-              <DataOverviewWatchlistOptions
-                wlRows={wlRows}
-                showWatchlistSummary={false}
-                onWatchlistRefreshRequested={refreshPipelineAfterJobs}
-                refGapBySymbol={refGapBySymbol}
-                onCompareMassiveReference={handleCompareMassiveReference}
-                refGapLoading={refGapLoading}
-                refGapError={refGapError}
-                snapshotGapBySymbol={snapshotGapBySymbol}
-                onCompareSnapshotGap={handleCompareSnapshotGap}
-                snapshotGapLoading={snapshotGapLoading}
-                snapshotGapError={snapshotGapError}
-                comparePool={comparePool}
-                onToggleComparePool={toggleComparePool}
-                onSelectAllComparePool={selectAllComparePool}
-                onClearComparePool={clearComparePool}
-                jobsSheetOpen={optionJobsSheetOpen}
-                onJobsSheetOpenChange={setOptionJobsSheetOpen}
-              />
-            ) : (
-              <DataOverviewWatchlistStocks
-                wlRows={wlRows}
-                showWatchlistSummary={false}
-                onWatchlistRefreshRequested={refreshPipelineAfterJobs}
-              />
-            )}
+                </h4>
+                <DataOverviewWatchlistStocks
+                  wlRows={wlRows}
+                  showWatchlistSummary={false}
+                  embedFocusChips={false}
+                  focusDataset={unifiedFocusToStocks(unifiedFocus)}
+                  onFocusDatasetChange={handleStocksFocusChange}
+                  onWatchlistRefreshRequested={refreshPipelineAfterJobs}
+                />
+              </>
+            ) : null}
           </>
         ) : null}
-        {!loading && !wlError && wlRows.length === 0 && !wlMessage ? (
+
+        {unifiedFocus != null && !loading && !wlError && wlRows.length === 0 && !wlMessage ? (
           <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-caption)' }}>No watchlist rows.</p>
         ) : null}
       </section>
+
+      {wlRows.length > 0 ? <DataOverviewStocksUtilitiesSection wlRows={wlRows} /> : null}
 
       <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginTop: 'var(--space-4)' }}>
         Massive option sync and chain tools:{' '}

@@ -85,8 +85,6 @@ function queueSummaryLine(c: JobQueueStatusCounts): string {
   return `pending ${c.pending} · running ${c.running} · failed ${c.failed} · done ${c.done}`
 }
 
-type WatchlistSummaryTab = 'options' | 'stocks'
-
 const emptyCounts = (): JobQueueStatusCounts => ({
   pending: 0,
   running: 0,
@@ -96,7 +94,6 @@ const emptyCounts = (): JobQueueStatusCounts => ({
 
 export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
   const [wlRows, setWlRows] = useState<WatchlistDbCoverageSymbolRow[]>([])
-  const [wlTab, setWlTab] = useState<WatchlistSummaryTab>('options')
   const [wlGeneratedAt, setWlGeneratedAt] = useState<string | null>(null)
   const [wlMessage, setWlMessage] = useState<string | null>(null)
   const [wlError, setWlError] = useState<string | null>(null)
@@ -322,36 +319,19 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
 
         {wlRows.length > 0 ? (
           <>
-            <div className="feed-massive-agg-tabs-wrap" style={{ marginBottom: 'var(--space-3)' }}>
-              <div className="feed-massive-agg-tabs" role="tablist" aria-label="Watchlist summary datasets">
-                <button
-                  type="button"
-                  role="tab"
-                  className={`feed-massive-agg-tab${wlTab === 'options' ? ' feed-massive-agg-tab--active' : ''}`}
-                  aria-selected={wlTab === 'options'}
-                  tabIndex={wlTab === 'options' ? 0 : -1}
-                  onClick={() => setWlTab('options')}
-                >
-                  Options
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  className={`feed-massive-agg-tab${wlTab === 'stocks' ? ' feed-massive-agg-tab--active' : ''}`}
-                  aria-selected={wlTab === 'stocks'}
-                  tabIndex={wlTab === 'stocks' ? 0 : -1}
-                  onClick={() => setWlTab('stocks')}
-                >
-                  Stocks
-                </button>
-              </div>
+            <div style={{ marginBottom: 'var(--space-4)' }}>
+              <h4 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)' }}>
+                Options (watchlist summary)
+                <InfoTooltip text="Watchlist-scoped aggregates across symbols (max 80). Same metrics as Data Overview → Detail option datasets summary block." />
+              </h4>
+              <DataOverviewWatchlistOptionsSummaryTable wlRows={wlRows} />
             </div>
-            <div className="replay-section" style={{ marginBottom: 0 }}>
-              {wlTab === 'options' ? (
-                <DataOverviewWatchlistOptionsSummaryTable wlRows={wlRows} />
-              ) : (
-                <DataOverviewWatchlistStocksSummaryTable wlRows={wlRows} />
-              )}
+            <div>
+              <h4 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)' }}>
+                Stocks (watchlist summary)
+                <InfoTooltip text="Fundamental stock datasets for the same watchlist universe. Per-symbol matrix is on Data Overview → Detail." />
+              </h4>
+              <DataOverviewWatchlistStocksSummaryTable wlRows={wlRows} />
             </div>
           </>
         ) : null}

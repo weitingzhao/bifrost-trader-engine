@@ -1,29 +1,32 @@
 /**
- * Watchlist Stocks matrix — fundamental (FDN) datasets only; no staging/report layers yet.
- * Table names align with PostgreSQL (ticker_types was formerly ticker_instrument_types).
+ * Watchlist Stocks matrix — watchlist-scoped bars (stock_day, stock_min) only.
+ * Reference utilities (tickers, ticker_overview, ticker_types) are full-universe tables
+ * and are surfaced outside the watchlist matrix on Data Overview → Detail.
  */
 
-export type StocksFocusTableId =
-  | 'stock_day'
-  | 'stock_min'
-  | 'tickers'
-  | 'ticker_overview'
-  | 'ticker_types'
+/** Columns in the per-watchlist-symbol matrix (OHLC bars). */
+export type WatchlistStocksTableId = 'stock_day' | 'stock_min'
 
-export type StocksFocusDataset = 'all' | 'fundamental' | StocksFocusTableId
+/** PostgreSQL reference tables covering the full instruments universe (not watchlist-specific). */
+export type StocksUtilitiesTableId = 'tickers' | 'ticker_overview' | 'ticker_types'
 
-const FUNDAMENTAL_TABLES: StocksFocusTableId[] = [
-  'stock_day',
-  'stock_min',
+export type StocksFocusTableId = WatchlistStocksTableId
+
+export type StocksFocusDataset = 'all' | 'fundamental' | WatchlistStocksTableId
+
+const WATCHLIST_BAR_TABLES: WatchlistStocksTableId[] = ['stock_day', 'stock_min']
+
+/** IDs that participate in unified watchlist focus chips (Detail). */
+export const STOCKS_WATCHLIST_FOCUS_TABLE_IDS: WatchlistStocksTableId[] = [...WATCHLIST_BAR_TABLES]
+
+export const STOCKS_UTILITIES_TABLE_IDS: StocksUtilitiesTableId[] = [
   'tickers',
   'ticker_overview',
   'ticker_types',
 ]
 
-export const STOCKS_FOCUS_TABLE_IDS: StocksFocusTableId[] = [...FUNDAMENTAL_TABLES]
-
 export function showStocksFocusTable(focus: StocksFocusDataset, table: StocksFocusTableId): boolean {
   if (focus === 'all') return true
-  if (focus === 'fundamental') return FUNDAMENTAL_TABLES.includes(table)
+  if (focus === 'fundamental') return WATCHLIST_BAR_TABLES.includes(table)
   return focus === table
 }

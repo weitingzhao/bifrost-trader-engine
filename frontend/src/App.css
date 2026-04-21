@@ -21082,6 +21082,19 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
+.data-overview-focus-chips__chip-wrap--placeholder {
+  cursor: help;
+}
+
+.data-overview-focus-chips__chip--placeholder {
+  opacity: 0.58;
+}
+
+.data-overview-focus-chips__chip-wrap--placeholder:hover .data-overview-focus-chips__chip--placeholder {
+  border-color: var(--color-border, #2a313c);
+  background: rgba(0, 0, 0, 0.18);
+}
+
 [data-theme="light"] .data-overview-focus-chips {
   background: var(--color-surface);
   box-shadow:

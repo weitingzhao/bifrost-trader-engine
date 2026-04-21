@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { postOptionBarsContractsGapBatch } from '../../api'
 import type {
   OptionBarsContractsGapResult,
@@ -247,13 +248,28 @@ function IconDbView({ className }: { className?: string }) {
   )
 }
 
+const focusLegendSrOnly: CSSProperties = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: 'hidden',
+  clip: 'rect(0, 0, 0, 0)',
+  whiteSpace: 'nowrap',
+  border: 0,
+}
+
 /** Inline segmented chips (native radios) — no dropdown. */
-function FocusDatasetChipSelector({
+export function FocusDatasetChipSelector({
   value,
   onChange,
+  /** When true, outer page shows the "Focus dataset" title; legend is screen-reader only. */
+  embedded = false,
 }: {
   value: OptionsFocusDataset
   onChange: (v: OptionsFocusDataset) => void
+  embedded?: boolean
 }) {
   const chip = (v: OptionsFocusDataset, label: string, title?: string) => {
     const kind = dbObjectKind(v)
@@ -293,36 +309,39 @@ function FocusDatasetChipSelector({
 
   return (
     <fieldset className="data-overview-focus-chips data-overview-focus-chips--compact">
-      <legend className="data-overview-focus-chips__legend">
-        <span className="data-overview-focus-chips__legend-text">
-          Focus dataset
-          <InfoTooltip text="Choose which column groups appear in the matrix. Quick row selects whole layers; named chips pick one dataset. Table and view icons match PostgreSQL: only option_snapshots_with_underlying_day is a SQL VIEW; others are tables." />
+      <legend className={embedded ? undefined : 'data-overview-focus-chips__legend'} style={embedded ? focusLegendSrOnly : undefined}>
+        <span className={embedded ? undefined : 'data-overview-focus-chips__legend-text'}>
+          {embedded ? (
+            'Options — focus dataset'
+          ) : (
+            <>
+              Focus dataset
+              <InfoTooltip text="Choose which column groups appear in the matrix. FDN lists core contracts and bars; Utilities holds option_snapshots; STG / RPT unchanged. Table and view icons match PostgreSQL: only option_snapshots_with_underlying_day is a SQL VIEW; others are tables." />
+            </>
+          )}
         </span>
       </legend>
 
       <div className="data-overview-focus-chips__matrix" role="presentation">
-        <span className="data-overview-focus-chips__rk" title="Quick scope — whole layers">
-          Quick
-        </span>
-        <div className="data-overview-focus-chips__row data-overview-focus-chips__row--quick">
-          {chip('all', 'All', 'Show every column group')}
-          {chip('fundamental', 'Fundamental', 'Contracts, snapshots, day & minute bars')}
-          {chip('staging', 'Staging', 'Underlying join, expirations, open interest')}
-          {chip('report', 'Report', 'ATM IV and max pain rollups')}
-        </div>
-
-        <span className="data-overview-focus-chips__rk" title="Fundamental tables">
-          Fdn
+        <span className="data-overview-focus-chips__rk" title="Fundamental — core contracts and bars">
+          FDN
         </span>
         <div className="data-overview-focus-chips__row">
+          {chip('all', 'All', 'Show every column group')}
           {chip('option_contracts', 'option_contracts', 'Reference / contract definitions')}
-          {chip('option_snapshots', 'option_snapshots', 'Chain & intraday greeks')}
           {chip('option_day', 'option_day', 'Daily option bars')}
           {chip('option_min', 'option_min', 'Minute option bars')}
         </div>
 
+        <span className="data-overview-focus-chips__rk" title="Option chain snapshots">
+          Utilities
+        </span>
+        <div className="data-overview-focus-chips__row">
+          {chip('option_snapshots', 'option_snapshots', 'Chain & intraday greeks')}
+        </div>
+
         <span className="data-overview-focus-chips__rk" title="Staging — tables plus one SQL view">
-          Stg
+          STG
         </span>
         <div className="data-overview-focus-chips__row">
           {chip(
@@ -621,6 +640,10 @@ export interface DataOverviewWatchlistOptionsProps {
   onClearComparePool?: () => void
   jobsSheetOpen: boolean
   onJobsSheetOpenChange: (open: boolean) => void
+  /** When false, Focus chips are omitted (rendered by parent, e.g. Data Overview Detail). Use with focusDataset + onFocusDatasetChange. */
+  embedFocusChips?: boolean
+  focusDataset?: OptionsFocusDataset
+  onFocusDatasetChange?: (v: OptionsFocusDataset) => void
 }
 
 export function DataOverviewWatchlistOptions({
@@ -641,8 +664,20 @@ export function DataOverviewWatchlistOptions({
   onClearComparePool,
   jobsSheetOpen,
   onJobsSheetOpenChange,
+  embedFocusChips = true,
+  focusDataset: focusDatasetProp,
+  onFocusDatasetChange: onFocusDatasetChangeProp,
 }: DataOverviewWatchlistOptionsProps) {
-  const [focusDataset, setFocusDataset] = useState<OptionsFocusDataset>('all')
+  const [focusUncontrolled, setFocusUncontrolled] = useState<OptionsFocusDataset>('all')
+  const focusControlled = focusDatasetProp !== undefined && onFocusDatasetChangeProp !== undefined
+  const focusDataset = focusControlled ? focusDatasetProp : focusUncontrolled
+  const setFocusDataset = useCallback(
+    (v: OptionsFocusDataset) => {
+      if (focusControlled) onFocusDatasetChangeProp(v)
+      else setFocusUncontrolled(v)
+    },
+    [focusControlled, onFocusDatasetChangeProp],
+  )
   const prevFocusRef = useRef<OptionsFocusDataset>(focusDataset)
   const jobsBarRef = useRef<DataOverviewOptionJobsBarHandle | null>(null)
   const [allGapsSheetMode, setAllGapsSheetMode] = useState<
@@ -769,9 +804,11 @@ export function DataOverviewWatchlistOptions({
       <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
             One sheet per symbol: grouped columns for each dataset. The Symbol column stays fixed when the table is wider than the viewport.
           </p>
-          <div style={{ marginBottom: 'var(--space-3)' }}>
-            <FocusDatasetChipSelector value={focusDataset} onChange={setFocusDataset} />
-          </div>
+          {embedFocusChips !== false ? (
+            <div style={{ marginBottom: 'var(--space-3)' }}>
+              <FocusDatasetChipSelector value={focusDataset} onChange={setFocusDataset} />
+            </div>
+          ) : null}
 
           <DataOverviewOptionJobsBar
             ref={jobsBarRef}
