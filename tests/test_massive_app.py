@@ -133,7 +133,7 @@ class TestMassiveHealth:
         newest = datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
         cur = MagicMock()
         cur.fetchall.side_effect = [
-            [("NVDA", 100, newest, 90, 80, 2, 50, 45, 4, 12)],  # option_contracts
+            [("NVDA", 100, newest, 90, 80, 2, 50, 45, 4, 12, 0, 0)],  # option_contracts (+ per-column SQL NULL row counts)
             [("NVDA", 50, newest, 45, 40, 30, 3)],               # option_snapshots
             [("NVDA", newest.date(), newest)],                   # report_option_atm_iv_daily
             [("NVDA", 200, newest, newest, 99.1, 98.0, 95.0, 180)],  # stock_day aggregate
@@ -172,6 +172,9 @@ class TestMassiveHealth:
         assert oc["exercise_style_pct"] == 50.0
         assert oc["shares_per_contract_pct"] == 45.0
         assert oc["optional_data_fill_avg_pct"] == 47.5
+        assert oc["exercise_style_null_row_count"] == 0
+        assert oc["shares_per_contract_null_row_count"] == 0
+        assert oc["column_gap_count"] == 0
         assert oc["distinct_expirations"] == 4
         assert oc["distinct_strikes"] == 12
         assert oc["newest_created_at"] is not None

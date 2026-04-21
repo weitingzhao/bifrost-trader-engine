@@ -91,7 +91,7 @@ function delayMs(ms: number): Promise<void> {
   })
 }
 
-const REF_GAP_BATCH_SIZE = 10
+/** Pace between per-symbol reference gap requests (matches option_day Check pacing). */
 const REF_GAP_CHUNK_DELAY_MS = 75
 
 type WatchlistSectionTab = 'options' | 'stocks'
@@ -320,41 +320,32 @@ export function DataOverviewPage(_props: DataOverviewPageProps) {
           )
           return
         }
-        for (let off = 0; off < eligible.length; off += REF_GAP_BATCH_SIZE) {
-          const chunk = eligible.slice(off, off + REF_GAP_BATCH_SIZE)
-          for (const sym of chunk) {
-            progress?.onSymbolStart?.(sym)
-          }
+        // One symbol per HTTP call so Jobs sheet "N active" decreases as each Check finishes (same as option_day).
+        for (let i = 0; i < eligible.length; i++) {
+          const sym = eligible[i]!
+          progress?.onSymbolStart?.(sym)
           try {
-            const batchRes = await postOptionContractsReferenceGapBatch(chunk, { max_expiries: maxExpiries })
+            const batchRes = await postOptionContractsReferenceGapBatch([sym], { max_expiries: maxExpiries })
             if (!batchRes.ok || !batchRes.results) {
               const msg = typeof batchRes.error === 'string' ? batchRes.error : 'Compare failed'
-              for (const sym of chunk) {
-                progress?.onSymbolError?.(sym, msg)
-              }
+              progress?.onSymbolError?.(sym, msg)
             } else {
-              for (const sym of chunk) {
-                const res = batchRes.results[sym]
-                if (!res) {
-                  progress?.onSymbolError?.(sym, 'No result')
-                  continue
-                }
-                if (!res.ok) {
-                  const msg = typeof res.error === 'string' ? res.error : 'Compare failed'
-                  progress?.onSymbolError?.(sym, msg)
-                  continue
-                }
+              const res = batchRes.results[sym]
+              if (!res) {
+                progress?.onSymbolError?.(sym, 'No result')
+              } else if (!res.ok) {
+                const msg = typeof res.error === 'string' ? res.error : 'Compare failed'
+                progress?.onSymbolError?.(sym, msg)
+              } else {
                 setRefGapBySymbol(prev => ({ ...prev, [sym]: res }))
                 progress?.onSymbolDone?.(sym, res)
               }
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : 'Compare failed'
-            for (const sym of chunk) {
-              progress?.onSymbolError?.(sym, msg)
-            }
+            progress?.onSymbolError?.(sym, msg)
           }
-          if (off + REF_GAP_BATCH_SIZE < eligible.length) {
+          if (i < eligible.length - 1) {
             await delayMs(REF_GAP_CHUNK_DELAY_MS)
           }
         }

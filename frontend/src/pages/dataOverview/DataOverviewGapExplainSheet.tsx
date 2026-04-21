@@ -139,9 +139,13 @@ export function DataOverviewGapExplainSheet({
           ) : (
             <>
               <p className="data-overview-gap-explain-sheet__lead">
-                In the <code>option_contracts</code> matrix, <strong>Ref</strong> is the number of reference contracts Massive
-                returns per compared expiry; <strong>Gap</strong> is Ref minus PG rows that match those contracts by{' '}
-                <code>contract_key</code>. <strong>Cov%</strong> is matched PG ÷ Ref (never above 100%).
+                In the <code>option_contracts</code> matrix, <strong>Column comp</strong> lists <strong>ID</strong> (avg ticker
+                and identity %), <strong>NULL</strong> (nullable fill %), and <strong>C gap</strong> (total SQL <code>NULL</code>{' '}
+                cells: rows with <code>exercise_style</code> IS NULL plus rows with <code>shares_per_contract</code> IS NULL).{' '}
+                <strong>Row alignment</strong> (Ref, Row gap, Cov%) is defined only after{' '}
+                <strong>Check</strong> vs Massive: <strong>Ref</strong> is the number of reference contracts Massive returns per
+                compared expiry; <strong>Row gap</strong> (left) is Ref minus PG rows matched by <code>contract_key</code>;{' '}
+                <strong>Cov%</strong> is matched PG ÷ Ref (never above 100%).
               </p>
 
               <h4 className="data-overview-gap-explain-sheet__h">How the total Gap and Cov% are computed</h4>

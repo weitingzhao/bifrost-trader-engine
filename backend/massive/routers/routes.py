@@ -649,7 +649,9 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                                     THEN 1 END) AS with_exercise_style,
                         COUNT(CASE WHEN shares_per_contract IS NOT NULL THEN 1 END) AS with_shares_per_contract,
                         COUNT(DISTINCT expiry)::bigint AS distinct_expirations,
-                        COUNT(DISTINCT strike)::bigint AS distinct_strikes
+                        COUNT(DISTINCT strike)::bigint AS distinct_strikes,
+                        COALESCE(SUM(CASE WHEN exercise_style IS NULL THEN 1 ELSE 0 END), 0)::bigint AS exercise_style_null_rows,
+                        COALESCE(SUM(CASE WHEN shares_per_contract IS NULL THEN 1 ELSE 0 END), 0)::bigint AS shares_per_contract_null_rows
                     FROM option_contracts
                     WHERE UPPER(TRIM(symbol)) = ANY(%s)
                     GROUP BY UPPER(TRIM(symbol))
@@ -669,6 +671,9 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                     w_spc = int(row[7] or 0)
                     dist_exp = int(row[8] or 0)
                     dist_strikes = int(row[9] or 0)
+                    es_null_rows = int(row[10] or 0)
+                    spc_null_rows = int(row[11] or 0)
+                    column_gap_count = es_null_rows + spc_null_rows
                     pct = lambda n: round(n / total * 100, 1) if total else 0.0  # noqa: E731
                     # Average fill across nullable *data* columns (exercise_style, shares_per_contract), not ticker/identity.
                     data_avg = (
@@ -686,6 +691,9 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                         "optional_data_fill_avg_pct": data_avg,
                         "distinct_expirations": dist_exp,
                         "distinct_strikes": dist_strikes,
+                        "exercise_style_null_row_count": es_null_rows,
+                        "shares_per_contract_null_row_count": spc_null_rows,
+                        "column_gap_count": column_gap_count,
                     }
 
                 cur.execute(
@@ -990,6 +998,9 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                 "distinct_expirations": ca["distinct_expirations"],
                 "distinct_strikes": ca["distinct_strikes"],
                 "contracts_last_at": ca["newest_created_at"],
+                "exercise_style_null_row_count": ca["exercise_style_null_row_count"],
+                "shares_per_contract_null_row_count": ca["shares_per_contract_null_row_count"],
+                "column_gap_count": ca["column_gap_count"],
             }
         else:
             oc_payload = {
@@ -1008,6 +1019,9 @@ def get_watchlist_db_coverage(request: Request) -> Dict[str, Any]:
                 "distinct_expirations": None,
                 "distinct_strikes": None,
                 "contracts_last_at": None,
+                "exercise_style_null_row_count": 0,
+                "shares_per_contract_null_row_count": 0,
+                "column_gap_count": 0,
             }
         out_symbols.append(
             {

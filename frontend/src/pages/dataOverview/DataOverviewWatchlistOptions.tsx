@@ -189,6 +189,13 @@ function completenessPctHealthClass(pct: number): string {
   return `${base} ${base}--bad`
 }
 
+/** Column gap 0–2: 0 = ok (green), &gt;0 = warn — matches gapnum styling. */
+function columnGapCountClass(n: number): string {
+  return n === 0
+    ? 'data-overview-wl-matrix__gapnum data-overview-wl-matrix__gapnum--ok'
+    : 'data-overview-wl-matrix__gapnum data-overview-wl-matrix__gapnum--warn'
+}
+
 const FOCUS_DATASET_RADIO_NAME = 'data-overview-wl-focus-dataset'
 
 function isCodeDatasetChip(v: OptionsFocusDataset): boolean {
@@ -784,7 +791,7 @@ export function DataOverviewWatchlistOptions({
       ) : (
         <>
           <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
-            One sheet per symbol: grouped columns for each dataset. Scroll horizontally to see all columns; the Symbol column stays fixed.
+            One sheet per symbol: grouped columns for each dataset. The Symbol column stays fixed when the table is wider than the viewport.
           </p>
           <div style={{ marginBottom: 'var(--space-3)' }}>
             <FocusDatasetChipSelector value={focusDataset} onChange={setFocusDataset} />
@@ -900,9 +907,15 @@ export function DataOverviewWatchlistOptions({
               <table className="data-table data-overview-wl-matrix__table">
                 <thead>
                   <tr>
-                    <th className="data-overview-wl-matrix__sticky-col" rowSpan={2} scope="col">Symbol</th>
+                    <th
+                      className="data-overview-wl-matrix__sticky-col"
+                      rowSpan={show('option_contracts') ? 3 : 2}
+                      scope="col"
+                    >
+                      Symbol
+                    </th>
                     {show('option_contracts') ? (
-                      <th colSpan={8} scope="colgroup"><code>option_contracts</code></th>
+                      <th colSpan={10} scope="colgroup"><code>option_contracts</code></th>
                     ) : null}
                     {show('option_snapshots') ? (
                       <th colSpan={7} scope="colgroup"><code>option_snapshots</code></th>
@@ -932,58 +945,50 @@ export function DataOverviewWatchlistOptions({
                   <tr>
                     {show('option_contracts') ? (
                       <>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           Age since last row
                           <InfoTooltip text="Based on max(created_at) in option_contracts — time since the most recently inserted contract row." />
                         </th>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           Last Check
                           <InfoTooltip text="Time since the last option_contracts sync run for this symbol (from job_ticker_reference_state). Updates every time the contracts service runs, even when no new rows are inserted." />
                         </th>
-                        <th scope="col">
-                          Completeness
-                          <InfoTooltip text="First: avg(ticker %, identity %). Identity in API = non-empty symbol, expiry, option_right; contract_key, strike, option_right are NOT NULL in DB. Second: avg nullable data fill (exercise_style, shares_per_contract). Each % is colored by health (≥97% green, 85–96.9% amber, &lt;85% red). See All gaps for column groups." />
+                        <th colSpan={3} scope="colgroup">
+                          Column comp
+                          <InfoTooltip text="PostgreSQL-only column health. ID = avg(ticker %, identity %). NULL = avg fill % for exercise_style and shares_per_contract. C gap = total SQL NULL cells: rows with NULL exercise_style plus rows with NULL shares_per_contract. Each % uses health bands (≥97% green, 85–96.9% amber, &lt;85% red)." />
                         </th>
-                        <th scope="col">Rows</th>
-                        <th scope="col">
-                          Ref
-                          <InfoTooltip text="Massive GET /v3/reference/options/contracts — paginated count per PG expiry, summed. Run Compare to Massive in the bar above. Does not discover expiries that exist only on the API." />
+                        <th rowSpan={2} scope="col">Rows</th>
+                        <th colSpan={3} scope="colgroup">
+                          Row alignment
+                          <InfoTooltip text="After Check vs Massive reference: Ref, row-level gap, and Cov% describe contract_key alignment between the API and PostgreSQL — not column fill %. See Column comp for ID / NULL / C gap." />
                         </th>
-                        <th scope="col">
-                          Gap
-                          <InfoTooltip text="Pair ref_gap / mismatch. Left: Σ (Massive reference count − PG rows matched by contract_key) after Check. Right: PG rows with massive_option_ticker but contract_key missing symbol substring. Green when 0, red when non-zero." />
-                        </th>
-                        <th scope="col">
-                          Cov%
-                          <InfoTooltip text="100 × (PG rows whose contract_key appears in the Massive reference list) ÷ Massive reference row total. Never above 100% because only matched PG rows are counted." />
-                        </th>
-                        <th scope="col">Expiries / strikes</th>
+                        <th rowSpan={2} scope="col">Expiries / strikes</th>
                       </>
                     ) : null}
                     {show('option_snapshots') ? (
                       <>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           Age since last snapshot
                           <InfoTooltip text="Based on max(snapshot_ts) over latest row per contract_key (Massive source). Same semantics as snapshot_ts in coverage APIs." />
                         </th>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           Completeness
                           <InfoTooltip text="First: avg(IV %, full greeks %). Full greeks = all of delta, gamma, theta, vega on latest row per contract. Second: avg of full greeks % and open interest % (nullable-style fields). ≥97% green, 85–96.9% amber, &lt;85% red." />
                         </th>
-                        <th scope="col">Rows</th>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">Rows</th>
+                        <th rowSpan={2} scope="col">
                           Ref
                           <InfoTooltip text="After Check: summed Ref from Massive GET /v3/snapshot/options/{underlying} intersected with option_contracts.contract_key per expiry. Run Check in the bar above." />
                         </th>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           Gap
                           <InfoTooltip text="Pair snapshot gap / stale. Left: Ref − PG distinct contract_keys with option_snapshots after Check. Right: latest rows older than 24h (per contract)." />
                         </th>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           Cov%
                           <InfoTooltip text="100 × PG matched ÷ Ref for the chain snapshot comparison. Never above 100% for this definition." />
                         </th>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           OC exp / stk
                           <InfoTooltip text="Distinct expiries and strikes in option_contracts for this symbol (reference shape)." />
                         </th>
@@ -991,28 +996,28 @@ export function DataOverviewWatchlistOptions({
                     ) : null}
                     {show('option_day') ? (
                       <>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           Age
                           <InfoTooltip text="Time since most recent bar in option_day (Massive source)." />
                         </th>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           Completeness
                           <InfoTooltip text="First: OHLC complete % (all four non-null). Second: avg(volume %, VWAP %). ≥97% green, 85–96.9% amber, &lt;85% red." />
                         </th>
-                        <th scope="col">Rows</th>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">Rows</th>
+                        <th rowSpan={2} scope="col">
                           Ref
                           <InfoTooltip text="After Check: distinct (expiry, strike, right) combinations in option_contracts for this symbol (reference shape). Run Check in the bar above." />
                         </th>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           Gap
                           <InfoTooltip text="Ref − covered. Covered = option_day has ≥1 bar for that (expiry, strike, right) key. Green when 0." />
                         </th>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           Cov%
                           <InfoTooltip text="100 × covered ÷ Ref after Check. Never above 100% for this definition." />
                         </th>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           Exp / Contracts
                           <InfoTooltip text="Distinct expiries / distinct (expiry, strike, right) keys in option_day for this symbol." />
                         </th>
@@ -1020,28 +1025,28 @@ export function DataOverviewWatchlistOptions({
                     ) : null}
                     {show('option_min') ? (
                       <>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           Age
                           <InfoTooltip text="Time since most recent bar in option_min (Massive source)." />
                         </th>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           Completeness
                           <InfoTooltip text="First: OHLC complete % (all four non-null). Second: avg(volume %, VWAP %). ≥97% green, 85–96.9% amber, &lt;85% red." />
                         </th>
-                        <th scope="col">Rows</th>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">Rows</th>
+                        <th rowSpan={2} scope="col">
                           Ref
                           <InfoTooltip text="After Check: distinct (expiry, strike, right) combinations in option_contracts for this symbol (reference shape). Run Check in the bar above." />
                         </th>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           Gap
                           <InfoTooltip text="Ref − covered. Covered = option_min has ≥1 bar for that (expiry, strike, right) key. Green when 0." />
                         </th>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           Cov%
                           <InfoTooltip text="100 × covered ÷ Ref after Check. Never above 100% for this definition." />
                         </th>
-                        <th scope="col">
+                        <th rowSpan={2} scope="col">
                           Exp / Contracts
                           <InfoTooltip text="Distinct expiries / distinct (expiry, strike, right) keys in option_min for this symbol." />
                         </th>
@@ -1049,38 +1054,66 @@ export function DataOverviewWatchlistOptions({
                     ) : null}
                     {show('option_snapshots_with_underlying_day') ? (
                       <>
-                        <th scope="col">Rows</th>
-                        <th scope="col">Last snapshot</th>
-                        <th scope="col">Last created</th>
+                        <th rowSpan={2} scope="col">Rows</th>
+                        <th rowSpan={2} scope="col">Last snapshot</th>
+                        <th rowSpan={2} scope="col">Last created</th>
                       </>
                     ) : null}
                     {show('option_expiration_cache') ? (
                       <>
-                        <th scope="col">Rows</th>
-                        <th scope="col">Last updated</th>
+                        <th rowSpan={2} scope="col">Rows</th>
+                        <th rowSpan={2} scope="col">Last updated</th>
                       </>
                     ) : null}
                     {show('option_open_interest_daily') ? (
                       <>
-                        <th scope="col">Rows</th>
-                        <th scope="col">Last trade date</th>
-                        <th scope="col">Last created</th>
+                        <th rowSpan={2} scope="col">Rows</th>
+                        <th rowSpan={2} scope="col">Last trade date</th>
+                        <th rowSpan={2} scope="col">Last created</th>
                       </>
                     ) : null}
                     {show('report_option_atm_iv_daily') ? (
                       <>
-                        <th scope="col">Last trade date</th>
-                        <th scope="col">Last created</th>
+                        <th rowSpan={2} scope="col">Last trade date</th>
+                        <th rowSpan={2} scope="col">Last created</th>
                       </>
                     ) : null}
                     {show('report_option_max_pain_daily') ? (
                       <>
-                        <th scope="col">Rows</th>
-                        <th scope="col">Last trade date</th>
-                        <th scope="col">Last created</th>
+                        <th rowSpan={2} scope="col">Rows</th>
+                        <th rowSpan={2} scope="col">Last trade date</th>
+                        <th rowSpan={2} scope="col">Last created</th>
                       </>
                     ) : null}
                   </tr>
+                  {show('option_contracts') ? (
+                    <tr>
+                      <th scope="col">
+                        ID
+                        <InfoTooltip text="avg(ticker %, identity %). Ticker = non-empty massive_option_ticker; identity = symbol, expiry, option_right fields present." />
+                      </th>
+                      <th scope="col">
+                        NULL
+                        <InfoTooltip text="Average fill % for exercise_style and shares_per_contract (same basis as optional_data_fill_avg_pct)." />
+                      </th>
+                      <th scope="col">
+                        C gap
+                        <InfoTooltip text="Total SQL NULL “cells” for exercise_style + shares_per_contract: count of rows with exercise_style IS NULL plus count of rows with shares_per_contract IS NULL (one row can add 2). Empty string is not NULL. 0 when there are no option_contracts rows." />
+                      </th>
+                      <th scope="col">
+                        Ref
+                        <InfoTooltip text="Massive GET /v3/reference/options/contracts — paginated count per PG expiry, summed. Run Check in the bar above." />
+                      </th>
+                      <th scope="col">
+                        Row gap
+                        <InfoTooltip text="Pair ref_gap / mismatch. Left: Σ (Massive reference count − PG rows matched by contract_key) after Check. Right: PG rows with massive_option_ticker but contract_key missing symbol substring. Green when 0, red when non-zero." />
+                      </th>
+                      <th scope="col">
+                        Cov%
+                        <InfoTooltip text="100 × (PG rows whose contract_key appears in the Massive reference list) ÷ Massive reference row total. Never above 100% because only matched PG rows are counted." />
+                      </th>
+                    </tr>
+                  ) : null}
                 </thead>
                 <tbody>
                   {wlRows.map(r => {
@@ -1103,9 +1136,13 @@ export function DataOverviewWatchlistOptions({
                       oc.has_data && ticker != null && ident != null
                         ? Math.round(((ticker + ident) / 2) * 10) / 10
                         : null
-                    const completenessTitle =
+                    const identityPctTitle =
                       oc.has_data && refMergedPct != null
-                        ? `First ${refMergedPct}%: avg(ticker, identity). Identity columns include contract_key, symbol, expiry, strike, option_right (DB NOT NULL). Second ${dataAvgPct != null ? `${dataAvgPct}%` : '—'}: nullable data (exercise_style, shares_per_contract). Column groups: All gaps (once).`
+                        ? `avg(ticker %, identity %). Identity columns include contract_key, symbol, expiry, strike, option_right (DB NOT NULL).`
+                        : undefined
+                    const nullablePctTitle =
+                      oc.has_data && dataAvgPct != null
+                        ? `Average fill % for exercise_style and shares_per_contract (watchlist coverage). Col gap counts SQL NULL only per column.`
                         : undefined
                     const st = r.option_snapshots.snapshots_last_ts
                     const symU = r.symbol.trim().toUpperCase()
@@ -1208,25 +1245,34 @@ export function DataOverviewWatchlistOptions({
                             >
                               {fmtAgeSeconds(oc.last_check_age_seconds)}
                             </td>
-                            <td style={{ fontSize: 'var(--text-caption)' }} title={completenessTitle}>
+                            <td
+                              style={{ fontSize: 'var(--text-caption)' }}
+                              title={identityPctTitle}
+                            >
                               {oc.has_data && refMergedPct != null ? (
-                                dataAvgPct != null ? (
-                                  <>
-                                    <span className={completenessPctHealthClass(refMergedPct)}>
-                                      {refMergedPct}%
-                                    </span>
-                                    <span className="data-overview-wl-matrix__completeness-sep" aria-hidden="true">
-                                      {' '}
-                                      ·{' '}
-                                    </span>
-                                    <span className={completenessPctHealthClass(dataAvgPct)}>{dataAvgPct}%</span>
-                                  </>
-                                ) : (
-                                  <span className={completenessPctHealthClass(refMergedPct)}>{refMergedPct}%</span>
-                                )
+                                <span className={completenessPctHealthClass(refMergedPct)}>{refMergedPct}%</span>
                               ) : (
                                 '—'
                               )}
+                            </td>
+                            <td
+                              style={{ fontSize: 'var(--text-caption)' }}
+                              title={nullablePctTitle}
+                            >
+                              {oc.has_data && dataAvgPct != null ? (
+                                <span className={completenessPctHealthClass(dataAvgPct)}>{dataAvgPct}%</span>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                            <td
+                              className="data-overview-wl-matrix__refcell"
+                              style={{ fontSize: 'var(--text-caption)' }}
+                              title="Total SQL NULL cells (exercise_style NULL rows + shares_per_contract NULL rows). Same row can count twice."
+                            >
+                              <span className={columnGapCountClass(oc.column_gap_count ?? 0)}>
+                                {(oc.column_gap_count ?? 0).toLocaleString()}
+                              </span>
                             </td>
                             <td>{oc.has_data && oc.row_count != null ? oc.row_count : '—'}</td>
                             <td className="data-overview-wl-matrix__refcell">
@@ -1234,7 +1280,7 @@ export function DataOverviewWatchlistOptions({
                             </td>
                             <td
                               className="data-overview-wl-matrix__refcell"
-                              title="Reference gap / mapping mismatch (after Check for left value)"
+                              title="Reference row gap / mapping mismatch (after Check for left value)"
                             >
                               <span className="data-overview-wl-matrix__gap-mm">
                                 <span className={gapCellHighlightClass(refG)}>{formatGapCell(refG)}</span>

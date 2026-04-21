@@ -20838,6 +20838,14 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   background: rgba(0, 0, 0, 0.02);
 }
 
+/* Data Overview matrix: compact multi-row thead (option_contracts Column comp / Row alignment) */
+.data-overview-wl-matrix .feed-massive-table-wrap .data-table thead th {
+  font-size: var(--text-tiny);
+  line-height: 1.25;
+  padding: 0.35rem 0.4rem;
+  vertical-align: bottom;
+}
+
 /* Data Overview — Watchlist Options By symbol: unified matrix, sticky Symbol column */
 .data-overview-wl-matrix .data-overview-wl-matrix__table .data-overview-wl-matrix__sticky-col {
   position: sticky;

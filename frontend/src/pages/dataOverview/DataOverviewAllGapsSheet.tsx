@@ -86,8 +86,8 @@ function AllGapsOptionContractsColumnGuide() {
         <div className="data-overview-all-gaps-sheet__guide-item data-overview-all-gaps-sheet__guide-item--vendor">
           <dt>Reference / vendor</dt>
           <dd>
-            <code>massive_option_ticker</code> (optional). Completeness first value averages ticker % with the identity check
-            below.
+            <code>massive_option_ticker</code> (optional). Matrix <strong>Column comp · ID</strong> averages ticker % with the
+            identity check below.
           </dd>
         </div>
         <div className="data-overview-all-gaps-sheet__guide-item data-overview-all-gaps-sheet__guide-item--coverage">
@@ -160,12 +160,18 @@ function nullableColumnFillHasIssue(fill: number | null | undefined): boolean {
   return fill < NULLABLE_FILL_HEALTH_MIN
 }
 
+/** True when matrix C gap &gt; 0: SQL NULL row counts on monitored nullable columns (sum shown in matrix). */
+function optionContractsHasSqlNullCavity(oc: WatchlistDbCoverageOptionContracts): boolean {
+  return (oc.column_gap_count ?? 0) > 0
+}
+
 /**
  * Matches NullableColumnNullStatsBlock: true when that block renders (including no-data CTA),
- * false when it returns null (all column fills healthy).
+ * false when it returns null (all column fills healthy and no SQL NULL cavities).
  */
 function nullableCoverageSectionShouldRender(oc: WatchlistDbCoverageOptionContracts): boolean {
   if (!oc.has_data) return true
+  if (optionContractsHasSqlNullCavity(oc)) return true
   const rows = [
     { fill: oc.ticker_pct },
     { fill: oc.exercise_style_pct },
@@ -278,7 +284,15 @@ function NullableColumnNullStatsBlock({
     oc.optional_data_fill_avg_pct != null &&
     oc.optional_data_fill_avg_pct < NULLABLE_FILL_HEALTH_MIN
 
-  let displayRows = rows.filter(r => nullableColumnFillHasIssue(r.fill))
+  const esSqlNull = oc.exercise_style_null_row_count ?? 0
+  const spcSqlNull = oc.shares_per_contract_null_row_count ?? 0
+
+  let displayRows = rows.filter(r => {
+    if (nullableColumnFillHasIssue(r.fill)) return true
+    if (r.code === 'exercise_style' && esSqlNull > 0) return true
+    if (r.code === 'shares_per_contract' && spcSqlNull > 0) return true
+    return false
+  })
   if (displayRows.length === 0 && optionalAvgIssue) {
     displayRows = rows
   }
@@ -288,6 +302,11 @@ function NullableColumnNullStatsBlock({
 
   const usedOptionalAvgFallback =
     optionalAvgIssue && rows.every(r => !nullableColumnFillHasIssue(r.fill))
+
+  const usedSqlNullOnlyFallback =
+    (esSqlNull > 0 || spcSqlNull > 0) &&
+    rows.every(r => !nullableColumnFillHasIssue(r.fill)) &&
+    !optionalAvgIssue
 
   return (
     <section className="data-overview-gap-sheet__sec" aria-label="Nullable column null statistics">
@@ -299,9 +318,18 @@ function NullableColumnNullStatsBlock({
           Optional data average is below 97% while per-column fills look healthy — showing all columns for review.
         </p>
       ) : null}
+      {usedSqlNullOnlyFallback ? (
+        <p className="data-overview-gap-sheet__note" role="note">
+          Matrix <strong>C gap</strong> counts SQL <code>NULL</code> cells (sum of NULL rows on{' '}
+          <code>exercise_style</code> and <code>shares_per_contract</code>). Per-column fill % can still be ≥97% if many rows
+          use empty strings instead of NULL — use <strong>Fill column</strong> to backfill from the contract detail API.
+        </p>
+      ) : null}
       <p className="data-overview-gap-sheet__nullable-lead">
         Same scan as the matrix (watchlist coverage). <code>massive_option_ticker</code> uses non-empty share; others use
-        non-NULL share. Est. NULL rows = row count × NULL %.         Row: ticker uses the reference list API (same as Fill row gap). Column: <code>exercise_style</code> and{' '}
+        non-NULL share for %. For <code>exercise_style</code> / <code>shares_per_contract</code>, <strong>Est. NULL rows</strong>{' '}
+        uses exact SQL <code>NULL</code> counts from the server when available (same as matrix C gap split). Otherwise est. = row
+        count × NULL %. Row: ticker uses the reference list API (same as Fill row gap). Column: <code>exercise_style</code> and{' '}
         <code>shares_per_contract</code> use the contract detail API where <code>massive_option_ticker</code> is set (cap 5000
         contracts per job).
       </p>
@@ -332,7 +360,18 @@ function NullableColumnNullStatsBlock({
         <tbody>
           {displayRows.map(r => {
             const nullP = nullOrEmptyPct(r.fill)
-            const estText = estRowsFromPct(n, nullP)
+            const exactSqlNull =
+              r.code === 'exercise_style'
+                ? oc.exercise_style_null_row_count
+                : r.code === 'shares_per_contract'
+                  ? oc.shares_per_contract_null_row_count
+                  : null
+            const estText =
+              r.code === 'exercise_style' || r.code === 'shares_per_contract'
+                ? exactSqlNull != null && exactSqlNull > 0
+                  ? exactSqlNull.toLocaleString()
+                  : estRowsFromPct(n, nullP)
+                : estRowsFromPct(n, nullP)
             const fillTitle =
               'Non-empty / non-NULL share: ≥97% healthy, 85–96.9% review, <85% attention.'
             const nullTitle =
@@ -717,8 +756,9 @@ export function DataOverviewAllGapsSheet({
 
         <p className="ref-jobs-sheet-meta">
           Symbols shown: <strong>compare pool</strong> only (same as <strong>Check</strong>). Per symbol: <strong>nullable column
-          NULL %</strong> shows only columns that are still below the healthy fill threshold (watchlist coverage), and{' '}
-          <strong>reference row gap</strong> lists only expiries with gap ≠ 0 (same run as <strong>Check</strong>). The gap{' '}
+          NULL %</strong> includes columns below the healthy fill threshold <em>or</em> with SQL <code>NULL</code> rows (matrix{' '}
+          <strong>C gap</strong> &gt; 0), and <strong>reference row gap</strong> lists only expiries with gap ≠ 0 (same run as{' '}
+          <strong>Check</strong>). The gap{' '}
           <strong>PG</strong> column counts rows whose <code>contract_key</code> appears in the Massive reference list for that
           expiry. When behind, use per-expiry <strong>Fill row gap</strong> or <strong>Fill row gaps in section</strong>. Nullable
           columns: use <strong>Fill row</strong> / <strong>Fill column</strong> in the table when it appears.
@@ -748,8 +788,9 @@ export function DataOverviewAllGapsSheet({
             <>
               {gapsWlRows.length > 0 && watchlistPoolIssueCount === 0 && extraPoolSymbols.length === 0 ? (
                 <p className="data-overview-all-gaps-sheet__empty-pool" role="status">
-                  No issues to list for the current compare pool — reference expiries are in sync and nullable column fills meet
-                  the healthy band (or run <strong>Check</strong> for symbols that are not loaded yet).
+                  No issues to list for the current compare pool — reference expiries are in sync, matrix <strong>C gap</strong> is
+                  0, and nullable column fills meet the healthy band (or run <strong>Check</strong> for symbols that are not
+                  loaded yet).
                 </p>
               ) : null}
               {gapsWlRows.map(r => {

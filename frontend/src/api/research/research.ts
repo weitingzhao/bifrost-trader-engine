@@ -585,6 +585,15 @@ export interface WatchlistDbCoverageOptionContracts {
    * not ticker/identity. Same as (es_non_null + spc_non_null) / (2 * row_count) * 100.
    */
   optional_data_fill_avg_pct: number | null
+  /** Rows where exercise_style IS NULL (SQL NULL only). 0 when has_data is false. */
+  exercise_style_null_row_count: number
+  /** Rows where shares_per_contract IS NULL. 0 when has_data is false. */
+  shares_per_contract_null_row_count: number
+  /**
+   * Total SQL NULL “cells” for monitored nullable columns: exercise_style_null_row_count +
+   * shares_per_contract_null_row_count (same row can contribute 2). 0 when has_data is false.
+   */
+  column_gap_count: number
   mapping_mismatch_count: number | null
   distinct_expirations: number | null
   distinct_strikes: number | null

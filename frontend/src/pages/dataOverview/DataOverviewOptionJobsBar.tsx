@@ -79,7 +79,9 @@ function optionContractsNeedsColumnBackfill(
   const es = oc.exercise_style_pct
   const spc = oc.shares_per_contract_pct
   const optAvg = oc.optional_data_fill_avg_pct
+  const sqlNullCells = oc.column_gap_count ?? 0
   return (
+    sqlNullCells > 0 ||
     (t != null && t < OPTION_CONTRACTS_COLUMN_HEALTH_PCT) ||
     (es != null && es < OPTION_CONTRACTS_COLUMN_HEALTH_PCT) ||
     (spc != null && spc < OPTION_CONTRACTS_COLUMN_HEALTH_PCT) ||
@@ -1144,7 +1146,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
     const pool = columnFillTargets
     if (pool.length === 0) {
       setEnqueueErr(
-        'Run Check on the pool first. Fill column data only enqueues symbols with a Compare result and nullable column coverage below 97%.',
+        'Run Check on the pool first. Fill column data requires Compare complete and (C gap > 0 or nullable/ticker coverage below 97%).',
       )
       return
     }
@@ -2215,11 +2217,11 @@ export const DataOverviewOptionJobsBar = forwardRef<
     if (columnFillTargets.length === 0) {
       const anyUnchecked = poolUpper.some(s => !hasRefCompareDone(refGapBySymbol[s]))
       if (anyUnchecked) {
-        return 'Run Check on the pool first. Fill column data only enqueues symbols with Compare complete and nullable/ticker coverage below 97% (watchlist matrix).'
+        return 'Run Check on the pool first. Fill column data enqueues symbols with Compare complete and either SQL NULL cells (C gap &gt; 0) or nullable/ticker coverage below 97% on the watchlist matrix.'
       }
       return 'No pooled symbols need nullable column backfill at this threshold, or option_contracts coverage is not loaded — refresh the watchlist.'
     }
-    return `Nullable columns: enqueue ${columnFillTargets.length} detail backfill job(s) for exercise_style and shares_per_contract (max 5000 contracts per symbol). Only symbols with Check complete and column metrics below 97%. Rows need non-empty massive_option_ticker for detail calls.`
+    return `Nullable columns: enqueue ${columnFillTargets.length} detail backfill job(s) for exercise_style and shares_per_contract (max 5000 contracts per symbol). Symbols with Check complete and (C gap &gt; 0 or column metrics below 97%). Rows need non-empty massive_option_ticker for detail calls.`
   }, [isContractsFocus, contractsFillBusy, poolUpper, columnFillTargets.length, refGapBySymbol])
 
   const optionMinFillBusy = optionMinFillBatch != null
