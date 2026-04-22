@@ -199,6 +199,31 @@ def _watchlist_targets(
                                 "option_right": (r.get("option_right") or "C").strip().upper() or "C",
                             }
                         )
+                    # 追加持仓 OPT 合约（非零持仓，不重复）
+                    cur.execute(
+                        """
+                        SELECT DISTINCT contract_key, symbol, expiry, strike, option_right
+                        FROM account_positions
+                        WHERE sec_type = 'OPT'
+                          AND position IS NOT NULL AND position != 0
+                          AND symbol IS NOT NULL AND TRIM(symbol) <> ''
+                          AND expiry IS NOT NULL AND TRIM(expiry) <> ''
+                          AND strike IS NOT NULL
+                        """
+                    )
+                    seen_keys = {r["contract_key"] for r in opt_rows}
+                    for r in cur.fetchall():
+                        ck = (r.get("contract_key") or "").strip()
+                        if not ck or ck in seen_keys:
+                            continue
+                        seen_keys.add(ck)
+                        opt_rows.append({
+                            "contract_key": ck,
+                            "symbol": (r.get("symbol") or "").strip(),
+                            "expiry": (r.get("expiry") or "").strip(),
+                            "strike": float(r["strike"]),
+                            "option_right": (r.get("option_right") or "C").strip().upper() or "C",
+                        })
                 if include_stk:
                     cur.execute(
                         """

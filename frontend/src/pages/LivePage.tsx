@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
-import type { OpenOrder, PositionCategory, RealtimeQuote, StatusResponse, WatchlistItem } from '../types'
-import { fetchBarsBenchmark, fetchMarketStreamsSymbolOrder, fetchOpenOrders, fetchPositionCategories, fetchQuotes, fetchWatchlist, patchPositionCategory, putMarketStreamsSymbolOrder, subscribeQuotes } from '../api'
+import type { Execution, OpenOrder, PositionCategory, RealtimeQuote, StatusResponse, WatchlistItem } from '../types'
+import { fetchBarsBenchmark, fetchExecutions, fetchMarketStreamsSymbolOrder, fetchOpenOrders, fetchPositionCategories, fetchQuotes, fetchWatchlist, patchPositionCategory, putMarketStreamsSymbolOrder, subscribeQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtSince, fmtTs, fmtUsd, fmtUsdRound0, parseOptionContractKey } from '../utils/format'
 import {
@@ -17,6 +17,7 @@ import {
   resolveDailyBasePrice,
   type DailyBenchmark,
 } from './accounts/accountsUtils'
+import { computeOptionLiveAvgPerShareFromExecutions } from '../utils/optionLiveBasis'
 
 const SYMBOL_ORDER_STORAGE_KEY = 'market_streams_symbol_order'
 
@@ -349,6 +350,87 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
   }, [])
 
   const accountsList = j?.portfolio?.accounts ?? []
+
+  const optPositionRows = useMemo(() => {
+    const rows: {
+      account_id: string
+      contract_key: string
+      symbol: string
+      expiry: string
+      strike: number
+      right: string
+      qty: number
+      avg_cost: number | null
+    }[] = []
+    const seen = new Set<string>()
+    for (const acc of accountsList) {
+      const accId = (acc?.account_id ?? (acc as { account?: string }).account ?? '').toString().trim()
+      if (!accId) continue
+      for (const p of (acc?.positions ?? [])) {
+        const secType = (p.secType ?? '').toString().toUpperCase()
+        if (secType !== 'OPT') continue
+        const ck = (p.contract_key ?? '').trim()
+        const qty = typeof p.position === 'number' ? p.position : 0
+        if (!ck || qty === 0) continue
+        const dedupeKey = `${accId.toLowerCase()}|${ck}`
+        if (seen.has(dedupeKey)) continue
+        seen.add(dedupeKey)
+        rows.push({
+          account_id: accId,
+          contract_key: ck,
+          symbol: p.symbol ?? '',
+          expiry: p.expiry ?? '',
+          strike: Number(p.strike ?? 0),
+          right: p.right ?? '',
+          qty,
+          avg_cost: p.avgCost != null ? Number(p.avgCost) : null,
+        })
+      }
+    }
+    return rows
+  }, [accountsList])
+
+  const optPositionsExecFetchKey = useMemo(
+    () => optPositionRows.map((r) => `${r.account_id}\t${r.contract_key}`).sort().join(';'),
+    [optPositionRows],
+  )
+
+  const [optionAccountExecutions, setOptionAccountExecutions] = useState<Execution[]>([])
+  useEffect(() => {
+    const ids = [...new Set(optPositionRows.map((r) => r.account_id).filter(Boolean))]
+    if (ids.length === 0) {
+      setOptionAccountExecutions([])
+      return
+    }
+    let cancelled = false
+    Promise.all(
+      ids.map((aid) =>
+        fetchExecutions(undefined, undefined, 10000, false, undefined, undefined, undefined, aid).then((r) => r.executions ?? []),
+      ),
+    )
+      .then((lists) => {
+        if (!cancelled) setOptionAccountExecutions(lists.flat())
+      })
+      .catch(() => {
+        if (!cancelled) setOptionAccountExecutions([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [optPositionsExecFetchKey])
+
+  const optionLiveBasisByRow = useMemo(() => {
+    const m = new Map<string, { avgPerShare: number | null; basisSource: 'flex_trades' | 'tws_client' | null }>()
+    for (const row of optPositionRows) {
+      const k = `${row.account_id.toLowerCase()}\t${row.contract_key}`
+      m.set(
+        k,
+        computeOptionLiveAvgPerShareFromExecutions(optionAccountExecutions, row.account_id, row.contract_key, row.qty),
+      )
+    }
+    return m
+  }, [optPositionRows, optionAccountExecutions])
+
   // Host/Secondary account IDs from Settings → IB Connection → Event Account (config.ib_client.account.*).
   // No hardcoded account IDs: read from status (backend reads from DB settings), then match against accountsList[].account_id.
   const ibAcct = j?.config?.ib_client?.account
@@ -973,6 +1055,94 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
           </div>
         </div>
       </div>
+
+      {optPositionRows.length > 0 && (
+        <div className="card card-operations">
+          <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
+            <h2 className="daemon-card-title page-title-with-tooltip">
+              <span
+                className={`title-inline-lamp lamp-icon ${marketStreamsOk ? 'green' : 'red'}`}
+                title="Same as Market Streams: green when Market API can read Redis quotes and IB ingestor is connected (option marks use live quotes)."
+                aria-hidden
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M22 12h-4l-3 9L9 3 6 12H2" />
+                </svg>
+              </span>
+              Option Positions
+              <InfoTooltip text="Live Bid·Mid·Ask and PNL for open option positions (IB ingestor subscribes position contracts automatically). Live PNL uses FIFO cost from account_executions when available: fills with source flex_trades if any exist for the contract/account, otherwise tws_client / tws_event; otherwise IB avg cost." />
+            </h2>
+          </div>
+          <div className="realtime-quotes-table-wrap">
+            <table className="table-operations realtime-quotes-table" aria-label="Option position live quotes">
+              <thead>
+                <tr>
+                  <th>Contract</th>
+                  <th>Qty</th>
+                  <th>Avg Cost</th>
+                  <th>Bid · Mid · Ask</th>
+                  <th>Live PNL</th>
+                  <th>Quote Age</th>
+                </tr>
+              </thead>
+              <tbody>
+                {optPositionRows.map(row => {
+                  const q = quotesByContractKey[row.contract_key]
+                  const mid = q?.mid ?? (q?.bid != null && q?.ask != null ? (q.bid + q.ask) / 2 : null)
+                  const basisKey = `${row.account_id.toLowerCase()}\t${row.contract_key}`
+                  const basis = optionLiveBasisByRow.get(basisKey)
+                  const avgForPnl = basis?.avgPerShare != null && Number.isFinite(basis.avgPerShare) ? basis.avgPerShare : row.avg_cost
+                  const livePnl =
+                    mid != null && avgForPnl != null && Number.isFinite(avgForPnl) && Number.isFinite(row.qty) && row.qty !== 0
+                      ? (mid - avgForPnl) * row.qty * 100
+                      : null
+                  const ageSec = q?.ts != null ? Math.floor(Date.now() / 1000 - q.ts) : null
+                  const contractLabel = row.symbol
+                    ? `${row.symbol} ${row.right === 'C' ? 'CALL' : row.right === 'P' ? 'PUT' : row.right} ${row.strike}`
+                    : row.contract_key
+                  const avgTitle =
+                    basis?.avgPerShare != null && Number.isFinite(basis.avgPerShare)
+                      ? `Live PNL basis: account_executions (FIFO open lot, source ${basis.basisSource ?? 'ledger'}) $/share. IB avg shown muted if different.`
+                      : 'Live PNL basis: IB position avg (no execution match or ledger qty mismatch).'
+                  return (
+                    <tr key={basisKey}>
+                      <td title={row.contract_key} style={{ fontWeight: 'bold' }}>{contractLabel}</td>
+                      <td>{row.qty > 0 ? `Long ${row.qty}` : row.qty < 0 ? `Short ${Math.abs(row.qty)}` : '—'}</td>
+                      <td title={avgTitle}>
+                        {avgForPnl != null && Number.isFinite(avgForPnl) ? fmtUsd(avgForPnl) : '—'}
+                        {basis?.avgPerShare != null && row.avg_cost != null && Number.isFinite(row.avg_cost) && Math.abs(basis.avgPerShare - row.avg_cost) > 1e-6 ? (
+                          <span className="replay-muted" style={{ fontSize: '0.7em', marginLeft: '0.35em' }} title="IB avg cost">IB {fmtUsd(row.avg_cost)}</span>
+                        ) : null}
+                      </td>
+                      <td className="positions-opt-live-quote">
+                        {q == null ? (
+                          <span className="replay-muted">—</span>
+                        ) : (
+                          <>
+                            {q.bid != null ? <span className="positions-opt-quote-bid">{q.bid.toFixed(2)}</span> : <span className="replay-muted">—</span>}
+                            {' · '}
+                            <strong>{mid != null ? mid.toFixed(2) : '—'}</strong>
+                            {' · '}
+                            {q.ask != null ? <span className="positions-opt-quote-ask">{q.ask.toFixed(2)}</span> : <span className="replay-muted">—</span>}
+                          </>
+                        )}
+                      </td>
+                      <td>
+                        {livePnl != null ? (
+                          <span className={`replay-pnl-unrealized ${livePnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(livePnl)}</span>
+                        ) : <span className="replay-muted">—</span>}
+                      </td>
+                      <td className="replay-muted">
+                        {ageSec != null ? `${ageSec}s ago` : '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="card card-operations realtime-quotes-card">
         <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>

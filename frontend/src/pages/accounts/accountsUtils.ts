@@ -49,7 +49,11 @@ export function mergeQuotesIntoSymbolMap(
     const sym = (q.symbol ?? '').trim()
     if (!sym) continue
     const mapKey = sym.toUpperCase()
-    if (isStkStreamQuote(q) || !q.contract_key) {
+    const st = (q.sec_type ?? '').toString().toUpperCase()
+    const ck = (q.contract_key ?? '').toString().trim()
+    // Never key OPT (or unknown sec_type with a contract_key) by underlying symbol — that overwrites STK rows.
+    const allowBareSymbolKey = !ck && st !== 'OPT'
+    if (isStkStreamQuote(q) || allowBareSymbolKey) {
       next[mapKey] = q
     }
   }

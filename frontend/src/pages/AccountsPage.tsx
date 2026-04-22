@@ -5,7 +5,16 @@ import { fetchPositionCategories, postPositionCategory, patchPositionCategory, d
 import type { PositionCategory } from '../types'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtExpiry, fmtUsd, fmtUsdRound0 } from '../utils/format'
-import { computeDailyChange, formatLastUpdate, getNetLiq, optionIntrinsic, optionMoneyness, resolvePreferredPrice, rightLabel, type DailyBenchmark } from './accounts/accountsUtils'
+import {
+  computeDailyChange,
+  formatLastUpdate,
+  getNetLiq,
+  mergeQuotesIntoSymbolMap,
+  optionIntrinsic,
+  resolvePreferredPrice,
+  rightLabel,
+  type DailyBenchmark,
+} from './accounts/accountsUtils'
 import { isLedgerCashLikeCategory, isLedgerFixedIncomeCategory } from './portfolio/ledgerStockCategoryBuckets'
 
 function ibPositionMarketValue(pos: {
@@ -100,6 +109,8 @@ export function AccountsPage({
   const selectedIndex = accounts.length > 0 ? Math.min(ibAccountIndex, accounts.length - 1) : 0
   const acc = accounts[selectedIndex] ?? null
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
+  /** OPT rows: keyed by contract_key (stream + GET contract_quote_live). */
+  const [optQuotesByCk, setOptQuotesByCk] = useState<Record<string, RealtimeQuote>>({})
   const [replayFetchDays, setReplayFetchDays] = useState<1 | 3 | 7>(1)
   const [replaySyncing, setReplaySyncing] = useState(false)
   const [flexSyncing, setFlexSyncing] = useState(false)
@@ -307,6 +318,22 @@ export function AccountsPage({
       ),
     ].map((s) => s.toUpperCase())
   }, [acc])
+  const optionContractKeys = useMemo(() => {
+    const positions = acc?.positions ?? []
+    const out: string[] = []
+    const seen = new Set<string>()
+    for (const p of positions) {
+      if ((p.secType ?? '').toUpperCase() !== 'OPT') continue
+      const expiry = p.lastTradeDateOrContractMonth ?? p.expiry ?? ''
+      const strike = Number(p.strike) || 0
+      const right = (p.right ?? '').toUpperCase().slice(0, 1)
+      const ck = (p.contract_key ?? `${p.symbol ?? ''}|OPT|${expiry}|${strike}|${right}`).trim()
+      if (!ck || seen.has(ck)) continue
+      seen.add(ck)
+      out.push(ck)
+    }
+    return out
+  }, [acc])
   const runTwsRefresh = async () => {
     setReplaySyncing(true)
     setTwsFetchMessage(null)
@@ -355,32 +382,50 @@ export function AccountsPage({
     }
   }, [benchmarkSymbols.join(',')])
   useEffect(() => {
-    if (stockSymbols.length === 0) {
+    if (stockSymbols.length === 0 && optionContractKeys.length === 0) {
       setQuotesMap({})
+      setOptQuotesByCk({})
       return
     }
     let cancelled = false
+    const stockSet = new Set(stockSymbols.map((s) => s.toUpperCase()))
+    const optSet = new Set(optionContractKeys)
     const mergeFetched = (quotes: RealtimeQuote[] | undefined) => {
       if (cancelled || !quotes?.length) return
-      setQuotesMap((prev) => {
-        const next = { ...prev }
-        quotes.forEach((q) => {
-          const k = (q.symbol ?? '').trim().toUpperCase()
-          if (k) next[k] = { ...q, symbol: k }
-        })
+      setQuotesMap((prev) => mergeQuotesIntoSymbolMap(prev, quotes))
+      setOptQuotesByCk((prev) => {
+        const next: Record<string, RealtimeQuote> = {}
+        for (const k of optSet) {
+          if (prev[k]) next[k] = prev[k]!
+        }
+        for (const q of quotes) {
+          const ck = (q.contract_key ?? '').trim()
+          if (ck && (q.sec_type ?? '').toUpperCase() === 'OPT' && optSet.has(ck)) next[ck] = { ...q, contract_key: ck }
+        }
         return next
       })
     }
-    fetchQuotes(stockSymbols).then((res) => mergeFetched(res.quotes)).catch(() => {})
-    const symbolSet = new Set(stockSymbols.map((s) => s.toUpperCase()))
     const unsub = subscribeQuotes((q) => {
       const sym = (q.symbol || '').toUpperCase()
-      if (!sym || !symbolSet.has(sym)) return
-      setQuotesMap((prev) => ({ ...prev, [sym]: { ...q, symbol: sym } }))
+      const ck = (q.contract_key ?? '').trim()
+      if (ck && (q.sec_type ?? '').toUpperCase() === 'OPT' && optSet.has(ck)) {
+        setOptQuotesByCk((prev) => ({ ...prev, [ck]: { ...q, contract_key: ck } }))
+      }
+      if (sym && stockSet.has(sym)) {
+        setQuotesMap((prev) => mergeQuotesIntoSymbolMap(prev, [q]))
+      }
     })
-    // Same as Live: periodic GET /quotes so UI stays fresh if SSE drops messages (e.g. strict JSON types).
+    fetchQuotes(
+      stockSymbols.length ? stockSymbols : undefined,
+      optionContractKeys.length ? optionContractKeys : undefined,
+    )
+      .then((res) => mergeFetched(res.quotes))
+      .catch(() => {})
     const pollId = window.setInterval(() => {
-      fetchQuotes(stockSymbols)
+      fetchQuotes(
+        stockSymbols.length ? stockSymbols : undefined,
+        optionContractKeys.length ? optionContractKeys : undefined,
+      )
         .then((res) => mergeFetched(res.quotes))
         .catch(() => {})
     }, 8000)
@@ -389,7 +434,7 @@ export function AccountsPage({
       unsub()
       window.clearInterval(pollId)
     }
-  }, [stockSymbols.join(',')])
+  }, [stockSymbols.join(','), optionContractKeys.join(',')])
 
   useEffect(() => {
     let cancelled = false
@@ -1449,7 +1494,23 @@ export function AccountsPage({
           ) : (
             <>
               <div style={{ marginBottom: '0.35rem' }} />
-              <table className="ib-positions-table">
+              <div className="ib-accounts-stock-table-scroll">
+              <table className="ib-positions-table ib-accounts-stock-positions">
+                <colgroup>
+                  <col className="ib-acs-col-symbol" />
+                  <col className="ib-acs-col-qty" />
+                  <col className="ib-acs-col-cost" />
+                  <col className="ib-acs-col-total-cost" />
+                  <col className="ib-acs-col-total-mkt" />
+                  <col className="ib-acs-col-last" />
+                  <col className="ib-acs-col-daily-pct" />
+                  <col className="ib-acs-col-daily-usd" />
+                  <col className="ib-acs-col-chg-pct" />
+                  <col className="ib-acs-col-chg-usd" />
+                  <col className="ib-acs-col-upd" />
+                  <col className="ib-acs-col-strategy" />
+                  <col className="ib-acs-col-instance" />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>Symbol</th>
@@ -1672,6 +1733,7 @@ export function AccountsPage({
                   </tbody>
                 ))}
               </table>
+              </div>
               {(() => {
                 const sumTotal = stockPositions.reduce((acc, pos) => {
                   const qty = pos.position != null ? Number(pos.position) : NaN
@@ -1778,16 +1840,52 @@ export function AccountsPage({
                 })
                 const dailyPct = dailyDenom !== 0 && Number.isFinite(sumDailyDollar) ? (sumDailyDollar / dailyDenom) * 100 : null
                 return (
-                  <p className="ib-positions-empty" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
-                    Stock total cost: {fmtUsd(sumTotal)}
-                    <span style={{ marginLeft: '1rem' }}>Stock total market: {fmtUsd(sumTotalMarket)}</span>
-                    <span style={{ marginLeft: '1rem', color: Number.isFinite(sumPnl) ? (sumPnl >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)') : 'var(--color-text-muted)' }}>
-                      Change {Number.isFinite(sumPnl) ? fmtUsdRound0(sumPnl) : '—'} / {totalPct != null && Number.isFinite(totalPct) ? (totalPct >= 0 ? '+' : '') + totalPct.toFixed(2) + '%' : '—'}
+                  <div className="ib-positions-empty ib-positions-stock-totals" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
+                    <span className="ib-positions-stock-totals__metric">
+                      <span className="ib-positions-stock-totals__k">Stock total cost:</span>{' '}
+                      <span className="ib-positions-stock-totals__v">{fmtUsd(sumTotal)}</span>
                     </span>
-                    <span style={{ marginLeft: '1rem', color: Number.isFinite(sumDailyDollar) ? (sumDailyDollar >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)') : 'var(--color-text-muted)' }}>
-                      Daily {Number.isFinite(sumDailyDollar) ? fmtUsdRound0(sumDailyDollar) : '—'} / {dailyPct != null && Number.isFinite(dailyPct) ? (dailyPct >= 0 ? '+' : '') + dailyPct.toFixed(2) + '%' : '—'}
+                    <span className="ib-positions-stock-totals__metric">
+                      <span className="ib-positions-stock-totals__k">Stock total market:</span>{' '}
+                      <span className="ib-positions-stock-totals__v">{fmtUsd(sumTotalMarket)}</span>
                     </span>
-                  </p>
+                    <span
+                      className="ib-positions-stock-totals__metric"
+                      style={{
+                        color: Number.isFinite(sumPnl)
+                          ? sumPnl >= 0
+                            ? 'var(--color-success, green)'
+                            : 'var(--color-danger, #c00)'
+                          : 'var(--color-text-muted)',
+                      }}
+                    >
+                      <span className="ib-positions-stock-totals__k">Change</span>{' '}
+                      <span className="ib-positions-stock-totals__v ib-positions-stock-totals__v--wide">
+                        {Number.isFinite(sumPnl) ? fmtUsdRound0(sumPnl) : '—'} /{' '}
+                        {totalPct != null && Number.isFinite(totalPct)
+                          ? (totalPct >= 0 ? '+' : '') + totalPct.toFixed(2) + '%'
+                          : '—'}
+                      </span>
+                    </span>
+                    <span
+                      className="ib-positions-stock-totals__metric"
+                      style={{
+                        color: Number.isFinite(sumDailyDollar)
+                          ? sumDailyDollar >= 0
+                            ? 'var(--color-success, green)'
+                            : 'var(--color-danger, #c00)'
+                          : 'var(--color-text-muted)',
+                      }}
+                    >
+                      <span className="ib-positions-stock-totals__k">Daily</span>{' '}
+                      <span className="ib-positions-stock-totals__v ib-positions-stock-totals__v--wide">
+                        {Number.isFinite(sumDailyDollar) ? fmtUsdRound0(sumDailyDollar) : '—'} /{' '}
+                        {dailyPct != null && Number.isFinite(dailyPct)
+                          ? (dailyPct >= 0 ? '+' : '') + dailyPct.toFixed(2) + '%'
+                          : '—'}
+                      </span>
+                    </span>
+                  </div>
                 )
               })()}
             </>
@@ -1798,7 +1896,8 @@ export function AccountsPage({
             <p className="ib-positions-empty">None</p>
           ) : (
             <>
-              <table className="ib-positions-table">
+              <div className="ib-accounts-stock-table-scroll">
+              <table className="ib-positions-table ib-accounts-option-positions">
                 <thead>
                   <tr>
                     <th>Symbol</th>
@@ -1809,26 +1908,87 @@ export function AccountsPage({
                     <th>Side</th>
                     <th>Cost</th>
                     <th>Premium</th>
-                    <th>Intrinsic</th>
-                    <th>Moneyness</th>
-                    <th>Strategy</th>
-                    <th>Instance</th>
+                    <th>Details</th>
+                    <th>Last</th>
+                    <th>Daily %</th>
+                    <th>Daily $</th>
+                    <th>Change %</th>
+                    <th>Change $</th>
+                    <th>Upd</th>
                   </tr>
                 </thead>
                 <tbody>
                   {optionPositions.map((pos, i) => {
                     const expiryRaw = pos.lastTradeDateOrContractMonth ?? pos.expiry ?? ''
                     const strike = pos.strike != null ? Number(pos.strike) : NaN
+                    const strikeKey = Number.isFinite(strike) ? strike : 0
+                    const rightLetter = (pos.right ?? '').toUpperCase().slice(0, 1)
+                    const contractKey = (
+                      pos.contract_key ?? `${pos.symbol ?? ''}|OPT|${expiryRaw}|${strikeKey}|${rightLetter}`
+                    ).trim()
                     const qty = pos.position != null ? Number(pos.position) : NaN
                     const cost = pos.avgCost != null ? Number(pos.avgCost) : NaN
                     const right = (pos.right ?? '').toUpperCase()
                     const isCall = right === 'C' || right === 'CALL'
                     const premium = Number.isFinite(qty) && Number.isFinite(cost) ? -(qty * cost) : null
                     const intrinsic = spot != null && Number.isFinite(strike) ? optionIntrinsic(isCall, strike, spot) : null
-                    const moneyness = spot != null && Number.isFinite(strike) ? optionMoneyness(isCall, strike, spot) : '—'
                     const sideLabel = Number.isFinite(qty) ? (qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—') : '—'
+                    const strategyName = (pos as { strategy_opportunity_name?: string | null }).strategy_opportunity_name?.trim() ?? ''
+                    const instanceLabel = (pos as { strategy_instance_label?: string | null }).strategy_instance_label?.trim() ?? ''
+                    const liveOpt = optQuotesByCk[contractKey]
+                    const perPrice =
+                      pos.price != null && Number.isFinite(Number(pos.price)) ? Number(pos.price) : null
+                    const priceInfo = resolvePreferredPrice({
+                      liveQuote: liveOpt,
+                      dbPrice: perPrice,
+                      dbUpdatedAt:
+                        pos.price_updated_at != null && Number.isFinite(Number(pos.price_updated_at))
+                          ? Number(pos.price_updated_at)
+                          : null,
+                      daemonSpot: null,
+                      daemonUpdatedAt: null,
+                    })
+                    const currPrice = priceInfo.price
+                    const { changePct, pnlVsBench } = computeDailyChange(
+                      undefined,
+                      currPrice,
+                      qty,
+                      pos.daily_prev_close ?? undefined,
+                    )
+                    const pnl =
+                      pos.unrealized_pnl != null && Number.isFinite(pos.unrealized_pnl)
+                        ? priceInfo.source === 'db'
+                          ? pos.unrealized_pnl
+                          : currPrice != null && Number.isFinite(qty) && Number.isFinite(cost)
+                            ? (currPrice - cost) * qty
+                            : pos.unrealized_pnl
+                        : currPrice != null && Number.isFinite(qty) && Number.isFinite(cost)
+                          ? (currPrice - cost) * qty
+                          : null
+                    const marketColor =
+                      currPrice != null && Number.isFinite(cost)
+                        ? currPrice > cost
+                          ? 'var(--color-success, green)'
+                          : currPrice < cost
+                            ? 'var(--color-danger, #c00)'
+                            : undefined
+                        : undefined
+                    const pnlColor =
+                      pnl != null
+                        ? pnl > 0
+                          ? 'var(--color-success, green)'
+                          : pnl < 0
+                            ? 'var(--color-danger, #c00)'
+                            : undefined
+                        : undefined
+                    const changePctVsCost =
+                      cost > 0 && currPrice != null && Number.isFinite(currPrice)
+                        ? ((currPrice - cost) / cost) * 100
+                        : null
+                    const hasDetails =
+                      (intrinsic != null && Number.isFinite(intrinsic)) || strategyName !== '' || instanceLabel !== ''
                     return (
-                      <tr key={`opt-${pos.symbol}-${i}`} className="ib-pos-opt">
+                      <tr key={`opt-${contractKey}-${i}`} className="ib-pos-opt">
                         <td>{pos.symbol ?? '—'}</td>
                         <td>{rightLabel(pos.right)}</td>
                         <td>{expiryRaw ? fmtExpiry(expiryRaw) : '—'}</td>
@@ -1837,15 +1997,83 @@ export function AccountsPage({
                         <td>{sideLabel}</td>
                         <td>{pos.avgCost != null ? fmtUsd(pos.avgCost) : '—'}</td>
                         <td>{premium != null ? fmtUsd(premium) : '—'}</td>
-                        <td>{intrinsic != null ? fmtUsd(intrinsic) : '—'}</td>
-                        <td>{moneyness}</td>
-                        <td>{(pos as { strategy_opportunity_name?: string | null }).strategy_opportunity_name?.trim() ?? '—'}</td>
-                        <td>{(pos as { strategy_instance_label?: string | null }).strategy_instance_label?.trim() ?? '—'}</td>
+                        <td className="ib-accounts-opt-details">
+                          {hasDetails ? (
+                            <div className="ib-accounts-opt-details-lines">
+                              {intrinsic != null && Number.isFinite(intrinsic) && (
+                                <div>
+                                  <span className="ib-accounts-opt-details-k">Intrinsic</span>{' '}
+                                  {fmtUsd(intrinsic)}
+                                </div>
+                              )}
+                              {strategyName !== '' && <div className="ib-accounts-opt-details-strategy">{strategyName}</div>}
+                              {instanceLabel !== '' && (
+                                <div className="ib-accounts-opt-details-instance section-hint">{instanceLabel}</div>
+                              )}
+                            </div>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td style={marketColor ? { color: marketColor, fontWeight: 600 } : undefined}>
+                          {currPrice != null ? fmtUsd(currPrice) : '—'}
+                        </td>
+                        <td>
+                          {changePct != null && Number.isFinite(changePct) ? (
+                            <span
+                              style={{
+                                color: changePct >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)',
+                                fontWeight: 600,
+                              }}
+                            >
+                              {changePct >= 0 ? '+' : ''}
+                              {changePct.toFixed(2)}%
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td>
+                          {pnlVsBench != null && Number.isFinite(pnlVsBench) ? (
+                            <span
+                              style={{
+                                color: pnlVsBench >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)',
+                                fontWeight: 600,
+                              }}
+                            >
+                              {fmtUsdRound0(pnlVsBench)}
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td>
+                          {changePctVsCost != null && Number.isFinite(changePctVsCost) ? (
+                            <span
+                              style={{
+                                color: changePctVsCost >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)',
+                                fontWeight: 600,
+                              }}
+                            >
+                              {changePctVsCost >= 0 ? '+' : ''}
+                              {changePctVsCost.toFixed(2)}%
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td style={pnlColor ? { color: pnlColor, fontWeight: 600 } : undefined}>
+                          {pnl != null ? fmtUsdRound0(pnl) : '—'}
+                        </td>
+                        <td>
+                          {priceInfo.updatedAtSec != null ? formatLastUpdate(priceInfo.updatedAtSec) : '—'}
+                        </td>
                       </tr>
                     )
                   })}
                 </tbody>
               </table>
+              </div>
               {(() => {
                 const sumPremium = optionPositions.reduce((acc, pos) => {
                   const qty = pos.position != null ? Number(pos.position) : NaN

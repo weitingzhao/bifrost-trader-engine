@@ -6774,6 +6774,7 @@ th {
   border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: var(--space-4);
+  min-width: 0;
 }
 
 .ib-summary-card {
@@ -6853,6 +6854,81 @@ th {
 
 .ib-positions-table td {
   font-variant-numeric: tabular-nums;
+}
+
+/* Accounts → Stock positions: fixed column layout within the card (no forced min-width scroll). */
+.ib-accounts-stock-table-scroll {
+  overflow-x: hidden;
+  max-width: 100%;
+  min-width: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ib-accounts-stock-positions.ib-positions-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.ib-accounts-stock-positions col.ib-acs-col-symbol {
+  width: 6.5rem;
+}
+.ib-accounts-stock-positions col.ib-acs-col-qty {
+  width: 3.75rem;
+}
+.ib-accounts-stock-positions col.ib-acs-col-cost {
+  width: 6.75rem;
+}
+.ib-accounts-stock-positions col.ib-acs-col-total-cost {
+  width: 8.25rem;
+}
+.ib-accounts-stock-positions col.ib-acs-col-total-mkt {
+  width: 9.25rem;
+}
+.ib-accounts-stock-positions col.ib-acs-col-last {
+  width: 7.25rem;
+}
+.ib-accounts-stock-positions col.ib-acs-col-daily-pct {
+  width: 5rem;
+}
+.ib-accounts-stock-positions col.ib-acs-col-daily-usd {
+  width: 7.5rem;
+}
+.ib-accounts-stock-positions col.ib-acs-col-chg-pct {
+  width: 5rem;
+}
+.ib-accounts-stock-positions col.ib-acs-col-chg-usd {
+  width: 7.5rem;
+}
+.ib-accounts-stock-positions col.ib-acs-col-upd {
+  width: 4rem;
+}
+.ib-accounts-stock-positions col.ib-acs-col-strategy {
+  width: 8.5rem;
+}
+.ib-accounts-stock-positions col.ib-acs-col-instance {
+  width: 8.5rem;
+}
+
+.ib-accounts-stock-positions.ib-positions-table > thead > tr > th:nth-child(n + 2):nth-child(-n + 10),
+.ib-accounts-stock-positions.ib-positions-table > tbody > tr > td:nth-child(n + 2):nth-child(-n + 10) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ib-accounts-stock-positions.ib-positions-table > thead > tr > th:first-child,
+.ib-accounts-stock-positions.ib-positions-table > tbody > tr > td:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ib-accounts-stock-positions.ib-positions-table > thead > tr > th:nth-child(12),
+.ib-accounts-stock-positions.ib-positions-table > thead > tr > th:nth-child(13),
+.ib-accounts-stock-positions.ib-positions-table > tbody > tr > td:nth-child(12),
+.ib-accounts-stock-positions.ib-positions-table > tbody > tr > td:nth-child(13) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ib-positions-table tr.ib-pos-stock {
@@ -7025,11 +7101,85 @@ th {
   background: rgba(125, 211, 252, 0.1);
 }
 
+/* Accounts → Option positions: stream Last + daily / change; Details = intrinsic + strategy + instance */
+.ib-accounts-option-positions.ib-positions-table > thead > tr > th:nth-child(n + 10),
+.ib-accounts-option-positions.ib-positions-table > tbody > tr > td:nth-child(n + 10) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ib-accounts-opt-details {
+  text-align: left !important;
+  white-space: normal !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.ib-accounts-opt-details-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 15rem;
+}
+
+.ib-accounts-opt-details-k {
+  color: var(--color-text-muted);
+  font-weight: 600;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ib-accounts-opt-details-strategy {
+  font-size: var(--text-caption);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ib-accounts-opt-details-instance {
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .ib-positions-empty {
   font-size: var(--text-body);
   color: var(--color-text-muted);
   margin: var(--space-1) 0 0 0;
   padding: var(--space-2) 0;
+}
+
+/* Stock positions footer: stable columns so live quotes do not jitter neighbors. */
+.ib-positions-stock-totals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 1.25rem;
+  row-gap: 0.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ib-positions-stock-totals__metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.ib-positions-stock-totals__k {
+  flex: none;
+}
+
+.ib-positions-stock-totals__v {
+  display: inline-block;
+  min-width: 11rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ib-positions-stock-totals__v--wide {
+  min-width: 15rem;
 }
 
 /* ---------- 复盘与风控 (R-M7) ---------- */
@@ -26193,4 +26343,206 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   font-weight: 400;
   color: var(--color-text-dim, #5c6572);
   margin-left: 0.3rem;
+}
+
+/* Positions page: option live bid / mid / ask — stacked rows (no horizontal min-width on table) */
+.positions-opt-live-quote {
+  font-size: 0.72rem;
+  white-space: normal;
+  vertical-align: top;
+  line-height: 1.2;
+}
+.positions-opt-quote-line {
+  text-align: right;
+  white-space: nowrap;
+}
+.positions-opt-quote-line--mid {
+  font-size: 0.76rem;
+}
+.positions-opt-quote-bid  { color: var(--color-put, #f87171); }
+.positions-opt-quote-ask  { color: var(--color-call, #4ade80); }
+
+.positions-opt-last-cell {
+  vertical-align: top;
+  text-align: right;
+  line-height: 1.2;
+  white-space: normal;
+}
+.positions-opt-last-line1 {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.positions-opt-last-line2 {
+  white-space: nowrap;
+  font-size: 0.76rem;
+}
+
+/* Positions → Options tables: fixed layout; width fits panel (no forced min rem) */
+.positions-opt-main-table,
+.positions-opt-instance-table {
+  table-layout: fixed;
+  font-variant-numeric: tabular-nums;
+}
+
+.positions-opt-main-table {
+  width: 100%;
+}
+
+.positions-opt-instance-table {
+  width: 100%;
+}
+
+.positions-opt-main-table col.pom-col-expand { width: 2.25rem; }
+.positions-opt-main-table col.pom-col-contract { width: 11.25rem; }
+.positions-opt-main-table col.pom-col-expiry { width: 7.75rem; }
+.positions-opt-main-table col.pom-col-strike { width: 5.25rem; }
+.positions-opt-main-table col.pom-col-last { width: 6.25rem; }
+.positions-opt-main-table col.pom-col-qty { width: 4.75rem; }
+.positions-opt-main-table col.pom-col-at { width: 5.25rem; }
+.positions-opt-main-table col.pom-col-value { width: 7rem; }
+.positions-opt-main-table col.pom-col-quote { width: 4.75rem; }
+.positions-opt-main-table col.pom-col-time { width: 4.5rem; }
+.positions-opt-main-table col.pom-col-unpnl { width: 8.5rem; }
+.positions-opt-main-table col.pom-col-pool { width: 4.25rem; }
+.positions-opt-main-table col.pom-col-account { width: 9rem; }
+.positions-opt-main-table col.pom-col-opp { width: 5.5rem; }
+.positions-opt-main-table col.pom-col-actions { width: 5.5rem; }
+
+.positions-opt-instance-table col.poi-col-expand { width: 2.25rem; }
+.positions-opt-instance-table col.poi-col-contract { width: 10.5rem; }
+.positions-opt-instance-table col.poi-col-expiry { width: 7.75rem; }
+.positions-opt-instance-table col.poi-col-strike { width: 5.25rem; }
+.positions-opt-instance-table col.poi-col-last { width: 6.25rem; }
+.positions-opt-instance-table col.poi-col-qty { width: 4.75rem; }
+.positions-opt-instance-table col.poi-col-at { width: 5.25rem; }
+.positions-opt-instance-table col.poi-col-value { width: 7rem; }
+.positions-opt-instance-table col.poi-col-quote { width: 4.75rem; }
+.positions-opt-instance-table col.poi-col-time { width: 4.5rem; }
+.positions-opt-instance-table col.poi-col-unpnl { width: 8.5rem; }
+.positions-opt-instance-table col.poi-col-pool { width: 4rem; }
+.positions-opt-instance-table col.poi-col-attr { width: 5.25rem; }
+.positions-opt-instance-table col.poi-col-account { width: 8.75rem; }
+.positions-opt-instance-table col.poi-col-opp { width: 5.25rem; }
+.positions-opt-instance-table col.poi-col-actions { width: 5.5rem; }
+
+/* Expiry: date + DTE on two lines */
+.positions-opt-main-table > thead > tr > th:nth-child(3),
+.positions-opt-main-table > tbody > tr.detail-position-row > td:nth-child(3),
+.positions-opt-instance-table > thead > tr > th:nth-child(3),
+.positions-opt-instance-table > tbody > tr.detail-position-row > td:nth-child(3) {
+  white-space: normal;
+  vertical-align: top;
+  line-height: 1.2;
+}
+
+.positions-opt-expiry-cell {
+  vertical-align: top;
+}
+.positions-opt-expiry-line1 {
+  white-space: nowrap;
+}
+.positions-opt-expiry-line2 {
+  font-size: 0.76rem;
+  margin-top: 0.1rem;
+}
+
+/* Last column: two-line body cells; header may wrap */
+.positions-opt-main-table > thead > tr > th:nth-child(5),
+.positions-opt-instance-table > thead > tr > th:nth-child(5) {
+  white-space: normal;
+  text-align: right;
+}
+
+/* Qty, @, Value — right-aligned single-line numerics */
+.positions-opt-main-table > thead > tr > th:nth-child(n + 6):nth-child(-n + 8),
+.positions-opt-main-table > tbody > tr.detail-position-row > td:nth-child(n + 6):nth-child(-n + 8),
+.positions-opt-instance-table > thead > tr > th:nth-child(n + 6):nth-child(-n + 8),
+.positions-opt-instance-table > tbody > tr.detail-position-row > td:nth-child(n + 6):nth-child(-n + 8) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Time (col 10): narrow column, date + relative on two lines */
+.positions-opt-main-table > thead > tr > th:nth-child(10),
+.positions-opt-main-table > tbody > tr.detail-position-row > td:nth-child(10),
+.positions-opt-instance-table > thead > tr > th:nth-child(10),
+.positions-opt-instance-table > tbody > tr.detail-position-row > td:nth-child(10) {
+  text-align: right;
+  white-space: normal;
+  vertical-align: top;
+  line-height: 1.15;
+  font-size: 0.76rem;
+}
+
+.positions-opt-time-cell {
+  vertical-align: top;
+}
+.positions-opt-time-line1 {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.positions-opt-time-line2 {
+  margin-top: 0.08rem;
+  font-size: 0.72rem;
+}
+
+/* UN PNL (col 11) */
+.positions-opt-main-table > thead > tr > th:nth-child(11),
+.positions-opt-main-table > tbody > tr.detail-position-row > td:nth-child(11),
+.positions-opt-instance-table > thead > tr > th:nth-child(11),
+.positions-opt-instance-table > tbody > tr.detail-position-row > td:nth-child(11) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Opt Quote (col 9): stacked bid / mid / ask */
+.positions-opt-main-table > thead > tr > th:nth-child(9),
+.positions-opt-main-table > tbody > tr.detail-position-row > td:nth-child(9),
+.positions-opt-instance-table > thead > tr > th:nth-child(9),
+.positions-opt-instance-table > tbody > tr.detail-position-row > td:nth-child(9) {
+  text-align: right;
+  white-space: normal;
+}
+
+.positions-opt-main-table > thead > tr > th:nth-child(2),
+.positions-opt-main-table > tbody > tr.detail-position-row > td:nth-child(2),
+.positions-opt-instance-table > thead > tr > th:nth-child(2),
+.positions-opt-instance-table > tbody > tr.detail-position-row > td:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Account: show full id (may wrap); Opp: compact hint / strategy link ellipsis */
+.positions-opt-main-table > thead > tr > th:nth-child(13),
+.positions-opt-main-table > tbody > tr.detail-position-row > td:nth-child(13),
+.positions-opt-instance-table > thead > tr > th:nth-child(14),
+.positions-opt-instance-table > tbody > tr.detail-position-row > td:nth-child(14) {
+  white-space: normal;
+  overflow: visible;
+  word-break: break-word;
+}
+
+.positions-opt-account-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+.positions-opt-main-table > thead > tr > th:nth-child(14),
+.positions-opt-main-table > tbody > tr.detail-position-row > td:nth-child(14):not(.positions-opt-opp-hint-cell),
+.positions-opt-instance-table > thead > tr > th:nth-child(15),
+.positions-opt-instance-table > tbody > tr.detail-position-row > td:nth-child(15):not(.positions-opt-opp-hint-cell) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Expand-hint cells in Opp column (not strategy name links on other views) */
+.positions-opt-main-table > tbody > tr.detail-position-row > td.positions-opt-opp-hint-cell,
+.positions-opt-instance-table > tbody > tr.detail-position-row > td.positions-opt-opp-hint-cell {
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+  max-width: none;
+  font-size: 0.76rem;
+  line-height: 1.2;
 }

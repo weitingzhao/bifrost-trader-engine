@@ -11,6 +11,7 @@ import {
   fetchOpsHealth,
   fetchMarketIngestServices,
   controlMarketIngest,
+  clearMarketIngestConflictLeases,
   setOpsToken,
   type MarketIngestServiceRow,
   type MarketIngestAction,
@@ -982,6 +983,8 @@ export function MarketIngestOpsPage({
   const [authPanelOpen, setAuthPanelOpen] = useState(false)
   const [confirmState, setConfirmState] = useState<ConfirmState>(INITIAL_CONFIRM)
   const [opsHealth, setOpsHealth] = useState<Awaited<ReturnType<typeof fetchOpsHealth>> | null>(null)
+  const [clearingConflict, setClearingConflict] = useState(false)
+  const [clearConflictErr, setClearConflictErr] = useState<string | null>(null)
 
   // Live 1-second ticker for countdown badges and heartbeat ages.
   const [, setTick] = useState(0)
@@ -1311,6 +1314,14 @@ export function MarketIngestOpsPage({
             )}
           </div>
           <div className="dashboard-auth-actions">
+            <button
+              type="button"
+              className="dashboard-console-btn"
+              onClick={() => void refresh()}
+              title="Reload service list and Redis leases from Ops API"
+            >
+              Refresh
+            </button>
             {isAuthenticated ? (
               <button type="button" className="dashboard-console-btn" onClick={handleLogout}>
                 Sign out
@@ -1390,6 +1401,40 @@ export function MarketIngestOpsPage({
           ) : null}
         </section>
       ) : null}
+
+      {(() => {
+        const envs = new Set(services.map(s => (s.redis_control_env ?? '').toLowerCase()).filter(v => v === 'dev' || v === 'prod'))
+        if (envs.size < 2) return null
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', padding: '0.6rem 0.9rem', marginBottom: '0.75rem', borderRadius: 6, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.35)', fontSize: '0.85rem', color: '#f87171' }}>
+            <span style={{ flex: 1 }}>
+              <strong>Dev/Prod lease conflict</strong> — some services are leased by dev, others by prod. Redis leases do not expire automatically.
+            </span>
+            {clearConflictErr && <span style={{ color: '#fbbf24', fontSize: '0.8rem' }}>{clearConflictErr}</span>}
+            <button
+              type="button"
+              className="dashboard-console-btn"
+              disabled={clearingConflict || !canOperate}
+              title={canOperate ? 'Clear all bifrost_ops_control_env/host fields from every service hash (does not stop processes)' : 'Operator role required'}
+              onClick={async () => {
+                setClearingConflict(true)
+                setClearConflictErr(null)
+                try {
+                  const res = await clearMarketIngestConflictLeases()
+                  if (!res.ok) setClearConflictErr(res.error ?? 'Failed')
+                  else await refresh()
+                } catch (e) {
+                  setClearConflictErr((e as Error).message)
+                } finally {
+                  setClearingConflict(false)
+                }
+              }}
+            >
+              {clearingConflict ? 'Clearing…' : 'Clear Leases'}
+            </button>
+          </div>
+        )
+      })()}
 
       <section className="replay-section" aria-label="Socket service units">
         <IngestServicesTable

@@ -502,6 +502,19 @@ export async function controlMarketIngest(
   throw new Error(opsControlFailureMessage(data, r))
 }
 
+export async function clearMarketIngestConflictLeases(): Promise<{
+  ok: boolean
+  cleared?: string[]
+  errors?: string[]
+  error?: string
+}> {
+  const r = await fetch(`${opsBase()}/ops/market-ingest/clear-conflict-leases`, {
+    method: 'POST',
+    headers: jsonAuthHeaders(),
+  })
+  return parseJsonResponse(r)
+}
+
 // ── Console SSE ──────────────────────────────────────────────────────────────
 
 function consoleStreamQuery(lines: number): URLSearchParams {

@@ -280,3 +280,42 @@ async def market_ingest_control(
         "success",
     )
     return {"ok": True, "service_id": body.service_id, "action": body.action.value, "result": result}
+
+
+@router.post("/ops/market-ingest/clear-conflict-leases")
+async def market_ingest_clear_conflict_leases(request: Request) -> Any:
+    """Clear all Redis control leases (bifrost_ops_control_env/host) across all configured services.
+
+    Resolves the dev/prod stack conflict so either stack can regain control. Does not stop
+    any running processes — it only removes the Ops ownership lease from each service hash.
+    Requires operator role.
+    """
+    from backend.ops.routers.workers import _role
+
+    denied = _require_role(request, "operator")
+    if denied:
+        _audit(request, "market_ingest_clear_conflict_leases", "*", "denied", detail=f"role={_role(request)}")
+        return denied
+
+    cfg = _config(request)
+    rows = market_ingest_services_from_config(cfg)
+    rurl = meta_redis_url_from_ops_config(cfg)
+    if not rurl:
+        return JSONResponse(status_code=503, content={"ok": False, "error": "Redis URL not configured for Ops."})
+
+    cleared: List[str] = []
+    errors: List[str] = []
+    for row in rows:
+        meta_key = (row.get("redis_meta_key") or "").strip()
+        if not meta_key:
+            continue
+        try:
+            await asyncio.to_thread(clear_control_env, rurl, meta_key)
+            cleared.append(row["id"])
+        except Exception as e:
+            errors.append(f"{row['id']}: {e}")
+            logger.warning("clear_conflict_leases %s: %s", meta_key, e)
+
+    _audit(request, "market_ingest_clear_conflict_leases", "*", "success" if not errors else "partial",
+           detail=f"cleared={cleared} errors={errors}")
+    return {"ok": True, "cleared": cleared, "errors": errors}

@@ -134,6 +134,7 @@ export async function fetchExecutions(
   strategy_opportunity_id?: number,
   strategy_instance_id?: number,
   source_scope?: 'performance_book' | 'on_the_fly' | 'tws_raw',
+  account_id?: string,
 ): Promise<ExecutionsResponse | ExecutionsResponseWithPairs> {
   const params = new URLSearchParams()
   if (since_ts != null) params.set('since_ts', String(since_ts))
@@ -143,6 +144,7 @@ export async function fetchExecutions(
   if (strategy_opportunity_id != null) params.set('strategy_opportunity_id', String(strategy_opportunity_id))
   if (strategy_instance_id != null) params.set('strategy_instance_id', String(strategy_instance_id))
   if (source_scope) params.set('source_scope', source_scope)
+  if (account_id != null && account_id.trim()) params.set('account_id', account_id.trim())
   const r = await fetch(tradingUrl(`/executions?${params}`))
   if (!r.ok) throw new Error(r.statusText)
   return r.json()

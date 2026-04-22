@@ -19,6 +19,7 @@ import {
   parseOptionContractKey,
 } from '../utils/format'
 import { executionMatchesInstanceGroup, sliceExecutionForInstanceOptView } from './portfolio/ledgerOptHelpers'
+import { mergeQuotesIntoSymbolMap } from './accounts/accountsUtils'
 
 type OpenPositionsTab = 'instance' | 'options' | 'stocks' | 'fixed_income' | 'cash_like'
 
@@ -761,10 +762,26 @@ export function PositionsPage({
   useEffect(() => {
     let cancelled = false
     fetchQuotes()
-      .then(res => { if (!cancelled) setQuotesMap(() => Object.fromEntries((res.quotes || []).map(q => [q.symbol, q]))) })
+      .then(res => {
+        if (!cancelled) {
+          setQuotesMap(() => {
+            const map = mergeQuotesIntoSymbolMap({}, res.quotes || [])
+            for (const q of res.quotes || []) {
+              if (q.contract_key && (q.sec_type ?? '').toUpperCase() === 'OPT')
+                map[q.contract_key] = q
+            }
+            return map
+          })
+        }
+      })
       .catch(() => { if (!cancelled) setQuotesMap({}) })
     const unsub = subscribeQuotes(q => {
-      setQuotesMap(prev => ({ ...prev, [q.symbol]: q }))
+      setQuotesMap(prev => {
+        const next = mergeQuotesIntoSymbolMap(prev, [q])
+        if (q.contract_key && (q.sec_type ?? '').toUpperCase() === 'OPT')
+          next[q.contract_key] = q
+        return next
+      })
     })
     return () => {
       cancelled = true
@@ -912,7 +929,7 @@ export function PositionsPage({
           <td>{eComm ? fmtUsd(eComm) : '—'}</td>
           <td className="replay-muted" />
           {includeAttrColumn ? <td className="replay-muted" /> : null}
-          <td className="replay-muted">{ex.account_id ?? '—'}</td>
+          <td className="replay-muted positions-opt-account-cell">{ex.account_id ?? '—'}</td>
           <StrategyAttributionCells ex={ex} />
           <td className="replay-opt-actions-cell">
             <span className="replay-exec-row-actions">
@@ -2936,7 +2953,7 @@ export function PositionsPage({
                         <thead>
                           <tr>
                             <th className="replay-opt-expand-col" />
-                            <th>Opportunity</th>
+                            <th title="Opportunity">Opp</th>
                             <th>Contract Type</th>
                             <th>Symbols</th>
                             <th>Opened</th>
@@ -3065,7 +3082,25 @@ export function PositionsPage({
                                       <div className="instance-sheet-sub-section">
                                         <h6 className="replay-sub instance-sheet-sub-heading">Options ({optN})</h6>
                                         <div className="replay-portfolio-table-wrap">
-                                          <table className="table-operations replay-opt-groups instance-sheet-sub-table">
+                                          <table className="table-operations replay-opt-groups instance-sheet-sub-table positions-opt-instance-table">
+                                            <colgroup>
+                                              <col className="poi-col-expand" />
+                                              <col className="poi-col-contract" />
+                                              <col className="poi-col-expiry" />
+                                              <col className="poi-col-strike" />
+                                              <col className="poi-col-last" />
+                                              <col className="poi-col-qty" />
+                                              <col className="poi-col-at" />
+                                              <col className="poi-col-value" />
+                                              <col className="poi-col-quote" />
+                                              <col className="poi-col-time" />
+                                              <col className="poi-col-unpnl" />
+                                              <col className="poi-col-pool" />
+                                              <col className="poi-col-attr" />
+                                              <col className="poi-col-account" />
+                                              <col className="poi-col-opp" />
+                                              <col className="poi-col-actions" />
+                                            </colgroup>
                                             <thead>
                                               <tr>
                                                 <th className="replay-opt-expand-col" />
@@ -3076,12 +3111,13 @@ export function PositionsPage({
                                                 <th>Qty</th>
                                                 <th>@</th>
                                                 <th>Value</th>
+                                                <th title="Option live bid / mid / ask">Opt Quote</th>
                                                 <th>Time</th>
                                                 <th>UN PNL</th>
                                                 <th>Pool</th>
                                                 <th>Attr</th>
                                                 <th>Account</th>
-                                                <th>Opportunity</th>
+                                                <th title="Opportunity">Opp</th>
                                                 <th className="replay-opt-actions-cell">Actions</th>
                                               </tr>
                                             </thead>
@@ -3130,17 +3166,21 @@ export function PositionsPage({
                                                         return p.symbol ? (<><strong>{p.symbol}</strong> {p.rightLabel}{strikeStr}</>) : pos.contract_key
                                                       })()}
                                                     </td>
-                                                    <td>
-                                                      {fmtExpiry(pos.expiry)}
+                                                    <td className="positions-opt-expiry-cell">
+                                                      <div className="positions-opt-expiry-line1">{fmtExpiry(pos.expiry)}</div>
                                                       {(() => {
                                                         const days = daysUntilExpiry(pos.expiry)
                                                         if (days == null) return null
-                                                        const label = days >= 0 ? (days === 0 ? ' today' : ` ${days}d`) : ` ${-days}d ago`
-                                                        return <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>{label}</span>
+                                                        const label = days >= 0 ? (days === 0 ? 'today' : `${days}d`) : `${-days}d ago`
+                                                        return (
+                                                          <div className="positions-opt-expiry-line2">
+                                                            <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>{label}</span>
+                                                          </div>
+                                                        )
                                                       })()}
                                                     </td>
                                                     <td><strong>{fmtUsd(pos.strike)}</strong></td>
-                                                    <td>
+                                                    <td className="positions-opt-last-cell">
                                                       {(() => {
                                                         const underlying = getContractLabelParts(pos.contract_key).symbol
                                                         const q = underlying ? quotesMap[underlying] : undefined
@@ -3152,8 +3192,14 @@ export function PositionsPage({
                                                         const pctClass = pct != null ? optionLastStrikePctClass(right, side, pct) : ''
                                                         return (
                                                           <>
-                                                            {last != null ? fmtUsd(last) : '—'}
-                                                            {pct != null && <span className={`replay-last-strike-pct ${pctClass}`.trim()} title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}> {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</span>}
+                                                            <div className="positions-opt-last-line1">{last != null ? fmtUsd(last) : '—'}</div>
+                                                            {pct != null ? (
+                                                              <div className="positions-opt-last-line2">
+                                                                <span className={`replay-last-strike-pct ${pctClass}`.trim()} title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}>
+                                                                  {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+                                                                </span>
+                                                              </div>
+                                                            ) : null}
                                                           </>
                                                         )
                                                       })()}
@@ -3161,12 +3207,56 @@ export function PositionsPage({
                                                     <td>{sideLabel} {absQty}</td>
                                                     <td>{fmtUsd(pos.avg_cost)}</td>
                                                     <td>{fmtUsd(value)}</td>
-                                                    <td>
+                                                    <td className="positions-opt-live-quote">
+                                                      {(() => {
+                                                        const liveQ = quotesMap[pos.contract_key]
+                                                        if (!liveQ) return <span className="replay-muted">—</span>
+                                                        const mid = liveQ.mid ?? (liveQ.bid != null && liveQ.ask != null ? (liveQ.bid + liveQ.ask) / 2 : null)
+                                                        return (
+                                                          <>
+                                                            <div className="positions-opt-quote-line positions-opt-quote-line--bid">
+                                                              {liveQ.bid != null ? <span className="positions-opt-quote-bid">{liveQ.bid.toFixed(2)}</span> : <span className="replay-muted">—</span>}
+                                                            </div>
+                                                            <div className="positions-opt-quote-line positions-opt-quote-line--mid">
+                                                              <strong>{mid != null ? mid.toFixed(2) : '—'}</strong>
+                                                            </div>
+                                                            <div className="positions-opt-quote-line positions-opt-quote-line--ask">
+                                                              {liveQ.ask != null ? <span className="positions-opt-quote-ask">{liveQ.ask.toFixed(2)}</span> : <span className="replay-muted">—</span>}
+                                                            </div>
+                                                          </>
+                                                        )
+                                                      })()}
+                                                    </td>
+                                                    <td className="positions-opt-time-cell">
                                                       {ts != null ? (
-                                                        <>{fmtDate(ts)}{fmtDaysAgo(ts) ? <span className="replay-time-ago"> {fmtDaysAgo(ts)}</span> : null}</>
+                                                        <>
+                                                          <div className="positions-opt-time-line1">{fmtDate(ts)}</div>
+                                                          {fmtDaysAgo(ts) ? <div className="positions-opt-time-line2"><span className="replay-time-ago">{fmtDaysAgo(ts)}</span></div> : null}
+                                                        </>
                                                       ) : '—'}
                                                     </td>
-                                                    <td><span className="replay-pnl-unrealized">{fmtUsd(pos.unrealized_pnl)}</span></td>
+                                                    <td>
+                                                      {(() => {
+                                                        const liveQ = quotesMap[pos.contract_key]
+                                                        const liveMid = liveQ?.mid ?? (liveQ?.bid != null && liveQ?.ask != null ? (liveQ.bid + liveQ.ask) / 2 : null)
+                                                        const livePnl = liveMid != null && pos.avg_cost != null
+                                                          ? (liveMid - pos.avg_cost) * absQty * 100 : null
+                                                        return (
+                                                          <>
+                                                            {livePnl != null && (
+                                                              <div>
+                                                                <span className={`replay-pnl-unrealized ${livePnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(livePnl)}</span>
+                                                                <span className="replay-muted" style={{fontSize:'0.7em'}}> live</span>
+                                                              </div>
+                                                            )}
+                                                            <div className={livePnl != null ? 'replay-muted' : undefined} style={livePnl != null ? {fontSize:'0.75em'} : undefined}>
+                                                              <span className={`replay-pnl-unrealized ${pos.unrealized_pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(pos.unrealized_pnl)}</span>
+                                                              {livePnl != null && <span style={{fontSize:'0.7em'}}> snap</span>}
+                                                            </div>
+                                                          </>
+                                                        )
+                                                      })()}
+                                                    </td>
                                                     <td className="replay-muted">{pos.pool_label}</td>
                                                     <td>
                                                       {pos.filtered_exec_lists ? (
@@ -3184,12 +3274,15 @@ export function PositionsPage({
                                                         <span className="attr-badge attr-unassigned" title="No strategy attribution">—</span>
                                                       )}
                                                     </td>
-                                                    <td>{pos.account_id || '—'}</td>
-                                                    <td className="replay-strategy-opp-cell">
+                                                    <td className="positions-opt-account-cell">{pos.account_id || '—'}</td>
+                                                    <td className="replay-strategy-opp-cell positions-opt-opp-hint-cell">
                                                       {execCount === 0 ? '—' : (
-                                                        <span className="replay-muted">
-                                                          {pos.filtered_exec_lists ? 'Uncategorized · ' : null}
-                                                          {execCount} execution{execCount > 1 ? 's' : ''} ↓
+                                                        <span className="replay-muted" title={`${execCount} execution${execCount > 1 ? 's' : ''} — expand row`}>
+                                                          {pos.filtered_exec_lists ? (
+                                                            <abbr title="Uncategorized fills">Unct.</abbr>
+                                                          ) : null}
+                                                          {pos.filtered_exec_lists ? ' · ' : null}
+                                                          {execCount} exec{execCount > 1 ? 's' : ''} ↓
                                                         </span>
                                                       )}
                                                     </td>
@@ -3941,7 +4034,24 @@ export function PositionsPage({
                     <p className="section-hint">No open option positions under the current filters.</p>
                   ) : (
                 <div className="replay-portfolio-table-wrap">
-                  <table className="table-operations replay-opt-groups">
+                  <table className="table-operations replay-opt-groups positions-opt-main-table">
+                    <colgroup>
+                      <col className="pom-col-expand" />
+                      <col className="pom-col-contract" />
+                      <col className="pom-col-expiry" />
+                      <col className="pom-col-strike" />
+                      <col className="pom-col-last" />
+                      <col className="pom-col-qty" />
+                      <col className="pom-col-at" />
+                      <col className="pom-col-value" />
+                      <col className="pom-col-quote" />
+                      <col className="pom-col-time" />
+                      <col className="pom-col-unpnl" />
+                      <col className="pom-col-pool" />
+                      <col className="pom-col-account" />
+                      <col className="pom-col-opp" />
+                      <col className="pom-col-actions" />
+                    </colgroup>
                     <thead>
                       <tr>
                         <th className="replay-opt-expand-col" />
@@ -3957,24 +4067,30 @@ export function PositionsPage({
                             { col: 'time', label: 'Time' },
                             { col: 'un_pnl', label: 'UN PNL' },
                           ]
-                          return cols.map(c => (
-                            <th
-                              key={c.col}
-                              className="replay-th-sortable"
-                              title={c.title ?? `Sort by ${c.label}`}
-                              onClick={() => setOpenOptSort(prev => prev.column === c.col ? { column: c.col, dir: prev.dir === 'desc' ? 'asc' : 'desc' } : { column: c.col, dir: 'desc' })}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenOptSort(prev => prev.column === c.col ? { column: c.col, dir: prev.dir === 'desc' ? 'asc' : 'desc' } : { column: c.col, dir: 'desc' }) } }}
-                              aria-sort={openOptSort.column === c.col ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
-                            >
-                              {c.label}{openOptSort.column === c.col ? (openOptSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
-                            </th>
-                          ))
+                          return cols.flatMap(c => {
+                            const th = (
+                              <th
+                                key={c.col}
+                                className="replay-th-sortable"
+                                title={c.title ?? `Sort by ${c.label}`}
+                                onClick={() => setOpenOptSort(prev => prev.column === c.col ? { column: c.col, dir: prev.dir === 'desc' ? 'asc' : 'desc' } : { column: c.col, dir: 'desc' })}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenOptSort(prev => prev.column === c.col ? { column: c.col, dir: prev.dir === 'desc' ? 'asc' : 'desc' } : { column: c.col, dir: 'desc' }) } }}
+                                aria-sort={openOptSort.column === c.col ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                              >
+                                {c.label}{openOptSort.column === c.col ? (openOptSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                              </th>
+                            )
+                            if (c.col === 'value') {
+                              return [th, <th key="opt-quote" title="Option live bid / mid / ask">Opt Quote</th>]
+                            }
+                            return [th]
+                          })
                         })()}
                         <th>Pool</th>
                         <th>Account</th>
-                        <th>Opportunity</th>
+                        <th title="Opportunity">Opp</th>
                         <th className="replay-opt-actions-cell">Actions</th>
                       </tr>
                     </thead>
@@ -4064,17 +4180,21 @@ export function PositionsPage({
                                     )
                                   })()}
                                 </td>
-                                <td>
-                                  {fmtExpiry(pos.expiry)}
+                                <td className="positions-opt-expiry-cell">
+                                  <div className="positions-opt-expiry-line1">{fmtExpiry(pos.expiry)}</div>
                                   {(() => {
                                     const days = daysUntilExpiry(pos.expiry)
                                     if (days == null) return null
-                                    const label = days >= 0 ? (days === 0 ? ' today' : ` ${days}d`) : ` ${-days}d ago`
-                                    return <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>{label}</span>
+                                    const label = days >= 0 ? (days === 0 ? 'today' : `${days}d`) : `${-days}d ago`
+                                    return (
+                                      <div className="positions-opt-expiry-line2">
+                                        <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>{label}</span>
+                                      </div>
+                                    )
                                   })()}
                                 </td>
                                 <td><strong>{fmtUsd(pos.strike)}</strong></td>
-                                <td>
+                                <td className="positions-opt-last-cell">
                                   {(() => {
                                     const underlying = getContractLabelParts(pos.contract_key).symbol
                                     const q = underlying ? quotesMap[underlying] : undefined
@@ -4086,8 +4206,14 @@ export function PositionsPage({
                                     const pctClass = pct != null ? optionLastStrikePctClass(right, side, pct) : ''
                                     return (
                                       <>
-                                        {last != null ? fmtUsd(last) : '—'}
-                                        {pct != null && <span className={`replay-last-strike-pct ${pctClass}`.trim()} title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}> {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</span>}
+                                        <div className="positions-opt-last-line1">{last != null ? fmtUsd(last) : '—'}</div>
+                                        {pct != null ? (
+                                          <div className="positions-opt-last-line2">
+                                            <span className={`replay-last-strike-pct ${pctClass}`.trim()} title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}>
+                                              {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+                                            </span>
+                                          </div>
+                                        ) : null}
                                       </>
                                     )
                                   })()}
@@ -4095,17 +4221,63 @@ export function PositionsPage({
                                 <td>{sideLabel} {absQty}</td>
                                 <td>{fmtUsd(pos.avg_cost)}</td>
                                 <td>{fmtUsd(value)}</td>
-                                <td>
+                                <td className="positions-opt-live-quote">
+                                  {(() => {
+                                    const liveQ = quotesMap[pos.contract_key]
+                                    if (!liveQ) return <span className="replay-muted">—</span>
+                                    const mid = liveQ.mid ?? (liveQ.bid != null && liveQ.ask != null ? (liveQ.bid + liveQ.ask) / 2 : null)
+                                    return (
+                                      <>
+                                        <div className="positions-opt-quote-line positions-opt-quote-line--bid">
+                                          {liveQ.bid != null ? <span className="positions-opt-quote-bid">{liveQ.bid.toFixed(2)}</span> : <span className="replay-muted">—</span>}
+                                        </div>
+                                        <div className="positions-opt-quote-line positions-opt-quote-line--mid">
+                                          <strong>{mid != null ? mid.toFixed(2) : '—'}</strong>
+                                        </div>
+                                        <div className="positions-opt-quote-line positions-opt-quote-line--ask">
+                                          {liveQ.ask != null ? <span className="positions-opt-quote-ask">{liveQ.ask.toFixed(2)}</span> : <span className="replay-muted">—</span>}
+                                        </div>
+                                      </>
+                                    )
+                                  })()}
+                                </td>
+                                <td className="positions-opt-time-cell">
                                   {ts != null ? (
-                                    <>{fmtDate(ts)}{fmtDaysAgo(ts) ? <span className="replay-time-ago"> {fmtDaysAgo(ts)}</span> : null}</>
+                                    <>
+                                      <div className="positions-opt-time-line1">{fmtDate(ts)}</div>
+                                      {fmtDaysAgo(ts) ? <div className="positions-opt-time-line2"><span className="replay-time-ago">{fmtDaysAgo(ts)}</span></div> : null}
+                                    </>
                                   ) : '—'}
                                 </td>
-                                <td><span className="replay-pnl-unrealized">{fmtUsd(pos.unrealized_pnl)}</span></td>
+                                <td>
+                                  {(() => {
+                                    const liveQ = quotesMap[pos.contract_key]
+                                    const liveMid = liveQ?.mid ?? (liveQ?.bid != null && liveQ?.ask != null ? (liveQ.bid + liveQ.ask) / 2 : null)
+                                    const livePnl = liveMid != null && pos.avg_cost != null
+                                      ? (liveMid - pos.avg_cost) * absQty * 100 : null
+                                    return (
+                                      <>
+                                        {livePnl != null && (
+                                          <div>
+                                            <span className={`replay-pnl-unrealized ${livePnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(livePnl)}</span>
+                                            <span className="replay-muted" style={{fontSize:'0.7em'}}> live</span>
+                                          </div>
+                                        )}
+                                        <div className={livePnl != null ? 'replay-muted' : undefined} style={livePnl != null ? {fontSize:'0.75em'} : undefined}>
+                                          <span className={`replay-pnl-unrealized ${pos.unrealized_pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(pos.unrealized_pnl)}</span>
+                                          {livePnl != null && <span style={{fontSize:'0.7em'}}> snap</span>}
+                                        </div>
+                                      </>
+                                    )
+                                  })()}
+                                </td>
                                 <td className="replay-muted">{pos.pool_label}</td>
-                                <td>{pos.account_id || '—'}</td>
-                                <td className="replay-strategy-opp-cell">
+                                <td className="positions-opt-account-cell">{pos.account_id || '—'}</td>
+                                <td className="replay-strategy-opp-cell positions-opt-opp-hint-cell">
                                   {execCount === 0 ? '—' : (
-                                    <span className="replay-muted">{execCount} execution{execCount > 1 ? 's' : ''} ↓</span>
+                                    <span className="replay-muted" title={`${execCount} execution${execCount > 1 ? 's' : ''} — expand row`}>
+                                      {execCount} exec{execCount > 1 ? 's' : ''} ↓
+                                    </span>
                                   )}
                                 </td>
                                 <td className="replay-opt-actions-cell">—</td>
@@ -4126,7 +4298,7 @@ export function PositionsPage({
                     </tbody>
                     <tfoot>
                       <tr className="replay-opt-tfoot-total">
-                        <td colSpan={13} className="replay-opt-tfoot-label">Total</td>
+                        <td colSpan={14} className="replay-opt-tfoot-label">Total</td>
                         <td>
                           <span className="replay-pnl-unrealized">
                             {fmtUsd(optionsTabPositions.reduce((acc, p) => acc + p.unrealized_pnl, 0))}

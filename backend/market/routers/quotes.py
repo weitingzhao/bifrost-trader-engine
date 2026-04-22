@@ -30,6 +30,10 @@ def _sanitize_for_sse_json(obj: Any) -> Any:
 def get_quotes(
     request: Request,
     symbols: Optional[str] = Query(None, description="Comma-separated symbols; if omitted, use focus list (positions + watchlist)"),
+    contract_keys: Optional[str] = Query(
+        None,
+        description="Comma-separated OPT contract_key values; merged with watchlist OPT keys when symbols omitted",
+    ),
 ) -> Dict[str, Any]:
     """STK from Redis ``ib:ingester:tick:{symbol}|STK|||`` (IB Ingestor); OPT from contract_quote_live. Combined list."""
     app = request.app
@@ -37,9 +41,10 @@ def get_quotes(
     rq = getattr(app.state, "redis_quotes", None)
     symbol_list: list = []
     contract_keys_opt: list = []
+    ck_param = (contract_keys or "").strip() if contract_keys else ""
     if symbols and symbols.strip():
         symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
-    else:
+    elif not ck_param:
         accounts = reader.get_accounts_from_tables() or []
         for acc in accounts:
             for pos in (acc.get("positions") or []):
@@ -56,6 +61,11 @@ def get_quotes(
                 sym = (w.get("symbol") or "").strip()
                 if sym and sym not in symbol_list:
                     symbol_list.append(sym)
+    if ck_param:
+        for ck in ck_param.split(","):
+            c = ck.strip()
+            if c and c not in contract_keys_opt:
+                contract_keys_opt.append(c)
     quotes: list = []
     if symbol_list and rq and getattr(rq, "available", False):
         try:

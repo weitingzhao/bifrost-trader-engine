@@ -4,10 +4,13 @@ Option 2 (gates): pipeline-aligned structure. Backward compat: top-level and sta
 Defaults: loaded from config/config.yaml.example (single source of truth, no code-level defaults).
 """
 
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 from src.core.dict_merge import deep_merge
 
@@ -19,7 +22,21 @@ def _load_example_config() -> Dict[str, Any]:
     """Load config.yaml.example as defaults. No code-level defaults."""
     global _EXAMPLE_CONFIG
     if _EXAMPLE_CONFIG is None:
-        path = Path(__file__).resolve().parent.parent.parent / "config" / "config.yaml.example"
+        cfg_dir = Path(__file__).resolve().parent.parent.parent / "config"
+        example_path = cfg_dir / "config.yaml.example"
+        fallback_path = cfg_dir / "config.yaml"
+        path = example_path if example_path.is_file() else fallback_path
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"Missing {example_path} (and no {fallback_path} to fall back). "
+                "Restore the tracked template config/config.yaml.example from the repository."
+            )
+        if path == fallback_path:
+            logger.warning(
+                "config/config.yaml.example missing; using %s as merge base for gate defaults. "
+                "Add config.yaml.example for consistent defaults across machines.",
+                fallback_path,
+            )
         with open(path, encoding="utf-8") as f:
             _EXAMPLE_CONFIG = yaml.safe_load(f) or {}
     return _EXAMPLE_CONFIG

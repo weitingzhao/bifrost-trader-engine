@@ -28,10 +28,11 @@ function parseRealtimeQuoteFromSSEPayload(data: string): RealtimeQuote | null {
   }
 }
 
-/** GET /quotes: STK from IB Ingestor Redis ticks; empty symbols = server watchlist. */
-export async function fetchQuotes(symbols?: string[]): Promise<QuotesResponse> {
+/** GET /quotes: STK from IB Ingestor Redis ticks; OPT rows from contract_quote_live when contractKeys passed. */
+export async function fetchQuotes(symbols?: string[], contractKeys?: string[]): Promise<QuotesResponse> {
   const params = new URLSearchParams()
   if (symbols?.length) params.set('symbols', symbols.join(','))
+  if (contractKeys?.length) params.set('contract_keys', contractKeys.join(','))
   const r = await fetch(marketUrl(`/quotes?${params}`))
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
