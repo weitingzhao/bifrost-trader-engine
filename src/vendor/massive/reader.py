@@ -210,12 +210,14 @@ _VALID_MASSIVE_JOB_STATUS = frozenset({"pending", "running", "done", "failed"})
 
 def _massive_celery_queue_condition(celery_queue: str) -> Tuple[Optional[str], List[Any]]:
     """SQL predicate for rows routed to ``celery_queue`` (see ``celery_queue_for_massive_job``)."""
-    from src.massive.celery_queues import STOCK_REFERENCE_KINDS
+    from src.massive.celery_queues import MASSIVE_STOCKS_QUEUE_KINDS
 
     cq = (celery_queue or "").strip()
     if not cq:
         return None, []
-    stock = sorted(STOCK_REFERENCE_KINDS)
+    # Keep SQL-side queue grouping aligned with the real Celery routing logic so
+    # stock OHLC / corporate-action jobs are not misclassified as options jobs.
+    stock = sorted(MASSIVE_STOCKS_QUEUE_KINDS)
     ph = ",".join(["%s"] * len(stock))
     pri_low = "lower(coalesce(payload->>'priority','')) <> 'high'"
     pri_high = "lower(coalesce(payload->>'priority','')) = 'high'"

@@ -8,7 +8,7 @@ vendor cap is independent of this window.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -18,7 +18,8 @@ NY = ZoneInfo("America/New_York")
 DAILY_FULL_BACKFILL_YEARS_STARTER = 5.0
 DAILY_FULL_BACKFILL_YEARS_DEVELOPER = 20.0
 
-DAILY_GAP_OVERLAP_TRADING_DAYS = 2
+DAILY_GAP_OVERLAP_TRADING_DAYS = 3
+DAILY_FINAL_CLOSE_GRACE_MINUTES = 20
 
 
 def days_for_calendar_years(years: float) -> int:
@@ -70,6 +71,62 @@ def subtract_n_trading_days_before_calendar_day(
     return cur
 
 
+def latest_trading_day_on_or_before(status_cfg: dict, anchor_calendar_day: date) -> date:
+    """Return the latest US trading day on or before ``anchor_calendar_day``."""
+    from src.monitor.reader.market import get_is_us_trading_day
+
+    cur = anchor_calendar_day
+    for _ in range(800):
+        if get_is_us_trading_day(status_cfg, cur.isoformat()):
+            return cur
+        cur -= timedelta(days=1)
+    return cur
+
+
+def is_ny_session_safely_closed(now_et: Optional[datetime] = None) -> bool:
+    """True when the regular NY session should be considered final for day-level overwrite."""
+    et_now = now_et.astimezone(NY) if now_et is not None else datetime.now(NY)
+    final_cutoff = datetime.combine(
+        et_now.date(),
+        time(16, 0),
+        tzinfo=NY,
+    ) + timedelta(minutes=DAILY_FINAL_CLOSE_GRACE_MINUTES)
+    return et_now >= final_cutoff
+
+
+def resolve_daily_smart_end_date(
+    status_cfg: dict,
+    end_cap_ms: Optional[int],
+) -> Tuple[date, bool, str]:
+    """Resolve the latest safe daily bar date for custom_bars daily_smart.
+
+    Returns ``(end_date, should_patch_open_close, reason)`` where
+    ``should_patch_open_close`` means the final day should be overwritten with
+    ``/v1/open-close`` after the aggregate range sync.
+    """
+    if end_cap_ms is not None and end_cap_ms > 0:
+        requested_end = ms_to_ny_date(int(end_cap_ms))
+    else:
+        requested_end = ny_calendar_today()
+
+    today_et = ny_calendar_today()
+    requested_is_today = requested_end == today_et
+
+    if requested_is_today:
+        from src.monitor.reader.market import get_is_us_trading_day
+
+        if not get_is_us_trading_day(status_cfg, requested_end.isoformat()):
+            end_date = latest_trading_day_on_or_before(status_cfg, requested_end)
+            return end_date, False, "today_not_trading_day"
+        if not is_ny_session_safely_closed():
+            end_date = latest_trading_day_on_or_before(status_cfg, requested_end - timedelta(days=1))
+            return end_date, False, "today_session_open"
+        return requested_end, True, "today_session_closed"
+
+    end_date = latest_trading_day_on_or_before(status_cfg, requested_end)
+    return end_date, True, "historical_or_capped_day"
+
+
 def full_backfill_start_date(end_d: date, *, full_backfill_years: float) -> date:
     return end_d - timedelta(days=days_for_calendar_years(full_backfill_years))
 
@@ -79,6 +136,7 @@ def compute_daily_smart_range(
     max_bar_date: Optional[date],
     end_cap_ms: Optional[int],
     full_backfill_years: float,
+    gap_start_date: Optional[date] = None,
 ) -> Tuple[int, int, str, Dict[str, Any]]:
     """
     Returns (start_ms, end_ms, policy, meta).
@@ -86,14 +144,24 @@ def compute_daily_smart_range(
     policy: full_20y | gapfill_overlap  (full_20y kept for UI compat — means empty-DB full window)
     meta includes resolved_start_date, resolved_end_date (ISO), daily_sync_policy, full_backfill_years.
     """
-    if end_cap_ms is not None and end_cap_ms > 0:
-        end_d = ms_to_ny_date(int(end_cap_ms))
-    else:
-        end_d = ny_calendar_today()
+    end_d, should_patch_open_close, end_reason = resolve_daily_smart_end_date(
+        status_cfg, end_cap_ms
+    )
 
     y = max(1.0, min(50.0, float(full_backfill_years)))
 
-    if max_bar_date is None:
+    gap_hint = gap_start_date
+    if gap_hint is not None and gap_hint > end_d:
+        gap_hint = end_d
+
+    if gap_hint is not None:
+        start_d = subtract_n_trading_days_before_calendar_day(
+            status_cfg,
+            gap_hint,
+            DAILY_GAP_OVERLAP_TRADING_DAYS,
+        )
+        policy = "gapfill_overlap_hint"
+    elif max_bar_date is None:
         start_d = full_backfill_start_date(end_d, full_backfill_years=y)
         policy = "full_20y"
     else:
@@ -110,7 +178,12 @@ def compute_daily_smart_range(
         "resolved_end_date": end_d.isoformat(),
         "daily_sync_policy": policy,
         "max_bar_date": max_bar_date.isoformat() if max_bar_date else None,
+        "gap_start_date": gap_hint.isoformat() if gap_hint else None,
         "full_backfill_years": y,
+        "daily_final_close_grace_minutes": DAILY_FINAL_CLOSE_GRACE_MINUTES,
+        "end_reason": end_reason,
+        "should_patch_open_close": should_patch_open_close,
+        "patch_open_close_date": end_d.isoformat() if should_patch_open_close else None,
     }
     start_ms = date_to_utc_epoch_ms_day_start(start_d)
     end_ms = date_to_utc_epoch_ms_day_end_inclusive(end_d)

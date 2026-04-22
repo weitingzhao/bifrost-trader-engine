@@ -676,29 +676,21 @@ export function DataOverviewStockDayJobsBar({
       for (let i = 0; i < rowFillTargets.length; i++) {
         const sym = rowFillTargets[i]!
         const tk = `fill-row-${batchId}-${sym}`
-        // Use explicit date range from gap analysis so historical missing days are covered.
+        // Use backend daily_smart so stock_day gap fill gets both:
+        // 1) historical overlap before the earliest missing day, and
+        // 2) safe handling for the latest session (avoid relying on an open day's partial bar).
         // missing_by_year is sorted DESC by year, so the last entry is the oldest year.
         const g = gapBySymbol[sym]
         const missingYears = g?.missing_by_year ?? []
         const oldestEntry = missingYears.length > 0 ? missingYears[missingYears.length - 1] : null
-        const syncPayload: Record<string, unknown> = oldestEntry?.first_missing
-          ? {
-              mode: 'custom_bars',
-              sync_all_periods: true,
-              custom_bars_period_group: 'daily',
-              // start 1 day before first missing to ensure overlap; end = now
-              start_ms: new Date(oldestEntry.first_missing).getTime() - 86_400_000,
-              end_ms: Date.now(),
-              ticker: sym,
-            }
-          : {
-              // Fallback when gap data lacks date detail
-              mode: 'custom_bars',
-              sync_all_periods: true,
-              custom_bars_period_group: 'daily',
-              custom_bars_sync_mode: 'daily_smart',
-              ticker: sym,
-            }
+        const syncPayload: Record<string, unknown> = {
+          mode: 'custom_bars',
+          sync_all_periods: true,
+          custom_bars_period_group: 'daily',
+          custom_bars_sync_mode: 'daily_smart',
+          ticker: sym,
+          ...(oldestEntry?.first_missing ? { gap_start_date: oldestEntry.first_missing } : {}),
+        }
         const res = await postMassiveSync('feed_stocks_aggregate', syncPayload)
         if (!res.ok) {
           const msg = res.error ?? res.message ?? `Enqueue failed for ${sym}`
@@ -934,7 +926,8 @@ export function DataOverviewStockDayJobsBar({
               <span className="data-overview-contracts-panel__em">Pool:</span> click a <strong>Symbol</strong> in the matrix below, <strong>Select all</strong>, or <strong>Clear</strong>.{' '}
               <span className="data-overview-contracts-panel__em">Check</span> compares each symbol's <code>stock_day</code> bar dates against the global trading-day calendar derived from all symbols in the table (purely local — no external API call).{' '}
               Gap = calendar days − covered days for this symbol.{' '}
-              <span className="data-overview-contracts-panel__em">Fill row gap</span> is available only after Check and enqueues <code>feed_stocks_aggregate</code> daily_smart for pooled symbols with Gap &gt; 0.{' '}
+              <span className="data-overview-contracts-panel__em">Fill row gap</span> is available only after Check and enqueues <code>feed_stocks_aggregate</code> daily_smart for pooled symbols with Gap &gt; 0:
+              it starts from the earliest missing day with overlap and uses a safer final-day policy so the latest completed session can overwrite partial daily bars.{' '}
               <span className="data-overview-contracts-panel__em">Fill column data</span> re-fetches recent bars for symbols whose OHLC / optional metrics are below 97%. Click <strong>↗</strong> on a symbol for daily OHLC / volume / VWAP quality breakdown.
             </p>
           </div>

@@ -1348,16 +1348,28 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                             er_end = payload.get("end_ms")
                             if er_end is not None and int(er_end or 0) > 0:
                                 end_cap_ms = int(er_end)
+                            gap_start_date_raw = (
+                                str(payload.get("gap_start_date") or "").strip()[:10]
+                            )
 
                             for t in tickers:
                                 fetch_t = polygon_ticker_for_massive_aggs(t, ref_indices)
                                 max_d = get_massive_stock_day_max_date(cur, t)
+                                gap_start_date = None
+                                if gap_start_date_raw:
+                                    try:
+                                        gap_start_date = date.fromisoformat(
+                                            gap_start_date_raw
+                                        )
+                                    except ValueError:
+                                        gap_start_date = None
                                 eff_start_ms, eff_end_ms, policy, meta_ds = (
                                     compute_daily_smart_range(
                                         status_cfg,
                                         max_d,
                                         end_cap_ms,
                                         float(ms["daily_full_backfill_years"]),
+                                        gap_start_date=gap_start_date,
                                     )
                                 )
                                 sym_total = 0
@@ -1394,6 +1406,53 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                                         "rows_upserted": n_p,
                                     }
                                 )
+                                patch_open_close_date = meta_ds.get(
+                                    "patch_open_close_date"
+                                )
+                                if patch_open_close_date:
+                                    try:
+                                        oc_data = client.fetch_stock_open_close(
+                                            t,
+                                            str(patch_open_close_date),
+                                            adjusted=use_adj,
+                                        )
+                                        if oc_data.get("error"):
+                                            period_errors_ds.append(
+                                                {
+                                                    "timespan": "day",
+                                                    "multiplier": 1,
+                                                    "mode": "open_close_patch",
+                                                    "error": str(oc_data.get("error")),
+                                                }
+                                            )
+                                        else:
+                                            rows_oc = apply_stock_daily_ticker_summary(
+                                                cur,
+                                                t,
+                                                oc_data,
+                                                adjusted=adjusted_bool,
+                                            )
+                                            sym_total += rows_oc
+                                            period_rows_ds.append(
+                                                {
+                                                    "timespan": "day",
+                                                    "multiplier": 1,
+                                                    "mode": "open_close_patch",
+                                                    "bar_date": str(
+                                                        patch_open_close_date
+                                                    ),
+                                                    "rows_upserted": rows_oc,
+                                                }
+                                            )
+                                    except Exception as ex:
+                                        period_errors_ds.append(
+                                            {
+                                                "timespan": "day",
+                                                "multiplier": 1,
+                                                "mode": "open_close_patch",
+                                                "error": str(ex),
+                                            }
+                                        )
                                 per_symbol.append(
                                     {
                                         "ticker": t,
