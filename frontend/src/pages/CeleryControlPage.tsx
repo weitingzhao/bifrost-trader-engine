@@ -784,6 +784,8 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   const [workerProfiles, setWorkerProfiles] = useState<WorkerProfileInfo[]>([])
   const workerProfilesDistinct = useMemo(() => dedupeWorkerProfilesByKey(workerProfiles), [workerProfiles])
   const [scaleWorkerType, setScaleWorkerType] = useState(SCALE_SELECTION_ALL)
+  /** Add Instance: single unit vs fill toward (max workers − Dev − Prod), capped by free slots on this Ops host. */
+  const [scaleAddMaxMode, setScaleAddMaxMode] = useState(true)
   const [scaleBusy, setScaleBusy] = useState(false)
   const [scaleMsg, setScaleMsg] = useState<{ text: string; isErr: boolean }>({ text: '', isErr: false })
   const [snapshotRefreshBusy, setSnapshotRefreshBusy] = useState(false)
@@ -1207,23 +1209,84 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
     const prof = workerProfilesDistinct.find(x => x.key === scaleWorkerType)
     const maxN = prof ? profileMaxInstances(prof) : 1
     const cur = countInstancesForProfile(instances, scaleWorkerType)
-    if (cur >= maxN) {
-      setScaleMsg({
-        text: `Already at configured maximum (${maxN}) for ${scaleWorkerType}`,
-        isErr: true,
-      })
+    const stack = countWorkerStackByProfileKey(workers, scaleWorkerType)
+
+    if (!scaleAddMaxMode) {
+      if (cur >= maxN) {
+        setScaleMsg({
+          text: `Already at configured maximum (${maxN}) for ${scaleWorkerType}`,
+          isErr: true,
+        })
+        return
+      }
+      setScaleBusy(true)
+      try {
+        const res = await scaleWorker({ action: 'add', worker_type: scaleWorkerType })
+        if (res.ok) {
+          const iid = res.instance_id ?? res.unit ?? scaleWorkerType
+          setScaleMsg({ text: `Instance ${iid} started (${scaleWorkerType})`, isErr: false })
+          await loadAll()
+          await refreshOpsWorkersSnapshot({ forceRefresh: true })
+        } else {
+          setScaleMsg({ text: res.error ?? 'Failed', isErr: true })
+        }
+      } catch (e) {
+        setScaleMsg({ text: e instanceof Error ? e.message : 'Error', isErr: true })
+      } finally {
+        setScaleBusy(false)
+      }
       return
     }
-    setScaleBusy(true)
-    try {
-      const res = await scaleWorker({ action: 'add', worker_type: scaleWorkerType })
-      if (res.ok) {
-        const iid = res.instance_id ?? res.unit ?? scaleWorkerType
-        setScaleMsg({ text: `Instance ${iid} started (${scaleWorkerType})`, isErr: false })
-        await loadAll()
+
+    const fleetRemaining = Math.max(0, maxN - stack.dev - stack.prod)
+    const hostRemaining = Math.max(0, maxN - cur)
+    const n = Math.min(fleetRemaining, hostRemaining)
+    if (n === 0) {
+      if (fleetRemaining === 0 && hostRemaining > 0) {
+        setScaleMsg({
+          text: `No capacity left by Dev+Prod (${stack.dev}+${stack.prod}) vs max ${maxN} for ${scaleWorkerType}.`,
+          isErr: true,
+        })
+      } else if (hostRemaining === 0) {
+        setScaleMsg({
+          text: `Already at configured maximum (${maxN}) on this host for ${scaleWorkerType}.`,
+          isErr: true,
+        })
       } else {
-        setScaleMsg({ text: res.error ?? 'Failed', isErr: true })
+        setScaleMsg({
+          text: `Nothing to add for ${scaleWorkerType}.`,
+          isErr: true,
+        })
       }
+      return
+    }
+
+    setScaleBusy(true)
+    const okParts: string[] = []
+    try {
+      for (let i = 0; i < n; i++) {
+        const res = await scaleWorker({ action: 'add', worker_type: scaleWorkerType })
+        if (!res.ok) {
+          setScaleMsg({
+            text:
+              okParts.length > 0
+                ? `Stopped after ${okParts.length} ok: ${res.error ?? 'Failed'}`
+                : (res.error ?? 'Failed'),
+            isErr: true,
+          })
+          await loadAll()
+          await refreshOpsWorkersSnapshot({ forceRefresh: true })
+          return
+        }
+        const iid = res.instance_id ?? res.unit ?? scaleWorkerType
+        okParts.push(String(iid))
+      }
+      setScaleMsg({
+        text: `Started ${okParts.length} instance(s) for ${scaleWorkerType} (max ${maxN} − Dev ${stack.dev} − Prod ${stack.prod}, capped by this host): ${okParts.join(', ')}`,
+        isErr: false,
+      })
+      await loadAll()
+      await refreshOpsWorkersSnapshot({ forceRefresh: true })
     } catch (e) {
       setScaleMsg({ text: e instanceof Error ? e.message : 'Error', isErr: true })
     } finally {
@@ -2328,19 +2391,64 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                   </div>
                 )}
                 {scaleWorkerType !== SCALE_SELECTION_ALL && (
-                  <button
-                    type="button"
-                    className="celery-queue-icon-btn celery-queue-icon-btn--scale-add-all celery-queue-icon-btn--with-label dashboard-scale-add-instance-btn"
-                    onClick={onScaleAdd}
-                    disabled={scaleBusy || !scaleWorkerType || !canOperate}
-                    title="Add one worker instance for the selected profile"
-                    aria-label={scaleBusy ? 'Working' : 'Add Instance: start one worker for the selected profile'}
-                  >
-                    <IcoWorkerInstanceAdd />
-                    <span className="celery-queue-icon-btn__label">
-                      {scaleBusy ? 'Working…' : 'Add Instance'}
-                    </span>
-                  </button>
+                  <>
+                    <div
+                      className="dashboard-scale-add-max-group"
+                      role="group"
+                      aria-labelledby="celery-add-instance-max-label"
+                    >
+                      <span className="dashboard-scale-remove-all-force-label" id="celery-add-instance-max-label">
+                        Max
+                      </span>
+                      <div
+                        className="replay-bubble-switch dashboard-celery-remove-all-force-switch"
+                        role="group"
+                        aria-label="Add instance count: one unit or fill remaining from max minus Dev and Prod"
+                      >
+                        <button
+                          type="button"
+                          className={`replay-bubble-switch-btn ${!scaleAddMaxMode ? 'active' : ''}`}
+                          onClick={() => setScaleAddMaxMode(false)}
+                          disabled={scaleBusy || !canOperate}
+                          title="Add a single worker instance on this host (same as before)"
+                        >
+                          1
+                        </button>
+                        <button
+                          type="button"
+                          className={`replay-bubble-switch-btn ${scaleAddMaxMode ? 'active' : ''}`}
+                          onClick={() => setScaleAddMaxMode(true)}
+                          disabled={scaleBusy || !canOperate}
+                          title="Add up to (max workers − Dev − Prod) instances in one action, limited by free slots on this Ops host"
+                        >
+                          Max
+                        </button>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="celery-queue-icon-btn celery-queue-icon-btn--scale-add-all celery-queue-icon-btn--with-label dashboard-scale-add-instance-btn"
+                      onClick={onScaleAdd}
+                      disabled={scaleBusy || !scaleWorkerType || !canOperate}
+                      title={
+                        scaleAddMaxMode
+                          ? 'Add worker instances: up to remaining capacity from max workers minus Dev and Prod (capped by this host)'
+                          : 'Add one worker instance for the selected profile'
+                      }
+                      aria-label={
+                        scaleBusy
+                          ? 'Working'
+                          : scaleAddMaxMode
+                            ? 'Add Instance: start workers up to remaining fleet capacity for the selected profile'
+                            : 'Add Instance: start one worker for the selected profile'
+                      }
+                    >
+                      <IcoWorkerInstanceAdd />
+                      <span className="celery-queue-icon-btn__label">
+                        {scaleBusy ? 'Working…' : 'Add Instance'}
+                      </span>
+                    </button>
+                  </>
                 )}
               </div>
               {scaleWorkerType === SCALE_SELECTION_ALL && workerProfilesDistinct.length > 0 && (

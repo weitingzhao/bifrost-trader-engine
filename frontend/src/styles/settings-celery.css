@@ -3722,6 +3722,14 @@ button.dashboard-queue-summary-totals-queue-clear:focus-visible {
   gap: var(--space-2);
 }
 
+.dashboard-scale-add-max-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
 .dashboard-scale-remove-all-force-label {
   font-size: 0.75rem;
   font-weight: 600;
