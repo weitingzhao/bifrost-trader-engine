@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { bsComputeDetail } from '../utils/bsCalc'
 import type { StatusResponse, WatchlistItem } from '../types'
 import {
   fetchWatchlist,
@@ -43,6 +44,7 @@ import {
   classifyExpiration,
   expirationDaysFromToday,
   isOptionExpirationPastNyClose,
+  parseExpirationDateParts,
 } from './optionDiscovery/expirationMeta'
 
 const STRIKE_COUNT_OPTIONS = [4, 6, 8, 19, 30, 'all'] as const
@@ -57,10 +59,9 @@ type StrikeSideMode = 'all' | 'call' | 'put'
 
 /** Option chain table: symmetric columns on call/put sides (TD-style). */
 type ChainColumnId =
-  | 'bid'
-  | 'ask'
-  | 'last'
-  | 'mid'
+  | 'day_open'
+  | 'day_high'
+  | 'day_low'
   | 'day_close'
   | 'day_vol'
   | 'iv'
@@ -71,12 +72,11 @@ type ChainColumnId =
   | 'oi'
 
 const CHAIN_COLUMN_LABEL: Record<ChainColumnId, string> = {
-  bid: 'Bid',
-  ask: 'Ask',
-  last: 'Last',
-  mid: 'Mid',
-  day_close: 'Day close',
-  day_vol: 'Day vol',
+  day_open: 'Open',
+  day_high: 'High',
+  day_low: 'Low',
+  day_close: 'Close',
+  day_vol: 'Vol',
   iv: 'IV',
   delta: 'Delta',
   gamma: 'Gamma',
@@ -86,10 +86,9 @@ const CHAIN_COLUMN_LABEL: Record<ChainColumnId, string> = {
 }
 
 const DEFAULT_CHAIN_COLUMN_VISIBILITY: Record<ChainColumnId, boolean> = {
-  bid: true,
-  ask: true,
-  last: true,
-  mid: true,
+  day_open: false,
+  day_high: false,
+  day_low: false,
   day_close: true,
   day_vol: false,
   iv: true,
@@ -198,6 +197,12 @@ function useWatchlistStkSymbols(): string[] {
 function fmtOptNum(v: number | null | undefined, digits = 4): string {
   if (v == null || !Number.isFinite(v)) return '—'
   return v.toFixed(digits)
+}
+
+/** Format IV as percentage (raw decimal 0.52 → "52.34%"). */
+function fmtIV(iv: number | null | undefined): string {
+  if (iv == null || !Number.isFinite(iv)) return '—'
+  return (iv * 100).toFixed(2) + '%'
 }
 
 /** Normalize option right for chain pairing (C / P). */
@@ -327,12 +332,6 @@ function effectiveQuotePremium(row: OptionSnapshotRow): number | null {
   return null
 }
 
-/** Chain table Mid column: prefer API mark, else same priority as effectiveQuotePremium. */
-function chainDisplayMid(row: OptionSnapshotRow): string {
-  const v =
-    row.mark != null && Number.isFinite(row.mark) ? row.mark : effectiveQuotePremium(row)
-  return v != null && Number.isFinite(v) ? fmtUsd(v) : '—'
-}
 
 function computeDerivedMetrics(
   row: OptionSnapshotRow,
@@ -562,6 +561,10 @@ export function OptionDiscoveryPage({
 
   // P0–P3: Contract detail panel state
   const [selectedContractIdx, setSelectedContractIdx] = useState<number | null>(null)
+  /** Greeks card source: 'snapshot' = Massive data, 'bs' = local Black-Scholes calculation */
+  const [greeksSource, setGreeksSource] = useState<'snapshot' | 'bs'>('snapshot')
+  /** Timestamp of last successful option quotes load */
+  const [lastQuotesLoadTs, setLastQuotesLoadTs] = useState<Date | null>(null)
 
   // P1: Liquidity async data
   const [liquidityLastTrade, setLiquidityLastTrade] = useState<Record<string, unknown> | null>(null)
@@ -1131,6 +1134,7 @@ export function OptionDiscoveryPage({
       const sn = await fetchOptionSnapshotsPg(sym, exp, strikesCsv, 'massive')
       const rows = sn.rows ?? []
       setSnapshotRows(rows)
+      setLastQuotesLoadTs(new Date())
       const up =
         sn.underlying_price != null && Number.isFinite(Number(sn.underlying_price))
           ? Number(sn.underlying_price)
@@ -1313,19 +1317,7 @@ export function OptionDiscoveryPage({
     return computeDerivedMetrics(selectedRow, underlyingPrice)
   }, [selectedRow, underlyingPrice])
 
-  /** Mid column: stored mid, else API mark / estimated from bid/ask/last/day close. */
-  const overviewMidDisplay = useMemo(() => {
-    if (!selectedRow) return { primary: '—' as string, est: false }
-    if (selectedRow.mid != null && Number.isFinite(selectedRow.mid)) {
-      return { primary: fmtUsd(selectedRow.mid), est: false }
-    }
-    if (selectedRow.mark != null && Number.isFinite(selectedRow.mark)) {
-      return { primary: fmtUsd(selectedRow.mark), est: true }
-    }
-    const m = effectiveQuotePremium(selectedRow)
-    if (m == null) return { primary: '—', est: false }
-    return { primary: fmtUsd(m), est: true }
-  }, [selectedRow])
+  // overviewMidDisplay removed — Price card now shows day OHLC instead of bid/ask/mid
 
   const canLoadQuotes = selectedSymbol.trim() !== '' && selectedExpiration.trim() !== '' && !snapshotLoading
 
@@ -1334,10 +1326,9 @@ export function OptionDiscoveryPage({
 
   const chainColumnList = useMemo((): ChainColumnId[] => {
     const order: ChainColumnId[] = [
-      'bid',
-      'ask',
-      'last',
-      'mid',
+      'day_open',
+      'day_high',
+      'day_low',
       'day_close',
       'day_vol',
       ...(['iv', 'delta', 'gamma', 'theta', 'vega', 'oi'] as const satisfies readonly ChainColumnId[]),
@@ -1369,6 +1360,26 @@ export function OptionDiscoveryPage({
     })
   }, [])
 
+  /** BS-computed Greeks for every snapshot row (used when greeksSource === 'bs'). */
+  const bsRowValues = useMemo(() => {
+    if (snapshotRows.length === 0 || underlyingPrice == null) return [] as (ReturnType<typeof bsComputeDetail> | null)[]
+    const parts = parseExpirationDateParts(selectedExpiration)
+    if (!parts) return [] as (ReturnType<typeof bsComputeDetail> | null)[]
+    const { y, m, d } = parts
+    const expDate = new Date(y, m, d)
+    expDate.setHours(0, 0, 0, 0)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const dteDays = Math.max(0, Math.round((expDate.getTime() - today.getTime()) / 86400000))
+    if (dteDays === 0) return [] as (ReturnType<typeof bsComputeDetail> | null)[]
+    const tYears = dteDays / 365
+    return snapshotRows.map(row => {
+      const mktPrice = effectiveQuotePremium(row)
+      if (mktPrice == null) return null
+      return bsComputeDetail({ marketPrice: mktPrice, S: underlyingPrice, K: row.strike, tYears, r: 0.045, right: row.right })
+    })
+  }, [snapshotRows, underlyingPrice, selectedExpiration])
+
   const renderChainSideCells = useCallback(
     (
       side: 'call' | 'put',
@@ -1381,17 +1392,14 @@ export function OptionDiscoveryPage({
         let cell: string = '—'
         if (row) {
           switch (col) {
-            case 'bid':
-              cell = row.bid != null ? fmtUsd(row.bid) : '—'
+            case 'day_open':
+              cell = row.day_open != null ? fmtUsd(row.day_open) : '—'
               break
-            case 'ask':
-              cell = row.ask != null ? fmtUsd(row.ask) : '—'
+            case 'day_high':
+              cell = row.day_high != null ? fmtUsd(row.day_high) : '—'
               break
-            case 'last':
-              cell = row.last != null ? fmtUsd(row.last) : '—'
-              break
-            case 'mid':
-              cell = chainDisplayMid(row)
+            case 'day_low':
+              cell = row.day_low != null ? fmtUsd(row.day_low) : '—'
               break
             case 'day_close':
               cell = row.day_close != null ? fmtUsd(row.day_close) : '—'
@@ -1399,21 +1407,31 @@ export function OptionDiscoveryPage({
             case 'day_vol':
               cell = row.day_volume != null ? String(row.day_volume) : '—'
               break
-            case 'iv':
-              cell = fmtOptNum(row.iv, 4)
+            case 'iv': {
+              const bsRow = greeksSource === 'bs' && rowIdx != null ? bsRowValues[rowIdx] : null
+              cell = bsRow != null ? fmtIV(bsRow.iv) : fmtIV(row.iv)
               break
-            case 'delta':
-              cell = fmtOptNum(row.delta, 4)
+            }
+            case 'delta': {
+              const bsRow = greeksSource === 'bs' && rowIdx != null ? bsRowValues[rowIdx] : null
+              cell = bsRow != null ? (bsRow.delta != null ? bsRow.delta.toFixed(4) : '—') : fmtOptNum(row.delta, 4)
               break
-            case 'gamma':
-              cell = fmtOptNum(row.gamma, 4)
+            }
+            case 'gamma': {
+              const bsRow = greeksSource === 'bs' && rowIdx != null ? bsRowValues[rowIdx] : null
+              cell = bsRow != null ? (bsRow.gamma != null ? bsRow.gamma.toFixed(4) : '—') : fmtOptNum(row.gamma, 4)
               break
-            case 'theta':
-              cell = fmtOptNum(row.theta, 4)
+            }
+            case 'theta': {
+              const bsRow = greeksSource === 'bs' && rowIdx != null ? bsRowValues[rowIdx] : null
+              cell = bsRow != null ? (bsRow.thetaPerDay != null ? bsRow.thetaPerDay.toFixed(4) : '—') : fmtOptNum(row.theta, 4)
               break
-            case 'vega':
-              cell = fmtOptNum(row.vega, 4)
+            }
+            case 'vega': {
+              const bsRow = greeksSource === 'bs' && rowIdx != null ? bsRowValues[rowIdx] : null
+              cell = bsRow != null ? (bsRow.vegaPer1Pct != null ? bsRow.vegaPer1Pct.toFixed(4) : '—') : fmtOptNum(row.vega, 4)
               break
+            }
             case 'oi':
               cell = row.open_interest != null ? String(row.open_interest) : '—'
               break
@@ -1434,12 +1452,9 @@ export function OptionDiscoveryPage({
           </td>
         )
       }),
-    [chainColumnList, selectedContractIdx, setSelectedContractIdx],
+    [chainColumnList, selectedContractIdx, setSelectedContractIdx, greeksSource, bsRowValues],
   )
 
-  const chainFilterColumnIds = useMemo((): ChainColumnId[] => {
-    return ['bid', 'ask', 'last', 'mid', 'day_close', 'day_vol', 'iv', 'delta', 'gamma', 'theta', 'vega', 'oi']
-  }, [])
 
   return (
     <div className="card process-section">
@@ -2087,8 +2102,28 @@ export function OptionDiscoveryPage({
             <div className="od-option-quotes-head-row">
               <h3 id="option-discovery-table-head" className="od-option-quotes-head-title">
                 Option quotes
-                <InfoTooltip text="Massive: enqueue sync job (REST), then read snapshots from PostgreSQL; 15 min delayed. Bid/ask may be empty outside RTH." />
+                <InfoTooltip text="Massive: enqueue sync job (REST), then read snapshots from PostgreSQL; 15 min delayed." />
               </h3>
+              {/* Greeks source toggle — always visible once section 4 is unlocked */}
+              <span className="od-quotes-refresh-meta">
+                {lastQuotesLoadTs != null && (
+                  <span className="od-quotes-refresh-ts" title={`Data loaded at ${lastQuotesLoadTs.toLocaleString()}`}>
+                    {lastQuotesLoadTs.toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </span>
+                )}
+                <span className="od-greeks-source-toggle" title="Switch IV & Greeks columns between Massive snapshot data and local Black-Scholes calculation">
+                  <button
+                    type="button"
+                    className={`od-greeks-source-btn${greeksSource === 'snapshot' ? ' od-greeks-source-btn--active' : ''}`}
+                    onClick={() => setGreeksSource('snapshot')}
+                  >Snapshot</button>
+                  <button
+                    type="button"
+                    className={`od-greeks-source-btn${greeksSource === 'bs' ? ' od-greeks-source-btn--active' : ''}`}
+                    onClick={() => setGreeksSource('bs')}
+                  >BS</button>
+                </span>
+              </span>
               <button
                 type="button"
                 className="section-header-icon-btn od-option-quotes-refresh-btn"
@@ -2157,13 +2192,17 @@ export function OptionDiscoveryPage({
             <div className="od-chain-column-filter" role="group" aria-label="Column visibility">
               <span className="od-chain-column-filter-label">Columns</span>
               <div className="od-chain-column-filter-list">
-                {chainFilterColumnIds.map(id => (
+                <span className="od-chain-col-group-label">Day</span>
+                {(['day_open', 'day_high', 'day_low', 'day_close', 'day_vol'] as const).map(id => (
                   <label key={id} className="od-chain-column-filter-item">
-                    <input
-                      type="checkbox"
-                      checked={chainColumnVisibility[id] !== false}
-                      onChange={() => toggleChainColumn(id)}
-                    />
+                    <input type="checkbox" checked={chainColumnVisibility[id] !== false} onChange={() => toggleChainColumn(id)} />
+                    {CHAIN_COLUMN_LABEL[id]}
+                  </label>
+                ))}
+                <span className="od-chain-col-group-sep" aria-hidden="true" />
+                {(['iv', 'delta', 'gamma', 'theta', 'vega', 'oi'] as const).map(id => (
+                  <label key={id} className="od-chain-column-filter-item">
+                    <input type="checkbox" checked={chainColumnVisibility[id] !== false} onChange={() => toggleChainColumn(id)} />
                     {CHAIN_COLUMN_LABEL[id]}
                   </label>
                 ))}
@@ -2384,28 +2423,23 @@ export function OptionDiscoveryPage({
                 <div className="od-card-section">
                   <div className="od-card-section-title od-card-section-title--with-hint">
                     Price
-                    <InfoTooltip text="Massive PG snapshots omit NBBO and last trade at this tier. Mark uses chain day bar (day.close). IB path may still show bid/ask/last. Underlying spot for decomposition uses stock_day daily close when available." />
+                    <span className="od-card-section-source">Day</span>
+                    <InfoTooltip text="Day bar OHLC from Massive (chain snapshot, 15 min delayed). Underlying spot for decomposition uses stock_day daily close when available." />
                   </div>
                   <div className="od-kv-grid">
                     {selectedRow.snapshot_ts && (
                       <>
-                        <span className="od-kv-k">Snapshot</span>
+                        <span className="od-kv-k">As of</span>
                         <span className="od-kv-v od-kv-dim">{new Date(selectedRow.snapshot_ts).toLocaleString()}</span>
                       </>
                     )}
-                    <span className="od-kv-k">Bid</span><span className="od-kv-v">{selectedRow.bid != null ? fmtUsd(selectedRow.bid) : '—'}</span>
-                    <span className="od-kv-k">Ask</span><span className="od-kv-v">{selectedRow.ask != null ? fmtUsd(selectedRow.ask) : '—'}</span>
-                    <span className="od-kv-k">Last</span><span className="od-kv-v">{selectedRow.last != null ? fmtUsd(selectedRow.last) : '—'}</span>
-                    <span className="od-kv-k">Mid</span>
-                    <span className="od-kv-v">
-                      {overviewMidDisplay.primary}
-                      {overviewMidDisplay.est && <span className="od-kv-dim"> (est.)</span>}
-                    </span>
-                    <span className="od-kv-k">Spread</span>
-                    <span className="od-kv-v">
-                      {selectedDerived.spread != null ? `${fmtUsd(selectedDerived.spread)}` : '—'}
-                      {selectedDerived.spreadPct != null && <span className="od-kv-dim"> ({selectedDerived.spreadPct.toFixed(1)}%)</span>}
-                    </span>
+                    <span className="od-kv-k">Open</span><span className="od-kv-v">{selectedRow.day_open != null ? fmtUsd(selectedRow.day_open) : '—'}</span>
+                    <span className="od-kv-k">High</span><span className="od-kv-v">{selectedRow.day_high != null ? fmtUsd(selectedRow.day_high) : '—'}</span>
+                    <span className="od-kv-k">Low</span><span className="od-kv-v">{selectedRow.day_low != null ? fmtUsd(selectedRow.day_low) : '—'}</span>
+                    <span className="od-kv-k">Close</span><span className="od-kv-v">{selectedRow.day_close != null ? fmtUsd(selectedRow.day_close) : '—'}</span>
+                    {selectedRow.day_volume != null && (
+                      <><span className="od-kv-k">Vol</span><span className="od-kv-v">{selectedRow.day_volume.toLocaleString()}</span></>
+                    )}
                   </div>
                 </div>
                 <div className="od-card-section">
@@ -2430,15 +2464,66 @@ export function OptionDiscoveryPage({
                   </div>
                 </div>
                 <div className="od-card-section">
-                  <div className="od-card-section-title">Greeks</div>
-                  <div className="od-kv-grid">
-                    <span className="od-kv-k">IV</span><span className="od-kv-v">{fmtOptNum(selectedRow.iv, 4)}</span>
-                    <span className="od-kv-k">Delta</span><span className="od-kv-v">{fmtOptNum(selectedRow.delta, 4)}</span>
-                    <span className="od-kv-k">Gamma</span><span className="od-kv-v">{fmtOptNum(selectedRow.gamma, 4)}</span>
-                    <span className="od-kv-k">Theta</span><span className="od-kv-v">{fmtOptNum(selectedRow.theta, 4)}</span>
-                    <span className="od-kv-k">Vega</span><span className="od-kv-v">{fmtOptNum(selectedRow.vega, 4)}</span>
-                    <span className="od-kv-k">OI</span><span className="od-kv-v">{selectedRow.open_interest != null ? String(selectedRow.open_interest) : '—'}</span>
+                  <div className="od-card-section-title od-card-section-title--with-hint">
+                    Greeks
+                    <span className="od-greeks-source-toggle">
+                      <button
+                        type="button"
+                        className={`od-greeks-source-btn${greeksSource === 'snapshot' ? ' od-greeks-source-btn--active' : ''}`}
+                        onClick={() => setGreeksSource('snapshot')}
+                        title="Show IV & Greeks from Massive snapshot data"
+                      >Snapshot</button>
+                      <button
+                        type="button"
+                        className={`od-greeks-source-btn${greeksSource === 'bs' ? ' od-greeks-source-btn--active' : ''}`}
+                        onClick={() => setGreeksSource('bs')}
+                        title="Show IV & Greeks computed locally via Black-Scholes"
+                      >BS</button>
+                    </span>
                   </div>
+                  {(() => {
+                    if (greeksSource === 'snapshot') {
+                      return (
+                        <div className="od-kv-grid">
+                          <span className="od-kv-k">IV</span><span className="od-kv-v">{fmtIV(selectedRow.iv)}</span>
+                          <span className="od-kv-k">Delta</span><span className="od-kv-v">{fmtOptNum(selectedRow.delta, 4)}</span>
+                          <span className="od-kv-k">Gamma</span><span className="od-kv-v">{fmtOptNum(selectedRow.gamma, 4)}</span>
+                          <span className="od-kv-k">Theta</span><span className="od-kv-v">{fmtOptNum(selectedRow.theta, 4)}</span>
+                          <span className="od-kv-k">Vega</span><span className="od-kv-v">{fmtOptNum(selectedRow.vega, 4)}</span>
+                          <span className="od-kv-k">OI</span><span className="od-kv-v">{selectedRow.open_interest != null ? String(selectedRow.open_interest) : '—'}</span>
+                        </div>
+                      )
+                    }
+                    // BS mode: compute on the fly
+                    const bsParts = parseExpirationDateParts(selectedExpiration)
+                    const bsDteDays = bsParts ? Math.max(0, Math.round(
+                      (new Date(bsParts.y, bsParts.m, bsParts.d).setHours(0,0,0,0) - new Date().setHours(0,0,0,0)) / 86400000
+                    )) : 0
+                    const bsMktPrice = effectiveQuotePremium(selectedRow)
+                    const bsD = (underlyingPrice != null && bsMktPrice != null && bsDteDays > 0)
+                      ? bsComputeDetail({ marketPrice: bsMktPrice, S: underlyingPrice, K: selectedRow.strike, tYears: bsDteDays / 365, r: 0.045, right: selectedRow.right })
+                      : null
+                    if (bsD == null || bsD.iv == null) {
+                      return (
+                        <div className="od-kv-grid">
+                          <span className="od-kv-k od-kv-dim" style={{ gridColumn: '1/-1', fontSize: '0.75rem' }}>
+                            {bsDteDays === 0 ? '已到期，无法计算' : underlyingPrice == null ? '标的价格未知' : 'IV 求解失败'}
+                          </span>
+                          <span className="od-kv-k">OI</span><span className="od-kv-v">{selectedRow.open_interest != null ? String(selectedRow.open_interest) : '—'}</span>
+                        </div>
+                      )
+                    }
+                    return (
+                      <div className="od-kv-grid">
+                        <span className="od-kv-k">IV</span><span className="od-kv-v">{bsD.iv != null ? (bsD.iv * 100).toFixed(2) + '%' : '—'}</span>
+                        <span className="od-kv-k">Delta</span><span className="od-kv-v">{bsD.delta != null ? bsD.delta.toFixed(4) : '—'}</span>
+                        <span className="od-kv-k">Gamma</span><span className="od-kv-v">{bsD.gamma != null ? bsD.gamma.toFixed(4) : '—'}</span>
+                        <span className="od-kv-k">Theta</span><span className="od-kv-v">{bsD.thetaPerDay != null ? bsD.thetaPerDay.toFixed(4) : '—'}</span>
+                        <span className="od-kv-k">Vega/1%</span><span className="od-kv-v">{bsD.vegaPer1Pct != null ? bsD.vegaPer1Pct.toFixed(4) : '—'}</span>
+                        <span className="od-kv-k">OI</span><span className="od-kv-v">{selectedRow.open_interest != null ? String(selectedRow.open_interest) : '—'}</span>
+                      </div>
+                    )
+                  })()}
                 </div>
               </div>
 
@@ -2461,6 +2546,138 @@ export function OptionDiscoveryPage({
               )}
             </div>
           </section>
+
+          {/* ── BS vs Snapshot comparison ── */}
+          {(() => {
+            const parts = parseExpirationDateParts(selectedExpiration)
+            if (!parts) return null
+            const { y, m, d } = parts
+            const expDate = new Date(y, m, d)
+            expDate.setHours(0, 0, 0, 0)
+            const todayMs = new Date()
+            todayMs.setHours(0, 0, 0, 0)
+            const dteDays = Math.max(0, Math.round((expDate.getTime() - todayMs.getTime()) / 86400000))
+            if (dteDays === 0) return null
+            const mktPrice = effectiveQuotePremium(selectedRow)
+            if (mktPrice == null || underlyingPrice == null) return null
+
+            const bsDetail = bsComputeDetail({
+              marketPrice: mktPrice,
+              S: underlyingPrice,
+              K: selectedRow.strike,
+              tYears: dteDays / 365,
+              r: 0.045,
+              right: selectedRow.right,
+            })
+
+            function diffPct(local: number | null, snap: number | null): number | null {
+              if (local == null || snap == null || snap === 0) return null
+              return ((local - snap) / Math.abs(snap)) * 100
+            }
+            function diffClass(pct: number | null): string {
+              if (pct == null) return ''
+              const abs = Math.abs(pct)
+              if (abs < 3) return 'od-bs-diff--ok'
+              if (abs < 10) return 'od-bs-diff--warn'
+              return 'od-bs-diff--alert'
+            }
+            function fmtDiff(pct: number | null): string {
+              if (pct == null) return '—'
+              return (pct > 0 ? '+' : '') + pct.toFixed(1) + '%'
+            }
+
+            const ivDiff = diffPct(bsDetail.iv, selectedRow.iv ?? null)
+            const deltaDiff = diffPct(bsDetail.delta, selectedRow.delta ?? null)
+            const gammaDiff = diffPct(bsDetail.gamma, selectedRow.gamma ?? null)
+            const thetaDiff = diffPct(bsDetail.thetaPerDay, selectedRow.theta ?? null)
+            const vegaDiff = diffPct(bsDetail.vegaPer1Pct, selectedRow.vega ?? null)
+
+            // Market price source label
+            let mktSrc = 'mark'
+            if (selectedRow.mark != null) mktSrc = 'mark/day_close'
+            else if (selectedRow.mid != null) mktSrc = 'mid'
+            else if (selectedRow.bid != null && selectedRow.ask != null) mktSrc = '(bid+ask)/2'
+            else if (selectedRow.last != null) mktSrc = 'last'
+            else if (selectedRow.day_close != null) mktSrc = 'day_close'
+
+            return (
+              <section className="od-detail-section od-bs-compare" aria-labelledby="od-contract-sec-bs">
+                <h4 id="od-contract-sec-bs" className="od-detail-section-title">
+                  BS vs Snapshot
+                  <span className="od-bs-compare__note"> · Black-Scholes 欧式近似（美式期权，ATM 误差通常 &lt;3%）</span>
+                </h4>
+                <div className="od-bs-compare__meta">
+                  S={`$${underlyingPrice.toFixed(2)}`} · K=${selectedRow.strike.toFixed(2)} · DTE={dteDays} · 市场价=${mktPrice.toFixed(4)} ({mktSrc}) · r=4.50%
+                </div>
+                {bsDetail.iv == null ? (
+                  <div className="od-bs-compare__noiv">BS IV 求解失败（价格异常或深度 ITM/OTM）</div>
+                ) : (
+                  <table className="od-bs-compare__table">
+                    <thead>
+                      <tr>
+                        <th>指标</th>
+                        <th>Snapshot (Massive)</th>
+                        <th>BS 计算</th>
+                        <th>差值 %</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>IV</td>
+                        <td>{selectedRow.iv != null ? (selectedRow.iv * 100).toFixed(2) + '%' : '—'}</td>
+                        <td>{(bsDetail.iv * 100).toFixed(2)}%</td>
+                        <td className={`od-bs-diff ${diffClass(ivDiff)}`}>{fmtDiff(ivDiff)}</td>
+                      </tr>
+                      <tr>
+                        <td>Delta</td>
+                        <td>{selectedRow.delta != null ? selectedRow.delta.toFixed(4) : '—'}</td>
+                        <td>{bsDetail.delta != null ? bsDetail.delta.toFixed(4) : '—'}</td>
+                        <td className={`od-bs-diff ${diffClass(deltaDiff)}`}>{fmtDiff(deltaDiff)}</td>
+                      </tr>
+                      <tr>
+                        <td>Gamma</td>
+                        <td>{selectedRow.gamma != null ? selectedRow.gamma.toFixed(4) : '—'}</td>
+                        <td>{bsDetail.gamma != null ? bsDetail.gamma.toFixed(4) : '—'}</td>
+                        <td className={`od-bs-diff ${diffClass(gammaDiff)}`}>{fmtDiff(gammaDiff)}</td>
+                      </tr>
+                      <tr>
+                        <td>Theta/日</td>
+                        <td>{selectedRow.theta != null ? selectedRow.theta.toFixed(4) : '—'}</td>
+                        <td>{bsDetail.thetaPerDay != null ? bsDetail.thetaPerDay.toFixed(4) : '—'}</td>
+                        <td className={`od-bs-diff ${diffClass(thetaDiff)}`}>{fmtDiff(thetaDiff)}</td>
+                      </tr>
+                      <tr>
+                        <td>
+                          <span title="Vega per 1% IV change. Massive may report per 1 vol point (same unit). If ×100 gap appears, Massive uses per-unit convention.">
+                            Vega/1%
+                          </span>
+                        </td>
+                        <td>{selectedRow.vega != null ? selectedRow.vega.toFixed(4) : '—'}</td>
+                        <td>{bsDetail.vegaPer1Pct != null ? bsDetail.vegaPer1Pct.toFixed(4) : '—'}</td>
+                        <td className={`od-bs-diff ${diffClass(vegaDiff)}`}>
+                          {fmtDiff(vegaDiff)}
+                          {vegaDiff != null && Math.abs(vegaDiff) > 80 && (
+                            <span className="od-bs-diff__hint"> 单位?</span>
+                          )}
+                        </td>
+                      </tr>
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={4} className="od-bs-compare__legend">
+                          <span className="od-bs-diff od-bs-diff--ok">■</span> &lt;3%&nbsp;&nbsp;
+                          <span className="od-bs-diff od-bs-diff--warn">■</span> 3–10%&nbsp;&nbsp;
+                          <span className="od-bs-diff od-bs-diff--alert">■</span> &gt;10%
+                          &nbsp;·&nbsp;NR {bsDetail.iterCount} 次迭代 {bsDetail.converged ? '✓' : '(未收敛)'}
+                          &nbsp;·&nbsp;BS 理论价={bsDetail.bsModelPrice != null ? `$${bsDetail.bsModelPrice.toFixed(4)}` : '—'}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                )}
+              </section>
+            )
+          })()}
 
           {/* ── Chart (K-line) ── */}
           <section className="od-detail-section" aria-labelledby="od-contract-sec-chart">
@@ -2631,7 +2848,7 @@ export function OptionDiscoveryPage({
                       <span className="od-kv-k">Gamma (Γ)</span><span className="od-kv-v">{fmtOptNum(selectedRow.gamma, 4)}</span>
                       <span className="od-kv-k">Theta (Θ)</span><span className="od-kv-v">{fmtOptNum(selectedRow.theta, 4)}</span>
                       <span className="od-kv-k">Vega (ν)</span><span className="od-kv-v">{fmtOptNum(selectedRow.vega, 4)}</span>
-                      <span className="od-kv-k">IV</span><span className="od-kv-v">{fmtOptNum(selectedRow.iv, 4)}</span>
+                      <span className="od-kv-k">IV</span><span className="od-kv-v">{fmtIV(selectedRow.iv)}</span>
                     </div>
                   </div>
                   {scenarios.length > 0 && (
@@ -2706,7 +2923,7 @@ export function OptionDiscoveryPage({
                       <span className="od-kv-k">IV z-score</span>
                       <span className="od-kv-v">{rvZScore != null ? Number(rvZScore).toFixed(2) : '—'}</span>
                       <span className="od-kv-k">This IV</span>
-                      <span className="od-kv-v">{fmtOptNum(selectedRow.iv, 4)}</span>
+                      <span className="od-kv-v">{fmtIV(selectedRow.iv)}</span>
                       <span className="od-kv-k">Avg IV (same side)</span>
                       <span className="od-kv-v">{rvAvgIv != null ? Number(rvAvgIv).toFixed(4) : '—'}</span>
                       {serverRelativeValue?.std_iv != null && (

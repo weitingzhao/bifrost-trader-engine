@@ -62,10 +62,12 @@ def create_research_app(
     from backend.research.routers.option_discovery import router as option_discovery_router
     from backend.research.routers.max_pain import router as max_pain_router
     from backend.research.routers.screener import router as screener_router
+    from backend.research.routers.greeks import router as greeks_router
 
     app.include_router(option_discovery_router)
     app.include_router(max_pain_router)
     app.include_router(screener_router)
+    app.include_router(greeks_router)
 
     from backend.ops.services.audit_store import AuditStore
 

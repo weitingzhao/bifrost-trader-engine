@@ -176,12 +176,24 @@ export function WatchlistCoverageFocusChips({
         <span className="data-overview-focus-chips__rk" title="Fundamental — core contracts and bars">
           FDN
         </span>
-        <div className="data-overview-focus-chips__row">
-          {optionChip('option_contracts', 'option_contracts', 'Reference / contract definitions', value, onChange)}
-          {optionChip('option_day', 'option_day', 'Daily option bars', value, onChange)}
-          {optionChip('option_min', 'option_min', 'Minute option bars', value, onChange)}
-          {stockTableChip('stock_day', value, onChange)}
-          {stockTableChip('stock_min', value, onChange)}
+        <div className="data-overview-focus-chips__row data-overview-focus-chips__row--fdn">
+          <div
+            className="data-overview-focus-chips__chip-group"
+            role="group"
+            aria-label="Daily: stock and option day bars, contract reference"
+          >
+            {stockTableChip('stock_day', value, onChange)}
+            {optionChip('option_day', 'option_day', 'Daily option bars', value, onChange)}
+            {optionChip('option_contracts', 'option_contracts', 'Reference / contract definitions', value, onChange)}
+          </div>
+          <div
+            className="data-overview-focus-chips__chip-group"
+            role="group"
+            aria-label="Intraday: stock and option minute bars"
+          >
+            {stockTableChip('stock_min', value, onChange)}
+            {optionChip('option_min', 'option_min', 'Minute option bars', value, onChange)}
+          </div>
         </div>
 
         <span className="data-overview-focus-chips__rk" title="Option chain snapshots and unified stock snapshot (planned)">

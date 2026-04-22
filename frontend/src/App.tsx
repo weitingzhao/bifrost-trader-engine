@@ -32,6 +32,7 @@ import { TransferPayPage } from './pages/TransferPayPage'
 import { ModelAnalysisPage } from './pages/ModelAnalysisPage'
 import { BacktestPage } from './pages/BacktestPage'
 import { OptionDiscoveryPage } from './pages/OptionDiscoveryPage'
+import OptionGreeksPage from './pages/OptionGreeksPage'
 import { StrategyStructurePage } from './pages/StrategyStructurePage'
 import { StrategyOpportunityPage } from './pages/StrategyOpportunityPage'
 import { StrategyInstancesPage } from './pages/StrategyInstancesPage'
@@ -345,7 +346,7 @@ export default function App() {
   const [systemMessages, setSystemMessages] = useState<SystemMessage[]>([])
   const [urlHash, setUrlHash] = useState(() => (typeof window !== 'undefined' ? window.location.hash : ''))
   const [portfolioView, setPortfolioView] = useState<PortfolioView>('accounts')
-  const [researchView, setResearchView] = useState<'risk' | 'screener' | 'backtest' | 'options'>('risk')
+  const [researchView, setResearchView] = useState<'risk' | 'screener' | 'backtest' | 'options' | 'greeks'>('risk')
   const [strategyView, setStrategyView] = useState<'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist' | 'typeConfig' | 'instances'>('structure')
   /** Instance id from URL hash #/strategies/instances/:id; drives Strategy Instances detail view and back/forward. */
   const [urlStrategyInstanceId, setUrlStrategyInstanceId] = useState<number | null>(null)
@@ -951,7 +952,7 @@ export default function App() {
   const researchSubmenuGroups: {
     id: string
     label: string
-    items: { id: 'risk' | 'screener' | 'backtest' | 'options'; label: string }[]
+    items: { id: 'risk' | 'screener' | 'backtest' | 'options' | 'greeks'; label: string }[]
   }[] = [
     {
       id: 'discovery',
@@ -967,6 +968,7 @@ export default function App() {
       items: [
         { id: 'risk', label: 'Risk Model' },
         { id: 'backtest', label: 'Backtest' },
+        { id: 'greeks', label: 'IV & Greeks' },
       ],
     },
   ]
@@ -1791,6 +1793,13 @@ export default function App() {
             window.location.hash = `#${FEED_MASSIVE_DAILY_DATA_ID}`
           }}
           breadcrumbLabel="Option Discovery"
+        />
+      )}
+
+      {activeTab === 'research' && researchView === 'greeks' && (
+        <OptionGreeksPage
+          onGoToScreener={() => setResearchView('screener')}
+          breadcrumbLabel="IV & Greeks"
         />
       )}
 

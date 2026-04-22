@@ -173,8 +173,54 @@ def compute_option_bars_contracts_gap(
                 "pg_count_all": oc_n,
                 "massive_count": ref_count,
                 "gap": gap,
+                # real_gap / illiquid filled in bulk query below
+                "real_gap": 0,
+                "illiquid": 0,
             }
         )
+
+    # ── OI classification: join missing contracts with option_snapshots_latest ─
+    # real_gap  = missing contracts whose latest snapshot shows open_interest > 0
+    #             (system should have bar data but doesn't → actionable gap)
+    # illiquid  = missing contracts with OI = 0 or no snapshot at all
+    #             (never traded / no market activity → expected absence)
+    expiry_list = [e["expiry"] for e in expiries_out if e["gap"] > 0]
+    if expiry_list:
+        period_clause = "AND period = %(period)s" if (table == "option_min" and period) else ""
+        cur.execute(
+            f"""
+            SELECT
+                oc.expiry,
+                COUNT(CASE WHEN COALESCE(sl.open_interest, 0) > 0 THEN 1 END)::int AS real_gap,
+                COUNT(CASE WHEN COALESCE(sl.open_interest, 0) = 0  THEN 1 END)::int AS illiquid
+            FROM option_contracts oc
+            LEFT JOIN option_snapshots_latest sl USING (contract_key)
+            LEFT JOIN (
+                SELECT DISTINCT expiry, strike, option_right
+                FROM {table}
+                WHERE source = 'massive'
+                  AND UPPER(TRIM(symbol)) = %(sym)s
+                  {period_clause}
+            ) cov
+              ON  cov.expiry       = oc.expiry
+              AND cov.strike       = oc.strike
+              AND cov.option_right = oc.option_right
+            WHERE UPPER(TRIM(oc.symbol)) = %(sym)s
+              AND oc.expiry = ANY(%(expiries)s)
+              AND cov.expiry IS NULL
+            GROUP BY oc.expiry
+            """,
+            {"sym": sym, "expiries": expiry_list, "period": period},
+        )
+        oi_by_expiry: Dict[str, tuple] = {
+            str(r[0]).strip(): (int(r[1] or 0), int(r[2] or 0))
+            for r in (cur.fetchall() or [])
+        }
+        for entry in expiries_out:
+            if entry["gap"] > 0 and entry["expiry"] in oi_by_expiry:
+                real_g, illiquid_g = oi_by_expiry[entry["expiry"]]
+                entry["real_gap"] = real_g
+                entry["illiquid"] = illiquid_g
 
     # Global coverage
     global_gap = ref_total - covered_total

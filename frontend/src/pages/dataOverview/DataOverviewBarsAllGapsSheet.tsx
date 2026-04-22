@@ -167,6 +167,9 @@ export function DataOverviewBarsAllGapsSheet({
           the same pool job as the toolbar for the whole underlying. <strong>Fill row gap (expiry)</strong> scopes the row-gap pool
           to one expiry. <strong>Fill column data</strong> remains symbol-wide (not expiry-scoped). For <code>option_min</code>,
           bar period must match the toolbar ({optionMinPeriod ?? '—'}).
+          <br />
+          <strong>Real gap</strong> = missing contracts with OI &gt; 0 in latest snapshot (actionable — system should have data).{' '}
+          <strong>Illiquid</strong> = OI = 0 or no snapshot (never traded, expected absence).
         </p>
 
         {localErr ? (
@@ -220,6 +223,8 @@ export function DataOverviewBarsAllGapsSheet({
                             <th scope="col">Ref</th>
                             <th scope="col">Covered</th>
                             <th scope="col">Gap</th>
+                            <th scope="col">Real gap</th>
+                            <th scope="col">Illiquid</th>
                             <th scope="col">Row fill</th>
                             <th scope="col">Queries</th>
                           </tr>
@@ -233,6 +238,12 @@ export function DataOverviewBarsAllGapsSheet({
                               <td>{row.massive_count?.toLocaleString() ?? '—'}</td>
                               <td>{row.pg_count?.toLocaleString() ?? '—'}</td>
                               <td>{row.gap?.toLocaleString() ?? '—'}</td>
+                              <td style={{ color: (row.real_gap ?? 0) > 0 ? 'var(--color-red, #e74c3c)' : undefined }}>
+                                {row.real_gap != null ? row.real_gap.toLocaleString() : '—'}
+                              </td>
+                              <td style={{ color: 'var(--color-muted, #888)' }}>
+                                {row.illiquid != null ? row.illiquid.toLocaleString() : '—'}
+                              </td>
                               <td>
                                 <button
                                   type="button"

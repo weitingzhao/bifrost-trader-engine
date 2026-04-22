@@ -676,13 +676,30 @@ export function DataOverviewStockDayJobsBar({
       for (let i = 0; i < rowFillTargets.length; i++) {
         const sym = rowFillTargets[i]!
         const tk = `fill-row-${batchId}-${sym}`
-        const res = await postMassiveSync('feed_stocks_aggregate', {
-          mode: 'custom_bars',
-          sync_all_periods: true,
-          custom_bars_period_group: 'daily',
-          custom_bars_sync_mode: 'daily_smart',
-          ticker: sym,
-        })
+        // Use explicit date range from gap analysis so historical missing days are covered.
+        // missing_by_year is sorted DESC by year, so the last entry is the oldest year.
+        const g = gapBySymbol[sym]
+        const missingYears = g?.missing_by_year ?? []
+        const oldestEntry = missingYears.length > 0 ? missingYears[missingYears.length - 1] : null
+        const syncPayload: Record<string, unknown> = oldestEntry?.first_missing
+          ? {
+              mode: 'custom_bars',
+              sync_all_periods: true,
+              custom_bars_period_group: 'daily',
+              // start 1 day before first missing to ensure overlap; end = now
+              start_ms: new Date(oldestEntry.first_missing).getTime() - 86_400_000,
+              end_ms: Date.now(),
+              ticker: sym,
+            }
+          : {
+              // Fallback when gap data lacks date detail
+              mode: 'custom_bars',
+              sync_all_periods: true,
+              custom_bars_period_group: 'daily',
+              custom_bars_sync_mode: 'daily_smart',
+              ticker: sym,
+            }
+        const res = await postMassiveSync('feed_stocks_aggregate', syncPayload)
         if (!res.ok) {
           const msg = res.error ?? res.message ?? `Enqueue failed for ${sym}`
           setEnqueueErr(msg)

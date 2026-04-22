@@ -1,12 +1,24 @@
 """Compare stock_day coverage against the global trading-day calendar derived from stock_day itself.
 
 No external calendar library — reference set = DISTINCT bar_time WHERE source='massive' across all symbols.
+Non-trading days are excluded using:
+  - weekends (Saturday/Sunday)
+  - NYSE market holidays from reference_us_holidays (exchange='NYSE')
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+# Shared SQL fragment for trading-day filtering in the ref CTE.
+# Excludes weekends and NYSE holidays stored in reference_us_holidays.
+_TRADING_DAY_FILTER = """
+    EXTRACT(DOW FROM bar_time) NOT IN (0, 6)
+    AND bar_time::date NOT IN (
+        SELECT holiday_date FROM reference_us_holidays WHERE exchange = 'NYSE'
+    )
+"""
 
 
 def compute_stock_day_gap(
@@ -18,7 +30,8 @@ def compute_stock_day_gap(
 
     Gap logic:
       ref     = DISTINCT bar_time FROM stock_day WHERE source='massive'
-                  AND bar_time >= NOW() - lookback_years (all symbols)
+                  AND bar_time >= symbol.first_bar (clips pre-IPO dates)
+                  AND is a trading day (no weekends, no NYSE holidays)
       covered = DISTINCT bar_time for this symbol in same window
       gap     = ref_total - covered_total
 
@@ -31,20 +44,37 @@ def compute_stock_day_gap(
     compared_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # ── Query A: ref total vs covered total ───────────────────────────────────
+    # Clip reference calendar to symbol's first known bar date so pre-IPO dates
+    # are not counted as gaps (e.g. CAVA IPO'd 2023-06-15).
+    # Trading-day filter uses reference_us_holidays (NYSE) + weekend exclusion.
     cur.execute(
-        """
-        WITH ref AS (
+        f"""
+        WITH sym_first AS (
+          SELECT MIN(bar_time) AS first_bar
+          FROM stock_day
+          WHERE source = 'massive'
+            AND UPPER(TRIM(symbol)) = %(symbol)s
+        ),
+        effective_start AS (
+          SELECT GREATEST(
+            CURRENT_DATE - (%(years)s || ' years')::interval,
+            COALESCE((SELECT first_bar FROM sym_first),
+                     CURRENT_DATE - (%(years)s || ' years')::interval)
+          ) AS ts
+        ),
+        ref AS (
           SELECT DISTINCT bar_time
           FROM stock_day
           WHERE source = 'massive'
-            AND bar_time >= CURRENT_DATE - (%(years)s || ' years')::interval
+            AND bar_time >= (SELECT ts FROM effective_start)
+            AND {_TRADING_DAY_FILTER}
         ),
         covered AS (
           SELECT DISTINCT bar_time
           FROM stock_day
           WHERE source = 'massive'
             AND UPPER(TRIM(symbol)) = %(symbol)s
-            AND bar_time >= CURRENT_DATE - (%(years)s || ' years')::interval
+            AND bar_time >= (SELECT ts FROM effective_start)
         )
         SELECT
           (SELECT COUNT(*) FROM ref)::bigint     AS ref_total,
@@ -79,21 +109,35 @@ def compute_stock_day_gap(
     else:
         coverage_pct = 100.0
 
-    # ── Query B: missing by year ───────────────────────────────────────────────
+    # ── Query B: missing by year (same effective_start + trading-day filter) ──
     cur.execute(
-        """
-        WITH ref AS (
+        f"""
+        WITH sym_first AS (
+          SELECT MIN(bar_time) AS first_bar
+          FROM stock_day
+          WHERE source = 'massive'
+            AND UPPER(TRIM(symbol)) = %(symbol)s
+        ),
+        effective_start AS (
+          SELECT GREATEST(
+            CURRENT_DATE - (%(years)s || ' years')::interval,
+            COALESCE((SELECT first_bar FROM sym_first),
+                     CURRENT_DATE - (%(years)s || ' years')::interval)
+          ) AS ts
+        ),
+        ref AS (
           SELECT DISTINCT bar_time
           FROM stock_day
           WHERE source = 'massive'
-            AND bar_time >= CURRENT_DATE - (%(years)s || ' years')::interval
+            AND bar_time >= (SELECT ts FROM effective_start)
+            AND {_TRADING_DAY_FILTER}
         ),
         covered AS (
           SELECT DISTINCT bar_time
           FROM stock_day
           WHERE source = 'massive'
             AND UPPER(TRIM(symbol)) = %(symbol)s
-            AND bar_time >= CURRENT_DATE - (%(years)s || ' years')::interval
+            AND bar_time >= (SELECT ts FROM effective_start)
         )
         SELECT
           EXTRACT(YEAR FROM r.bar_time)::int AS year,

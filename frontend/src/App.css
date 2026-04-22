@@ -9803,6 +9803,26 @@ th {
   overflow: auto;
 }
 
+/* Sticky two-row header inside the scrollable chain table */
+#od-layer-4 .od-chain-table thead tr:first-child th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+#od-layer-4 .od-chain-table thead tr:nth-child(2) th {
+  position: sticky;
+  top: 1.85rem;   /* approximate height of the group header row */
+  z-index: 3;
+}
+
+/* Sticky headers must be opaque — override semi-transparent class backgrounds */
+#od-layer-4 .od-chain-table thead .od-chain-group-call { background: color-mix(in srgb, #4ade80 10%, var(--color-surface)); }
+#od-layer-4 .od-chain-table thead .od-chain-group-put  { background: color-mix(in srgb, #f87171 8%,  var(--color-surface)); }
+#od-layer-4 .od-chain-table thead .od-chain-th-call    { background: color-mix(in srgb, #4ade80 6%,  var(--color-surface)); }
+#od-layer-4 .od-chain-table thead .od-chain-th-put     { background: color-mix(in srgb, #f87171 6%,  var(--color-surface)); }
+#od-layer-4 .od-chain-table thead .od-chain-strike-col { background: var(--color-surface); }
+
 /* Chain / quotes expiry (step 2) — horizontal chip strip */
 .od-chain-expiry-bar {
   display: flex;
@@ -11689,6 +11709,30 @@ th {
   flex-shrink: 0;
 }
 
+/* "Day" group label in Columns filter */
+.od-chain-col-group-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-dim);
+  background: var(--color-border);
+  border-radius: 3px;
+  padding: 0.05rem 0.35rem;
+  align-self: center;
+  user-select: none;
+}
+
+/* Visual separator between Day group and Greeks group */
+.od-chain-col-group-sep {
+  display: inline-block;
+  width: 1px;
+  height: 1rem;
+  background: var(--color-border-strong);
+  align-self: center;
+  margin: 0 0.2rem;
+}
+
 .od-chain-column-filter-list {
   display: flex;
   flex-wrap: wrap;
@@ -12315,6 +12359,67 @@ th {
   align-items: center;
   gap: 0.35rem;
   flex-wrap: wrap;
+}
+
+/* "Day" source tag next to Price card title */
+.od-card-section-source {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-dim);
+  background: var(--color-border);
+  border-radius: 3px;
+  padding: 0 0.3rem;
+  line-height: 1.5;
+}
+
+/* Refresh timestamp + toggle wrapper */
+.od-quotes-refresh-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.od-quotes-refresh-ts {
+  font-size: 0.68rem;
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
+
+/* Greeks source toggle (Snapshot / BS bubble) */
+.od-greeks-source-toggle {
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
+  overflow: hidden;
+  gap: 0;
+}
+
+.od-greeks-source-btn {
+  background: transparent;
+  border: none;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  line-height: 1.6;
+}
+
+.od-greeks-source-btn:hover {
+  color: var(--color-text-muted);
+  background: var(--color-border);
+}
+
+.od-greeks-source-btn--active {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
 }
 
 .od-kv-grid {
@@ -20997,6 +21102,29 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   gap: 0.28rem 0.38rem;
 }
 
+/* FDN: two subtle clusters — daily + contracts vs minute bars */
+.data-overview-focus-chips__row--fdn {
+  gap: 0.45rem 0.55rem;
+}
+
+.data-overview-focus-chips__chip-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.28rem 0.38rem;
+  padding: 0.16rem 0.4rem;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+[data-theme="light"] .data-overview-focus-chips__chip-group {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.07);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
 .data-overview-focus-chips__chip-wrap {
   position: relative;
   display: inline-flex;
@@ -25693,4 +25821,376 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   padding-left: 1.1rem;
   color: var(--color-text-muted);
   font-size: var(--text-small, 0.875rem);
+}
+/* ==========================================================================
+   IV & Greeks Page
+   ========================================================================== */
+
+.option-greeks-page {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.option-greeks-page__controls {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: var(--space-3) var(--space-4);
+}
+
+.option-greeks-page__controls-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3) var(--space-4);
+}
+
+.option-greeks-page__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.option-greeks-page__label {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.option-greeks-page__loading-dots {
+  color: var(--color-accent, #4fa3e3);
+}
+
+.option-greeks-page__input,
+.option-greeks-page__select {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
+  color: var(--color-text);
+  font-size: 0.875rem;
+  padding: 0.3rem 0.5rem;
+  height: 2rem;
+}
+
+.option-greeks-page__input:focus,
+.option-greeks-page__select:focus {
+  outline: none;
+  border-color: var(--color-accent, #4fa3e3);
+}
+
+.option-greeks-page__toggle-group {
+  display: flex;
+  gap: 2px;
+}
+
+.option-greeks-page__toggle {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  height: 2rem;
+  min-width: 2.2rem;
+  padding: 0 0.5rem;
+  transition: background 0.15s, color 0.15s;
+}
+
+.option-greeks-page__toggle:hover {
+  background: var(--color-surface-elevated);
+  color: var(--color-text);
+}
+
+.option-greeks-page__toggle--active {
+  background: var(--color-accent-dim, #1e3a52);
+  border-color: var(--color-accent, #4fa3e3);
+  color: var(--color-accent, #4fa3e3);
+}
+
+.option-greeks-page__load-btn {
+  height: 2rem;
+  align-self: flex-end;
+}
+
+/* Info bar */
+.option-greeks-page__info-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-5);
+  font-size: 0.8125rem;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.option-greeks-page__info-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.option-greeks-page__info-label {
+  color: var(--color-text-muted);
+}
+
+.option-greeks-page__info-approx {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-style: italic;
+  font-size: 0.75rem;
+}
+
+/* States */
+.option-greeks-page__error {
+  background: rgba(220, 53, 69, 0.1);
+  border: 1px solid rgba(220, 53, 69, 0.4);
+  border-radius: 6px;
+  color: #e07070;
+  font-size: 0.875rem;
+  padding: var(--space-3) var(--space-4);
+}
+
+.option-greeks-page__loading,
+.option-greeks-page__empty {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  padding: var(--space-4);
+  text-align: center;
+}
+
+.option-greeks-page__table-wrap {
+  overflow-x: auto;
+}
+
+/* Greeks table */
+.greeks-table {
+  width: 100%;
+}
+
+.greeks-table__expiry-header td {
+  background: var(--color-surface-elevated);
+  border-top: 1px solid var(--color-border-strong);
+  color: var(--color-text);
+  font-size: 0.8125rem;
+  padding: 0.35rem 0.6rem;
+}
+
+.greeks-table__dte-badge {
+  margin-left: 0.5em;
+  background: var(--color-accent-dim, #1e3a52);
+  border: 1px solid var(--color-accent, #4fa3e3);
+  border-radius: 3px;
+  color: var(--color-accent, #4fa3e3);
+  font-size: 0.7rem;
+  padding: 0 0.3em;
+}
+
+.greeks-table__right-badge {
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.1em 0.35em;
+}
+
+.greeks-table__right-badge--c {
+  background: rgba(80, 200, 120, 0.12);
+  color: #50c878;
+}
+
+.greeks-table__right-badge--p {
+  background: rgba(240, 100, 80, 0.12);
+  color: #f06450;
+}
+
+/* IV coloring */
+.greeks-table__iv--low  { color: #50c878; }
+.greeks-table__iv--mid  { color: var(--color-text); }
+.greeks-table__iv--high { color: #f0a040; }
+
+/* ATM delta highlight */
+.greeks-table__delta--atm {
+  color: var(--color-accent, #4fa3e3);
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   GreeksCalcTooltip — hover BS calculation detail
+   ========================================================================== */
+
+.greeks-calc-tooltip {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  background: var(--color-surface-elevated, #1a1f26);
+  border: 1px solid var(--color-border-strong, #3d4754);
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  max-width: 420px;
+  min-width: 280px;
+  font-size: 0.72rem;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  color: var(--color-text-main, #e4e9ef);
+  line-height: 1.5;
+}
+
+.greeks-calc-tooltip__section {
+  margin-bottom: 0.45rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--color-border, #2a313c);
+}
+
+.greeks-calc-tooltip__section:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.greeks-calc-tooltip__heading {
+  font-size: 0.68rem;
+  font-family: var(--font-sans, sans-serif);
+  font-weight: 600;
+  color: var(--color-text-muted, #7a8492);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.3rem;
+}
+
+.greeks-calc-tooltip__mono {
+  white-space: pre-wrap;
+  font-size: 0.71rem;
+}
+
+.greeks-calc-tooltip__warn {
+  color: var(--color-warning, #eab308);
+}
+
+.greeks-calc-tooltip__kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.1rem 0.6rem;
+}
+
+.greeks-calc-tooltip__kv > span:nth-child(odd) {
+  color: var(--color-text-muted, #7a8492);
+}
+
+.greeks-calc-tooltip__kv--compare {
+  grid-template-columns: auto auto auto;
+  gap: 0.1rem 0.75rem;
+}
+
+.greeks-calc-tooltip__col-label {
+  color: var(--color-text-muted, #7a8492);
+  font-size: 0.67rem;
+}
+
+.greeks-calc-tooltip__section--footer {
+  font-size: 0.68rem;
+  color: var(--color-text-dim, #5c6572);
+}
+
+/* ==========================================================================
+   OD BS vs Snapshot comparison panel
+   ========================================================================== */
+
+.od-bs-compare .od-detail-section-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.od-bs-compare__note {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--color-text-dim, #5c6572);
+}
+
+.od-bs-compare__meta {
+  font-size: 0.75rem;
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text-muted, #7a8492);
+  margin-bottom: 0.6rem;
+}
+
+.od-bs-compare__noiv {
+  font-size: 0.8rem;
+  color: var(--color-warning, #eab308);
+  padding: 0.4rem 0;
+}
+
+.od-bs-compare__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  font-family: var(--font-mono, monospace);
+}
+
+.od-bs-compare__table th,
+.od-bs-compare__table td {
+  padding: 0.25rem 0.6rem;
+  text-align: right;
+  border-bottom: 1px solid var(--color-border, #2a313c);
+  white-space: nowrap;
+}
+
+.od-bs-compare__table th:first-child,
+.od-bs-compare__table td:first-child {
+  text-align: left;
+  font-family: var(--font-sans, sans-serif);
+  color: var(--color-text-muted, #7a8492);
+  font-size: 0.75rem;
+}
+
+.od-bs-compare__table thead th {
+  font-size: 0.72rem;
+  font-family: var(--font-sans, sans-serif);
+  font-weight: 600;
+  color: var(--color-text-muted, #7a8492);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--color-border-strong, #3d4754);
+}
+
+.od-bs-compare__table tfoot td {
+  font-size: 0.7rem;
+  color: var(--color-text-dim, #5c6572);
+  font-family: var(--font-sans, sans-serif);
+  border-bottom: none;
+  padding-top: 0.4rem;
+}
+
+.od-bs-compare__legend {
+  text-align: left !important;
+}
+
+.od-bs-diff {
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+}
+
+.od-bs-diff--ok {
+  color: var(--color-text-dim, #5c6572);
+}
+
+.od-bs-diff--warn {
+  color: var(--color-warning, #eab308);
+}
+
+.od-bs-diff--alert {
+  color: var(--color-lamp-red, #f87171);
+}
+
+.od-bs-diff__hint {
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: var(--color-text-dim, #5c6572);
+  margin-left: 0.3rem;
 }

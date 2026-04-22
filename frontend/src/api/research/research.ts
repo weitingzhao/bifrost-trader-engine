@@ -768,6 +768,18 @@ export interface OptionContractsReferenceGapExpiryRow {
   massive_count: number
   gap: number
   truncated?: boolean
+  /**
+   * Missing contracts whose latest option_snapshots_latest.open_interest > 0.
+   * These are actionable gaps — the system should have bar data but doesn't.
+   * Only populated for bars gap results (option_day / option_min).
+   */
+  real_gap?: number
+  /**
+   * Missing contracts with OI = 0 or no snapshot at all.
+   * Typically illiquid / never-traded contracts — expected absence, not a system error.
+   * Only populated for bars gap results (option_day / option_min).
+   */
+  illiquid?: number
 }
 
 export interface OptionContractsReferenceGapResult {
@@ -3074,5 +3086,98 @@ export async function fetchSnapshotQualityDetail(
       ok: false, symbol: s, source, latest_date: null, daily: [], expiries: [],
       error: e instanceof Error ? e.message : 'fetch failed',
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// IV & Greeks
+// ---------------------------------------------------------------------------
+
+export interface GreeksRow {
+  expiry: string
+  strike: number
+  right: string
+  market_price: number
+  stock_price: number
+  t_years: number
+  t_days: number
+  iv: number | null
+  delta: number | null
+  gamma: number | null
+  theta: number | null
+  vega: number | null
+}
+
+export interface GreeksResponse {
+  ok: boolean
+  symbol: string
+  trade_date: string
+  stock_price: number | null
+  risk_free_rate: number
+  count: number
+  rows: GreeksRow[]
+  error?: string
+}
+
+export async function fetchGreeks(params: {
+  symbol: string
+  trade_date: string
+  risk_free_rate?: number
+  expiry?: string
+  right?: string
+  limit?: number
+}): Promise<GreeksResponse> {
+  const s = (params.symbol || '').trim().toUpperCase()
+  if (!s) {
+    return { ok: false, symbol: '', trade_date: params.trade_date, stock_price: null, risk_free_rate: params.risk_free_rate ?? 0.045, count: 0, rows: [], error: 'symbol is required' }
+  }
+  try {
+    const qs = new URLSearchParams({ symbol: s, trade_date: params.trade_date })
+    if (params.risk_free_rate != null) qs.set('risk_free_rate', String(params.risk_free_rate))
+    if (params.expiry) qs.set('expiry', params.expiry)
+    if (params.right) qs.set('right', params.right)
+    if (params.limit != null) qs.set('limit', String(params.limit))
+    const r = await fetch(researchApiUrl(`/research/greeks?${qs.toString()}`))
+    const j = await r.json().catch(() => ({}))
+    return {
+      ok: Boolean(j.ok),
+      symbol: j.symbol ?? s,
+      trade_date: j.trade_date ?? params.trade_date,
+      stock_price: j.stock_price ?? null,
+      risk_free_rate: j.risk_free_rate ?? (params.risk_free_rate ?? 0.045),
+      count: j.count ?? 0,
+      rows: Array.isArray(j.rows) ? (j.rows as GreeksRow[]) : [],
+      error: j.error != null ? String(j.error) : undefined,
+    }
+  } catch (e) {
+    return {
+      ok: false, symbol: s, trade_date: params.trade_date, stock_price: null,
+      risk_free_rate: params.risk_free_rate ?? 0.045, count: 0, rows: [],
+      error: e instanceof Error ? e.message : 'fetch failed',
+    }
+  }
+}
+
+export interface GreeksAvailableDatesResponse {
+  ok: boolean
+  symbol: string
+  dates: string[]
+  error?: string
+}
+
+export async function fetchGreeksAvailableDates(symbol: string): Promise<GreeksAvailableDatesResponse> {
+  const s = (symbol || '').trim().toUpperCase()
+  if (!s) return { ok: false, symbol: '', dates: [], error: 'symbol is required' }
+  try {
+    const r = await fetch(researchApiUrl(`/research/greeks/available-dates?symbol=${encodeURIComponent(s)}`))
+    const j = await r.json().catch(() => ({}))
+    return {
+      ok: Boolean(j.ok),
+      symbol: j.symbol ?? s,
+      dates: Array.isArray(j.dates) ? (j.dates as string[]) : [],
+      error: j.error != null ? String(j.error) : undefined,
+    }
+  } catch (e) {
+    return { ok: false, symbol: s, dates: [], error: e instanceof Error ? e.message : 'fetch failed' }
   }
 }

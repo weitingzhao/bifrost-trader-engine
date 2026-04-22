@@ -385,3 +385,5 @@ export type {
   CeleryBeatTaskRow,
   QueueSummaryRow,
 } from './ops/ops'
+export type { GreeksRow, GreeksResponse, GreeksAvailableDatesResponse } from './research/research'
+export { fetchGreeks, fetchGreeksAvailableDates } from './research/research'
