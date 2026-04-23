@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { InfoTooltip } from '../components/InfoTooltip'
 import { fetchGreeks, fetchGreeksAvailableDates } from '../api/research/research'
 import type { GreeksRow, GreeksResponse } from '../api/research/research'
 import { bsComputeDetail } from '../utils/bsCalc'
@@ -9,7 +10,8 @@ import type { BSDetail } from '../utils/bsCalc'
 // ---------------------------------------------------------------------------
 
 interface OptionGreeksPageProps {
-  onGoToScreener?: () => void   // reserved for future navigation
+  /** “Research” breadcrumb → Risk Model. */
+  onBreadcrumbResearch?: () => void
   breadcrumbLabel?: string
 }
 
@@ -237,7 +239,7 @@ function GreeksTableGroup({ expiry, rows, dte, riskFreeRate: _riskFreeRate, onRo
 // Main page
 // ---------------------------------------------------------------------------
 
-export default function OptionGreeksPage({ onGoToScreener: _onGoToScreener, breadcrumbLabel = 'IV & Greeks' }: OptionGreeksPageProps) {
+export default function OptionGreeksPage({ onBreadcrumbResearch, breadcrumbLabel = 'IV & Greeks' }: OptionGreeksPageProps) {
   const [symbol, setSymbol] = useState('NVDA')
   const [symbolInput, setSymbolInput] = useState('NVDA')
   const [tradeDate, setTradeDate] = useState('')
@@ -321,11 +323,26 @@ export default function OptionGreeksPage({ onGoToScreener: _onGoToScreener, brea
 
   return (
     <div className="option-greeks-page">
-      {/* Breadcrumb */}
-      <div className="app-page-breadcrumb">
-        <span>Research</span>
-        <span className="app-page-breadcrumb__sep">/</span>
-        <span>{breadcrumbLabel}</span>
+      <div className="research-page-head" style={{ marginBottom: 'var(--space-3)' }}>
+        <h2 className="page-title-with-tooltip" style={{ margin: 0 }}>
+          {onBreadcrumbResearch ? (
+            <>
+              <button
+                type="button"
+                className="page-title-breadcrumb-link"
+                onClick={onBreadcrumbResearch}
+                aria-label="Research home"
+              >
+                Research
+              </button>
+              {' / '}
+              {breadcrumbLabel}
+            </>
+          ) : (
+            breadcrumbLabel
+          )}
+          <InfoTooltip text="Historical option greeks from the research API: pick symbol and trade date, then fetch chain rows." />
+        </h2>
       </div>
 
       {/* Controls */}

@@ -346,8 +346,8 @@ export default function App() {
   const [systemMessages, setSystemMessages] = useState<SystemMessage[]>([])
   const [urlHash, setUrlHash] = useState(() => (typeof window !== 'undefined' ? window.location.hash : ''))
   const [portfolioView, setPortfolioView] = useState<PortfolioView>('accounts')
-  const [researchView, setResearchView] = useState<'risk' | 'screener' | 'backtest' | 'options' | 'greeks'>('risk')
-  const [strategyView, setStrategyView] = useState<'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist' | 'typeConfig' | 'instances'>('structure')
+  const [researchView, setResearchView] = useState<'risk' | 'screener' | 'watchlist' | 'backtest' | 'options' | 'greeks'>('risk')
+  const [strategyView, setStrategyView] = useState<'structure' | 'opportunity' | 'allocations' | 'gates' | 'typeConfig' | 'instances'>('structure')
   /** Instance id from URL hash #/strategies/instances/:id; drives Strategy Instances detail view and back/forward. */
   const [urlStrategyInstanceId, setUrlStrategyInstanceId] = useState<number | null>(null)
   /** Opportunity id from #/strategies/opportunities/:id — opens edit form on Opportunity page. */
@@ -941,26 +941,37 @@ export default function App() {
     }
   }, [benchmarkSymbols.join(',')])
 
+  /** Research submenu “Research” crumb → Risk Model (home). */
+  const goResearchHome = useCallback(() => {
+    setActiveTab('research')
+    setResearchView('risk')
+  }, [])
+
   const tabList: { id: TabId; label: string; group: TabGroup; lamp?: 'green' | 'yellow' | 'red' | 'none'; lampTitle?: string }[] = [
     { id: 'live', label: 'Live', group: 'market', lamp: liveLamp, lampTitle: liveLamp !== 'green' ? liveNavLamp.title : undefined },
-    { id: 'strategy', label: 'Strategy', group: 'strategy', lamp: strategyLamp },
-    { id: 'replay', label: 'Portfolio', group: 'portfolio' },
     { id: 'research', label: 'Research', group: 'research' },
+    { id: 'replay', label: 'Portfolio', group: 'portfolio' },
+    { id: 'strategy', label: 'Strategy', group: 'strategy', lamp: strategyLamp },
   ]
 
-  /** Research dropdown: Discovery vs Risk & tools (same pattern as Strategy / Portfolio groups). */
+  /** Research dropdown: Screener (stocks vs options) vs Discovery vs Risk & tools. */
   const researchSubmenuGroups: {
     id: string
     label: string
-    items: { id: 'risk' | 'screener' | 'backtest' | 'options' | 'greeks'; label: string }[]
+    items: { id: 'risk' | 'screener' | 'watchlist' | 'backtest' | 'options' | 'greeks'; label: string }[]
   }[] = [
+    {
+      id: 'screener-section',
+      label: 'Screener',
+      items: [
+        { id: 'watchlist', label: 'Stock Screener' },
+        { id: 'screener', label: 'Option Screener' },
+      ],
+    },
     {
       id: 'discovery',
       label: 'Discovery',
-      items: [
-        { id: 'screener', label: 'Screener' },
-        { id: 'options', label: 'Option Discovery' },
-      ],
+      items: [{ id: 'options', label: 'Option Discovery' }],
     },
     {
       id: 'risk-tools',
@@ -977,15 +988,12 @@ export default function App() {
   const strategySubmenuGroups: {
     id: string
     label: string
-    items: { id: 'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist' | 'typeConfig' | 'instances'; label: string }[]
+    items: { id: 'structure' | 'opportunity' | 'allocations' | 'gates' | 'typeConfig' | 'instances'; label: string }[]
   }[] = [
     {
       id: 'operations',
       label: 'Operations',
-      items: [
-        { id: 'watchlist', label: 'Watchlist' },
-        { id: 'instances', label: 'Instances' },
-      ],
+      items: [{ id: 'instances', label: 'Instances' }],
     },
     {
       id: 'configuration',
@@ -1101,7 +1109,7 @@ export default function App() {
       <header className="app-header">
         <div className="app-header-left">
           <img src={logoImg} alt="Bifrost Trader" className="app-logo" />
-          <nav className="app-tabs" aria-label="Live, Strategy, Portfolio, Research">
+          <nav className="app-tabs" aria-label="Live, Research, Portfolio, Strategy">
             {tabList.map(({ id, label, group, lamp, lampTitle }, idx) => {
               const showDivider = idx > 0 && tabList[idx - 1].group !== group
               const divider = showDivider ? <NavGroupDivider key={`div-${group}`} /> : null
@@ -1759,7 +1767,7 @@ export default function App() {
 
       {activeTab === 'research' && researchView === 'risk' && (
         <ResearchRiskAnalysisPage
-          onGoToScreener={() => setResearchView('screener')}
+          onGoToScreener={goResearchHome}
           breadcrumbLabel="Risk & Position Sizer"
           status={status}
         />
@@ -1768,19 +1776,19 @@ export default function App() {
       {activeTab === 'research' && researchView === 'screener' && (
         <OptionScreenerPage
           status={status}
-          onGoToScreener={() => setResearchView('screener')}
+          onBreadcrumbResearch={goResearchHome}
           onOpenOptionCoverage={() => {
             setActiveTab('settings')
             window.location.hash = `#${COVERAGE_OVERVIEW_SUMMARY_ID}`
           }}
-          breadcrumbLabel="Screener"
+          breadcrumbLabel="Option Screener"
         />
       )}
 
       {activeTab === 'research' && researchView === 'backtest' && (
         <BacktestPage
           status={status}
-          onGoToScreener={() => setResearchView('screener')}
+          onGoToScreener={goResearchHome}
           breadcrumbLabel="Backtest"
         />
       )}
@@ -1788,7 +1796,7 @@ export default function App() {
       {activeTab === 'research' && researchView === 'options' && (
         <OptionDiscoveryPage
           status={status}
-          onGoToScreener={() => setResearchView('screener')}
+          onGoToScreener={goResearchHome}
           onOpenMassiveFeed={() => {
             setActiveTab('settings')
             window.location.hash = `#${FEED_MASSIVE_DAILY_DATA_ID}`
@@ -1799,7 +1807,7 @@ export default function App() {
 
       {activeTab === 'research' && researchView === 'greeks' && (
         <OptionGreeksPage
-          onGoToScreener={() => setResearchView('screener')}
+          onBreadcrumbResearch={goResearchHome}
           breadcrumbLabel="IV & Greeks"
         />
       )}
@@ -1848,8 +1856,8 @@ export default function App() {
         />
       )}
 
-      {activeTab === 'strategy' && strategyView === 'watchlist' && (
-        <WatchlistPage status={status} />
+      {activeTab === 'research' && researchView === 'watchlist' && (
+        <WatchlistPage status={status} onBreadcrumbResearch={goResearchHome} />
       )}
 
       {activeTab === 'strategy' && strategyView === 'typeConfig' && (
@@ -1871,7 +1879,7 @@ export default function App() {
           operations={operations}
           onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
           onNavigateToSocket={openSocketInSettings}
-          onGoToScreener={() => { setActiveTab('research'); setResearchView('screener') }}
+          onGoToScreener={goResearchHome}
           celeryLamp={celeryLamp}
           apiHealthProbes={apiHealthProbes}
         />

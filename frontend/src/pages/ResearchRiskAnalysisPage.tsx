@@ -118,26 +118,28 @@ export function ResearchRiskAnalysisPage({
 
   return (
     <div className="card process-section">
-      <h2 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-        {onGoToScreener ? (
-          <>
-            <button
-              type="button"
-              className="page-title-breadcrumb-link"
-              onClick={onGoToScreener}
-              aria-label="Go to Screener"
-            >
-              Research
-            </button>
-            {' / '}
-            {breadcrumbLabel}
-            {' '}
-          </>
-        ) : (
-          <>Risk &amp; Position Sizer{' '}</>
-        )}
-        <InfoTooltip text="Portfolio risk diagnostics (Kelly criterion from trade history) and ATR-based per-symbol position sizing." />
-      </h2>
+      <div className="research-page-head">
+        <h2 className="page-title-with-tooltip" style={{ margin: 0 }}>
+          {onGoToScreener ? (
+            <>
+              <button
+                type="button"
+                className="page-title-breadcrumb-link"
+                onClick={onGoToScreener}
+                aria-label="Research home"
+              >
+                Research
+              </button>
+              {' / '}
+              {breadcrumbLabel}
+              {' '}
+            </>
+          ) : (
+            <>Risk &amp; Position Sizer{' '}</>
+          )}
+          <InfoTooltip text="Portfolio risk diagnostics (Kelly criterion from trade history) and ATR-based per-symbol position sizing." />
+        </h2>
+      </div>
       <p className="section-hint">
         Section 1 shows portfolio risk metrics from your trade history. Section 2 sizes a position using
         ATR(14) stop loss and your Kelly-derived capital allocation.

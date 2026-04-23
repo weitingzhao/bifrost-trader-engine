@@ -21,10 +21,8 @@ import { computeOptionLiveAvgPerShareFromExecutions } from '../utils/optionLiveB
 
 const SYMBOL_ORDER_STORAGE_KEY = 'market_streams_symbol_order'
 
-/** IB TWS-style FIN INSTRUMENT column sort cycle (Market Streams = STK only → 5 modes). */
-type MarketStreamsSortMode = 1 | 2 | 3 | 4 | 5
-/** IB TWS-style Contract column sort cycle (Option Positions). */
-type OptionPositionsSortMode = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
+/** IB TWS-style FIN INSTRUMENT column sort cycle (unified STK + OPT → 9 modes). */
+type MarketStreamsSortMode = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
 
 type MarketStreamsRow = {
   symbol: string
@@ -57,23 +55,8 @@ type OptPositionRow = {
   avg_cost: number | null
 }
 
-function msStockSide(qty: number | null): 'long' | 'short' | 'flat' {
-  if (qty == null || !Number.isFinite(qty) || qty === 0) return 'flat'
-  return qty > 0 ? 'long' : 'short'
-}
-
 function cmpSymbolLocale(a: string, b: string, dir: 1 | -1): number {
   return a.localeCompare(b, undefined, { sensitivity: 'base' }) * dir
-}
-
-function optionRightIsCall(right: string): boolean {
-  const r = (right ?? '').toString().trim().toUpperCase()
-  return r === 'C' || r === 'CALL'
-}
-
-function optionRightIsPut(right: string): boolean {
-  const r = (right ?? '').toString().trim().toUpperCase()
-  return r === 'P' || r === 'PUT'
 }
 
 /** YYYYMMDD → sortable int; invalid → 0 */
@@ -104,16 +87,65 @@ function optionRowSortKey(row: OptPositionRow): string {
   return `${sym}|${exp}|${strike}|${ck}`
 }
 
+/**
+ * IB sometimes returns OPT avgCost scaled (e.g. 350 for $3.50/share). Match Positions page heuristic.
+ */
+function normalizeIbOptionAvgCostPerShare(raw: number | null | undefined): number | null {
+  if (raw == null || !Number.isFinite(Number(raw))) return null
+  const n = Number(raw)
+  return Math.abs(n) >= 10 ? n / 100 : n
+}
+
+/** Human label: Long/Short + Call/Put (MTM is still $/share × signed contracts × 100 for both rights). */
+function describeOptionLegMtm(row: OptPositionRow): string {
+  const r = String(row.right ?? '').trim().toUpperCase()
+  const leg =
+    r === 'P' || r === 'PUT' || r.startsWith('P')
+      ? 'Put'
+      : r === 'C' || r === 'CALL' || r.startsWith('C')
+        ? 'Call'
+        : (row.right || 'Opt').trim() || 'Opt'
+  if (row.qty > 0) return `Long ${leg}`
+  if (row.qty < 0) return `Short ${leg}`
+  return leg
+}
+
+/** Listed equity OPT: MTM $ = (mark − avg $/share) × signed contract count × 100. Long qty&gt;0, short qty&lt;0; Call/Put both $/share premium. */
+function computeOptionMtmPnlUsd(midPerShare: number, avgCostPerShare: number, signedContracts: number): number {
+  return (midPerShare - avgCostPerShare) * signedContracts * 100
+}
+
+function resolveOptAvgCostPerShareForMtm(
+  row: OptPositionRow,
+  basis: { avgPerShare: number | null; basisSource: 'flex_trades' | 'tws_client' | null } | undefined,
+): number | null {
+  const raw =
+    basis?.avgPerShare != null && Number.isFinite(basis.avgPerShare) ? basis.avgPerShare : row.avg_cost
+  return normalizeIbOptionAvgCostPerShare(raw)
+}
+
+/**
+ * IB short OPT: `avgCost` is often **negative** $/share (credit received). For MTM `(mid − avg)×qty×100`
+ * we need average **premium received as a positive** $/sh when qty &lt; 0, so flip sign once.
+ * Long legs keep IB avg as-is (positive cost).
+ */
+function effectiveOptAvgCostPerShareForMtm(row: OptPositionRow, avgNormalized: number | null): number | null {
+  if (avgNormalized == null || !Number.isFinite(avgNormalized)) return null
+  if (row.qty < 0 && avgNormalized < 0) return -avgNormalized
+  return avgNormalized
+}
+
 function computeOptMidAndLivePnl(
   row: OptPositionRow,
   q: RealtimeQuote | undefined,
   basis: { avgPerShare: number | null; basisSource: 'flex_trades' | 'tws_client' | null } | undefined,
 ): { mid: number | null; livePnl: number | null } {
   const mid = q?.mid ?? (q?.bid != null && q?.ask != null ? (q.bid + q.ask) / 2 : null)
-  const avgForPnl = basis?.avgPerShare != null && Number.isFinite(basis.avgPerShare) ? basis.avgPerShare : row.avg_cost
+  const rawAvg = resolveOptAvgCostPerShareForMtm(row, basis)
+  const avgForPnl = effectiveOptAvgCostPerShareForMtm(row, rawAvg)
   const livePnl =
     mid != null && avgForPnl != null && Number.isFinite(avgForPnl) && Number.isFinite(row.qty) && row.qty !== 0
-      ? (mid - avgForPnl) * row.qty * 100
+      ? computeOptionMtmPnlUsd(mid, avgForPnl, row.qty)
       : null
   return { mid, livePnl }
 }
@@ -126,17 +158,6 @@ function sumFiniteMsPnl(rows: MarketStreamsRow[]): number {
 }
 
 function marketStreamsSortHeaderMeta(mode: MarketStreamsSortMode): { suffix: string | null; arrow: 'up' | 'down' | null } {
-  switch (mode) {
-    case 1: return { suffix: null, arrow: null }
-    case 2: return { suffix: null, arrow: 'up' }
-    case 3: return { suffix: null, arrow: 'down' }
-    case 4: return { suffix: null, arrow: 'up' }
-    case 5: return { suffix: null, arrow: 'down' }
-    default: return { suffix: null, arrow: null }
-  }
-}
-
-function optionPositionsSortHeaderMeta(mode: OptionPositionsSortMode): { suffix: string | null; arrow: 'up' | 'down' | null } {
   if (mode === 1) return { suffix: null, arrow: null }
   if (mode === 2) return { suffix: null, arrow: 'up' }
   if (mode === 3) return { suffix: null, arrow: 'down' }
@@ -146,8 +167,16 @@ function optionPositionsSortHeaderMeta(mode: OptionPositionsSortMode): { suffix:
   return { suffix: null, arrow: null }
 }
 
-type LiveSortGroupMs = { label: string; showGroupHeader: boolean; rows: MarketStreamsRow[]; totalPnl: number }
-type LiveSortGroupOp = { label: string; showGroupHeader: boolean; rows: OptPositionRow[]; totalPnl: number }
+/** Visual accent on Symbol header for each sort family (color in CSS). */
+function marketStreamsSortHeaderAccentClass(mode: MarketStreamsSortMode): string {
+  if (mode === 1) return 'live-sort-header--accent-default'
+  if (mode === 2 || mode === 3) return 'live-sort-header--accent-alpha'
+  if (mode === 4 || mode === 5) return 'live-sort-header--accent-type'
+  if (mode === 6 || mode === 7) return 'live-sort-header--accent-gamma'
+  return 'live-sort-header--accent-expiry'
+}
+
+type LiveSortGroupMs = { label: string; showGroupHeader: boolean; stkRows: MarketStreamsRow[]; optRows: OptPositionRow[]; totalPnl: number }
 
 function sortOptRowsAlpha(rows: OptPositionRow[], dir: 1 | -1): OptPositionRow[] {
   return [...rows].sort((a, b) => optionRowSortKey(a).localeCompare(optionRowSortKey(b), undefined, { sensitivity: 'base' }) * dir)
@@ -197,6 +226,11 @@ function saveSymbolOrderToStorage(order: Record<string, string[]>): void {
   } catch {
     /* ignore */
   }
+}
+
+/** Watchlist STK `category` → show in Watching Stocks pane (not Market Streams). */
+function isWatchlistStockCategoryWatching(category: string | null | undefined): boolean {
+  return String(category ?? '').trim().toLowerCase() === 'watching'
 }
 
 /** Quote age → Symbol cell freshness: under 3s normal, 3–10s gray, over 10s darker (replaces Since column). */
@@ -398,6 +432,8 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
   const [quotesByContractKey, setQuotesByContractKey] = useState<Record<string, RealtimeQuote>>({})
   const [benchmarks, setBenchmarks] = useState<Record<string, DailyBenchmark>>({})
   const [watchlistSymbolSet, setWatchlistSymbolSet] = useState<Set<string>>(new Set())
+  /** STK (and non-OPT) watchlist rows — used to read Watchlist category (e.g. Watching). */
+  const [watchlistStkItems, setWatchlistStkItems] = useState<WatchlistItem[]>([])
   const [watchlistOptionItems, setWatchlistOptionItems] = useState<WatchlistItem[]>([])
   const [freshnessTick, setFreshnessTick] = useState(0)
   const [positionCategories, setPositionCategories] = useState<PositionCategory[]>([])
@@ -408,7 +444,6 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
   const [categoryOrderSaving, setCategoryOrderSaving] = useState(false)
   const [streamSyncFeedback, setStreamSyncFeedback] = useState<string | null>(null)
   const [msSortMode, setMsSortMode] = useState<MarketStreamsSortMode>(1)
-  const [opSortMode, setOpSortMode] = useState<OptionPositionsSortMode>(1)
   /** Open orders: from status (DB) + dedicated poll for live updates. */
   const [openOrders, setOpenOrders] = useState<OpenOrder[]>([])
   const [openOrdersUpdatedAt, setOpenOrdersUpdatedAt] = useState<number | null>(null)
@@ -423,16 +458,22 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
         if (cancelled) return
         const set = new Set<string>()
         const items = res.items ?? []
+        const stkItems: WatchlistItem[] = []
         for (const w of items) {
           const sym = (w.symbol ?? '').trim()
           const st = (w.sec_type ?? '').toString().toUpperCase()
-          if (sym && (st === 'STK' || !st)) set.add(sym.toUpperCase())
+          if (sym && (st === 'STK' || !st)) {
+            set.add(sym.toUpperCase())
+            if (st !== 'OPT') stkItems.push(w)
+          }
         }
         setWatchlistSymbolSet(set)
+        setWatchlistStkItems(stkItems)
         setWatchlistOptionItems(items.filter((w) => (w.sec_type ?? '').toString().toUpperCase() === 'OPT'))
       })
       .catch(() => {
         if (!cancelled) setWatchlistSymbolSet(new Set())
+        if (!cancelled) setWatchlistStkItems([])
         if (!cancelled) setWatchlistOptionItems([])
       })
     return () => {
@@ -800,34 +841,96 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
     }
   })
 
-  const [streamCategoryFilter, setStreamCategoryFilter] = useState<'all' | 'host' | 'secondary' | 'wishlist'>('all')
-  const [positionCategoryFilter, setPositionCategoryFilter] = useState<string>('all')
+  const watchlistStkBySymbol = useMemo(() => {
+    const m = new Map<string, WatchlistItem>()
+    for (const w of watchlistStkItems) {
+      const sym = (w.symbol ?? '').trim().toUpperCase()
+      if (sym) m.set(sym, w)
+    }
+    return m
+  }, [watchlistStkItems])
+
+  /** STK rows for Market Streams vs Watching Stocks (Watchlist category Watching uses IB quote row but not position category). */
+  const { marketStreamsRows, watchingTickerRows } = useMemo(() => {
+    const watching: MarketStreamsRow[] = []
+    const rest: MarketStreamsRow[] = []
+    for (const r of watchlistRows) {
+      const sym = (r.symbol || '').trim().toUpperCase()
+      const wl = watchlistStkBySymbol.get(sym)
+      if (wl && isWatchlistStockCategoryWatching(wl.category)) {
+        watching.push({ ...r, category: 'Watching' })
+      } else {
+        rest.push(r)
+      }
+    }
+    return { watchingTickerRows: watching, marketStreamsRows: rest }
+  }, [watchlistRows, watchlistStkBySymbol])
+
+  const watchingTickerRowsSorted = useMemo(
+    () => [...watchingTickerRows].sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, 1)),
+    [watchingTickerRows],
+  )
+
+  /** Empty set = no filter (show all). OR when Host + Secondary both selected. */
+  const [streamAccountFilters, setStreamAccountFilters] = useState<Set<'host' | 'secondary'>>(() => new Set())
+  const toggleStreamAccountFilter = useCallback((key: 'host' | 'secondary') => {
+    setStreamAccountFilters((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+
+  /** Empty set = all categories. */
+  const [positionCategoryFilters, setPositionCategoryFilters] = useState<Set<string>>(() => new Set())
+  const togglePositionCategoryFilter = useCallback((cat: string) => {
+    setPositionCategoryFilters((prev) => {
+      const next = new Set(prev)
+      if (next.has(cat)) next.delete(cat)
+      else next.add(cat)
+      return next
+    })
+  }, [])
+
   const filteredByAccount = useMemo(() => {
-    if (!hasStreamAccounts) return watchlistRows
-    if (streamCategoryFilter === 'all') return watchlistRows
-    if (streamCategoryFilter === 'wishlist') return watchlistRows.filter((row) => row.isInWatchlist === true)
-    if (streamCategoryFilter === 'host')
-      return watchlistRows.filter((row) => row.streamCategory === 'host' || row.streamCategory === 'both')
-    if (streamCategoryFilter === 'secondary')
-      return watchlistRows.filter((row) => row.streamCategory === 'secondary' || row.streamCategory === 'both')
-    return watchlistRows.filter((row) => row.streamCategory === streamCategoryFilter)
-  }, [watchlistRows, hasStreamAccounts, streamCategoryFilter])
+    if (!hasStreamAccounts) return marketStreamsRows
+    if (streamAccountFilters.size === 0) return marketStreamsRows
+    return marketStreamsRows.filter((row) => {
+      if (streamAccountFilters.has('host') && (row.streamCategory === 'host' || row.streamCategory === 'both')) return true
+      if (streamAccountFilters.has('secondary') && (row.streamCategory === 'secondary' || row.streamCategory === 'both')) return true
+      return false
+    })
+  }, [marketStreamsRows, hasStreamAccounts, streamAccountFilters])
   const filteredRows = useMemo(() => {
-    if (positionCategoryFilter === 'all') return filteredByAccount
-    return filteredByAccount.filter((row) => row.category === positionCategoryFilter)
-  }, [filteredByAccount, positionCategoryFilter])
+    if (positionCategoryFilters.size === 0) return filteredByAccount
+    return filteredByAccount.filter((row) => positionCategoryFilters.has(row.category))
+  }, [filteredByAccount, positionCategoryFilters])
 
   const marketStreamsDailyTotals = useMemo(
     () => aggregateMarketStreamsDailyTotals(filteredRows, benchmarks),
     [filteredRows, benchmarks],
   )
 
+  /** Pre-computed summary for the top bar (SINCE $ / % and DAILY $ / %). */
+  const streamsSummary = useMemo(() => {
+    const totalCostPnl = filteredRows.reduce((a, r) => a + (r.pnlCost != null && Number.isFinite(r.pnlCost) ? r.pnlCost : 0), 0)
+    const totalCost = filteredRows.reduce((a, r) => {
+      const q = r.qty != null && Number.isFinite(r.qty) ? r.qty : 0
+      const c = r.avgCost != null && Number.isFinite(r.avgCost) ? r.avgCost : 0
+      return a + q * c
+    }, 0)
+    const sincePct = totalCost > 0 && Number.isFinite(totalCostPnl) ? (totalCostPnl / totalCost) * 100 : null
+    const { totalDailyDollar, totalDailyPct } = marketStreamsDailyTotals
+    return { totalCostPnl, sincePct, totalDailyDollar, totalDailyPct }
+  }, [filteredRows, marketStreamsDailyTotals])
+
   /** Category names that appear in data. */
   const categoryNamesFromData = useMemo(() => {
     const set = new Set<string>()
-    watchlistRows.forEach((row) => set.add(row.category))
+    marketStreamsRows.forEach((row) => set.add(row.category))
     return Array.from(set)
-  }, [watchlistRows])
+  }, [marketStreamsRows])
 
   /** Default category order: Uncategorized first, then API categories by sort_order, then data-only names alphabetical. */
   const defaultCategoryOrder = useMemo(() => {
@@ -974,147 +1077,113 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
     putMarketStreamsSymbolOrder(cat, next).catch(() => { /* DB failed; localStorage already updated */ })
   }, [rowsByCategory, symbolOrderByCategory])
 
-  /** Modes 2–5: flat / grouped rows; mode 1 uses category + drag order (null). */
-  const marketStreamsGroupedOverride = useMemo((): LiveSortGroupMs[] | null => {
+  /** Mode 1 = null (category + drag for STK, OPT appended). Modes 2–9 = unified sorted/grouped STK+OPT. */
+  const unifiedGroupedRows = useMemo((): LiveSortGroupMs[] | null => {
     if (msSortMode === 1) return null
-    const rows = [...filteredRows]
-    const push = (label: string, show: boolean, r: MarketStreamsRow[]): LiveSortGroupMs => ({
-      label,
-      showGroupHeader: show,
-      rows: r,
-      totalPnl: sumFiniteMsPnl(r),
-    })
-    if (msSortMode === 2) {
-      rows.sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, 1))
-      return [push('', false, rows)]
-    }
-    if (msSortMode === 3) {
-      rows.sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, -1))
-      return [push('', false, rows)]
-    }
-    if (msSortMode === 4) {
-      const longs = rows.filter((r) => msStockSide(r.qty) === 'long').sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, 1))
-      const shorts = rows.filter((r) => msStockSide(r.qty) === 'short').sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, 1))
-      const flats = rows.filter((r) => msStockSide(r.qty) === 'flat').sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, 1))
-      const out: LiveSortGroupMs[] = []
-      if (longs.length) out.push(push('Total Long Stocks', true, longs))
-      if (shorts.length) out.push(push('Total Short Stocks', true, shorts))
-      if (flats.length) out.push(push('No position qty', true, flats))
-      return out.length ? out : [push('', false, rows)]
-    }
-    if (msSortMode === 5) {
-      const longs = rows.filter((r) => msStockSide(r.qty) === 'long').sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, -1))
-      const shorts = rows.filter((r) => msStockSide(r.qty) === 'short').sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, -1))
-      const flats = rows.filter((r) => msStockSide(r.qty) === 'flat').sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, -1))
-      const out: LiveSortGroupMs[] = []
-      if (shorts.length) out.push(push('Total Short Stocks', true, shorts))
-      if (longs.length) out.push(push('Total Long Stocks', true, longs))
-      if (flats.length) out.push(push('No position qty', true, flats))
-      return out.length ? out : [push('', false, rows)]
-    }
-    return null
-  }, [filteredRows, msSortMode])
 
-  const optionPositionsDisplayGroups = useMemo((): LiveSortGroupOp[] => {
-    const rows = optPositionRows
-    if (rows.length === 0) return []
+    const stkRows = [...filteredRows]
+    const optRows = [...optPositionRows]
+
     const basisFor = (row: OptPositionRow) =>
       optionLiveBasisByRow.get(`${row.account_id.toLowerCase()}\t${row.contract_key}`)
-    const totalPnlFor = (rs: OptPositionRow[]) =>
-      rs.reduce((acc, row) => {
+    const sumOptPnl = (rows: OptPositionRow[]) =>
+      rows.reduce((acc, row) => {
         const { livePnl } = computeOptMidAndLivePnl(row, quotesByContractKey[row.contract_key], basisFor(row))
         return acc + (livePnl != null && Number.isFinite(livePnl) ? livePnl : 0)
       }, 0)
-    const grp = (label: string, show: boolean, r: OptPositionRow[]): LiveSortGroupOp => ({
+
+    const grp = (label: string, show: boolean, stk: MarketStreamsRow[], opt: OptPositionRow[]): LiveSortGroupMs => ({
       label,
       showGroupHeader: show,
-      rows: r,
-      totalPnl: totalPnlFor(r),
+      stkRows: stk,
+      optRows: opt,
+      totalPnl: sumFiniteMsPnl(stk) + sumOptPnl(opt),
     })
-    const rowKey = (r: OptPositionRow) => `${r.account_id.toLowerCase()}\t${r.contract_key}`
-    switch (opSortMode) {
-      case 1:
-      case 2:
-        return [grp('', false, sortOptRowsAlpha(rows, 1))]
-      case 3:
-        return [grp('', false, sortOptRowsAlpha(rows, -1))]
-      case 4: {
-        const calls = sortOptRowsAlpha(rows.filter((r) => optionRightIsCall(r.right)), 1)
-        const puts = sortOptRowsAlpha(rows.filter((r) => optionRightIsPut(r.right)), 1)
-        const other = sortOptRowsAlpha(
-          rows.filter((r) => !optionRightIsCall(r.right) && !optionRightIsPut(r.right)),
-          1,
-        )
-        const out: LiveSortGroupOp[] = []
-        if (calls.length) out.push(grp('Calls', true, calls))
-        if (puts.length) out.push(grp('Puts', true, puts))
-        if (other.length) out.push(grp('Other', true, other))
-        return out.length ? out : [grp('', false, rows)]
-      }
-      case 5: {
-        const puts = sortOptRowsAlpha(rows.filter((r) => optionRightIsPut(r.right)), -1)
-        const calls = sortOptRowsAlpha(rows.filter((r) => optionRightIsCall(r.right)), -1)
-        const other = sortOptRowsAlpha(
-          rows.filter((r) => !optionRightIsCall(r.right) && !optionRightIsPut(r.right)),
-          -1,
-        )
-        const out: LiveSortGroupOp[] = []
-        if (puts.length) out.push(grp('Puts', true, puts))
-        if (calls.length) out.push(grp('Calls', true, calls))
-        if (other.length) out.push(grp('Other', true, other))
-        return out.length ? out : [grp('', false, rows)]
-      }
-      case 6: {
-        const longCalls = rows.filter((r) => r.qty > 0 && optionRightIsCall(r.right))
-        const shortPuts = rows.filter((r) => r.qty < 0 && optionRightIsPut(r.right))
-        const used = new Set([...longCalls, ...shortPuts].map(rowKey))
-        const other = rows.filter((r) => !used.has(rowKey(r)))
-        const out: LiveSortGroupOp[] = []
-        if (longCalls.length) out.push(grp('Long Calls', true, sortOptRowsAlpha(longCalls, 1)))
-        if (shortPuts.length) out.push(grp('Short Puts', true, sortOptRowsAlpha(shortPuts, 1)))
-        if (other.length) out.push(grp('Other', true, sortOptRowsAlpha(other, 1)))
-        return out.length ? out : [grp('', false, rows)]
-      }
-      case 7: {
-        const longCalls = rows.filter((r) => r.qty > 0 && optionRightIsCall(r.right))
-        const shortPuts = rows.filter((r) => r.qty < 0 && optionRightIsPut(r.right))
-        const used = new Set([...longCalls, ...shortPuts].map(rowKey))
-        const other = rows.filter((r) => !used.has(rowKey(r)))
-        const out: LiveSortGroupOp[] = []
-        if (shortPuts.length) out.push(grp('Short Puts', true, sortOptRowsAlpha(shortPuts, -1)))
-        if (longCalls.length) out.push(grp('Long Calls', true, sortOptRowsAlpha(longCalls, -1)))
-        if (other.length) out.push(grp('Other', true, sortOptRowsAlpha(other, -1)))
-        return out.length ? out : [grp('', false, rows)]
-      }
-      case 8:
-      case 9: {
-        const expMap = new Map<string, OptPositionRow[]>()
-        for (const r of rows) {
-          const k = String(r.expiry ?? '').trim() || 'Other'
-          if (!expMap.has(k)) expMap.set(k, [])
-          expMap.get(k)!.push(r)
-        }
-        const keys = Array.from(expMap.keys()).sort((a, b) => {
-          const ka = expiryDigitsToSortKey(a)
-          const kb = expiryDigitsToSortKey(b)
-          if (ka !== kb) return opSortMode === 8 ? ka - kb : kb - ka
-          return a.localeCompare(b)
-        })
-        const dir: 1 | -1 = opSortMode === 8 ? 1 : -1
-        return keys.map((k) => grp(formatExpiryIbGroupLabel(k), true, sortOptRowsAlpha(expMap.get(k) ?? [], dir)))
-      }
-      default:
-        return [grp('', false, sortOptRowsAlpha(rows, 1))]
+
+    const sortStk = (rows: MarketStreamsRow[], dir: 1 | -1) =>
+      [...rows].sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, dir))
+    const sortOpt = (rows: OptPositionRow[], dir: 1 | -1) => sortOptRowsAlpha(rows, dir)
+
+    if (msSortMode === 2) {
+      return [grp('', false, sortStk(stkRows, 1), sortOpt(optRows, 1))]
     }
-  }, [optPositionRows, opSortMode, quotesByContractKey, optionLiveBasisByRow])
+    if (msSortMode === 3) {
+      return [grp('', false, sortStk(stkRows, -1), sortOpt(optRows, -1))]
+    }
+    if (msSortMode === 4) {
+      // T+ ↑: Stocks first, Options second
+      const out: LiveSortGroupMs[] = []
+      if (stkRows.length) out.push(grp('Total Stocks', true, sortStk(stkRows, 1), []))
+      if (optRows.length) out.push(grp('Total Options', true, [], sortOpt(optRows, 1)))
+      return out.length ? out : [grp('', false, stkRows, optRows)]
+    }
+    if (msSortMode === 5) {
+      // T+ ↓: Options first, Stocks second
+      const out: LiveSortGroupMs[] = []
+      if (optRows.length) out.push(grp('Total Options', true, [], sortOpt(optRows, -1)))
+      if (stkRows.length) out.push(grp('Total Stocks', true, sortStk(stkRows, -1), []))
+      return out.length ? out : [grp('', false, stkRows, optRows)]
+    }
+    if (msSortMode === 6) {
+      // T+S+ ↑: Long Stocks → Short Options → Short Stocks → Long Options (gamma scalp view)
+      const longStk = stkRows.filter((r) => (r.qty ?? 0) > 0)
+      const shortStk = stkRows.filter((r) => (r.qty ?? 0) < 0)
+      const flatStk = stkRows.filter((r) => !(r.qty ?? 0))
+      const shortOpt = optRows.filter((r) => r.qty < 0)
+      const longOpt = optRows.filter((r) => r.qty > 0)
+      const out: LiveSortGroupMs[] = []
+      if (longStk.length) out.push(grp('Total Long Stocks', true, sortStk(longStk, 1), []))
+      if (shortOpt.length) out.push(grp('Total Short Options', true, [], sortOpt(shortOpt, 1)))
+      if (shortStk.length) out.push(grp('Total Short Stocks', true, sortStk(shortStk, 1), []))
+      if (longOpt.length) out.push(grp('Total Long Options', true, [], sortOpt(longOpt, 1)))
+      if (flatStk.length) out.push(grp('No position', true, sortStk(flatStk, 1), []))
+      return out.length ? out : [grp('', false, stkRows, optRows)]
+    }
+    if (msSortMode === 7) {
+      // T+S+ ↓: Short Options → Long Stocks → Long Options → Short Stocks
+      const longStk = stkRows.filter((r) => (r.qty ?? 0) > 0)
+      const shortStk = stkRows.filter((r) => (r.qty ?? 0) < 0)
+      const shortOpt = optRows.filter((r) => r.qty < 0)
+      const longOpt = optRows.filter((r) => r.qty > 0)
+      const out: LiveSortGroupMs[] = []
+      if (shortOpt.length) out.push(grp('Total Short Options', true, [], sortOpt(shortOpt, -1)))
+      if (longStk.length) out.push(grp('Total Long Stocks', true, sortStk(longStk, -1), []))
+      if (longOpt.length) out.push(grp('Total Long Options', true, [], sortOpt(longOpt, -1)))
+      if (shortStk.length) out.push(grp('Total Short Stocks', true, sortStk(shortStk, -1), []))
+      return out.length ? out : [grp('', false, stkRows, optRows)]
+    }
+    if (msSortMode === 8 || msSortMode === 9) {
+      // E+ ↑/↓: Stocks group, then OPT groups by expiry
+      const dir: 1 | -1 = msSortMode === 8 ? 1 : -1
+      const out: LiveSortGroupMs[] = []
+      if (stkRows.length) out.push(grp('Stocks', true, sortStk(stkRows, dir), []))
+      const expMap = new Map<string, OptPositionRow[]>()
+      for (const r of optRows) {
+        const k = String(r.expiry ?? '').trim() || 'Other'
+        if (!expMap.has(k)) expMap.set(k, [])
+        expMap.get(k)!.push(r)
+      }
+      const keys = Array.from(expMap.keys()).sort((a, b) => {
+        const ka = expiryDigitsToSortKey(a)
+        const kb = expiryDigitsToSortKey(b)
+        if (ka !== kb) return dir === 1 ? ka - kb : kb - ka
+        return a.localeCompare(b)
+      })
+      for (const k of keys) {
+        out.push(grp(formatExpiryIbGroupLabel(k), true, [], sortOpt(expMap.get(k) ?? [], dir)))
+      }
+      return out.length ? out : [grp('', false, stkRows, optRows)]
+    }
+    return null
+  }, [filteredRows, optPositionRows, msSortMode, quotesByContractKey, optionLiveBasisByRow])
 
   const msColSpan = hasStreamAccounts ? 12 : 6
   const msDragEnabled = msSortMode === 1
   const msHeaderMeta = marketStreamsSortHeaderMeta(msSortMode)
-  const opHeaderMeta = optionPositionsSortHeaderMeta(opSortMode)
+  const msHeaderAccentClass = marketStreamsSortHeaderAccentClass(msSortMode)
 
   const renderMarketStreamRow = useCallback(
-    (row: MarketStreamsRow, categoryForDrag: string, dragEnabled: boolean) => {
+    (row: MarketStreamsRow, categoryForDrag: string, dragEnabled: boolean, watchingStocksSlim = false) => {
       const {
         symbol,
         quote: q,
@@ -1179,7 +1248,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
             ) : null}
             <strong>{symbol}</strong>
           </td>
-          {hasStreamAccounts && (
+          {!watchingStocksSlim && hasStreamAccounts && (
             <>
               <td className="realtime-quote-num">{hostQty != null && Number.isFinite(hostQty) ? hostQty : '—'}</td>
               <td className="realtime-quote-num">{hostAvgCost != null && Number.isFinite(hostAvgCost) ? fmtUsd(hostAvgCost) : '—'}</td>
@@ -1205,8 +1274,12 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
               </td>
             </>
           )}
-          <td className="realtime-quote-num">{qty != null && Number.isFinite(qty) ? qty : '—'}</td>
-          <td className="realtime-quote-num">{avgCost != null && Number.isFinite(avgCost) ? fmtUsd(avgCost) : '—'}</td>
+          {!watchingStocksSlim && (
+            <>
+              <td className="realtime-quote-num">{qty != null && Number.isFinite(qty) ? qty : '—'}</td>
+              <td className="realtime-quote-num">{avgCost != null && Number.isFinite(avgCost) ? fmtUsd(avgCost) : '—'}</td>
+            </>
+          )}
           <td className="realtime-quote-num realtime-quote-last-bid-ask">
             {q ? (() => {
               const displayLast = quoteDisplayLast(q)
@@ -1294,351 +1367,185 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
     [hasStreamAccounts, benchmarks, applySymbolReorder],
   )
 
+  const renderOptStreamRow = useCallback(
+    (row: OptPositionRow) => {
+      const basisKey = `${row.account_id.toLowerCase()}\t${row.contract_key}`
+      const q = quotesByContractKey[row.contract_key]
+      const basis = optionLiveBasisByRow.get(basisKey)
+      const { mid, livePnl } = computeOptMidAndLivePnl(row, q, basis)
+      const avgForPnl = effectiveOptAvgCostPerShareForMtm(row, resolveOptAvgCostPerShareForMtm(row, basis))
+      const mtmTooltip =
+        mid != null && avgForPnl != null && Number.isFinite(row.qty) && row.qty !== 0
+          ? [
+              `MTM: (mid ${mid.toFixed(4)} − avg $/sh ${avgForPnl.toFixed(4)}) × ${row.qty} contracts × 100`,
+              `${describeOptionLegMtm(row)} — Short legs: if IB avgCost is negative (credit), we convert to +$/sh for MTM. Call/Put use the same formula.`,
+            ].join('\n')
+          : `Live MTM needs quote mid and avg $/share (${describeOptionLegMtm(row)}).`
+      const contractLabel = row.symbol
+        ? `${row.symbol} ${row.right === 'C' ? 'CALL' : row.right === 'P' ? 'PUT' : row.right} ${row.strike}`
+        : row.contract_key
+      const accIdNorm = (row.account_id ?? '').trim().toLowerCase()
+      const isHost = streamHostId != null && accIdNorm === streamHostId.trim().toLowerCase()
+      const isSecondary = streamSecondaryId != null && accIdNorm === streamSecondaryId.trim().toLowerCase()
+      const qtyCell = row.qty > 0 ? `Long ${row.qty}` : row.qty < 0 ? `Short ${Math.abs(row.qty)}` : '—'
+      const costCell = avgForPnl != null && Number.isFinite(avgForPnl) ? fmtUsd(avgForPnl) : '—'
+      const pnlCell = livePnl != null
+        ? (
+            <span className={`replay-pnl-unrealized ${livePnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`} title={mtmTooltip}>
+              {fmtUsdRound0(livePnl)}
+            </span>
+          )
+        : <span className="replay-muted" title={mtmTooltip}>—</span>
+      return (
+        <tr key={basisKey} className="live-opt-inline-row">
+          <td title={row.contract_key} className="realtime-quote-symbol live-opt-inline-label">{contractLabel}</td>
+          {hasStreamAccounts && (
+            <>
+              {/* Host columns */}
+              <td className="realtime-quote-num">{isHost ? qtyCell : <span className="replay-muted">—</span>}</td>
+              <td className="realtime-quote-num">{isHost ? costCell : <span className="replay-muted">—</span>}</td>
+              <td className="realtime-quote-num">{isHost ? pnlCell : <span className="replay-muted">—</span>}</td>
+              {/* Secondary columns */}
+              <td className="realtime-quote-num">{isSecondary ? qtyCell : <span className="replay-muted">—</span>}</td>
+              <td className="realtime-quote-num">{isSecondary ? costCell : <span className="replay-muted">—</span>}</td>
+              <td className="realtime-quote-num">{isSecondary ? pnlCell : <span className="replay-muted">—</span>}</td>
+            </>
+          )}
+          {/* Combined columns */}
+          <td className="realtime-quote-num">{qtyCell}</td>
+          <td className="realtime-quote-num">{costCell}</td>
+          <td className="positions-opt-live-quote">
+            {q == null ? (
+              <span className="replay-muted">—</span>
+            ) : (
+              <>
+                {q.bid != null ? <span className="positions-opt-quote-bid">{q.bid.toFixed(2)}</span> : <span className="replay-muted">—</span>}
+                {' · '}
+                <strong>{mid != null ? mid.toFixed(2) : '—'}</strong>
+                {' · '}
+                {q.ask != null ? <span className="positions-opt-quote-ask">{q.ask.toFixed(2)}</span> : <span className="replay-muted">—</span>}
+              </>
+            )}
+          </td>
+          <td className="realtime-quote-num replay-muted">—</td>
+          <td className="realtime-quote-num realtime-quote-pnl-stacked">
+            <span className="realtime-quote-pnl-stacked-line replay-muted" style={{ fontSize: '0.7em' }}>Live PNL</span>
+            <span className="realtime-quote-pnl-stacked-line">{pnlCell}</span>
+          </td>
+        </tr>
+      )
+    },
+    [hasStreamAccounts, streamHostId, streamSecondaryId, quotesByContractKey, optionLiveBasisByRow],
+  )
+
   return (
     <div className="app-page-stack">
-      <div className="card card-operations live-open-watchlist-split">
-        <div className="live-open-watchlist-split-grid" role="group" aria-label="Open orders and Watchlist options">
-          <div className="live-open-orders-pane">
-            <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
-              <h2 className="daemon-card-title page-title-with-tooltip">
-                <span
-                  className={`title-inline-lamp lamp-icon ${openOrdersSectionOk ? 'green' : 'red'}`}
-                  title={`Open orders lamp: green when Account Sync Daemon is healthy (GET /status account_sync_daemon) and heartbeat is fresh. ${accountSyncLamp.title}${openOrdersUpdatedAt != null ? ` · Last UI read (GET /open-orders): ${fmtSince(openOrdersUpdatedAt)} ago.` : ''}`}
-                  aria-hidden
-                >
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-                  </svg>
+      {filteredRows.length > 0 && (
+        <div className="live-streams-summary-bar">
+          <span className="live-streams-summary-label">STK Streams</span>
+          <span className="live-streams-summary-seg">
+            <span className="live-streams-summary-key">SINCE $</span>
+            <span className={`live-streams-summary-val ${streamsSummary.totalCostPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+              {fmtUsdRound0(streamsSummary.totalCostPnl)}
+            </span>
+          </span>
+          {streamsSummary.sincePct != null && Number.isFinite(streamsSummary.sincePct) && (
+            <span className="live-streams-summary-seg">
+              <span className="live-streams-summary-key">SINCE %</span>
+              <span className={`live-streams-summary-val ${streamsSummary.sincePct >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                {streamsSummary.sincePct >= 0 ? '+' : ''}{streamsSummary.sincePct.toFixed(2)}%
+              </span>
+            </span>
+          )}
+          {(streamsSummary.totalDailyPct != null || streamsSummary.totalDailyDollar !== 0) && (
+            <>
+              <span className="live-streams-summary-divider" aria-hidden>|</span>
+              <span className="live-streams-summary-seg">
+                <span className="live-streams-summary-key">DAILY $</span>
+                <span className={`live-streams-summary-val ${streamsSummary.totalDailyDollar >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                  {fmtUsdRound0(streamsSummary.totalDailyDollar)}
                 </span>
-                Open Orders
-                <InfoTooltip text="Unfilled orders from PostgreSQL (daemon_open_orders). The Account Sync Daemon writes this table from the IB account stream. This page polls GET /open-orders every few seconds for UI updates. Account ID is the IB account that placed each order." />
-              </h2>
-              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                {openOrdersUpdatedAt != null && (
-                  <span
-                    className="open-orders-freshness-badge"
-                    title={`DB polled at ${fmtTs(openOrdersUpdatedAt)}`}
-                  >
-                    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ opacity: 0.7 }}>
-                      <circle cx="12" cy="12" r="10" />
-                      <path d="M12 6v6l4 2" />
-                    </svg>
-                    <span className="open-orders-freshness-age">{fmtSince(openOrdersUpdatedAt)} ago</span>
+              </span>
+              {streamsSummary.totalDailyPct != null && Number.isFinite(streamsSummary.totalDailyPct) && (
+                <span className="live-streams-summary-seg">
+                  <span className="live-streams-summary-key">DAILY %</span>
+                  <span className={`live-streams-summary-val ${streamsSummary.totalDailyPct >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                    {streamsSummary.totalDailyPct >= 0 ? '+' : ''}{streamsSummary.totalDailyPct.toFixed(2)}%
                   </span>
-                )}
-                {onNavigateToSubscribe && (
-                  <button
-                    type="button"
-                    className="section-header-icon-btn"
-                    onClick={onNavigateToSubscribe}
-                    title="Open Subscribe page (IB Event Subscribe — account agent stream)"
-                    aria-label="Open Subscribe page"
-                  >
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <path d="M22 12h-4l-3 9L9 3 6 12H2" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-              <span className="section-hint" style={{ marginLeft: 8 }}>Source: DB table daemon_open_orders</span>
-            </div>
-            <div className="open-orders-table-wrap">
-              {openOrders.length === 0 ? (
-                <p className="section-hint">No open orders</p>
-              ) : (
-                <>
-                  {(() => {
-                    const optionOrders = openOrders.filter((o) => ((o.sec_type ?? '').toString().toUpperCase()) === 'OPT')
-                    const stockOrders = openOrders.filter((o) => ((o.sec_type ?? '').toString().toUpperCase()) === 'STK')
-                    return (
-                      <>
-                        {optionOrders.length > 0 && (
-                          <div className="open-orders-section" style={{ marginBottom: 'var(--space-3)' }}>
-                            <h3 className="open-orders-subtitle" style={{ fontSize: 'var(--text-caption)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Option (OPT)</h3>
-                            <table className="open-orders-table table-operations" role="grid" aria-label="Open orders Option">
-                              <thead>
-                                <tr>
-                                  <th scope="col">Account ID</th>
-                                  <th scope="col">Symbol</th>
-                                  <th scope="col">Expiry</th>
-                                  <th scope="col">Strike</th>
-                                  <th scope="col">Opt side</th>
-                                  <th scope="col">Side</th>
-                                  <th scope="col">Qty</th>
-                                  <th scope="col">Limit</th>
-                                  <th scope="col">Status</th>
-                                  <th scope="col">Filled / Rem</th>
-                                  <th scope="col">Submit</th>
-                                  <th scope="col">Since</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {optionOrders.map((o, i) => {
-                                  const optParts = parseOptionContractKey(o.contract_key)
-                                  const submitTs = o.updated_ts != null && Number.isFinite(Number(o.updated_ts)) ? Number(o.updated_ts) : null
-                                  return (
-                                    <tr key={o.order_id ?? o.perm_id ?? i}>
-                                      <td>{o.account_id ?? '—'}</td>
-                                      <td>{o.symbol ?? '—'}</td>
-                                      <td>{optParts.expiry}</td>
-                                      <td>{optParts.strike === '—' ? '—' : fmtUsd(Number(optParts.strike))}</td>
-                                      <td>{optParts.rightLabel}</td>
-                                      <td>{o.action ?? '—'}</td>
-                                      <td>{o.total_quantity != null ? Math.round(Number(o.total_quantity)) : '—'}</td>
-                                      <td>{o.limit_price != null ? fmtUsd(Number(o.limit_price)) : '—'}</td>
-                                      <td>{o.status ?? '—'}</td>
-                                      <td>
-                                        {o.filled != null && o.remaining != null ? (
-                                          <>{Math.round(Number(o.filled))} / {Math.round(Number(o.remaining))}</>
-                                        ) : (
-                                          '—'
-                                        )}
-                                      </td>
-                                      <td>{submitTs != null ? fmtTs(submitTs) : '—'}</td>
-                                      <td>{submitTs != null ? `${fmtSince(submitTs)} ago` : '—'}</td>
-                                    </tr>
-                                  )
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                        {stockOrders.length > 0 && (
-                          <div className="open-orders-section">
-                            <h3 className="open-orders-subtitle" style={{ fontSize: 'var(--text-caption)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Stock (STK)</h3>
-                            <table className="open-orders-table table-operations" role="grid" aria-label="Open orders Stock">
-                              <thead>
-                                <tr>
-                                  <th scope="col">Account ID</th>
-                                  <th scope="col">Symbol</th>
-                                  <th scope="col">Side</th>
-                                  <th scope="col">Qty</th>
-                                  <th scope="col">Limit</th>
-                                  <th scope="col">Status</th>
-                                  <th scope="col">Filled / Rem</th>
-                                  <th scope="col">Submit</th>
-                                  <th scope="col">Since</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {stockOrders.map((o, i) => {
-                                  const submitTs = o.updated_ts != null && Number.isFinite(Number(o.updated_ts)) ? Number(o.updated_ts) : null
-                                  return (
-                                    <tr key={o.order_id ?? o.perm_id ?? i}>
-                                      <td>{o.account_id ?? '—'}</td>
-                                      <td>{o.symbol ?? '—'}</td>
-                                      <td>{o.action ?? '—'}</td>
-                                      <td>{o.total_quantity != null ? fmtQtyWithMutedDecimal(o.total_quantity) : '—'}</td>
-                                      <td>{o.limit_price != null ? fmtUsd(Number(o.limit_price)) : '—'}</td>
-                                      <td>{o.status ?? '—'}</td>
-                                      <td>
-                                        {o.filled != null && o.remaining != null ? (
-                                          <>{fmtQtyWithMutedDecimal(o.filled)} / {fmtQtyWithMutedDecimal(o.remaining)}</>
-                                        ) : (
-                                          '—'
-                                        )}
-                                      </td>
-                                      <td>{submitTs != null ? fmtTs(submitTs) : '—'}</td>
-                                      <td>{submitTs != null ? `${fmtSince(submitTs)} ago` : '—'}</td>
-                                    </tr>
-                                  )
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                        {optionOrders.length === 0 && stockOrders.length === 0 && (
-                          <p className="section-hint">No OPT or STK open orders (other sec types filtered)</p>
-                        )}
-                      </>
-                    )
-                  })()}
-                </>
+                </span>
               )}
-            </div>
-          </div>
-
-          <div className="live-watchlist-options-pane">
-            <h2 className="daemon-card-title page-title-with-tooltip" style={{ marginBottom: '0.5rem' }}>
-              Watchlist Options
-              <InfoTooltip text="Option contracts from Watchlist; quotes from daemon (contract_quote_live). Updates every few seconds." />
-            </h2>
-            <div className="realtime-quotes-table-wrap">
-              {watchlistOptionItems.length === 0 ? (
-                <p className="section-hint">No option contracts on Watchlist</p>
-              ) : (
-                <table className="table-operations realtime-quotes-table" aria-label="Watchlist option quotes">
-                  <thead>
-                    <tr>
-                      <th>Symbol</th>
-                      <th title="Last price; Bid and Ask shown as spread vs Last">Last (Bid / Ask)</th>
-                      <th>Expiry</th>
-                      <th>Right</th>
-                      <th>Strike</th>
-                      <th>Category</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {watchlistOptionItems.map((item) => {
-                      const q = quotesByContractKey[item.contract_key]
-                      const categoryName = (item.category ?? '').trim() || 'Uncategorized'
-                      return (
-                        <tr key={item.contract_key}>
-                          <td title={item.contract_key} style={{ fontWeight: 'bold' }}>{watchlistOptionLabel(item)}</td>
-                          <td className="realtime-quote-num realtime-quote-last-bid-ask">{renderLastBidAskOption(q)}</td>
-                          <td>{formatExpiry(item.expiry)}</td>
-                          <td>{formatOptionRight(item.option_right)}</td>
-                          <td>{item.strike != null ? formatStrike(item.strike) : '—'}</td>
-                          <td>{categoryName}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
+            </>
+          )}
         </div>
-      </div>
-
-      {optPositionRows.length > 0 && (
-        <div className="card card-operations">
-          <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
+      )}
+      <div className="card card-operations realtime-quotes-card">
+        <div className="realtime-quotes-card-header-row">
+          <div className="daemon-header-with-lamp realtime-quotes-card-header-title">
             <h2 className="daemon-card-title page-title-with-tooltip">
               <span
                 className={`title-inline-lamp lamp-icon ${marketStreamsOk ? 'green' : 'red'}`}
-                title="Same as Market Streams: green when Market API can read Redis quotes and IB ingestor is connected (option marks use live quotes)."
+                title="Market streams: green when Market API can read Redis quotes and IB ingestor is connected (socket)"
                 aria-hidden
               >
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <path d="M22 12h-4l-3 9L9 3 6 12H2" />
                 </svg>
               </span>
-              Option Positions
-              <InfoTooltip text="Live Bid·Mid·Ask and PNL for open option positions (IB ingestor subscribes position contracts automatically). Live PNL uses FIFO cost from account_executions when available: fills with source flex_trades if any exist for the contract/account, otherwise tws_client / tws_event; otherwise IB avg cost." />
+              Market Streams
+              <InfoTooltip
+                text={
+                  marketStreamsOk
+                    ? `Live quotes: IB ingestor writes Redis (ib:ingester:tick:*); Market API SSE + polling. STK symbols: Watchlist ∪ Host & Secondary positions; Watchlist category "Watching" STK are shown in Watching Stocks (left). ${watchlistSymbols.length} stream symbol(s). Refresh reloads quotes and daily benchmarks from the API.`
+                    : 'Requires Market API Redis (quotes) and IB ingestor connected (see System status). Watching-category STK are in Watching Stocks on the Live split card.'
+                }
+              />
             </h2>
           </div>
-          <div className="realtime-quotes-table-wrap">
-            <table className="table-operations realtime-quotes-table" aria-label="Option position live quotes">
-              <thead>
-                <tr>
-                  <th scope="col">
+          <div className="realtime-stream-filters-inline" role="toolbar" aria-label="Market Streams filters">
+            {hasStreamAccounts && (
+              <div className="realtime-stream-filter">
+                <span className="section-hint">Account:</span>
+                <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by stream account (multi-select; none selected = all)">
+                  {(['host', 'secondary'] as const).map((key) => (
                     <button
+                      key={key}
                       type="button"
-                      className="live-sort-header"
-                      onClick={() => setOpSortMode((m) => ((((m as number) % 9) + 1) as OptionPositionsSortMode))}
-                      title="Cycle sort: A–Z → Z–A → Calls/Puts → Puts/Calls → Long Calls·Short Puts → Short Puts·Long Calls → by expiry ↑ / ↓"
+                      className={`replay-filter-pill ${streamAccountFilters.has(key) ? 'active' : ''}`}
+                      onClick={() => toggleStreamAccountFilter(key)}
+                      aria-pressed={streamAccountFilters.has(key)}
+                      title={streamAccountFilters.size === 0 ? 'No filter — showing all rows. Click to narrow.' : 'Toggle; Host and Secondary combine with OR.'}
                     >
-                      <span className="live-sort-header__label">
-                        Contract
-                        {opHeaderMeta.suffix ? <span className="live-sort-header__suffix">{opHeaderMeta.suffix}</span> : null}
-                      </span>
-                      {opHeaderMeta.arrow === 'up' ? <span className="live-sort-header__arrow live-sort-header__arrow--up" aria-hidden /> : null}
-                      {opHeaderMeta.arrow === 'down' ? <span className="live-sort-header__arrow live-sort-header__arrow--down" aria-hidden /> : null}
+                      {key === 'host' ? 'Host' : 'Secondary'}
                     </button>
-                  </th>
-                  <th>Qty</th>
-                  <th>Avg Cost</th>
-                  <th>Bid · Mid · Ask</th>
-                  <th>Live PNL</th>
-                  <th>Quote Age</th>
-                </tr>
-              </thead>
-              <tbody>
-                {optionPositionsDisplayGroups.map((g, gi) => (
-                  <Fragment key={`op-grp-${gi}-${g.label || 'all'}`}>
-                    {g.showGroupHeader ? (
-                      <tr className="live-sort-group-header">
-                        <td colSpan={6}>
-                          <span className="live-sort-group-label">{g.label}</span>
-                          <span className={`live-sort-group-total ${g.totalPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-                            Live PNL Σ {fmtUsd(g.totalPnl)}
-                          </span>
-                        </td>
-                      </tr>
-                    ) : null}
-                    {g.rows.map((row) => {
-                      const q = quotesByContractKey[row.contract_key]
-                      const { mid, livePnl } = computeOptMidAndLivePnl(
-                        row,
-                        q,
-                        optionLiveBasisByRow.get(`${row.account_id.toLowerCase()}\t${row.contract_key}`),
-                      )
-                      const basisKey = `${row.account_id.toLowerCase()}\t${row.contract_key}`
-                      const basis = optionLiveBasisByRow.get(basisKey)
-                      const avgForPnl = basis?.avgPerShare != null && Number.isFinite(basis.avgPerShare) ? basis.avgPerShare : row.avg_cost
-                      const ageSec = q?.ts != null ? Math.floor(Date.now() / 1000 - q.ts) : null
-                      const contractLabel = row.symbol
-                        ? `${row.symbol} ${row.right === 'C' ? 'CALL' : row.right === 'P' ? 'PUT' : row.right} ${row.strike}`
-                        : row.contract_key
-                      const avgTitle =
-                        basis?.avgPerShare != null && Number.isFinite(basis.avgPerShare)
-                          ? `Live PNL basis: account_executions (FIFO open lot, source ${basis.basisSource ?? 'ledger'}) $/share. IB avg shown muted if different.`
-                          : 'Live PNL basis: IB position avg (no execution match or ledger qty mismatch).'
-                      return (
-                        <tr key={basisKey}>
-                          <td title={row.contract_key} style={{ fontWeight: 'bold' }}>{contractLabel}</td>
-                          <td>{row.qty > 0 ? `Long ${row.qty}` : row.qty < 0 ? `Short ${Math.abs(row.qty)}` : '—'}</td>
-                          <td title={avgTitle}>
-                            {avgForPnl != null && Number.isFinite(avgForPnl) ? fmtUsd(avgForPnl) : '—'}
-                            {basis?.avgPerShare != null && row.avg_cost != null && Number.isFinite(row.avg_cost) && Math.abs(basis.avgPerShare - row.avg_cost) > 1e-6 ? (
-                              <span className="replay-muted" style={{ fontSize: '0.7em', marginLeft: '0.35em' }} title="IB avg cost">IB {fmtUsd(row.avg_cost)}</span>
-                            ) : null}
-                          </td>
-                          <td className="positions-opt-live-quote">
-                            {q == null ? (
-                              <span className="replay-muted">—</span>
-                            ) : (
-                              <>
-                                {q.bid != null ? <span className="positions-opt-quote-bid">{q.bid.toFixed(2)}</span> : <span className="replay-muted">—</span>}
-                                {' · '}
-                                <strong>{mid != null ? mid.toFixed(2) : '—'}</strong>
-                                {' · '}
-                                {q.ask != null ? <span className="positions-opt-quote-ask">{q.ask.toFixed(2)}</span> : <span className="replay-muted">—</span>}
-                              </>
-                            )}
-                          </td>
-                          <td>
-                            {livePnl != null ? (
-                              <span className={`replay-pnl-unrealized ${livePnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(livePnl)}</span>
-                            ) : <span className="replay-muted">—</span>}
-                          </td>
-                          <td className="replay-muted">
-                            {ageSec != null ? `${ageSec}s ago` : '—'}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </Fragment>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="realtime-stream-filter">
+              <span className="section-hint">Category:</span>
+              <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by position category (multi-select; none selected = all)">
+                {streamCategoryOrder.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    className={`replay-filter-pill replay-filter-pill-draggable ${positionCategoryFilters.has(cat) ? 'active' : ''}`}
+                    onClick={() => togglePositionCategoryFilter(cat)}
+                    aria-pressed={positionCategoryFilters.has(cat)}
+                    draggable
+                    onDragStart={(e) => handleCategoryDragStart(e, cat)}
+                    onDragOver={handleCategoryDragOver}
+                    onDrop={(e) => handleCategoryDrop(e, cat)}
+                    title="Click to toggle filter; drag to reorder. No pills active = all categories."
+                  >
+                    <span className="replay-filter-pill-grip" aria-hidden>⋮⋮</span>
+                    {cat}
+                  </button>
                 ))}
-              </tbody>
-            </table>
+              </div>
+              {categoryOrderSaving && <span className="section-hint" style={{ marginLeft: '0.5rem' }}>Saving order…</span>}
+            </div>
           </div>
-        </div>
-      )}
-
-      <div className="card card-operations realtime-quotes-card">
-        <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
-          <h2 className="daemon-card-title page-title-with-tooltip">
-            <span
-              className={`title-inline-lamp lamp-icon ${marketStreamsOk ? 'green' : 'red'}`}
-              title="Market streams: green when Market API can read Redis quotes and IB ingestor is connected (socket)"
-              aria-hidden
-            >
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M22 12h-4l-3 9L9 3 6 12H2" />
-              </svg>
-            </span>
-            Market Streams
-            <InfoTooltip
-              text={
-                marketStreamsOk
-                  ? `Live quotes: IB ingestor writes Redis (ib:ingester:tick:*); Market API SSE + polling. Symbols: Watchlist ∪ Host & Secondary STK positions. ${watchlistSymbols.length} symbol(s). Refresh reloads quotes and daily benchmarks from the API.`
-                  : 'Requires Market API Redis (quotes) and IB ingestor connected (see System status). Symbols: Watchlist ∪ Host & Secondary positions.'
-              }
-            />
-          </h2>
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div className="realtime-quotes-card-header-actions">
             {onNavigateToSubscribe && (
               <button
                 type="button"
@@ -1685,68 +1592,17 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
             )}
           </div>
         </div>
-        <div className="realtime-stream-filters-row">
-          {hasStreamAccounts && (
-            <div className="realtime-stream-filter">
-              <span className="section-hint">Account:</span>
-              <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by stream account">
-                {(['all', 'host', 'secondary', 'wishlist'] as const).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={`replay-filter-pill ${streamCategoryFilter === value ? 'active' : ''}`}
-                    onClick={() => setStreamCategoryFilter(value)}
-                    aria-pressed={streamCategoryFilter === value}
-                  >
-                    {value === 'all' ? 'All' : value === 'host' ? 'Host' : value === 'secondary' ? 'Secondary' : 'Wishlist'}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="realtime-stream-filter">
-            <span className="section-hint">Category:</span>
-            <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by position category">
-              <button
-                type="button"
-                className={`replay-filter-pill ${positionCategoryFilter === 'all' ? 'active' : ''}`}
-                onClick={() => setPositionCategoryFilter('all')}
-                aria-pressed={positionCategoryFilter === 'all'}
-              >
-                All
-              </button>
-              {streamCategoryOrder.map((cat) => (
-                <button
-                  key={cat}
-                  type="button"
-                  className={`replay-filter-pill replay-filter-pill-draggable ${positionCategoryFilter === cat ? 'active' : ''}`}
-                  onClick={() => setPositionCategoryFilter(cat)}
-                  aria-pressed={positionCategoryFilter === cat}
-                  draggable
-                  onDragStart={(e) => handleCategoryDragStart(e, cat)}
-                  onDragOver={handleCategoryDragOver}
-                  onDrop={(e) => handleCategoryDrop(e, cat)}
-                  title="Drag to reorder category"
-                >
-                  <span className="replay-filter-pill-grip" aria-hidden>⋮⋮</span>
-                  {cat}
-                </button>
-              ))}
-            </div>
-            {categoryOrderSaving && <span className="section-hint" style={{ marginLeft: '0.5rem' }}>Saving order…</span>}
-          </div>
-        </div>
         <div className="realtime-quotes-table-wrap">
           <table className="table-operations realtime-quotes-table">
             <colgroup>
               <col style={{ width: '5rem' }} />
-              {hasStreamAccounts && <col style={{ width: '4rem' }} />}
+              {hasStreamAccounts && <col style={{ width: '5.5rem' }} />}
               {hasStreamAccounts && <col style={{ width: '5rem' }} />}
               {hasStreamAccounts && <col style={{ width: '5.5rem' }} />}
-              {hasStreamAccounts && <col style={{ width: '4rem' }} />}
+              {hasStreamAccounts && <col style={{ width: '5.5rem' }} />}
               {hasStreamAccounts && <col style={{ width: '5rem' }} />}
               {hasStreamAccounts && <col style={{ width: '5.5rem' }} />}
-              <col style={{ width: '4rem' }} />
+              <col style={{ width: '5.5rem' }} />
               <col style={{ width: '5.5rem' }} />
               <col style={{ width: '8rem' }} />
               <col style={{ width: '6.25rem' }} />
@@ -1757,9 +1613,9 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                 <th scope="col">
                   <button
                     type="button"
-                    className="live-sort-header"
-                    onClick={() => setMsSortMode((m) => ((((m as number) % 5) + 1) as MarketStreamsSortMode))}
-                    title="Cycle sort: default (category + drag) → A–Z → Z–A → Long/Short groups → Short/Long groups"
+                    className={`live-sort-header ${msHeaderAccentClass}`}
+                    onClick={() => setMsSortMode((m) => ((((m as number) % 9) + 1) as MarketStreamsSortMode))}
+                    title="Cycle sort: default → A–Z → Z–A → Stocks/Options (T+↑) → Options/Stocks (T+↓) → Long Stocks/Short Options (T+S+↑) → Short Options/Long Stocks (T+S+↓) → by expiry ↑ (E+) → by expiry ↓ (E+). Header color indicates sort family."
                   >
                     <span className="live-sort-header__label">
                       Symbol
@@ -1805,39 +1661,52 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
               )}
             </thead>
             <tbody>
-              {filteredRows.length === 0 ? (
+              {filteredRows.length === 0 && optPositionRows.length === 0 ? (
                 <tr>
                   <td colSpan={hasStreamAccounts ? 12 : 6}>
-                    {watchlistRows.length === 0
+                    {watchlistSymbols.length === 0
                       ? 'No symbols (add symbols in Watchlist, or ensure Event Account (Host/Secondary) have positions, or daemon is running)'
                       : 'No rows match the selected filters.'}
                   </td>
                 </tr>
-              ) : marketStreamsGroupedOverride != null ? (
-                marketStreamsGroupedOverride.map((g, gi) => (
+              ) : unifiedGroupedRows != null ? (
+                unifiedGroupedRows.map((g, gi) => (
                   <Fragment key={`ms-ov-${gi}-${g.label || 'flat'}`}>
                     {g.showGroupHeader ? (
                       <tr className="live-sort-group-header">
                         <td colSpan={msColSpan}>
                           <span className="live-sort-group-label">{g.label}</span>
                           <span className={`live-sort-group-total ${g.totalPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-                            SINCE Σ {fmtUsdRound0(g.totalPnl)}
+                            PNL Σ {fmtUsdRound0(g.totalPnl)}
                           </span>
                         </td>
                       </tr>
                     ) : null}
-                    {g.rows.map((row) => renderMarketStreamRow(row, row.category, false))}
+                    {g.stkRows.map((row) => renderMarketStreamRow(row, row.category, false))}
+                    {g.optRows.map((row) => renderOptStreamRow(row))}
                   </Fragment>
                 ))
               ) : (
-                categoryOrderFiltered.map((cat) => (
-                  <Fragment key={cat}>
-                    <tr className="ib-stock-group-header">
-                      <td colSpan={msColSpan}>{cat}</td>
-                    </tr>
-                    {(sortedRowsByCategory[cat] ?? rowsByCategory[cat]).map((row) => renderMarketStreamRow(row, cat, msDragEnabled))}
-                  </Fragment>
-                ))
+                <>
+                  {categoryOrderFiltered.map((cat) => (
+                    <Fragment key={cat}>
+                      <tr className="ib-stock-group-header">
+                        <td colSpan={msColSpan}>{cat}</td>
+                      </tr>
+                      {(sortedRowsByCategory[cat] ?? rowsByCategory[cat]).map((row) => renderMarketStreamRow(row, cat, msDragEnabled))}
+                    </Fragment>
+                  ))}
+                  {optPositionRows.length > 0 && (
+                    <Fragment>
+                      <tr className="live-sort-group-header">
+                        <td colSpan={msColSpan}>
+                          <span className="live-sort-group-label">Options</span>
+                        </td>
+                      </tr>
+                      {sortOptRowsAlpha(optPositionRows, 1).map((row) => renderOptStreamRow(row))}
+                    </Fragment>
+                  )}
+                </>
               )}
               {filteredRows.length > 0 && (() => {
                 const hostCostSum = filteredRows.reduce((a, r) => {
@@ -1922,92 +1791,309 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
             </tbody>
           </table>
         </div>
-        {filteredRows.length > 0 &&
-          (() => {
-            const totalCostPnl = filteredRows.reduce((acc, row) => {
-              const v = row.pnlCost
-              return acc + (v != null && Number.isFinite(v) ? v : 0)
-            }, 0)
-            const totalCost = filteredRows.reduce((acc, row) => {
-              const qty = row.qty != null && Number.isFinite(row.qty) ? row.qty : 0
-              const cost = row.avgCost != null && Number.isFinite(row.avgCost) ? row.avgCost : 0
-              return acc + qty * cost
-            }, 0)
-            const totalPct = totalCost > 0 && Number.isFinite(totalCostPnl) ? (totalCostPnl / totalCost) * 100 : null
-            const { totalDailyDollar, totalDailyPct } = marketStreamsDailyTotals
-            const showDailySummary = totalDailyPct != null || totalDailyDollar !== 0
-            return (
-              <div className="watchlist-summary-row" style={{ marginTop: 'var(--space-3)' }}>
-                <span className="watchlist-summary-segment">
-                  SINCE $
-                  <span className={`watchlist-summary-value ${totalCostPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-                    {fmtUsdRound0(totalCostPnl)}
+      </div>
+
+      <div className="card card-operations live-open-watchlist-split">
+        <div className="live-open-watchlist-split-grid" role="group" aria-label="Watching stocks, Watching options, and open orders">
+          <div className="live-watching-stocks-column">
+            <div className="live-watching-stocks-pane">
+              <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
+                <h2 className="daemon-card-title page-title-with-tooltip">
+                  <span
+                    className={`title-inline-lamp lamp-icon ${marketStreamsOk ? 'green' : 'red'}`}
+                    title="Quotes: green when Market API can read Redis quotes and IB ingestor is connected (same as Market Streams)."
+                    aria-hidden
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M22 12h-4l-3 9L9 3 6 12H2" />
+                    </svg>
                   </span>
-                </span>
-                {totalPct != null && Number.isFinite(totalPct) && (
-                  <span className="watchlist-summary-segment">
-                    SINCE %
-                    <span className={`watchlist-summary-value watchlist-summary-value-pct ${totalPct >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-                      {totalPct >= 0 ? '+' : ''}{totalPct.toFixed(2)}%
-                    </span>
-                  </span>
+                  Watching Stocks
+                  <InfoTooltip text="STK symbols whose Watchlist category is Watching. Stock quotes and daily % match Market Streams; Host/Secondary and position qty/cost are omitted here." />
+                </h2>
+              </div>
+              <div className="realtime-quotes-table-wrap live-watching-stocks-table-wrap">
+                {watchingTickerRows.length === 0 ? (
+                  <p className="section-hint">No STK symbols with Watchlist category Watching</p>
+                ) : (
+                  <table className="table-operations realtime-quotes-table" aria-label="Watching stocks quotes">
+                    <colgroup>
+                      <col style={{ width: '5.5rem' }} />
+                      <col style={{ width: '9rem' }} />
+                      <col style={{ width: '6.25rem' }} />
+                      <col style={{ width: '6.25rem' }} />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th scope="col">Symbol</th>
+                        <th title="Last price; Bid and Ask shown as spread vs Last">Last (Bid / Ask)</th>
+                        <th scope="col" className="realtime-quote-pnl-stacked-th" title="Daily % / Daily $">
+                          Daily
+                          <span className="realtime-quote-pnl-stacked-th-sub">% / $</span>
+                        </th>
+                        <th scope="col" className="realtime-quote-pnl-stacked-th" title="SINCE % / SINCE $">
+                          SINCE
+                          <span className="realtime-quote-pnl-stacked-th-sub">% / $</span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {watchingTickerRowsSorted.map((row) => renderMarketStreamRow(row, 'Watching', msDragEnabled, true))}
+                    </tbody>
+                  </table>
                 )}
-                {showDailySummary && (
-                  <>
-                    <span className="watchlist-summary-segment">
-                      DAILY $
-                      <span className={`watchlist-summary-value ${totalDailyDollar >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-                        {fmtUsdRound0(totalDailyDollar)}
-                      </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="live-watch-right-column">
+            <div className="live-watching-options-pane">
+              <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
+                <h2 className="daemon-card-title page-title-with-tooltip">
+                  <span
+                    className={`title-inline-lamp lamp-icon ${marketStreamsOk ? 'green' : 'red'}`}
+                    title="Quotes: green when Market API can read Redis and IB ingestor is connected (OPT quotes via contract_quote_live)."
+                    aria-hidden
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M22 12h-4l-3 9L9 3 6 12H2" />
+                    </svg>
+                  </span>
+                  Watching Options
+                  <InfoTooltip text="Option contracts from Watchlist; quotes from daemon (contract_quote_live). Same quote-path health as Market Streams." />
+                </h2>
+              </div>
+              <div className="realtime-quotes-table-wrap">
+                {watchlistOptionItems.length === 0 ? (
+                  <p className="section-hint">No option contracts on Watchlist</p>
+                ) : (
+                  <table className="table-operations realtime-quotes-table" aria-label="Watching option quotes">
+                    <thead>
+                      <tr>
+                        <th>Symbol</th>
+                        <th title="Last price; Bid and Ask shown as spread vs Last">Last (Bid / Ask)</th>
+                        <th>Expiry</th>
+                        <th>Right</th>
+                        <th>Strike</th>
+                        <th>Category</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {watchlistOptionItems.map((item) => {
+                        const q = quotesByContractKey[item.contract_key]
+                        const categoryName = (item.category ?? '').trim() || 'Uncategorized'
+                        return (
+                          <tr key={item.contract_key}>
+                            <td title={item.contract_key} style={{ fontWeight: 'bold' }}>{watchlistOptionLabel(item)}</td>
+                            <td className="realtime-quote-num realtime-quote-last-bid-ask">{renderLastBidAskOption(q)}</td>
+                            <td>{formatExpiry(item.expiry)}</td>
+                            <td>{formatOptionRight(item.option_right)}</td>
+                            <td>{item.strike != null ? formatStrike(item.strike) : '—'}</td>
+                            <td>{categoryName}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+
+            <div className="live-open-orders-pane">
+              <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem', marginTop: 'var(--space-2)' }}>
+                <h2 className="daemon-card-title page-title-with-tooltip">
+                  <span
+                    className={`title-inline-lamp lamp-icon ${openOrdersSectionOk ? 'green' : 'red'}`}
+                    title={`Open orders lamp: green when Account Sync Daemon is healthy (GET /status account_sync_daemon) and heartbeat is fresh. ${accountSyncLamp.title}${openOrdersUpdatedAt != null ? ` · Last UI read (GET /open-orders): ${fmtSince(openOrdersUpdatedAt)} ago.` : ''}`}
+                    aria-hidden
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+                    </svg>
+                  </span>
+                  Open Orders
+                  <InfoTooltip text="Unfilled orders from PostgreSQL (daemon_open_orders). The Account Sync Daemon writes this table from the IB account stream. This page polls GET /open-orders every few seconds for UI updates. Account ID is the IB account that placed each order." />
+                </h2>
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {openOrdersUpdatedAt != null && (
+                    <span
+                      className="open-orders-freshness-badge"
+                      title={`DB polled at ${fmtTs(openOrdersUpdatedAt)}`}
+                    >
+                      <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ opacity: 0.7 }}>
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 6v6l4 2" />
+                      </svg>
+                      <span className="open-orders-freshness-age">{fmtSince(openOrdersUpdatedAt)} ago</span>
                     </span>
-                    {totalDailyPct != null && Number.isFinite(totalDailyPct) && (
-                      <span className="watchlist-summary-segment">
-                        DAILY %
-                        <span className={`watchlist-summary-value watchlist-summary-value-pct ${totalDailyPct >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-                          {totalDailyPct >= 0 ? '+' : ''}{totalDailyPct.toFixed(2)}%
-                        </span>
-                      </span>
-                    )}
+                  )}
+                  {onNavigateToSubscribe && (
+                    <button
+                      type="button"
+                      className="section-header-icon-btn"
+                      onClick={onNavigateToSubscribe}
+                      title="Open Subscribe page (IB Event Subscribe — account agent stream)"
+                      aria-label="Open Subscribe page"
+                    >
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M22 12h-4l-3 9L9 3 6 12H2" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                <span className="section-hint" style={{ marginLeft: 8 }}>Source: DB table daemon_open_orders</span>
+              </div>
+              <div className="open-orders-table-wrap">
+                {openOrders.length === 0 ? (
+                  <p className="section-hint">No open orders</p>
+                ) : (
+                  <>
+                    {(() => {
+                      const optionOrders = openOrders.filter((o) => ((o.sec_type ?? '').toString().toUpperCase()) === 'OPT')
+                      const stockOrders = openOrders.filter((o) => ((o.sec_type ?? '').toString().toUpperCase()) === 'STK')
+                      return (
+                        <>
+                          {optionOrders.length > 0 && (
+                            <div className="open-orders-section" style={{ marginBottom: 'var(--space-3)' }}>
+                              <h3 className="open-orders-subtitle" style={{ fontSize: 'var(--text-caption)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Option (OPT)</h3>
+                              <table className="open-orders-table table-operations" role="grid" aria-label="Open orders Option">
+                                <thead>
+                                  <tr>
+                                    <th scope="col">Account ID</th>
+                                    <th scope="col">Symbol</th>
+                                    <th scope="col">Expiry</th>
+                                    <th scope="col">Strike</th>
+                                    <th scope="col">Opt side</th>
+                                    <th scope="col">Side</th>
+                                    <th scope="col">Qty</th>
+                                    <th scope="col">Limit</th>
+                                    <th scope="col">Status</th>
+                                    <th scope="col">Filled / Rem</th>
+                                    <th scope="col">Submit</th>
+                                    <th scope="col">Since</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {optionOrders.map((o, i) => {
+                                    const optParts = parseOptionContractKey(o.contract_key)
+                                    const submitTs = o.updated_ts != null && Number.isFinite(Number(o.updated_ts)) ? Number(o.updated_ts) : null
+                                    return (
+                                      <tr key={o.order_id ?? o.perm_id ?? i}>
+                                        <td>{o.account_id ?? '—'}</td>
+                                        <td>{o.symbol ?? '—'}</td>
+                                        <td>{optParts.expiry}</td>
+                                        <td>{optParts.strike === '—' ? '—' : fmtUsd(Number(optParts.strike))}</td>
+                                        <td>{optParts.rightLabel}</td>
+                                        <td>{o.action ?? '—'}</td>
+                                        <td>{o.total_quantity != null ? Math.round(Number(o.total_quantity)) : '—'}</td>
+                                        <td>{o.limit_price != null ? fmtUsd(Number(o.limit_price)) : '—'}</td>
+                                        <td>{o.status ?? '—'}</td>
+                                        <td>
+                                          {o.filled != null && o.remaining != null ? (
+                                            <>{Math.round(Number(o.filled))} / {Math.round(Number(o.remaining))}</>
+                                          ) : (
+                                            '—'
+                                          )}
+                                        </td>
+                                        <td>{submitTs != null ? fmtTs(submitTs) : '—'}</td>
+                                        <td>{submitTs != null ? `${fmtSince(submitTs)} ago` : '—'}</td>
+                                      </tr>
+                                    )
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                          {stockOrders.length > 0 && (
+                            <div className="open-orders-section">
+                              <h3 className="open-orders-subtitle" style={{ fontSize: 'var(--text-caption)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Stock (STK)</h3>
+                              <table className="open-orders-table table-operations" role="grid" aria-label="Open orders Stock">
+                                <thead>
+                                  <tr>
+                                    <th scope="col">Account ID</th>
+                                    <th scope="col">Symbol</th>
+                                    <th scope="col">Side</th>
+                                    <th scope="col">Qty</th>
+                                    <th scope="col">Limit</th>
+                                    <th scope="col">Status</th>
+                                    <th scope="col">Filled / Rem</th>
+                                    <th scope="col">Submit</th>
+                                    <th scope="col">Since</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {stockOrders.map((o, i) => {
+                                    const submitTs = o.updated_ts != null && Number.isFinite(Number(o.updated_ts)) ? Number(o.updated_ts) : null
+                                    return (
+                                      <tr key={o.order_id ?? o.perm_id ?? i}>
+                                        <td>{o.account_id ?? '—'}</td>
+                                        <td>{o.symbol ?? '—'}</td>
+                                        <td>{o.action ?? '—'}</td>
+                                        <td>{o.total_quantity != null ? fmtQtyWithMutedDecimal(o.total_quantity) : '—'}</td>
+                                        <td>{o.limit_price != null ? fmtUsd(Number(o.limit_price)) : '—'}</td>
+                                        <td>{o.status ?? '—'}</td>
+                                        <td>
+                                          {o.filled != null && o.remaining != null ? (
+                                            <>{fmtQtyWithMutedDecimal(o.filled)} / {fmtQtyWithMutedDecimal(o.remaining)}</>
+                                          ) : (
+                                            '—'
+                                          )}
+                                        </td>
+                                        <td>{submitTs != null ? fmtTs(submitTs) : '—'}</td>
+                                        <td>{submitTs != null ? `${fmtSince(submitTs)} ago` : '—'}</td>
+                                      </tr>
+                                    )
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                          {optionOrders.length === 0 && stockOrders.length === 0 && (
+                            <p className="section-hint">No OPT or STK open orders (other sec types filtered)</p>
+                          )}
+                        </>
+                      )
+                    })()}
                   </>
                 )}
               </div>
-            )
-          })()}
+            </div>
+
+            <div className="live-strategy-inline-bar" style={{ marginTop: 'var(--space-3)' }}>
+              <span className="live-strategy-inline-title">
+                Strategy Active
+                <InfoTooltip text="Current active structure, gate safety set, and allocation. Daemon uses these on next start. To change them, click Manage to open Strategy → Structure." />
+              </span>
+              <span className="live-strategy-inline-pills">
+                <span className="live-strategy-pill" title="Structure">
+                  <span className="live-strategy-pill-key">S</span>
+                  <span className="live-strategy-pill-val">{j?.strategy?.active?.structure?.name ?? '—'}</span>
+                </span>
+                <span className="live-strategy-pill" title="Gate safety">
+                  <span className="live-strategy-pill-key">G</span>
+                  <span className="live-strategy-pill-val">{j?.strategy?.active?.gate_safety?.name ?? '—'}</span>
+                </span>
+                <span className="live-strategy-pill" title="Allocation">
+                  <span className="live-strategy-pill-key">A</span>
+                  <span className="live-strategy-pill-val">{j?.strategy?.active?.allocation?.name ?? '—'}</span>
+                </span>
+              </span>
+              {onNavigateToStrategy && (
+                <button
+                  type="button"
+                  className="btn-secondary page-title-breadcrumb-link"
+                  onClick={onNavigateToStrategy}
+                  aria-label="Manage strategy"
+                  style={{ marginLeft: 'auto', fontSize: '0.72rem', padding: '0.15rem 0.5rem' }}
+                >
+                  Manage
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div className="card card-operations strategy-active-live-card strategy-section" style={{ marginTop: 'var(--space-3)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
-          <h2 className="daemon-card-title page-title-with-tooltip" style={{ margin: 0 }}>
-            Strategy Active
-            <InfoTooltip text="Current active structure, gate safety set, and allocation. Daemon uses these on next start. To change them, click Manage to open Strategy → Structure." />
-          </h2>
-          {onNavigateToStrategy && (
-            <button
-              type="button"
-              className="btn-secondary page-title-breadcrumb-link"
-              onClick={onNavigateToStrategy}
-              aria-label="Manage strategy"
-            >
-              Manage
-            </button>
-          )}
-        </div>
-        <div className="statusSummary">
-          <div>
-            <strong>Structure:</strong> {j?.strategy?.active?.structure?.name ?? '—'}
-            {j?.strategy?.active?.structure?.id != null && ` (${j?.strategy?.active?.structure?.id})`}
-          </div>
-          <div>
-            <strong>Gate safety:</strong> {j?.strategy?.active?.gate_safety?.name ?? '—'}
-            {j?.strategy?.active?.gate_safety?.id != null && ` (${j?.strategy?.active?.gate_safety?.id})`}
-          </div>
-          <div>
-            <strong>Allocation:</strong> {j?.strategy?.active?.allocation?.name ?? '—'}
-            {j?.strategy?.active?.allocation?.id != null && ` (${j?.strategy?.active?.allocation?.id})`}
-          </div>
-        </div>
-        <p className="section-hint">Daemon uses these on next start.</p>
-      </div>
     </div>
   )
 }

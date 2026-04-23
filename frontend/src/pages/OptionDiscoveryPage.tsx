@@ -1458,25 +1458,26 @@ export function OptionDiscoveryPage({
 
   return (
     <div className="card process-section">
-      <h2 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-        {onGoToScreener ? (
-          <>
-            <button
-              type="button"
-              className="page-title-breadcrumb-link"
-              onClick={onGoToScreener}
-              aria-label="Go to Screener"
-            >
-              Research
-            </button>
-            {' / '}
-            {breadcrumbLabel}
-            {' '}
-          </>
-        ) : (
-          <>{breadcrumbLabel}{' '}</>
-        )}
-        <InfoTooltip text="Option Discovery: choose underlying (from Watchlist STK with Option? on) and expiration. Expirations and quotes use Massive delayed snapshot sync + PostgreSQL." />
+      <div className="research-page-head">
+        <h2 className="page-title-with-tooltip" style={{ margin: 0 }}>
+          {onGoToScreener ? (
+            <>
+              <button
+                type="button"
+                className="page-title-breadcrumb-link"
+                onClick={onGoToScreener}
+                aria-label="Research home"
+              >
+                Research
+              </button>
+              {' / '}
+              {breadcrumbLabel}
+              {' '}
+            </>
+          ) : (
+            <>{breadcrumbLabel}{' '}</>
+          )}
+          <InfoTooltip text="Option Discovery: choose underlying (from Watchlist STK with Option? on) and expiration. Expirations and quotes use Massive delayed snapshot sync + PostgreSQL." />
         {massiveStatus?.configured && (
           <span
             className="section-hint"
@@ -1491,7 +1492,8 @@ export function OptionDiscoveryPage({
             <InfoTooltip text="Tape (last trades) is not available on this tier. Enable trades in Massive config for Developer." />
           </span>
         )}
-      </h2>
+        </h2>
+      </div>
 
       {/* ── Session bar: Chain title + daily data on one row ── */}
       <section className="replay-section option-discovery-session-bar" aria-label="Session">

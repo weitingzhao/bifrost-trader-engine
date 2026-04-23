@@ -10,25 +10,27 @@ interface BacktestPageProps {
 export function BacktestPage({ status: _status, onGoToScreener, breadcrumbLabel = 'Backtest' }: BacktestPageProps) {
   return (
     <div className="card process-section">
-      <h2 id="backtest-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-        {onGoToScreener ? (
-          <>
-            <button
-              type="button"
-              className="page-title-breadcrumb-link"
-              onClick={onGoToScreener}
-              aria-label="Go to Screener"
-            >
-              Research
-            </button>
-            {' / '}
-            {breadcrumbLabel}
-          </>
-        ) : (
-          breadcrumbLabel
-        )}
-        <InfoTooltip text="Backtest and strategy validation — planned for a later release." />
-      </h2>
+      <div className="research-page-head">
+        <h2 id="backtest-head" className="page-title-with-tooltip" style={{ margin: 0 }}>
+          {onGoToScreener ? (
+            <>
+              <button
+                type="button"
+                className="page-title-breadcrumb-link"
+                onClick={onGoToScreener}
+                aria-label="Research home"
+              >
+                Research
+              </button>
+              {' / '}
+              {breadcrumbLabel}
+            </>
+          ) : (
+            breadcrumbLabel
+          )}
+          <InfoTooltip text="Backtest and strategy validation — planned for a later release." />
+        </h2>
+      </div>
       <p className="section-hint">
         Backtest and strategy validation will be available in a later release.
       </p>

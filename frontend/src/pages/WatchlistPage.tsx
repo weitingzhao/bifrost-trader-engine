@@ -1,13 +1,41 @@
 import type { ReactNode } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { IbAccountSnapshot, IbPositionRow, PositionCategory, RealtimeQuote, StatusResponse, WatchlistItem } from '../types'
 import type { BarStatsResponse } from '../types'
-import { fetchWatchlist, fetchBarStats, fetchQuotes, postBarsFetch, postWatchlist, deleteWatchlist, fetchPositionCategories } from '../api'
+import { fetchWatchlist, fetchBarStats, fetchQuotes, postBarsFetch, postWatchlist, deleteWatchlist, fetchPositionCategories, postPositionCategory } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtUsd } from '../utils/format'
 
 interface WatchlistPageProps {
   status: StatusResponse | null
+  /** “Research” breadcrumb → Risk Model (same as other Research pages). */
+  onBreadcrumbResearch?: () => void
+}
+
+/** Position category names for Research → Screener → Stock Screener workflow (same DB as Portfolio → Accounts categories). */
+const WL_CAT_WATCHING = 'Watching'
+const WL_CAT_SIZING = 'Sizing'
+
+function categoryIdForName(cats: PositionCategory[], name: string): number | null {
+  const n = name.trim().toLowerCase()
+  const hit = cats.find(c => String(c.name ?? '').trim().toLowerCase() === n)
+  return hit != null && Number.isFinite(Number(hit.id)) ? Number(hit.id) : null
+}
+
+function itemMatchesCategory(item: WatchlistItem, name: string, resolvedId: number | null): boolean {
+  if (resolvedId != null && item.category_id != null && Number(item.category_id) === resolvedId) return true
+  return String(item.category ?? '').trim().toLowerCase() === name.trim().toLowerCase()
+}
+
+function isStockRow(item: WatchlistItem): boolean {
+  return (item.sec_type || 'STK').toUpperCase() !== 'OPT'
+}
+
+function isUncategorizedStock(item: WatchlistItem): boolean {
+  if (!isStockRow(item)) return false
+  if (item.category_id != null && Number.isFinite(Number(item.category_id))) return false
+  const cat = String(item.category ?? '').trim()
+  return !cat || cat.toLowerCase() === 'uncategorized'
 }
 
 function normalizeToContractKey(input: string): { contract_key: string; symbol?: string; sec_type?: string } {
@@ -96,7 +124,7 @@ function renderQuoteCell(q: RealtimeQuote | undefined): ReactNode {
   )
 }
 
-export function WatchlistPage({ status }: WatchlistPageProps) {
+export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPageProps) {
   const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>([])
   const [watchlistLoading, setWatchlistLoading] = useState(false)
   const [watchlistError, setWatchlistError] = useState<string | null>(null)
@@ -113,7 +141,10 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
   const [realtimeQuotes, setRealtimeQuotes] = useState<RealtimeQuote[]>([])
   const [positionCategories, setPositionCategories] = useState<PositionCategory[]>([])
   const [showPositionPicker, setShowPositionPicker] = useState(false)
-  const [activeSection, setActiveSection] = useState<'stocks' | 'options'>('stocks')
+  const [primaryTab, setPrimaryTab] = useState<'watching' | 'sizing' | 'positions'>('watching')
+  const [positionSubTab, setPositionSubTab] = useState<'stocks' | 'options'>('stocks')
+  const [promoteContractKey, setPromoteContractKey] = useState('')
+  const watchlistCategoryEnsureAttempted = useRef(false)
 
   const positions = useMemo(() => {
     return (status?.portfolio?.accounts || []).flatMap((acc: IbAccountSnapshot) => (acc.positions || []))
@@ -147,6 +178,28 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
       .catch(() => { if (!cancelled) setPositionCategories([]) })
     return () => { cancelled = true }
   }, [])
+
+  /** Ensure DB has Watching / Sizing categories for this workflow (single POST attempt per mount). */
+  useEffect(() => {
+    if (positionCategories.length === 0) return
+    const wid = categoryIdForName(positionCategories, WL_CAT_WATCHING)
+    const sid = categoryIdForName(positionCategories, WL_CAT_SIZING)
+    if (wid != null && sid != null) return
+    if (watchlistCategoryEnsureAttempted.current) return
+    watchlistCategoryEnsureAttempted.current = true
+    let cancelled = false
+    ;(async () => {
+      try {
+        if (wid == null) await postPositionCategory({ name: WL_CAT_WATCHING, sort_order: 2 })
+        if (!cancelled && sid == null) await postPositionCategory({ name: WL_CAT_SIZING, sort_order: 3 })
+        const res = await fetchPositionCategories()
+        if (!cancelled) setPositionCategories(res.items ?? [])
+      } catch {
+        /* keep existing categories */
+      }
+    })()
+    return () => { cancelled = true }
+  }, [positionCategories])
 
   useEffect(() => {
     let cancelled = false
@@ -183,7 +236,16 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
   )
 
   const handleAddWatchlist = useCallback(
-    async (contract_key: string, source: string, symbol?: string, sec_type?: string, expiry?: string, strike?: number, option_right?: string) => {
+    async (
+      contract_key: string,
+      source: string,
+      symbol?: string,
+      sec_type?: string,
+      expiry?: string,
+      strike?: number,
+      option_right?: string,
+      category_id?: number | null,
+    ) => {
       const key = contract_key.trim()
       if (!key) return
       setAddPending(true)
@@ -197,6 +259,7 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
           strike,
           option_right: option_right || undefined,
           source,
+          ...(category_id !== undefined ? { category_id } : {}),
         })
         if (res.ok) await loadWatchlist()
         else setWatchlistError(res.error || 'Add failed')
@@ -281,45 +344,73 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     [watchlistItems],
   )
 
-  const stockByCategory = useMemo(() => {
-    const map: Record<string, WatchlistItem[]> = {}
-    for (const item of allStocks) {
-      const k = (item.category && String(item.category).trim()) || 'Uncategorized'
-      if (!map[k]) map[k] = []
-      map[k].push(item)
-    }
-    return map
-  }, [allStocks])
+  const watchingCategoryId = useMemo(() => categoryIdForName(positionCategories, WL_CAT_WATCHING), [positionCategories])
+  const sizingCategoryId = useMemo(() => categoryIdForName(positionCategories, WL_CAT_SIZING), [positionCategories])
 
-  const optionByCategory = useMemo(() => {
-    const map: Record<string, WatchlistItem[]> = {}
-    for (const item of watchlistOptions) {
-      const k = (item.category && String(item.category).trim()) || 'Uncategorized'
-      if (!map[k]) map[k] = []
-      map[k].push(item)
-    }
-    return map
-  }, [watchlistOptions])
+  const hasPosition = useCallback(
+    (item: WatchlistItem) => contractKeysWithPosition.has(item.contract_key.trim()),
+    [contractKeysWithPosition],
+  )
 
-  const stockCategoryOrder = useMemo(() => {
-    const arr = Object.keys(stockByCategory)
-    arr.sort((a, b) => {
-      if (a === 'Uncategorized') return -1
-      if (b === 'Uncategorized') return 1
-      return a.localeCompare(b)
+  const matchesWatching = useCallback(
+    (item: WatchlistItem) => itemMatchesCategory(item, WL_CAT_WATCHING, watchingCategoryId),
+    [watchingCategoryId],
+  )
+  const matchesSizing = useCallback(
+    (item: WatchlistItem) => itemMatchesCategory(item, WL_CAT_SIZING, sizingCategoryId),
+    [sizingCategoryId],
+  )
+
+  /** Stocks: Watching + uncategorized, excluding sizing-only rows and anything with an open position (positions tab owns those). */
+  const watchingStockRows = useMemo(() => {
+    return allStocks.filter((s) => {
+      if (hasPosition(s)) return false
+      if (matchesSizing(s)) return false
+      if (matchesWatching(s)) return true
+      if (isUncategorizedStock(s)) return true
+      return false
     })
-    return arr
-  }, [stockByCategory])
+  }, [allStocks, hasPosition, matchesSizing, matchesWatching])
 
-  const optionCategoryOrder = useMemo(() => {
-    const arr = Object.keys(optionByCategory)
-    arr.sort((a, b) => {
-      if (a === 'Uncategorized') return -1
-      if (b === 'Uncategorized') return 1
-      return a.localeCompare(b)
+  /** Stocks on other position-categories (not Watching/Sizing), no holding — shown under Watching for reassignment. */
+  const otherCategoryStockRows = useMemo(() => {
+    return allStocks.filter((s) => {
+      if (hasPosition(s)) return false
+      if (matchesWatching(s) || matchesSizing(s)) return false
+      if (isUncategorizedStock(s)) return false
+      return true
     })
-    return arr
-  }, [optionByCategory])
+  }, [allStocks, hasPosition, matchesSizing, matchesWatching])
+
+  const sizingStockRows = useMemo(
+    () => allStocks.filter(s => !hasPosition(s) && matchesSizing(s)),
+    [allStocks, hasPosition, matchesSizing],
+  )
+
+  const positionStockRows = useMemo(() => allStocks.filter(hasPosition), [allStocks, hasPosition])
+  const positionOptRows = useMemo(() => watchlistOptions.filter(hasPosition), [watchlistOptions, hasPosition])
+
+  /** Option contracts on watchlist without a position — still editable under Watching. */
+  const optionsNotHeldRows = useMemo(() => watchlistOptions.filter(o => !hasPosition(o)), [watchlistOptions, hasPosition])
+
+  /** STK rows classified as Watching, no position — eligible to move to Sizing. */
+  const watchingOnlyForPromote = useMemo(
+    () => allStocks.filter(s => !hasPosition(s) && matchesWatching(s)),
+    [allStocks, hasPosition, matchesWatching],
+  )
+
+  const watchingTabCount = watchingStockRows.length + optionsNotHeldRows.length
+  const sizingTabCount = sizingStockRows.length
+  const positionsTabCount = positionStockRows.length + positionOptRows.length
+
+  const handlePromoteToSizing = useCallback(async () => {
+    const ck = promoteContractKey.trim()
+    if (!ck || sizingCategoryId == null) return
+    const item = watchingOnlyForPromote.find(i => i.contract_key.trim() === ck)
+    if (!item) return
+    await handleWatchlistCategoryChange(item, sizingCategoryId)
+    setPromoteContractKey('')
+  }, [promoteContractKey, sizingCategoryId, watchingOnlyForPromote, handleWatchlistCategoryChange])
 
   function symbolFromItem(item: WatchlistItem): string {
     if (item.symbol && String(item.symbol).trim()) return String(item.symbol).trim()
@@ -401,56 +492,203 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     }
   }
 
-  const stockCount = allStocks.length
-  const optionCount = watchlistOptions.length
+  const renderStockRows = (items: WatchlistItem[]) =>
+    items.map((item) => {
+      const sym = symbolFromItem(item)
+      const q = quoteByContractKey[item.contract_key] ?? quoteBySymbol[sym]
+      const held = hasPosition(item)
+      const optOn = item.optionable === true
+      return (
+        <tr key={item.contract_key} className={!optOn ? 'wl2-row--dim' : undefined}>
+          <td className="wl2-td--sym" title={item.contract_key}>
+            <span className="wl2-sym">{watchlistItemLabel(item)}</span>
+            {held && <span className="wl2-badge wl2-badge--hold" title="Holding">H</span>}
+          </td>
+          <td className="wl2-td--quote">{renderQuoteCell(q)}</td>
+          <td className="wl2-td--opt">
+            <button
+              type="button"
+              className={`wl2-opt-pill${optOn ? ' wl2-opt-pill--on' : ''}`}
+              onClick={() => handleOptionableToggle(item)}
+              aria-label={`Option? for ${watchlistItemLabel(item)}`}
+              title={optOn ? 'Included in Option Discovery' : 'Not in Option Discovery'}
+            >
+              {optOn ? 'ON' : 'OFF'}
+            </button>
+          </td>
+          <td className="wl2-td--cat">
+            <select
+              className="wl2-cat-select"
+              value={item.category_id ?? ''}
+              onChange={e => {
+                const v = e.target.value
+                handleWatchlistCategoryChange(item, v ? Number(v) : null)
+              }}
+              aria-label={`Category for ${watchlistItemLabel(item)}`}
+            >
+              <option value="">—</option>
+              {positionCategories.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </td>
+          <td className="wl2-td--acts">
+            <span className="wl2-acts">
+              <button
+                type="button"
+                className="wl2-act-icon"
+                onClick={() => handleAnalyze(item)}
+                disabled={analysisLoadingSymbol !== null}
+                title="Bar stats"
+                aria-label={`Analyze ${sym}`}
+              >
+                {analysisLoadingSymbol === sym ? '⏳' : '📊'}
+              </button>
+              <button
+                type="button"
+                className="wl2-act-icon"
+                onClick={() => openAddOptionModal(item)}
+                title="Add option contract"
+                aria-label="Add option"
+              >
+                ＋
+              </button>
+              <button
+                type="button"
+                className="wl2-act-icon wl2-act-icon--rm"
+                onClick={() => handleRemoveWatchlist(item)}
+                title="Remove"
+                aria-label="Remove from watchlist"
+              >
+                ✕
+              </button>
+            </span>
+          </td>
+        </tr>
+      )
+    })
+
+  const renderOptionRows = (items: WatchlistItem[]) =>
+    items.map((item) => {
+      const q = quoteByContractKey[item.contract_key] ?? quoteBySymbol[symbolFromItem(item)]
+      const held = hasPosition(item)
+      return (
+        <tr key={item.contract_key}>
+          <td className="wl2-td--sym" title={item.contract_key}>
+            <span className="wl2-sym">{item.symbol || watchlistItemLabel(item)}</span>
+            {held && <span className="wl2-badge wl2-badge--hold" title="Holding">H</span>}
+          </td>
+          <td className="wl2-td--quote">{renderQuoteCell(q)}</td>
+          <td className="wl2-td--exp">{formatExpiry(item.expiry)}</td>
+          <td className="wl2-td--right">
+            <span className={`wl2-right-badge${(item.option_right || '').toUpperCase() === 'C' || (item.option_right || '').toUpperCase() === 'CALL' ? ' wl2-right-badge--c' : ' wl2-right-badge--p'}`}>
+              {formatOptionRight(item.option_right)}
+            </span>
+          </td>
+          <td className="wl2-td--strike">{item.strike != null ? formatStrike(item.strike) : '—'}</td>
+          <td className="wl2-td--cat">
+            <select
+              className="wl2-cat-select"
+              value={item.category_id ?? ''}
+              onChange={e => {
+                const v = e.target.value
+                handleWatchlistCategoryChange(item, v ? Number(v) : null)
+              }}
+              aria-label={`Category for ${item.symbol || watchlistItemLabel(item)}`}
+            >
+              <option value="">—</option>
+              {positionCategories.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </td>
+          <td className="wl2-td--acts">
+            <button
+              type="button"
+              className="wl2-act-icon wl2-act-icon--rm"
+              onClick={() => handleRemoveWatchlist(item)}
+              title="Remove"
+              aria-label="Remove from watchlist"
+            >
+              ✕
+            </button>
+          </td>
+        </tr>
+      )
+    })
+
+  const addCategoryForHeader = watchingCategoryId != null ? watchingCategoryId : undefined
 
   return (
-    <div className="wl2">
+    <div className="card process-section watchlist-page stock-screener-page wl2">
       {/* ── Header bar ── */}
       <header className="wl2-header">
-        <div className="wl2-header__left">
-          <h2 className="wl2-header__title">Watchlist</h2>
-          <InfoTooltip text="Symbols here are monitored for quotes, bars, and Market API focus lists. Live ticks come from IB Ingestor (Redis)." />
-          <span className="wl2-header__count">{watchlistItems.length}</span>
-        </div>
-        <div className="wl2-header__add">
-          <input
-            type="text"
-            className="wl2-header__input"
-            placeholder="Add symbol…"
-            value={addContractKey}
-            onChange={e => setAddContractKey(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && addContractKey.trim()) {
-                const { contract_key, symbol, sec_type } = normalizeToContractKey(addContractKey)
-                if (contract_key) { handleAddWatchlist(contract_key, 'manual', symbol, sec_type); setAddContractKey('') }
-              }
-            }}
-            aria-label="Enter Symbol to add stock"
-          />
-          <button
-            type="button"
-            className="wl2-btn wl2-btn--primary wl2-header__add-btn"
-            disabled={addPending || !addContractKey.trim()}
-            onClick={() => {
-              const { contract_key, symbol, sec_type } = normalizeToContractKey(addContractKey)
-              if (!contract_key) return
-              handleAddWatchlist(contract_key, 'manual', symbol, sec_type)
-              setAddContractKey('')
-            }}
-          >
-            {addPending ? '…' : '+'}
-          </button>
-          {positionsNotInWatchlist.length > 0 && (
+        <div className="research-page-head">
+          <h2 className="page-title-with-tooltip" style={{ margin: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem' }}>
+            {onBreadcrumbResearch ? (
+              <>
+                <button
+                  type="button"
+                  className="page-title-breadcrumb-link"
+                  onClick={onBreadcrumbResearch}
+                  aria-label="Research home"
+                >
+                  Research
+                </button>
+                {' / Stock Screener'}
+              </>
+            ) : (
+              <>Stock Screener</>
+            )}
+            <InfoTooltip text="Stock screener workflow: Watching (ideas) → Sizing (pre-trade sizing) → Positions (live IB holdings). Categories Watching / Sizing match Portfolio → Accounts. Quotes and ingest use IB / Redis." />
+            <span className="wl2-header__count">{watchlistItems.length}</span>
+          </h2>
+          <div className="wl2-header__add">
+          {(primaryTab === 'watching' || primaryTab === 'positions') && positionsNotInWatchlist.length > 0 && (
             <button
               type="button"
               className="wl2-btn wl2-btn--ghost wl2-header__pos-btn"
               onClick={() => setShowPositionPicker(v => !v)}
-              title="Add from positions"
+              title="Add from positions (category Watching)"
             >
               Pos ({positionsNotInWatchlist.length})
             </button>
           )}
+          {primaryTab === 'watching' && (
+            <>
+              <input
+                type="text"
+                className="wl2-header__input"
+                placeholder="Add symbol → Watching…"
+                value={addContractKey}
+                onChange={e => setAddContractKey(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && addContractKey.trim()) {
+                    const { contract_key, symbol, sec_type } = normalizeToContractKey(addContractKey)
+                    if (contract_key) {
+                      handleAddWatchlist(contract_key, 'manual', symbol, sec_type, undefined, undefined, undefined, addCategoryForHeader)
+                      setAddContractKey('')
+                    }
+                  }
+                }}
+                aria-label="Enter symbol to add as Watching"
+              />
+              <button
+                type="button"
+                className="wl2-btn wl2-btn--primary wl2-header__add-btn"
+                disabled={addPending || !addContractKey.trim()}
+                onClick={() => {
+                  const { contract_key, symbol, sec_type } = normalizeToContractKey(addContractKey)
+                  if (!contract_key) return
+                  handleAddWatchlist(contract_key, 'manual', symbol, sec_type, undefined, undefined, undefined, addCategoryForHeader)
+                  setAddContractKey('')
+                }}
+              >
+                {addPending ? '…' : '+'}
+              </button>
+            </>
+          )}
+          </div>
         </div>
       </header>
 
@@ -459,7 +697,7 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
       )}
 
       {/* ── Position picker ── */}
-      {showPositionPicker && positionsNotInWatchlist.length > 0 && (
+      {showPositionPicker && positionsNotInWatchlist.length > 0 && (primaryTab === 'watching' || primaryTab === 'positions') && (
         <div className="wl2-pos-picker">
           {positionsNotInWatchlist.map((p, idx) => {
             const ck = positionToContractKey(p)
@@ -472,7 +710,7 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
                 disabled={addPending}
                 onClick={() => {
                   const exp = (p.expiry ?? p.lastTradeDateOrContractMonth) as string | undefined
-                  handleAddWatchlist(ck, 'position', p.symbol || undefined, p.secType || undefined, exp, p.strike, p.right)
+                  handleAddWatchlist(ck, 'position', p.symbol || undefined, p.secType || undefined, exp, p.strike, p.right, addCategoryForHeader)
                 }}
                 title={ck}
               >
@@ -483,40 +721,220 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
         </div>
       )}
 
-      {/* ── Tab bar ── */}
-      {!watchlistLoading && watchlistItems.length > 0 && (
-        <nav className="wl2-tabs" aria-label="Watchlist sections">
+      {/* ── Step-by-step workflow (Watching → Sizing → Positions) ── */}
+      {!watchlistLoading && (
+        <div className="wl2-stepper" role="tablist" aria-label="Position workflow steps">
           <button
             type="button"
-            className={`wl2-tabs__btn${activeSection === 'stocks' ? ' wl2-tabs__btn--active' : ''}`}
-            onClick={() => setActiveSection('stocks')}
+            role="tab"
+            aria-selected={primaryTab === 'watching'}
+            aria-current={primaryTab === 'watching' ? 'step' : undefined}
+            className={`wl2-step${primaryTab === 'watching' ? ' wl2-step--active' : ''}${primaryTab === 'sizing' || primaryTab === 'positions' ? ' wl2-step--done' : ''}`}
+            onClick={() => { setPrimaryTab('watching'); setShowPositionPicker(false) }}
           >
-            Stocks
-            <span className="wl2-tabs__badge">{stockCount}</span>
+            <span className="wl2-step__index" aria-hidden>1</span>
+            <span className="wl2-step__body">
+              <span className="wl2-step__title">Watching</span>
+              <span className="wl2-step__desc">Screen names &amp; ideas</span>
+            </span>
+            <span className="wl2-step__badge">{watchingTabCount}</span>
           </button>
+          <span
+            className={`wl2-step-connector${primaryTab === 'sizing' || primaryTab === 'positions' ? ' wl2-step-connector--done' : ''}`}
+            aria-hidden
+          />
           <button
             type="button"
-            className={`wl2-tabs__btn${activeSection === 'options' ? ' wl2-tabs__btn--active' : ''}`}
-            onClick={() => setActiveSection('options')}
+            role="tab"
+            aria-selected={primaryTab === 'sizing'}
+            aria-current={primaryTab === 'sizing' ? 'step' : undefined}
+            className={`wl2-step${primaryTab === 'sizing' ? ' wl2-step--active' : ''}${primaryTab === 'positions' ? ' wl2-step--done' : ''}`}
+            onClick={() => { setPrimaryTab('sizing'); setShowPositionPicker(false); setPromoteContractKey('') }}
           >
-            Options
-            <span className="wl2-tabs__badge">{optionCount}</span>
+            <span className="wl2-step__index" aria-hidden>2</span>
+            <span className="wl2-step__body">
+              <span className="wl2-step__title">Sizing</span>
+              <span className="wl2-step__desc">Size before you trade</span>
+            </span>
+            <span className="wl2-step__badge">{sizingTabCount}</span>
           </button>
-        </nav>
+          <span
+            className={`wl2-step-connector${primaryTab === 'positions' ? ' wl2-step-connector--done' : ''}`}
+            aria-hidden
+          />
+          <button
+            type="button"
+            role="tab"
+            aria-selected={primaryTab === 'positions'}
+            aria-current={primaryTab === 'positions' ? 'step' : undefined}
+            className={`wl2-step${primaryTab === 'positions' ? ' wl2-step--active' : ''}`}
+            onClick={() => { setPrimaryTab('positions'); setPromoteContractKey('') }}
+          >
+            <span className="wl2-step__index" aria-hidden>3</span>
+            <span className="wl2-step__body">
+              <span className="wl2-step__title">Positions</span>
+              <span className="wl2-step__desc">Live IB holdings</span>
+            </span>
+            <span className="wl2-step__badge">{positionsTabCount}</span>
+          </button>
+        </div>
+      )}
+
+      {!watchlistLoading && primaryTab === 'positions' && (
+        <div className="wl2-substep-wrap">
+          <span className="wl2-substep-label">Step 3 — instrument type</span>
+          <nav className="wl2-tabs wl2-tabs--sub" aria-label="Positions instrument type">
+            <button
+              type="button"
+              className={`wl2-tabs__btn${positionSubTab === 'stocks' ? ' wl2-tabs__btn--active' : ''}`}
+              onClick={() => setPositionSubTab('stocks')}
+            >
+              Stocks
+              <span className="wl2-tabs__badge">{positionStockRows.length}</span>
+            </button>
+            <button
+              type="button"
+              className={`wl2-tabs__btn${positionSubTab === 'options' ? ' wl2-tabs__btn--active' : ''}`}
+              onClick={() => setPositionSubTab('options')}
+            >
+              Options
+              <span className="wl2-tabs__badge">{positionOptRows.length}</span>
+            </button>
+          </nav>
+        </div>
       )}
 
       {/* ── Main content ── */}
       {watchlistLoading ? (
         <div className="wl2-empty">Loading…</div>
-      ) : watchlistItems.length === 0 ? (
-        <div className="wl2-empty">No items. Enter a symbol above to start.</div>
+      ) : primaryTab === 'watching' ? (
+        <>
+          <p className="wl2-tier-hint">
+            <strong>Step 1.</strong> Tickers you add in the header are stored with category <strong>Watching</strong> (same names as Portfolio → Accounts). Option legs on the list without an open IB position are in the second table below.
+          </p>
+          {watchingCategoryId == null && (
+            <p className="wl2-tier-hint wl2-tier-hint--warn">
+              The <strong>Watching</strong> category is missing or still being created. If this persists, add <strong>Watching</strong> and <strong>Sizing</strong> under Portfolio → Accounts.
+            </p>
+          )}
+          {watchlistItems.length === 0 && watchingStockRows.length === 0 && optionsNotHeldRows.length === 0 ? (
+            <div className="wl2-empty">No symbols yet. Type a ticker in the header to start in Watching.</div>
+          ) : (
+            <>
+              <div className="wl2-table-wrap">
+                {watchingStockRows.length === 0 && otherCategoryStockRows.length === 0 ? (
+                  <div className="wl2-empty">No non-held stock rows in Watching / uncategorized.</div>
+                ) : (
+                  <table className="wl2-table">
+                    <thead>
+                      <tr>
+                        <th className="wl2-th--sym">Symbol</th>
+                        <th className="wl2-th--quote">Last / B·A</th>
+                        <th className="wl2-th--opt" title="Show in Option Discovery">Opt</th>
+                        <th className="wl2-th--cat">Category</th>
+                        <th className="wl2-th--acts" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {renderStockRows(watchingStockRows)}
+                    </tbody>
+                    {otherCategoryStockRows.length > 0 && (
+                      <tbody>
+                        <tr className="wl2-group-row">
+                          <td colSpan={5}>
+                            <span className="wl2-group-label">Other portfolio categories (no open position)</span>
+                            <span className="wl2-group-count">{otherCategoryStockRows.length}</span>
+                          </td>
+                        </tr>
+                        {renderStockRows(otherCategoryStockRows)}
+                      </tbody>
+                    )}
+                  </table>
+                )}
+              </div>
+              {optionsNotHeldRows.length > 0 && (
+                <>
+                  <p className="wl2-tier-hint" style={{ marginTop: 'var(--space-4)' }}>Options on the list (no matching open position)</p>
+                  <div className="wl2-table-wrap">
+                    <table className="wl2-table">
+                      <thead>
+                        <tr>
+                          <th className="wl2-th--sym">Symbol</th>
+                          <th className="wl2-th--quote">Last / B·A</th>
+                          <th className="wl2-th--exp">Expiry</th>
+                          <th className="wl2-th--right">R</th>
+                          <th className="wl2-th--strike">Strike</th>
+                          <th className="wl2-th--cat">Category</th>
+                          <th className="wl2-th--acts" />
+                        </tr>
+                      </thead>
+                      <tbody>{renderOptionRows(optionsNotHeldRows)}</tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </>
+      ) : primaryTab === 'sizing' ? (
+        <>
+          <p className="wl2-tier-hint">
+            <strong>Step 2.</strong> The table lists stocks tagged <strong>Sizing</strong>. Promote only from Watching: pick a symbol, then <strong>Move to Sizing</strong>.
+          </p>
+          <div className="wl2-sizing-promote">
+            <select
+              className="wl2-cat-select wl2-sizing-promote__select"
+              value={promoteContractKey}
+              onChange={e => setPromoteContractKey(e.target.value)}
+              aria-label="Pick a Watching symbol to move to Sizing"
+            >
+              <option value="">Choose a Watching symbol…</option>
+              {watchingOnlyForPromote.map(item => (
+                <option key={item.contract_key} value={item.contract_key.trim()}>
+                  {watchlistItemLabel(item)}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="wl2-btn wl2-btn--primary"
+              disabled={!promoteContractKey.trim() || sizingCategoryId == null || addPending}
+              onClick={() => void handlePromoteToSizing()}
+            >
+              Move to Sizing
+            </button>
+          </div>
+          {sizingCategoryId == null && (
+            <p className="wl2-tier-hint wl2-tier-hint--warn">The <strong>Sizing</strong> category is missing; you cannot promote rows yet.</p>
+          )}
+          <div className="wl2-table-wrap">
+            {sizingStockRows.length === 0 ? (
+              <div className="wl2-empty">No Sizing symbols yet. Promote from Watching above.</div>
+            ) : (
+              <table className="wl2-table">
+                <thead>
+                  <tr>
+                    <th className="wl2-th--sym">Symbol</th>
+                    <th className="wl2-th--quote">Last / B·A</th>
+                    <th className="wl2-th--opt" title="Show in Option Discovery">Opt</th>
+                    <th className="wl2-th--cat">Category</th>
+                    <th className="wl2-th--acts" />
+                  </tr>
+                </thead>
+                <tbody>{renderStockRows(sizingStockRows)}</tbody>
+              </table>
+            )}
+          </div>
+        </>
       ) : (
         <>
-          {/* ── Stocks table ── */}
-          {activeSection === 'stocks' && (
+          <p className="wl2-tier-hint">
+            <strong>Step 3.</strong> Rows matched to your current IB portfolio snapshot. Once held, names leave Watching / Sizing for this view.
+          </p>
+          {positionSubTab === 'stocks' && (
             <div className="wl2-table-wrap">
-              {allStocks.length === 0 ? (
-                <div className="wl2-empty">No stocks in watchlist.</div>
+              {positionStockRows.length === 0 ? (
+                <div className="wl2-empty">No held stocks from this list.</div>
               ) : (
                 <table className="wl2-table">
                   <thead>
@@ -528,106 +946,15 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
                       <th className="wl2-th--acts" />
                     </tr>
                   </thead>
-                  {stockCategoryOrder.map(catLabel => {
-                    const items = stockByCategory[catLabel] ?? []
-                    if (items.length === 0) return null
-                    return (
-                      <tbody key={catLabel}>
-                        {stockCategoryOrder.length > 1 && (
-                          <tr className="wl2-group-row">
-                            <td colSpan={5}>
-                              <span className="wl2-group-label">{catLabel}</span>
-                              <span className="wl2-group-count">{items.length}</span>
-                            </td>
-                          </tr>
-                        )}
-                        {items.map(item => {
-                          const sym = symbolFromItem(item)
-                          const q = quoteByContractKey[item.contract_key] ?? quoteBySymbol[sym]
-                          const hasHolding = contractKeysWithPosition.has(item.contract_key.trim())
-                          const optOn = item.optionable === true
-                          return (
-                            <tr key={item.contract_key} className={!optOn ? 'wl2-row--dim' : undefined}>
-                              <td className="wl2-td--sym" title={item.contract_key}>
-                                <span className="wl2-sym">{watchlistItemLabel(item)}</span>
-                                {hasHolding && <span className="wl2-badge wl2-badge--hold" title="Holding">H</span>}
-                              </td>
-                              <td className="wl2-td--quote">{renderQuoteCell(q)}</td>
-                              <td className="wl2-td--opt">
-                                <button
-                                  type="button"
-                                  className={`wl2-opt-pill${optOn ? ' wl2-opt-pill--on' : ''}`}
-                                  onClick={() => handleOptionableToggle(item)}
-                                  aria-label={`Option? for ${watchlistItemLabel(item)}`}
-                                  title={optOn ? 'Included in Option Discovery' : 'Not in Option Discovery'}
-                                >
-                                  {optOn ? 'ON' : 'OFF'}
-                                </button>
-                              </td>
-                              <td className="wl2-td--cat">
-                                <select
-                                  className="wl2-cat-select"
-                                  value={item.category_id ?? ''}
-                                  onChange={e => {
-                                    const v = e.target.value
-                                    handleWatchlistCategoryChange(item, v ? Number(v) : null)
-                                  }}
-                                  aria-label={`Category for ${watchlistItemLabel(item)}`}
-                                >
-                                  <option value="">—</option>
-                                  {positionCategories.map(c => (
-                                    <option key={c.id} value={c.id}>{c.name}</option>
-                                  ))}
-                                </select>
-                              </td>
-                              <td className="wl2-td--acts">
-                                <span className="wl2-acts">
-                                  <button
-                                    type="button"
-                                    className="wl2-act-icon"
-                                    onClick={() => handleAnalyze(item)}
-                                    disabled={analysisLoadingSymbol !== null}
-                                    title="Bar stats"
-                                    aria-label={`Analyze ${sym}`}
-                                  >
-                                    {analysisLoadingSymbol === sym ? '⏳' : '📊'}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="wl2-act-icon"
-                                    onClick={() => openAddOptionModal(item)}
-                                    title="Add option contract"
-                                    aria-label="Add option"
-                                  >
-                                    ＋
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="wl2-act-icon wl2-act-icon--rm"
-                                    onClick={() => handleRemoveWatchlist(item)}
-                                    title="Remove"
-                                    aria-label="Remove from watchlist"
-                                  >
-                                    ✕
-                                  </button>
-                                </span>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    )
-                  })}
+                  <tbody>{renderStockRows(positionStockRows)}</tbody>
                 </table>
               )}
             </div>
           )}
-
-          {/* ── Options table ── */}
-          {activeSection === 'options' && (
+          {positionSubTab === 'options' && (
             <div className="wl2-table-wrap">
-              {watchlistOptions.length === 0 ? (
-                <div className="wl2-empty">No options in watchlist.</div>
+              {positionOptRows.length === 0 ? (
+                <div className="wl2-empty">No held options from this list.</div>
               ) : (
                 <table className="wl2-table">
                   <thead>
@@ -641,69 +968,7 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
                       <th className="wl2-th--acts" />
                     </tr>
                   </thead>
-                  {optionCategoryOrder.map(catLabel => {
-                    const items = optionByCategory[catLabel] ?? []
-                    if (items.length === 0) return null
-                    return (
-                      <tbody key={`opt-${catLabel}`}>
-                        {optionCategoryOrder.length > 1 && (
-                          <tr className="wl2-group-row">
-                            <td colSpan={7}>
-                              <span className="wl2-group-label">{catLabel}</span>
-                              <span className="wl2-group-count">{items.length}</span>
-                            </td>
-                          </tr>
-                        )}
-                        {items.map(item => {
-                          const q = quoteByContractKey[item.contract_key] ?? quoteBySymbol[symbolFromItem(item)]
-                          const hasHolding = contractKeysWithPosition.has(item.contract_key.trim())
-                          return (
-                            <tr key={item.contract_key}>
-                              <td className="wl2-td--sym" title={item.contract_key}>
-                                <span className="wl2-sym">{item.symbol || watchlistItemLabel(item)}</span>
-                                {hasHolding && <span className="wl2-badge wl2-badge--hold" title="Holding">H</span>}
-                              </td>
-                              <td className="wl2-td--quote">{renderQuoteCell(q)}</td>
-                              <td className="wl2-td--exp">{formatExpiry(item.expiry)}</td>
-                              <td className="wl2-td--right">
-                                <span className={`wl2-right-badge${(item.option_right || '').toUpperCase() === 'C' || (item.option_right || '').toUpperCase() === 'CALL' ? ' wl2-right-badge--c' : ' wl2-right-badge--p'}`}>
-                                  {formatOptionRight(item.option_right)}
-                                </span>
-                              </td>
-                              <td className="wl2-td--strike">{item.strike != null ? formatStrike(item.strike) : '—'}</td>
-                              <td className="wl2-td--cat">
-                                <select
-                                  className="wl2-cat-select"
-                                  value={item.category_id ?? ''}
-                                  onChange={e => {
-                                    const v = e.target.value
-                                    handleWatchlistCategoryChange(item, v ? Number(v) : null)
-                                  }}
-                                  aria-label={`Category for ${item.symbol || watchlistItemLabel(item)}`}
-                                >
-                                  <option value="">—</option>
-                                  {positionCategories.map(c => (
-                                    <option key={c.id} value={c.id}>{c.name}</option>
-                                  ))}
-                                </select>
-                              </td>
-                              <td className="wl2-td--acts">
-                                <button
-                                  type="button"
-                                  className="wl2-act-icon wl2-act-icon--rm"
-                                  onClick={() => handleRemoveWatchlist(item)}
-                                  title="Remove"
-                                  aria-label="Remove from watchlist"
-                                >
-                                  ✕
-                                </button>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    )
-                  })}
+                  <tbody>{renderOptionRows(positionOptRows)}</tbody>
                 </table>
               )}
             </div>

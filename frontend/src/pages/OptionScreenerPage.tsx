@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { StatusResponse } from '../types'
+import { InfoTooltip } from '../components/InfoTooltip'
 import type { ScreenerFilters, ScreenerContractRow, ScreenerSymbolGroup, ScreenerResponse } from '../api/research/screener'
 import { runScreener } from '../api/research/screener'
 import type { StrategyStructure, OpportunityPayload, EntryConditionItem } from '../api/strategy/strategies'
@@ -12,7 +13,8 @@ import { SCREENER_STRUCTURE_TYPES } from './strategy/strategyFormUtils'
 
 interface OptionScreenerPageProps {
   status?: StatusResponse | null
-  onGoToScreener?: () => void
+  /** “Research” breadcrumb → Risk Model (Portfolio-style title row). */
+  onBreadcrumbResearch?: () => void
   /** Opens Settings → Data Coverage → Option (Screener data pipeline tables). */
   onOpenOptionCoverage?: () => void
   breadcrumbLabel?: string
@@ -102,7 +104,7 @@ function fmtNum(v: number | null | undefined, decimals = 2): string {
 function ratingColor(rating: string): string {
   switch (rating) {
     case 'A': return '#22c55e'
-    case 'B': return '#3b82f6'
+    case 'B': return 'var(--color-link)'
     case 'C': return '#f59e0b'
     default: return '#ef4444'
   }
@@ -128,17 +130,11 @@ function scoreBar(score: number): string {
 
 function ScreenerPipelineSummary({ onOpenOptionCoverage }: { onOpenOptionCoverage?: () => void }) {
   return (
-    <div style={{
-      border: '1px solid var(--color-border, #2a3040)',
-      borderRadius: 8, marginBottom: 18, padding: '14px 18px',
-      background: 'var(--color-surface2, #252d3b)',
-    }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: '#a0aec0', letterSpacing: 0.5, marginBottom: 8 }}>
-        DATA PIPELINE
-      </div>
-      <p style={{ fontSize: 13, color: '#cbd5e0', lineHeight: 1.55, margin: '0 0 12px' }}>
+    <div className="oscr-pipeline">
+      <div className="oscr-pipeline__kicker">Data pipeline</div>
+      <p className="oscr-pipeline__body">
         Scores use PostgreSQL rows from Massive option sync and stock OHLC, plus derived daily ATM IV for percentiles. See{' '}
-        <strong style={{ color: '#e2e8f0' }}>Settings → Data Coverage → Overview</strong>
+        <strong className="oscr-meta--strong">Settings → Data Coverage → Overview</strong>
         {' '}for coverage metrics and detail links.
       </p>
       {onOpenOptionCoverage ? (
@@ -231,8 +227,8 @@ function SaveOpportunityModal({ contract, structureType, onClose }: SaveModalPro
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
       <div style={{
-        background: 'var(--color-surface, #1e2430)',
-        border: '1px solid var(--color-border, #2a3040)',
+        background: 'var(--color-surface)',
+        border: '1px solid var(--color-border)',
         borderRadius: 8, padding: '24px 28px', width: 480, maxWidth: '95vw',
         maxHeight: '90vh', overflowY: 'auto',
       }}>
@@ -240,7 +236,7 @@ function SaveOpportunityModal({ contract, structureType, onClose }: SaveModalPro
 
         {/* Contract summary */}
         <div style={{
-          background: 'var(--color-surface2, #252d3b)', borderRadius: 6,
+          background: 'var(--color-surface-elevated)', borderRadius: 6,
           padding: '10px 14px', marginBottom: 18, fontSize: 13,
         }}>
           <strong>{contract.symbol}</strong>{' '}
@@ -251,7 +247,7 @@ function SaveOpportunityModal({ contract, structureType, onClose }: SaveModalPro
             {contract.rating} {contract.score.toFixed(1)}
           </span>
           {contract.apr_pct != null && (
-            <span style={{ color: '#a0aec0' }}> · {contract.apr_pct.toFixed(1)}% APR</span>
+            <span style={{ color: 'var(--color-text-muted)' }}> · {contract.apr_pct.toFixed(1)}% APR</span>
           )}
         </div>
 
@@ -260,7 +256,7 @@ function SaveOpportunityModal({ contract, structureType, onClose }: SaveModalPro
           Strategy Structure
         </label>
         {structuresLoading ? (
-          <div style={{ fontSize: 13, color: '#a0aec0', marginBottom: 14 }}>Loading structures…</div>
+          <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 14 }}>Loading structures…</div>
         ) : structures.length === 0 ? (
           <div style={{ fontSize: 13, color: '#f59e0b', marginBottom: 14 }}>
             No active {structureType.replace(/_/g, ' ')} structures found. Create one first.
@@ -271,8 +267,8 @@ function SaveOpportunityModal({ contract, structureType, onClose }: SaveModalPro
             onChange={e => setSelectedStructureId(e.target.value === '' ? '' : Number(e.target.value))}
             style={{
               width: '100%', marginBottom: 14, padding: '6px 10px',
-              background: 'var(--color-surface2, #252d3b)',
-              border: '1px solid var(--color-border, #2a3040)',
+              background: 'var(--color-surface-elevated)',
+              border: '1px solid var(--color-border)',
               borderRadius: 5, color: 'inherit', fontSize: 13,
             }}
           >
@@ -295,8 +291,8 @@ function SaveOpportunityModal({ contract, structureType, onClose }: SaveModalPro
           onChange={e => setOppName(e.target.value)}
           style={{
             width: '100%', marginBottom: 14, padding: '6px 10px',
-            background: 'var(--color-surface2, #252d3b)',
-            border: '1px solid var(--color-border, #2a3040)',
+            background: 'var(--color-surface-elevated)',
+            border: '1px solid var(--color-border)',
             borderRadius: 5, color: 'inherit', fontSize: 13,
           }}
         />
@@ -313,8 +309,8 @@ function SaveOpportunityModal({ contract, structureType, onClose }: SaveModalPro
             onChange={e => setDteMin(e.target.value)}
             style={{
               flex: 1, padding: '6px 10px',
-              background: 'var(--color-surface2, #252d3b)',
-              border: '1px solid var(--color-border, #2a3040)',
+              background: 'var(--color-surface-elevated)',
+              border: '1px solid var(--color-border)',
               borderRadius: 5, color: 'inherit', fontSize: 13,
             }}
           />
@@ -325,8 +321,8 @@ function SaveOpportunityModal({ contract, structureType, onClose }: SaveModalPro
             onChange={e => setDteMax(e.target.value)}
             style={{
               flex: 1, padding: '6px 10px',
-              background: 'var(--color-surface2, #252d3b)',
-              border: '1px solid var(--color-border, #2a3040)',
+              background: 'var(--color-surface-elevated)',
+              border: '1px solid var(--color-border)',
               borderRadius: 5, color: 'inherit', fontSize: 13,
             }}
           />
@@ -335,7 +331,7 @@ function SaveOpportunityModal({ contract, structureType, onClose }: SaveModalPro
         {/* IV conditions */}
         <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>
           IV Range (entry conditions)
-          <span style={{ color: '#a0aec0', fontWeight: 400 }}> — contract IV ±20%, editable</span>
+          <span style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}> — contract IV ±20%, editable</span>
         </label>
         <div style={{ display: 'flex', gap: 10, marginBottom: 18 }}>
           <input
@@ -345,8 +341,8 @@ function SaveOpportunityModal({ contract, structureType, onClose }: SaveModalPro
             onChange={e => setIvMin(e.target.value)}
             style={{
               flex: 1, padding: '6px 10px',
-              background: 'var(--color-surface2, #252d3b)',
-              border: '1px solid var(--color-border, #2a3040)',
+              background: 'var(--color-surface-elevated)',
+              border: '1px solid var(--color-border)',
               borderRadius: 5, color: 'inherit', fontSize: 13,
             }}
           />
@@ -357,8 +353,8 @@ function SaveOpportunityModal({ contract, structureType, onClose }: SaveModalPro
             onChange={e => setIvMax(e.target.value)}
             style={{
               flex: 1, padding: '6px 10px',
-              background: 'var(--color-surface2, #252d3b)',
-              border: '1px solid var(--color-border, #2a3040)',
+              background: 'var(--color-surface-elevated)',
+              border: '1px solid var(--color-border)',
               borderRadius: 5, color: 'inherit', fontSize: 13,
             }}
           />
@@ -368,7 +364,7 @@ function SaveOpportunityModal({ contract, structureType, onClose }: SaveModalPro
         {saveError && (
           <div style={{
             background: 'rgba(239,68,68,0.15)', border: '1px solid #ef4444',
-            borderRadius: 5, padding: '8px 12px', marginBottom: 14, fontSize: 13, color: '#fca5a5',
+            borderRadius: 5, padding: '8px 12px', marginBottom: 14, fontSize: 13, color: 'var(--color-danger)',
           }}>
             {saveError}
           </div>
@@ -388,7 +384,7 @@ function SaveOpportunityModal({ contract, structureType, onClose }: SaveModalPro
             type="button"
             onClick={onClose}
             style={{
-              padding: '7px 18px', borderRadius: 5, border: '1px solid var(--color-border, #2a3040)',
+              padding: '7px 18px', borderRadius: 5, border: '1px solid var(--color-border)',
               background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 13,
             }}
           >
@@ -401,7 +397,7 @@ function SaveOpportunityModal({ contract, structureType, onClose }: SaveModalPro
               disabled={saving || !selectedStructureId || structures.length === 0}
               style={{
                 padding: '7px 18px', borderRadius: 5, border: 'none',
-                background: saving ? '#4a5568' : '#3b82f6',
+                background: saving ? 'var(--color-border)' : 'var(--color-accent)',
                 color: '#fff', cursor: saving ? 'not-allowed' : 'pointer', fontSize: 13,
               }}
             >
@@ -428,7 +424,7 @@ function ContractTable({ contracts, onSave }: ContractTableProps) {
     <div style={{ overflowX: 'auto', marginTop: 8 }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
-          <tr style={{ borderBottom: '1px solid var(--color-border, #2a3040)', color: '#a0aec0' }}>
+          <tr style={{ borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
             <th style={{ padding: '6px 8px', textAlign: 'left' }}>Strike</th>
             <th style={{ padding: '6px 8px', textAlign: 'right' }}>DTE</th>
             <th style={{ padding: '6px 8px', textAlign: 'right' }}>Score</th>
@@ -455,7 +451,7 @@ function ContractTable({ contracts, onSave }: ContractTableProps) {
               }}
             >
               <td style={{ padding: '5px 8px', fontFamily: 'monospace' }}>
-                <span style={{ color: '#a0aec0', fontSize: 11 }}>{c.expiration.slice(4, 6)}/{c.expiration.slice(6)}</span>
+                <span style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>{c.expiration.slice(4, 6)}/{c.expiration.slice(6)}</span>
                 {' '}
                 <strong>${c.strike.toFixed(0)}</strong>
               </td>
@@ -506,7 +502,7 @@ function ContractTable({ contracts, onSave }: ContractTableProps) {
               <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace' }}>
                 {fmtPct(c.safety_margin)}
               </td>
-              <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#a0aec0' }}>
+              <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--color-text-muted)' }}>
                 {c.open_interest != null ? c.open_interest.toLocaleString() : '—'}
               </td>
               <td style={{ padding: '5px 8px', textAlign: 'center' }}>
@@ -515,9 +511,9 @@ function ContractTable({ contracts, onSave }: ContractTableProps) {
                   title="Save as Strategy Opportunity"
                   onClick={() => onSave(c)}
                   style={{
-                    background: 'none', border: '1px solid var(--color-border, #2a3040)',
+                    background: 'none', border: '1px solid var(--color-border)',
                     borderRadius: 4, cursor: 'pointer', padding: '2px 8px',
-                    color: '#a0aec0', fontSize: 13,
+                    color: 'var(--color-text-muted)', fontSize: 13,
                   }}
                 >
                   ⊕
@@ -545,7 +541,7 @@ function GroupRow({ group, onSave }: GroupRowProps) {
 
   return (
     <div style={{
-      border: '1px solid var(--color-border, #2a3040)',
+      border: '1px solid var(--color-border)',
       borderRadius: 7, marginBottom: 12, overflow: 'hidden',
     }}>
       {/* Group header */}
@@ -555,12 +551,12 @@ function GroupRow({ group, onSave }: GroupRowProps) {
         style={{
           display: 'flex', alignItems: 'center', gap: 16,
           width: '100%', padding: '10px 16px',
-          background: 'var(--color-surface2, #252d3b)',
+          background: 'var(--color-surface-elevated)',
           border: 'none', cursor: 'pointer', color: 'inherit', textAlign: 'left',
         }}
       >
         <span style={{ fontSize: 15, fontWeight: 700, minWidth: 56 }}>{group.symbol}</span>
-        <span style={{ color: '#a0aec0', fontSize: 13 }}>
+        <span style={{ color: 'var(--color-text-muted)', fontSize: 13 }}>
           ${group.spot.toFixed(2)}
         </span>
         <span style={{
@@ -579,17 +575,17 @@ function GroupRow({ group, onSave }: GroupRowProps) {
           <strong>Best</strong> {group.best_score.toFixed(1)}
         </span>
         {group.avg_iv != null && (
-          <span style={{ fontSize: 12, color: '#a0aec0' }}>
+          <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
             Avg IV {fmtPct(group.avg_iv)}
           </span>
         )}
         <span style={{
-          marginLeft: 'auto', fontSize: 12, color: '#a0aec0',
+          marginLeft: 'auto', fontSize: 12, color: 'var(--color-text-muted)',
           background: 'rgba(255,255,255,0.07)', borderRadius: 4, padding: '2px 8px',
         }}>
           {group.contract_count} contracts
         </span>
-        <span style={{ fontSize: 16, color: '#a0aec0', marginLeft: 8 }}>
+        <span style={{ fontSize: 16, color: 'var(--color-text-muted)', marginLeft: 8 }}>
           {expanded ? '▲' : '▼'}
         </span>
       </button>
@@ -629,7 +625,7 @@ function FilterRow({ enabled, onToggle, label, children }: FilterRowProps) {
           type="checkbox"
           checked={enabled}
           onChange={onToggle}
-          style={{ accentColor: '#3b82f6', width: 14, height: 14, cursor: 'pointer' }}
+          style={{ accentColor: 'var(--color-accent)', width: 14, height: 14, cursor: 'pointer' }}
         />
       </label>
       <div style={{ flex: 1, opacity: enabled ? 1 : 0.4, pointerEvents: enabled ? 'auto' : 'none', transition: 'opacity 0.15s' }}>
@@ -644,9 +640,9 @@ function FilterRow({ enabled, onToggle, label, children }: FilterRowProps) {
 // ---------------------------------------------------------------------------
 
 export function OptionScreenerPage({
-  onGoToScreener,
+  onBreadcrumbResearch,
   onOpenOptionCoverage,
-  breadcrumbLabel = 'Screener',
+  breadcrumbLabel = 'Option Screener',
 }: OptionScreenerPageProps) {
   const [filters, setFilters] = useState<ScreenerFilters>(loadFilters)
   const [filtersEnabled, setFiltersEnabled] = useState<Record<FilterKey, boolean>>(loadFiltersEnabled)
@@ -729,28 +725,30 @@ export function OptionScreenerPage({
   const minPremiumDisplay = filters.min_premium ?? 0
 
   return (
-    <div className="card process-section" style={{ maxWidth: 1280 }}>
-      {/* Page title */}
-      <h2 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-        {onGoToScreener ? (
-          <>
-            <button
-              type="button"
-              className="page-title-breadcrumb-link"
-              onClick={onGoToScreener}
-              aria-label="Go to Research"
-            >
-              Research
-            </button>
-            {' / '}
-            {breadcrumbLabel}
-            {' '}
-          </>
-        ) : (
-          <>Option Screener{' '}</>
-        )}
-      </h2>
-      <p className="section-hint" style={{ marginBottom: 16 }}>
+    <div className="card process-section watchlist-page stock-screener-page option-screener-page wl2">
+      <div className="research-page-head">
+        <h2 className="page-title-with-tooltip" style={{ margin: 0 }}>
+          {onBreadcrumbResearch ? (
+            <>
+              <button
+                type="button"
+                className="page-title-breadcrumb-link"
+                onClick={onBreadcrumbResearch}
+                aria-label="Research home"
+              >
+                Research
+              </button>
+              {' / '}
+              {breadcrumbLabel}
+              {' '}
+            </>
+          ) : (
+            <>Option Screener{' '}</>
+          )}
+          <InfoTooltip text="Option screener (Research → Screener → Option Screener): filter by structure and run against Massive-backed data. Same card theme as Stock Screener." />
+        </h2>
+      </div>
+      <p className="section-hint" style={{ marginBottom: 'var(--space-3)' }}>
         Screen option contracts by strategy structure and scoring criteria (V1: cash-secured puts).
       </p>
 
@@ -759,19 +757,13 @@ export function OptionScreenerPage({
       {/* ----------------------------------------------------------------- */}
       {/* Filter Panel                                                       */}
       {/* ----------------------------------------------------------------- */}
-      <section
-        style={{
-          background: 'var(--color-surface2, #252d3b)',
-          border: '1px solid var(--color-border, #2a3040)',
-          borderRadius: 8, padding: '18px 20px', marginBottom: 24,
-        }}
-      >
+      <section className="oscr-panel" aria-label="Screener filters">
         {/* Strategy type */}
         <div style={{ marginBottom: 16 }}>
-          <label style={{ display: 'block', fontSize: 12, color: '#a0aec0', marginBottom: 6 }}>
+          <label className="oscr-label">
             Strategy Type
           </label>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <div className="oscr-chip-row">
             {SCREENER_STRUCTURE_TYPES.map(st => {
               const isActive = filters.structure_type === st.value
               const isEnabled = st.value === 'cash_secured_put'
@@ -782,16 +774,7 @@ export function OptionScreenerPage({
                   disabled={!isEnabled}
                   onClick={() => isEnabled && updateFilter('structure_type', st.value)}
                   title={isEnabled ? st.label : `${st.label} — coming in V2`}
-                  style={{
-                    padding: '5px 14px', borderRadius: 5, fontSize: 13,
-                    border: isActive
-                      ? '1px solid #3b82f6'
-                      : '1px solid var(--color-border, #2a3040)',
-                    background: isActive ? 'rgba(59,130,246,0.2)' : 'transparent',
-                    color: isEnabled ? (isActive ? '#93c5fd' : 'inherit') : '#4a5568',
-                    cursor: isEnabled ? 'pointer' : 'not-allowed',
-                    fontWeight: isActive ? 600 : 400,
-                  }}
+                  className={`oscr-structure-chip${isActive ? ' oscr-structure-chip--active' : ''}`}
                 >
                   {st.label}
                   {!isEnabled && <span style={{ marginLeft: 4, fontSize: 10 }}>V2</span>}
@@ -803,21 +786,16 @@ export function OptionScreenerPage({
 
         {/* Symbols row */}
         <div style={{ marginBottom: 16 }}>
-          <label style={{ display: 'block', fontSize: 12, color: '#a0aec0', marginBottom: 4 }}>
+          <label className="oscr-label">
             Symbols (comma or space separated)
           </label>
           <input
             type="text"
+            className="oscr-input"
             placeholder="AAPL, NVDA, TSLA"
             value={symbolsInput}
             onChange={e => setSymbolsInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') handleRun() }}
-            style={{
-              width: '100%', padding: '7px 11px',
-              background: 'var(--color-surface, #1e2430)',
-              border: '1px solid var(--color-border, #2a3040)',
-              borderRadius: 5, color: 'inherit', fontSize: 13,
-            }}
           />
         </div>
 
@@ -826,7 +804,7 @@ export function OptionScreenerPage({
           <FilterRow enabled={filtersEnabled.dte} onToggle={() => toggleFilter('dte')} label="DTE">
             <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end' }}>
               <div>
-                <label style={{ display: 'block', fontSize: 12, color: '#a0aec0', marginBottom: 4 }}>
+                <label style={{ display: 'block', fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
                   DTE Min
                 </label>
                 <input
@@ -836,14 +814,14 @@ export function OptionScreenerPage({
                   onChange={e => updateFilter('dte_min', Number(e.target.value))}
                   style={{
                     width: 72, padding: '7px 8px',
-                    background: 'var(--color-surface, #1e2430)',
-                    border: '1px solid var(--color-border, #2a3040)',
+                    background: 'var(--color-surface)',
+                    border: '1px solid var(--color-border)',
                     borderRadius: 5, color: 'inherit', fontSize: 13,
                   }}
                 />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: 12, color: '#a0aec0', marginBottom: 4 }}>
+                <label style={{ display: 'block', fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
                   DTE Max
                 </label>
                 <input
@@ -853,14 +831,14 @@ export function OptionScreenerPage({
                   onChange={e => updateFilter('dte_max', Number(e.target.value))}
                   style={{
                     width: 72, padding: '7px 8px',
-                    background: 'var(--color-surface, #1e2430)',
-                    border: '1px solid var(--color-border, #2a3040)',
+                    background: 'var(--color-surface)',
+                    border: '1px solid var(--color-border)',
                     borderRadius: 5, color: 'inherit', fontSize: 13,
                   }}
                 />
               </div>
               {!filtersEnabled.dte && (
-                <span style={{ fontSize: 11, color: '#4a5568', paddingBottom: 10, fontStyle: 'italic' }}>
+                <span style={{ fontSize: 11, color: 'var(--color-text-dim)', paddingBottom: 10, fontStyle: 'italic' }}>
                   disabled — all expirations included
                 </span>
               )}
@@ -872,9 +850,9 @@ export function OptionScreenerPage({
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, marginBottom: 16 }}>
           {/* Prob ITM max */}
           <FilterRow enabled={filtersEnabled.max_prob_itm} onToggle={() => toggleFilter('max_prob_itm')} label="Max Prob ITM">
-            <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#a0aec0', marginBottom: 4 }}>
+            <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
               <span>Max Prob ITM</span>
-              <span style={{ color: filtersEnabled.max_prob_itm ? '#e2e8f0' : '#4a5568' }}>
+              <span style={{ color: filtersEnabled.max_prob_itm ? 'var(--color-text-main)' : 'var(--color-text-dim)' }}>
                 {filtersEnabled.max_prob_itm ? `${(maxProbItmDisplay * 100).toFixed(0)}%` : 'off'}
               </span>
             </label>
@@ -888,9 +866,9 @@ export function OptionScreenerPage({
 
           {/* Min annualized return */}
           <FilterRow enabled={filtersEnabled.min_annualized_return} onToggle={() => toggleFilter('min_annualized_return')} label="Min Annual Return">
-            <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#a0aec0', marginBottom: 4 }}>
+            <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
               <span>Min Annual Return</span>
-              <span style={{ color: filtersEnabled.min_annualized_return ? '#e2e8f0' : '#4a5568' }}>
+              <span style={{ color: filtersEnabled.min_annualized_return ? 'var(--color-text-main)' : 'var(--color-text-dim)' }}>
                 {filtersEnabled.min_annualized_return ? `${(minAnnualReturnDisplay * 100).toFixed(0)}%` : 'off'}
               </span>
             </label>
@@ -904,9 +882,9 @@ export function OptionScreenerPage({
 
           {/* Max spread pct */}
           <FilterRow enabled={filtersEnabled.max_spread_pct} onToggle={() => toggleFilter('max_spread_pct')} label="Max Spread %">
-            <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#a0aec0', marginBottom: 4 }}>
+            <label style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
               <span>Max Spread %</span>
-              <span style={{ color: filtersEnabled.max_spread_pct ? '#e2e8f0' : '#4a5568' }}>
+              <span style={{ color: filtersEnabled.max_spread_pct ? 'var(--color-text-main)' : 'var(--color-text-dim)' }}>
                 {filtersEnabled.max_spread_pct ? `${(maxSpreadDisplay * 100).toFixed(0)}%` : 'off'}
               </span>
             </label>
@@ -923,7 +901,7 @@ export function OptionScreenerPage({
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 20 }}>
           <FilterRow enabled={filtersEnabled.min_premium} onToggle={() => toggleFilter('min_premium')} label="Min Premium">
             <div>
-              <label style={{ display: 'block', fontSize: 12, color: '#a0aec0', marginBottom: 4 }}>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
                 Min Premium ($)
               </label>
               <input
@@ -934,8 +912,8 @@ export function OptionScreenerPage({
                 onChange={e => updateFilter('min_premium', Number(e.target.value))}
                 style={{
                   width: 90, padding: '7px 8px',
-                  background: 'var(--color-surface, #1e2430)',
-                  border: '1px solid var(--color-border, #2a3040)',
+                  background: 'var(--color-surface)',
+                  border: '1px solid var(--color-border)',
                   borderRadius: 5, color: 'inherit', fontSize: 13,
                 }}
               />
@@ -955,16 +933,10 @@ export function OptionScreenerPage({
 
           <button
             type="button"
+            className="wl2-btn wl2-btn--primary"
             onClick={handleRun}
             disabled={loading}
-            style={{
-              padding: '8px 24px', borderRadius: 6,
-              background: loading ? '#374151' : '#3b82f6',
-              border: 'none', color: '#fff',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              fontSize: 14, fontWeight: 600,
-              display: 'flex', alignItems: 'center', gap: 8,
-            }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '0.4rem 1.25rem' }}
           >
             {loading ? (
               <>
@@ -980,11 +952,7 @@ export function OptionScreenerPage({
       {/* Error                                                              */}
       {/* ----------------------------------------------------------------- */}
       {error && (
-        <div style={{
-          background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)',
-          borderRadius: 6, padding: '10px 16px', marginBottom: 18,
-          fontSize: 13, color: '#fca5a5',
-        }}>
+        <div className="wl2-error" role="alert" style={{ marginBottom: 'var(--space-3)' }}>
           {error}
         </div>
       )}
@@ -1005,7 +973,7 @@ export function OptionScreenerPage({
             marginBottom: 16,
           }}>
             {scanned > 0 && (
-              <span style={{ fontSize: 12, color: '#718096' }}>
+              <span style={{ fontSize: 12, color: 'var(--color-text-dim)' }}>
                 Scan: {scanned} symbol{scanned !== 1 ? 's' : ''} requested
                 {withMatches > 0 ? ` · ${withMatches} with matching contracts` : ''}
                 {failed > 0 ? ` · ${failed} with no qualifying row` : ''}
@@ -1020,28 +988,25 @@ export function OptionScreenerPage({
               </span>
             )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 13, color: '#a0aec0' }}>
+              <span style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>
                 {totalC} contract{totalC !== 1 ? 's' : ''}
                 {' across '}
                 {withMatches} symbol{withMatches !== 1 ? 's' : ''}
                 {withMatches > 0 && (
-                  <> · best score <strong style={{ color: '#e2e8f0' }}>{result.groups[0].best_score.toFixed(1)}</strong></>
+                  <> · best score <strong style={{ color: 'var(--color-text-main)' }}>{result.groups[0].best_score.toFixed(1)}</strong></>
                 )}
               </span>
               {result.scan_ts ? (
-                <span style={{ color: '#4a5568', fontSize: 12 }}>{result.scan_ts}</span>
+                <span style={{ color: 'var(--color-text-dim)', fontSize: 12 }}>{result.scan_ts}</span>
               ) : null}
             </div>
           </div>
 
           {/* Warnings */}
           {Object.keys(warnings).length > 0 && (
-            <div style={{
-              background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)',
-              borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 12,
-            }}>
+            <div className="oscr-warn-box">
               {Object.entries(warnings).map(([sym, msg]) => (
-                <div key={sym} style={{ color: '#fcd34d' }}>
+                <div key={sym} style={{ color: 'var(--color-warning)' }}>
                   <strong>{sym}:</strong> {msg}
                 </div>
               ))}
@@ -1050,7 +1015,7 @@ export function OptionScreenerPage({
 
           {/* No results */}
           {result.groups.length === 0 && (
-            <div style={{ color: '#a0aec0', fontSize: 13, padding: '20px 0' }}>
+            <div style={{ color: 'var(--color-text-muted)', fontSize: 13, padding: '20px 0' }}>
               No contracts matched the current filters. Try disabling some filter checkboxes, widening the DTE range, raising Max Prob ITM, or lowering Min Annual Return.
             </div>
           )}
