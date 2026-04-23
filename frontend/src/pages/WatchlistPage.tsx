@@ -144,6 +144,8 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
   const [primaryTab, setPrimaryTab] = useState<'watching' | 'sizing' | 'positions'>('watching')
   const [positionSubTab, setPositionSubTab] = useState<'stocks' | 'options'>('stocks')
   const [promoteContractKey, setPromoteContractKey] = useState('')
+  const [promotePickerOpen, setPromotePickerOpen] = useState(false)
+  const promoteComboboxRef = useRef<HTMLDivElement>(null)
   const watchlistCategoryEnsureAttempted = useRef(false)
 
   const positions = useMemo(() => {
@@ -410,7 +412,27 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
     if (!item) return
     await handleWatchlistCategoryChange(item, sizingCategoryId)
     setPromoteContractKey('')
+    setPromotePickerOpen(false)
   }, [promoteContractKey, sizingCategoryId, watchingOnlyForPromote, handleWatchlistCategoryChange])
+
+  const promoteSelectedItem = useMemo(
+    () => watchingOnlyForPromote.find(i => i.contract_key.trim() === promoteContractKey.trim()),
+    [watchingOnlyForPromote, promoteContractKey],
+  )
+
+  useEffect(() => {
+    if (!promotePickerOpen) return
+    function onPointerDown(ev: PointerEvent) {
+      const root = promoteComboboxRef.current
+      if (root && !root.contains(ev.target as Node)) setPromotePickerOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [promotePickerOpen])
+
+  useEffect(() => {
+    setPromotePickerOpen(false)
+  }, [primaryTab])
 
   function symbolFromItem(item: WatchlistItem): string {
     if (item.symbol && String(item.symbol).trim()) return String(item.symbol).trim()
@@ -882,19 +904,77 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
             <strong>Step 2.</strong> The table lists stocks tagged <strong>Sizing</strong>. Promote only from Watching: pick a symbol, then <strong>Move to Sizing</strong>.
           </p>
           <div className="wl2-sizing-promote">
-            <select
-              className="wl2-cat-select wl2-sizing-promote__select"
-              value={promoteContractKey}
-              onChange={e => setPromoteContractKey(e.target.value)}
-              aria-label="Pick a Watching symbol to move to Sizing"
-            >
-              <option value="">Choose a Watching symbol…</option>
-              {watchingOnlyForPromote.map(item => (
-                <option key={item.contract_key} value={item.contract_key.trim()}>
-                  {watchlistItemLabel(item)}
-                </option>
-              ))}
-            </select>
+            <div className="wl2-promote-combobox" ref={promoteComboboxRef}>
+              <button
+                type="button"
+                className="wl2-promote-combobox__trigger"
+                id="wl2-promote-combobox-trigger"
+                aria-label="Pick a Watching symbol to move to Sizing"
+                aria-expanded={promotePickerOpen}
+                aria-controls="wl2-promote-listbox"
+                aria-haspopup="listbox"
+                onClick={() => setPromotePickerOpen(o => !o)}
+                onKeyDown={e => {
+                  if (e.key === 'Escape' && promotePickerOpen) {
+                    e.preventDefault()
+                    setPromotePickerOpen(false)
+                  }
+                }}
+              >
+                <span
+                  className={`wl2-promote-combobox__value${promoteSelectedItem ? '' : ' wl2-promote-combobox__value--placeholder'}`}
+                  title={
+                    promoteSelectedItem
+                      ? watchlistItemLabel(promoteSelectedItem)
+                      : 'Choose a Watching symbol…'
+                  }
+                >
+                  {promoteSelectedItem
+                    ? watchlistItemLabel(promoteSelectedItem)
+                    : 'Choose a Watching symbol…'}
+                </span>
+                <span className="wl2-promote-combobox__chev" aria-hidden>
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+              </button>
+              {promotePickerOpen && (
+                <ul id="wl2-promote-listbox" role="listbox" className="wl2-promote-combobox__menu" aria-labelledby="wl2-promote-combobox-trigger">
+                  <li
+                    role="option"
+                    aria-selected={promoteContractKey.trim() === ''}
+                    className={`wl2-promote-combobox__opt wl2-promote-combobox__opt--placeholder${promoteContractKey.trim() === '' ? ' wl2-promote-combobox__opt--active' : ''}`}
+                    onPointerDown={e => e.preventDefault()}
+                    onClick={() => {
+                      setPromoteContractKey('')
+                      setPromotePickerOpen(false)
+                    }}
+                  >
+                    Choose a Watching symbol…
+                  </li>
+                  {watchingOnlyForPromote.map(item => {
+                    const key = item.contract_key.trim()
+                    const sel = promoteContractKey.trim() === key
+                    return (
+                      <li
+                        key={key}
+                        role="option"
+                        aria-selected={sel}
+                        className={`wl2-promote-combobox__opt${sel ? ' wl2-promote-combobox__opt--active' : ''}`}
+                        onPointerDown={e => e.preventDefault()}
+                        onClick={() => {
+                          setPromoteContractKey(key)
+                          setPromotePickerOpen(false)
+                        }}
+                      >
+                        {watchlistItemLabel(item)}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
             <button
               type="button"
               className="wl2-btn wl2-btn--primary"

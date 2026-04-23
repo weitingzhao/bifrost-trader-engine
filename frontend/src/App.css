@@ -27035,9 +27035,122 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   margin-bottom: var(--space-4);
 }
 
-.wl2-sizing-promote__select {
-  min-width: 12rem;
-  max-width: 100%;
+/* Custom combobox for “Watching → Sizing” (avoids native <select> + .wl2-cat-select width clash). */
+.wl2-promote-combobox {
+  position: relative;
+  flex: 1 1 14rem;
+  min-width: min(14rem, 100%);
+  max-width: min(26rem, 100%);
+}
+
+.wl2-promote-combobox__trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  margin: 0;
+  padding: 0.4rem 0.55rem 0.4rem 0.65rem;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  color: var(--color-text-main);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12);
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.wl2-promote-combobox__trigger:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+  background: color-mix(in srgb, var(--color-surface-elevated) 92%, var(--color-accent-soft));
+}
+
+.wl2-promote-combobox__trigger:focus {
+  outline: none;
+}
+
+.wl2-promote-combobox__trigger:focus-visible {
+  border-color: var(--color-accent);
+  box-shadow:
+    0 0 0 1px var(--color-accent),
+    0 0 0 3px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+.wl2-promote-combobox__value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+
+.wl2-promote-combobox__value--placeholder {
+  color: var(--color-text-muted);
+  font-weight: 450;
+}
+
+.wl2-promote-combobox__chev {
+  flex-shrink: 0;
+  display: flex;
+  color: var(--color-text-muted);
+  opacity: 0.85;
+  transition: transform var(--transition-fast), color var(--transition-fast);
+}
+
+.wl2-promote-combobox__trigger[aria-expanded='true'] .wl2-promote-combobox__chev {
+  transform: rotate(180deg);
+  color: var(--color-accent);
+}
+
+.wl2-promote-combobox__menu {
+  position: absolute;
+  z-index: 80;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: min(16rem, 42vh);
+  overflow-y: auto;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.35),
+    0 0 0 1px color-mix(in srgb, var(--color-border) 80%, transparent);
+}
+
+.wl2-promote-combobox__opt {
+  margin: 0;
+  padding: 0.45rem 0.55rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  letter-spacing: -0.01em;
+  color: var(--color-text-main);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.wl2-promote-combobox__opt:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.wl2-promote-combobox__opt--placeholder {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.wl2-promote-combobox__opt--active {
+  background: var(--color-accent-soft);
+  color: var(--color-text-main);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent);
 }
 
 /* ── Research → Screener → Stock Screener: step-by-step (Watching → Sizing → Positions) ── */
