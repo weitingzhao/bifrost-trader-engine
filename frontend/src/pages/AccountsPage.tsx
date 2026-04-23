@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { ExecutionFreshnessItem, IbAccountSnapshot, RealtimeQuote, StatusResponse } from '../types'
+import type { ExecutionFreshnessItem, IbAccountSnapshot, IbPositionRow, RealtimeQuote, StatusResponse } from '../types'
 import { fetchBarsBenchmark, fetchQuotes, fetchExecutionsFreshness, postExecutionsFetch, postExecutionsFetchFlex, postExecutionsFetchFlexUpload, subscribeQuotes } from '../api'
 import { fetchPositionCategories, postPositionCategory, patchPositionCategory, deletePositionCategory, putPositionCategoryTag } from '../api'
 import type { PositionCategory } from '../types'
@@ -16,6 +16,28 @@ import {
   type DailyBenchmark,
 } from './accounts/accountsUtils'
 import { isLedgerCashLikeCategory, isLedgerFixedIncomeCategory } from './portfolio/ledgerStockCategoryBuckets'
+
+/**
+ * `<select>` value must match an `<option value>`. Prefer `category_id` when it matches a known
+ * category; otherwise resolve from `category` name (same field used to group rows in the table)
+ * so Host/Secondary tabs stay in sync with the stock table when ids are missing or JSON types differ.
+ */
+function positionCategorySelectValue(pos: IbPositionRow, categories: PositionCategory[]): string {
+  const cats = categories ?? []
+  const idRaw = pos.category_id
+  if (idRaw != null) {
+    const n = Number(idRaw)
+    if (Number.isFinite(n) && cats.some((c) => Number(c.id) === n)) {
+      return String(n)
+    }
+  }
+  const name = String(pos.category ?? '').trim()
+  if (name && name !== 'Uncategorized') {
+    const hit = cats.find((c) => c.name.trim() === name)
+    if (hit != null) return String(hit.id)
+  }
+  return ''
+}
 
 function ibPositionMarketValue(pos: {
   position?: number | string | null
@@ -132,8 +154,9 @@ export function AccountsPage({
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null)
   const [editingCategoryName, setEditingCategoryName] = useState('')
 
+  // Categories are DB-backed and independent of whether accounts are in the snapshot yet; do not gate on hasAccounts
+  // (otherwise opening the modal before accounts load, or failed portfolio-only routing, leaves lists empty).
   useEffect(() => {
-    if (!hasAccounts) return
     let cancelled = false
     fetchPositionCategories()
       .then((r) => {
@@ -142,8 +165,10 @@ export function AccountsPage({
       .catch(() => {
         if (!cancelled) setPositionCategories([])
       })
-    return () => { cancelled = true }
-  }, [hasAccounts])
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   /** Settings → IB: Event account IDs (same as Model Analysis / Live streams). */
   const ibAccountCfg = j?.config?.ib_client?.account
@@ -2304,7 +2329,7 @@ export function AccountsPage({
                           <span style={{ minWidth: '4rem', fontWeight: 500 }}>{pos.symbol ?? '—'}</span>
                           <select
                             className="ib-position-category-select ib-category-modal-select"
-                            value={pos.category_id ?? ''}
+                            value={positionCategorySelectValue(pos, positionCategories)}
                             onChange={async (e) => {
                               const v = e.target.value
                               await putPositionCategoryTag(aid, ck, v ? Number(v) : null)
@@ -2315,7 +2340,7 @@ export function AccountsPage({
                           >
                             <option value="">Uncategorized</option>
                             {positionCategories.map((c) => (
-                              <option key={c.id} value={c.id}>{c.name}</option>
+                              <option key={c.id} value={String(c.id)}>{c.name}</option>
                             ))}
                           </select>
                         </li>

@@ -1967,7 +1967,20 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 created_at timestamptz DEFAULT now(),
                 updated_at timestamptz DEFAULT now()
             )
-        """
+            """
+        )
+        # Older installs may predate some columns; INSERT expects updated_at etc.
+        cur.execute(
+            "ALTER TABLE preference_position_categories ADD COLUMN IF NOT EXISTS description text"
+        )
+        cur.execute(
+            "ALTER TABLE preference_position_categories ADD COLUMN IF NOT EXISTS sort_order integer"
+        )
+        cur.execute(
+            "ALTER TABLE preference_position_categories ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now()"
+        )
+        cur.execute(
+            "ALTER TABLE preference_position_categories ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now()"
         )
         _log_table(
             "preference_position_category_tags",

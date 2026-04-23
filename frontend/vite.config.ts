@@ -107,7 +107,7 @@ export default defineConfig({
       '/indices': { target: MARKET, changeOrigin: true },
       '/market': { target: MARKET, changeOrigin: true },
       '/watchlist': { target: MARKET, changeOrigin: true },
-      '/position-categories': { target: PORTFOLIO, changeOrigin: true },
+      '/position-categories': { target: MONITOR, changeOrigin: true },
       '/portfolio': { target: PORTFOLIO, changeOrigin: true },
       '/positions': { target: MONITOR, changeOrigin: true },
       '/control': { target: MONITOR, changeOrigin: true },

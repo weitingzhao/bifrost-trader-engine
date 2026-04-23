@@ -21,6 +21,138 @@ import { computeOptionLiveAvgPerShareFromExecutions } from '../utils/optionLiveB
 
 const SYMBOL_ORDER_STORAGE_KEY = 'market_streams_symbol_order'
 
+/** IB TWS-style FIN INSTRUMENT column sort cycle (Market Streams = STK only → 5 modes). */
+type MarketStreamsSortMode = 1 | 2 | 3 | 4 | 5
+/** IB TWS-style Contract column sort cycle (Option Positions). */
+type OptionPositionsSortMode = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
+
+type MarketStreamsRow = {
+  symbol: string
+  quote?: RealtimeQuote | null
+  qty: number | null
+  avgCost: number | null
+  changePct: number | null
+  pnlVsBench: number | null
+  pnlCost: number | null
+  streamCategory: 'host' | 'secondary' | 'both' | null
+  isInWatchlist: boolean
+  category: string
+  hostQty: number | null
+  hostAvgCost: number | null
+  hostPnlCost: number | null
+  secondaryQty: number | null
+  secondaryAvgCost: number | null
+  secondaryPnlCost: number | null
+  positionDailyPrevClose: number | null
+}
+
+type OptPositionRow = {
+  account_id: string
+  contract_key: string
+  symbol: string
+  expiry: string
+  strike: number
+  right: string
+  qty: number
+  avg_cost: number | null
+}
+
+function msStockSide(qty: number | null): 'long' | 'short' | 'flat' {
+  if (qty == null || !Number.isFinite(qty) || qty === 0) return 'flat'
+  return qty > 0 ? 'long' : 'short'
+}
+
+function cmpSymbolLocale(a: string, b: string, dir: 1 | -1): number {
+  return a.localeCompare(b, undefined, { sensitivity: 'base' }) * dir
+}
+
+function optionRightIsCall(right: string): boolean {
+  const r = (right ?? '').toString().trim().toUpperCase()
+  return r === 'C' || r === 'CALL'
+}
+
+function optionRightIsPut(right: string): boolean {
+  const r = (right ?? '').toString().trim().toUpperCase()
+  return r === 'P' || r === 'PUT'
+}
+
+/** YYYYMMDD → sortable int; invalid → 0 */
+function expiryDigitsToSortKey(expiry: string): number {
+  const s = String(expiry ?? '').replace(/\D/g, '')
+  if (s.length >= 8) return parseInt(s.slice(0, 8), 10) || 0
+  if (s.length === 6) return parseInt(`${s}01`, 10) || 0
+  return 0
+}
+
+/** IB-style e.g. May 08'26 */
+function formatExpiryIbGroupLabel(expiry: string): string {
+  const s = String(expiry ?? '').replace(/\D/g, '')
+  if (s.length < 8) return expiry?.trim() ? String(expiry).trim() : 'Other'
+  const y = parseInt(s.slice(0, 4), 10)
+  const mo = parseInt(s.slice(4, 6), 10) - 1
+  const d = parseInt(s.slice(6, 8), 10)
+  if (!Number.isFinite(y) || mo < 0 || mo > 11 || !Number.isFinite(d)) return String(expiry).trim() || 'Other'
+  const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][mo] ?? ''
+  return `${mon} ${String(d).padStart(2, '0')}'${String(y).slice(2)}`
+}
+
+function optionRowSortKey(row: OptPositionRow): string {
+  const exp = String(row.expiry ?? '').replace(/\D/g, '')
+  const strike = Number.isFinite(row.strike) ? String(row.strike).padStart(12, '0') : '0'
+  const sym = (row.symbol || '').toUpperCase()
+  const ck = (row.contract_key || '').toUpperCase()
+  return `${sym}|${exp}|${strike}|${ck}`
+}
+
+function computeOptMidAndLivePnl(
+  row: OptPositionRow,
+  q: RealtimeQuote | undefined,
+  basis: { avgPerShare: number | null; basisSource: 'flex_trades' | 'tws_client' | null } | undefined,
+): { mid: number | null; livePnl: number | null } {
+  const mid = q?.mid ?? (q?.bid != null && q?.ask != null ? (q.bid + q.ask) / 2 : null)
+  const avgForPnl = basis?.avgPerShare != null && Number.isFinite(basis.avgPerShare) ? basis.avgPerShare : row.avg_cost
+  const livePnl =
+    mid != null && avgForPnl != null && Number.isFinite(avgForPnl) && Number.isFinite(row.qty) && row.qty !== 0
+      ? (mid - avgForPnl) * row.qty * 100
+      : null
+  return { mid, livePnl }
+}
+
+function sumFiniteMsPnl(rows: MarketStreamsRow[]): number {
+  return rows.reduce((acc, r) => {
+    const v = r.pnlCost
+    return acc + (v != null && Number.isFinite(v) ? v : 0)
+  }, 0)
+}
+
+function marketStreamsSortHeaderMeta(mode: MarketStreamsSortMode): { suffix: string | null; arrow: 'up' | 'down' | null } {
+  switch (mode) {
+    case 1: return { suffix: null, arrow: null }
+    case 2: return { suffix: null, arrow: 'up' }
+    case 3: return { suffix: null, arrow: 'down' }
+    case 4: return { suffix: null, arrow: 'up' }
+    case 5: return { suffix: null, arrow: 'down' }
+    default: return { suffix: null, arrow: null }
+  }
+}
+
+function optionPositionsSortHeaderMeta(mode: OptionPositionsSortMode): { suffix: string | null; arrow: 'up' | 'down' | null } {
+  if (mode === 1) return { suffix: null, arrow: null }
+  if (mode === 2) return { suffix: null, arrow: 'up' }
+  if (mode === 3) return { suffix: null, arrow: 'down' }
+  if (mode === 4 || mode === 5) return { suffix: 'T+', arrow: mode === 4 ? 'up' : 'down' }
+  if (mode === 6 || mode === 7) return { suffix: 'T+S+', arrow: mode === 6 ? 'up' : 'down' }
+  if (mode === 8 || mode === 9) return { suffix: 'E+', arrow: mode === 8 ? 'up' : 'down' }
+  return { suffix: null, arrow: null }
+}
+
+type LiveSortGroupMs = { label: string; showGroupHeader: boolean; rows: MarketStreamsRow[]; totalPnl: number }
+type LiveSortGroupOp = { label: string; showGroupHeader: boolean; rows: OptPositionRow[]; totalPnl: number }
+
+function sortOptRowsAlpha(rows: OptPositionRow[], dir: 1 | -1): OptPositionRow[] {
+  return [...rows].sort((a, b) => optionRowSortKey(a).localeCompare(optionRowSortKey(b), undefined, { sensitivity: 'base' }) * dir)
+}
+
 /** Total Daily $ and weighted Daily % for Market Streams (denominator = Σ base × |qty| per Accounts group logic). */
 function aggregateMarketStreamsDailyTotals(
   rows: {
@@ -275,6 +407,8 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
   const [symbolOrderByCategory, setSymbolOrderByCategory] = useState<Record<string, string[]>>(loadSymbolOrderFromStorage)
   const [categoryOrderSaving, setCategoryOrderSaving] = useState(false)
   const [streamSyncFeedback, setStreamSyncFeedback] = useState<string | null>(null)
+  const [msSortMode, setMsSortMode] = useState<MarketStreamsSortMode>(1)
+  const [opSortMode, setOpSortMode] = useState<OptionPositionsSortMode>(1)
   /** Open orders: from status (DB) + dedicated poll for live updates. */
   const [openOrders, setOpenOrders] = useState<OpenOrder[]>([])
   const [openOrdersUpdatedAt, setOpenOrdersUpdatedAt] = useState<number | null>(null)
@@ -352,16 +486,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
   const accountsList = j?.portfolio?.accounts ?? []
 
   const optPositionRows = useMemo(() => {
-    const rows: {
-      account_id: string
-      contract_key: string
-      symbol: string
-      expiry: string
-      strike: number
-      right: string
-      qty: number
-      avg_cost: number | null
-    }[] = []
+    const rows: OptPositionRow[] = []
     const seen = new Set<string>()
     for (const acc of accountsList) {
       const accId = (acc?.account_id ?? (acc as { account?: string }).account ?? '').toString().trim()
@@ -561,7 +686,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
   const wantHost = norm(streamHostId)
   const wantSecondary = norm(streamSecondaryId)
   const wishlistSet = watchlistSymbolSet.size > 0 ? watchlistSymbolSet : subscribedSet
-  const watchlistRows = watchlistSymbols.map((symbol) => {
+  const watchlistRows: MarketStreamsRow[] = watchlistSymbols.map((symbol) => {
     let qty = 0
     let totalCost = 0
     let hasCost = false
@@ -849,6 +974,326 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
     putMarketStreamsSymbolOrder(cat, next).catch(() => { /* DB failed; localStorage already updated */ })
   }, [rowsByCategory, symbolOrderByCategory])
 
+  /** Modes 2–5: flat / grouped rows; mode 1 uses category + drag order (null). */
+  const marketStreamsGroupedOverride = useMemo((): LiveSortGroupMs[] | null => {
+    if (msSortMode === 1) return null
+    const rows = [...filteredRows]
+    const push = (label: string, show: boolean, r: MarketStreamsRow[]): LiveSortGroupMs => ({
+      label,
+      showGroupHeader: show,
+      rows: r,
+      totalPnl: sumFiniteMsPnl(r),
+    })
+    if (msSortMode === 2) {
+      rows.sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, 1))
+      return [push('', false, rows)]
+    }
+    if (msSortMode === 3) {
+      rows.sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, -1))
+      return [push('', false, rows)]
+    }
+    if (msSortMode === 4) {
+      const longs = rows.filter((r) => msStockSide(r.qty) === 'long').sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, 1))
+      const shorts = rows.filter((r) => msStockSide(r.qty) === 'short').sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, 1))
+      const flats = rows.filter((r) => msStockSide(r.qty) === 'flat').sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, 1))
+      const out: LiveSortGroupMs[] = []
+      if (longs.length) out.push(push('Total Long Stocks', true, longs))
+      if (shorts.length) out.push(push('Total Short Stocks', true, shorts))
+      if (flats.length) out.push(push('No position qty', true, flats))
+      return out.length ? out : [push('', false, rows)]
+    }
+    if (msSortMode === 5) {
+      const longs = rows.filter((r) => msStockSide(r.qty) === 'long').sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, -1))
+      const shorts = rows.filter((r) => msStockSide(r.qty) === 'short').sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, -1))
+      const flats = rows.filter((r) => msStockSide(r.qty) === 'flat').sort((a, b) => cmpSymbolLocale(a.symbol, b.symbol, -1))
+      const out: LiveSortGroupMs[] = []
+      if (shorts.length) out.push(push('Total Short Stocks', true, shorts))
+      if (longs.length) out.push(push('Total Long Stocks', true, longs))
+      if (flats.length) out.push(push('No position qty', true, flats))
+      return out.length ? out : [push('', false, rows)]
+    }
+    return null
+  }, [filteredRows, msSortMode])
+
+  const optionPositionsDisplayGroups = useMemo((): LiveSortGroupOp[] => {
+    const rows = optPositionRows
+    if (rows.length === 0) return []
+    const basisFor = (row: OptPositionRow) =>
+      optionLiveBasisByRow.get(`${row.account_id.toLowerCase()}\t${row.contract_key}`)
+    const totalPnlFor = (rs: OptPositionRow[]) =>
+      rs.reduce((acc, row) => {
+        const { livePnl } = computeOptMidAndLivePnl(row, quotesByContractKey[row.contract_key], basisFor(row))
+        return acc + (livePnl != null && Number.isFinite(livePnl) ? livePnl : 0)
+      }, 0)
+    const grp = (label: string, show: boolean, r: OptPositionRow[]): LiveSortGroupOp => ({
+      label,
+      showGroupHeader: show,
+      rows: r,
+      totalPnl: totalPnlFor(r),
+    })
+    const rowKey = (r: OptPositionRow) => `${r.account_id.toLowerCase()}\t${r.contract_key}`
+    switch (opSortMode) {
+      case 1:
+      case 2:
+        return [grp('', false, sortOptRowsAlpha(rows, 1))]
+      case 3:
+        return [grp('', false, sortOptRowsAlpha(rows, -1))]
+      case 4: {
+        const calls = sortOptRowsAlpha(rows.filter((r) => optionRightIsCall(r.right)), 1)
+        const puts = sortOptRowsAlpha(rows.filter((r) => optionRightIsPut(r.right)), 1)
+        const other = sortOptRowsAlpha(
+          rows.filter((r) => !optionRightIsCall(r.right) && !optionRightIsPut(r.right)),
+          1,
+        )
+        const out: LiveSortGroupOp[] = []
+        if (calls.length) out.push(grp('Calls', true, calls))
+        if (puts.length) out.push(grp('Puts', true, puts))
+        if (other.length) out.push(grp('Other', true, other))
+        return out.length ? out : [grp('', false, rows)]
+      }
+      case 5: {
+        const puts = sortOptRowsAlpha(rows.filter((r) => optionRightIsPut(r.right)), -1)
+        const calls = sortOptRowsAlpha(rows.filter((r) => optionRightIsCall(r.right)), -1)
+        const other = sortOptRowsAlpha(
+          rows.filter((r) => !optionRightIsCall(r.right) && !optionRightIsPut(r.right)),
+          -1,
+        )
+        const out: LiveSortGroupOp[] = []
+        if (puts.length) out.push(grp('Puts', true, puts))
+        if (calls.length) out.push(grp('Calls', true, calls))
+        if (other.length) out.push(grp('Other', true, other))
+        return out.length ? out : [grp('', false, rows)]
+      }
+      case 6: {
+        const longCalls = rows.filter((r) => r.qty > 0 && optionRightIsCall(r.right))
+        const shortPuts = rows.filter((r) => r.qty < 0 && optionRightIsPut(r.right))
+        const used = new Set([...longCalls, ...shortPuts].map(rowKey))
+        const other = rows.filter((r) => !used.has(rowKey(r)))
+        const out: LiveSortGroupOp[] = []
+        if (longCalls.length) out.push(grp('Long Calls', true, sortOptRowsAlpha(longCalls, 1)))
+        if (shortPuts.length) out.push(grp('Short Puts', true, sortOptRowsAlpha(shortPuts, 1)))
+        if (other.length) out.push(grp('Other', true, sortOptRowsAlpha(other, 1)))
+        return out.length ? out : [grp('', false, rows)]
+      }
+      case 7: {
+        const longCalls = rows.filter((r) => r.qty > 0 && optionRightIsCall(r.right))
+        const shortPuts = rows.filter((r) => r.qty < 0 && optionRightIsPut(r.right))
+        const used = new Set([...longCalls, ...shortPuts].map(rowKey))
+        const other = rows.filter((r) => !used.has(rowKey(r)))
+        const out: LiveSortGroupOp[] = []
+        if (shortPuts.length) out.push(grp('Short Puts', true, sortOptRowsAlpha(shortPuts, -1)))
+        if (longCalls.length) out.push(grp('Long Calls', true, sortOptRowsAlpha(longCalls, -1)))
+        if (other.length) out.push(grp('Other', true, sortOptRowsAlpha(other, -1)))
+        return out.length ? out : [grp('', false, rows)]
+      }
+      case 8:
+      case 9: {
+        const expMap = new Map<string, OptPositionRow[]>()
+        for (const r of rows) {
+          const k = String(r.expiry ?? '').trim() || 'Other'
+          if (!expMap.has(k)) expMap.set(k, [])
+          expMap.get(k)!.push(r)
+        }
+        const keys = Array.from(expMap.keys()).sort((a, b) => {
+          const ka = expiryDigitsToSortKey(a)
+          const kb = expiryDigitsToSortKey(b)
+          if (ka !== kb) return opSortMode === 8 ? ka - kb : kb - ka
+          return a.localeCompare(b)
+        })
+        const dir: 1 | -1 = opSortMode === 8 ? 1 : -1
+        return keys.map((k) => grp(formatExpiryIbGroupLabel(k), true, sortOptRowsAlpha(expMap.get(k) ?? [], dir)))
+      }
+      default:
+        return [grp('', false, sortOptRowsAlpha(rows, 1))]
+    }
+  }, [optPositionRows, opSortMode, quotesByContractKey, optionLiveBasisByRow])
+
+  const msColSpan = hasStreamAccounts ? 12 : 6
+  const msDragEnabled = msSortMode === 1
+  const msHeaderMeta = marketStreamsSortHeaderMeta(msSortMode)
+  const opHeaderMeta = optionPositionsSortHeaderMeta(opSortMode)
+
+  const renderMarketStreamRow = useCallback(
+    (row: MarketStreamsRow, categoryForDrag: string, dragEnabled: boolean) => {
+      const {
+        symbol,
+        quote: q,
+        qty,
+        avgCost,
+        changePct,
+        pnlVsBench,
+        pnlCost,
+        hostQty,
+        hostAvgCost,
+        hostPnlCost,
+        secondaryQty,
+        secondaryAvgCost,
+        secondaryPnlCost,
+        positionDailyPrevClose,
+      } = row
+      const symbolFreshness = getQuoteFreshness(q?.ts)
+      const symBench = benchmarks[(symbol || '').trim().toUpperCase()]
+      const dailyLast = quoteDisplayLast(q)
+      return (
+        <tr
+          key={row.symbol}
+          onDragOver={dragEnabled ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } : undefined}
+          onDrop={
+            dragEnabled
+              ? (e) => {
+                  e.preventDefault()
+                  try {
+                    const raw = e.dataTransfer.getData('application/x-market-streams-symbol')
+                    if (!raw) return
+                    const { category: fromCat, symbol: fromSymbol } = JSON.parse(raw) as { category: string; symbol: string }
+                    if (fromCat === categoryForDrag && fromSymbol !== row.symbol) applySymbolReorder(categoryForDrag, fromSymbol, row.symbol)
+                  } catch {
+                    /* ignore */
+                  }
+                }
+              : undefined
+          }
+        >
+          <td
+            className={symbolFreshness ? `realtime-quote-symbol realtime-quote-symbol-${symbolFreshness}` : 'realtime-quote-symbol'}
+            title={[
+              q?.ts != null ? `Last update ${symbolFreshness === 'fresh' ? '<3s ago' : symbolFreshness === 'stale' ? '3–10s ago' : '>10s ago'}` : null,
+              getDailyRefTooltip(benchmarks[(symbol || '').trim().toUpperCase()], quoteDisplayLast(q)),
+            ]
+              .filter(Boolean)
+              .join('\n') || undefined}
+          >
+            {dragEnabled ? (
+              <span
+                className="realtime-quote-drag-handle"
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('application/x-market-streams-symbol', JSON.stringify({ category: categoryForDrag, symbol: row.symbol }))
+                  e.dataTransfer.effectAllowed = 'move'
+                }}
+                title="Drag to reorder symbol"
+                aria-hidden
+              >
+                ⋮⋮
+              </span>
+            ) : null}
+            <strong>{symbol}</strong>
+          </td>
+          {hasStreamAccounts && (
+            <>
+              <td className="realtime-quote-num">{hostQty != null && Number.isFinite(hostQty) ? hostQty : '—'}</td>
+              <td className="realtime-quote-num">{hostAvgCost != null && Number.isFinite(hostAvgCost) ? fmtUsd(hostAvgCost) : '—'}</td>
+              <td className="realtime-quote-num">
+                {hostPnlCost != null && Number.isFinite(hostPnlCost) ? (
+                  <span className={hostPnlCost > 0 ? 'pnl-positive' : hostPnlCost < 0 ? 'pnl-negative' : ''}>
+                    {fmtUsdRound0(hostPnlCost)}
+                  </span>
+                ) : (
+                  '—'
+                )}
+              </td>
+              <td className="realtime-quote-num">{secondaryQty != null && Number.isFinite(secondaryQty) ? secondaryQty : '—'}</td>
+              <td className="realtime-quote-num">{secondaryAvgCost != null && Number.isFinite(secondaryAvgCost) ? fmtUsd(secondaryAvgCost) : '—'}</td>
+              <td className="realtime-quote-num">
+                {secondaryPnlCost != null && Number.isFinite(secondaryPnlCost) ? (
+                  <span className={secondaryPnlCost > 0 ? 'pnl-positive' : secondaryPnlCost < 0 ? 'pnl-negative' : ''}>
+                    {fmtUsdRound0(secondaryPnlCost)}
+                  </span>
+                ) : (
+                  '—'
+                )}
+              </td>
+            </>
+          )}
+          <td className="realtime-quote-num">{qty != null && Number.isFinite(qty) ? qty : '—'}</td>
+          <td className="realtime-quote-num">{avgCost != null && Number.isFinite(avgCost) ? fmtUsd(avgCost) : '—'}</td>
+          <td className="realtime-quote-num realtime-quote-last-bid-ask">
+            {q ? (() => {
+              const displayLast = quoteDisplayLast(q)
+              const bid = q.bid != null && Number.isFinite(q.bid) ? q.bid : null
+              const ask = q.ask != null && Number.isFinite(q.ask) ? q.ask : null
+              const bidDiff = displayLast != null && bid != null ? bid - displayLast : null
+              const askDiff = displayLast != null && ask != null ? ask - displayLast : null
+              const bench = benchmarks[(symbol || '').trim().toUpperCase()]
+              const prevClose = bench && (bench.prev_close != null && Number.isFinite(bench.prev_close))
+                ? bench.prev_close
+                : (bench && Number.isFinite(bench.close) ? bench.close : null)
+              const lastVsPrev = displayLast != null && prevClose != null && prevClose > 0
+                ? (displayLast > prevClose ? 'pnl-positive' : displayLast < prevClose ? 'pnl-negative' : '')
+                : ''
+              return (
+                <>
+                  {displayLast != null ? (
+                    <span className={lastVsPrev}>{fmtUsd(displayLast)}</span>
+                  ) : '—'}
+                  {bidDiff != null && (
+                    <span className={`realtime-quote-spread ${bidDiff > 0 ? 'pnl-positive' : bidDiff < 0 ? 'pnl-negative' : ''}`} title="Bid vs Last"> {Math.abs(bidDiff).toFixed(2)}</span>
+                  )}
+                  {askDiff != null && (
+                    <span className={`realtime-quote-spread ${askDiff > 0 ? 'pnl-positive' : askDiff < 0 ? 'pnl-negative' : ''}`} title="Ask vs Last"> {Math.abs(askDiff).toFixed(2)}</span>
+                  )}
+                </>
+              )
+            })() : '—'}
+          </td>
+          <td className="realtime-quote-num realtime-quote-pnl-stacked market-streams-daily-calc-cell">
+            <span className="realtime-quote-pnl-stacked-line">
+              {changePct != null && Number.isFinite(changePct) ? (
+                <span className={changePct > 0 ? 'pnl-positive' : changePct < 0 ? 'pnl-negative' : ''}>
+                  {Math.abs(changePct).toFixed(2)}%
+                </span>
+              ) : (
+                '—'
+              )}
+            </span>
+            <span className="realtime-quote-pnl-stacked-line">
+              {pnlVsBench != null && Number.isFinite(pnlVsBench) ? (
+                <span className={pnlVsBench > 0 ? 'pnl-positive' : pnlVsBench < 0 ? 'pnl-negative' : ''}>
+                  {fmtUsd(Math.abs(pnlVsBench))}
+                </span>
+              ) : (
+                '—'
+              )}
+            </span>
+            <div className="market-streams-daily-calc-popup" role="tooltip">
+              <MarketStreamsDailyCalcBreakdown
+                symbol={(symbol || '').trim() || '—'}
+                bench={symBench}
+                positionDailyPrevClose={positionDailyPrevClose}
+                last={dailyLast}
+                qty={qty}
+              />
+            </div>
+          </td>
+          <td className="realtime-quote-num realtime-quote-pnl-stacked">
+            <span className="realtime-quote-pnl-stacked-line">
+              {(() => {
+                const dl = quoteDisplayLast(q)
+                if (avgCost == null || !Number.isFinite(avgCost) || avgCost <= 0 || dl == null) return '—'
+                const sincePct = ((dl - avgCost) / avgCost) * 100
+                return (
+                  <span className={sincePct > 0 ? 'pnl-positive' : sincePct < 0 ? 'pnl-negative' : ''}>
+                    {Math.abs(sincePct).toFixed(2)}%
+                  </span>
+                )
+              })()}
+            </span>
+            <span className="realtime-quote-pnl-stacked-line">
+              {pnlCost != null && Number.isFinite(pnlCost) ? (
+                <span className={pnlCost > 0 ? 'pnl-positive' : pnlCost < 0 ? 'pnl-negative' : ''}>
+                  {fmtUsdRound0(pnlCost)}
+                </span>
+              ) : (
+                '—'
+              )}
+            </span>
+          </td>
+        </tr>
+      )
+    },
+    [hasStreamAccounts, benchmarks, applySymbolReorder],
+  )
+
   return (
     <div className="app-page-stack">
       <div className="card card-operations live-open-watchlist-split">
@@ -1077,7 +1522,21 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
             <table className="table-operations realtime-quotes-table" aria-label="Option position live quotes">
               <thead>
                 <tr>
-                  <th>Contract</th>
+                  <th scope="col">
+                    <button
+                      type="button"
+                      className="live-sort-header"
+                      onClick={() => setOpSortMode((m) => ((((m as number) % 9) + 1) as OptionPositionsSortMode))}
+                      title="Cycle sort: A–Z → Z–A → Calls/Puts → Puts/Calls → Long Calls·Short Puts → Short Puts·Long Calls → by expiry ↑ / ↓"
+                    >
+                      <span className="live-sort-header__label">
+                        Contract
+                        {opHeaderMeta.suffix ? <span className="live-sort-header__suffix">{opHeaderMeta.suffix}</span> : null}
+                      </span>
+                      {opHeaderMeta.arrow === 'up' ? <span className="live-sort-header__arrow live-sort-header__arrow--up" aria-hidden /> : null}
+                      {opHeaderMeta.arrow === 'down' ? <span className="live-sort-header__arrow live-sort-header__arrow--down" aria-hidden /> : null}
+                    </button>
+                  </th>
                   <th>Qty</th>
                   <th>Avg Cost</th>
                   <th>Bid · Mid · Ask</th>
@@ -1086,58 +1545,72 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                 </tr>
               </thead>
               <tbody>
-                {optPositionRows.map(row => {
-                  const q = quotesByContractKey[row.contract_key]
-                  const mid = q?.mid ?? (q?.bid != null && q?.ask != null ? (q.bid + q.ask) / 2 : null)
-                  const basisKey = `${row.account_id.toLowerCase()}\t${row.contract_key}`
-                  const basis = optionLiveBasisByRow.get(basisKey)
-                  const avgForPnl = basis?.avgPerShare != null && Number.isFinite(basis.avgPerShare) ? basis.avgPerShare : row.avg_cost
-                  const livePnl =
-                    mid != null && avgForPnl != null && Number.isFinite(avgForPnl) && Number.isFinite(row.qty) && row.qty !== 0
-                      ? (mid - avgForPnl) * row.qty * 100
-                      : null
-                  const ageSec = q?.ts != null ? Math.floor(Date.now() / 1000 - q.ts) : null
-                  const contractLabel = row.symbol
-                    ? `${row.symbol} ${row.right === 'C' ? 'CALL' : row.right === 'P' ? 'PUT' : row.right} ${row.strike}`
-                    : row.contract_key
-                  const avgTitle =
-                    basis?.avgPerShare != null && Number.isFinite(basis.avgPerShare)
-                      ? `Live PNL basis: account_executions (FIFO open lot, source ${basis.basisSource ?? 'ledger'}) $/share. IB avg shown muted if different.`
-                      : 'Live PNL basis: IB position avg (no execution match or ledger qty mismatch).'
-                  return (
-                    <tr key={basisKey}>
-                      <td title={row.contract_key} style={{ fontWeight: 'bold' }}>{contractLabel}</td>
-                      <td>{row.qty > 0 ? `Long ${row.qty}` : row.qty < 0 ? `Short ${Math.abs(row.qty)}` : '—'}</td>
-                      <td title={avgTitle}>
-                        {avgForPnl != null && Number.isFinite(avgForPnl) ? fmtUsd(avgForPnl) : '—'}
-                        {basis?.avgPerShare != null && row.avg_cost != null && Number.isFinite(row.avg_cost) && Math.abs(basis.avgPerShare - row.avg_cost) > 1e-6 ? (
-                          <span className="replay-muted" style={{ fontSize: '0.7em', marginLeft: '0.35em' }} title="IB avg cost">IB {fmtUsd(row.avg_cost)}</span>
-                        ) : null}
-                      </td>
-                      <td className="positions-opt-live-quote">
-                        {q == null ? (
-                          <span className="replay-muted">—</span>
-                        ) : (
-                          <>
-                            {q.bid != null ? <span className="positions-opt-quote-bid">{q.bid.toFixed(2)}</span> : <span className="replay-muted">—</span>}
-                            {' · '}
-                            <strong>{mid != null ? mid.toFixed(2) : '—'}</strong>
-                            {' · '}
-                            {q.ask != null ? <span className="positions-opt-quote-ask">{q.ask.toFixed(2)}</span> : <span className="replay-muted">—</span>}
-                          </>
-                        )}
-                      </td>
-                      <td>
-                        {livePnl != null ? (
-                          <span className={`replay-pnl-unrealized ${livePnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(livePnl)}</span>
-                        ) : <span className="replay-muted">—</span>}
-                      </td>
-                      <td className="replay-muted">
-                        {ageSec != null ? `${ageSec}s ago` : '—'}
-                      </td>
-                    </tr>
-                  )
-                })}
+                {optionPositionsDisplayGroups.map((g, gi) => (
+                  <Fragment key={`op-grp-${gi}-${g.label || 'all'}`}>
+                    {g.showGroupHeader ? (
+                      <tr className="live-sort-group-header">
+                        <td colSpan={6}>
+                          <span className="live-sort-group-label">{g.label}</span>
+                          <span className={`live-sort-group-total ${g.totalPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                            Live PNL Σ {fmtUsd(g.totalPnl)}
+                          </span>
+                        </td>
+                      </tr>
+                    ) : null}
+                    {g.rows.map((row) => {
+                      const q = quotesByContractKey[row.contract_key]
+                      const { mid, livePnl } = computeOptMidAndLivePnl(
+                        row,
+                        q,
+                        optionLiveBasisByRow.get(`${row.account_id.toLowerCase()}\t${row.contract_key}`),
+                      )
+                      const basisKey = `${row.account_id.toLowerCase()}\t${row.contract_key}`
+                      const basis = optionLiveBasisByRow.get(basisKey)
+                      const avgForPnl = basis?.avgPerShare != null && Number.isFinite(basis.avgPerShare) ? basis.avgPerShare : row.avg_cost
+                      const ageSec = q?.ts != null ? Math.floor(Date.now() / 1000 - q.ts) : null
+                      const contractLabel = row.symbol
+                        ? `${row.symbol} ${row.right === 'C' ? 'CALL' : row.right === 'P' ? 'PUT' : row.right} ${row.strike}`
+                        : row.contract_key
+                      const avgTitle =
+                        basis?.avgPerShare != null && Number.isFinite(basis.avgPerShare)
+                          ? `Live PNL basis: account_executions (FIFO open lot, source ${basis.basisSource ?? 'ledger'}) $/share. IB avg shown muted if different.`
+                          : 'Live PNL basis: IB position avg (no execution match or ledger qty mismatch).'
+                      return (
+                        <tr key={basisKey}>
+                          <td title={row.contract_key} style={{ fontWeight: 'bold' }}>{contractLabel}</td>
+                          <td>{row.qty > 0 ? `Long ${row.qty}` : row.qty < 0 ? `Short ${Math.abs(row.qty)}` : '—'}</td>
+                          <td title={avgTitle}>
+                            {avgForPnl != null && Number.isFinite(avgForPnl) ? fmtUsd(avgForPnl) : '—'}
+                            {basis?.avgPerShare != null && row.avg_cost != null && Number.isFinite(row.avg_cost) && Math.abs(basis.avgPerShare - row.avg_cost) > 1e-6 ? (
+                              <span className="replay-muted" style={{ fontSize: '0.7em', marginLeft: '0.35em' }} title="IB avg cost">IB {fmtUsd(row.avg_cost)}</span>
+                            ) : null}
+                          </td>
+                          <td className="positions-opt-live-quote">
+                            {q == null ? (
+                              <span className="replay-muted">—</span>
+                            ) : (
+                              <>
+                                {q.bid != null ? <span className="positions-opt-quote-bid">{q.bid.toFixed(2)}</span> : <span className="replay-muted">—</span>}
+                                {' · '}
+                                <strong>{mid != null ? mid.toFixed(2) : '—'}</strong>
+                                {' · '}
+                                {q.ask != null ? <span className="positions-opt-quote-ask">{q.ask.toFixed(2)}</span> : <span className="replay-muted">—</span>}
+                              </>
+                            )}
+                          </td>
+                          <td>
+                            {livePnl != null ? (
+                              <span className={`replay-pnl-unrealized ${livePnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(livePnl)}</span>
+                            ) : <span className="replay-muted">—</span>}
+                          </td>
+                          <td className="replay-muted">
+                            {ageSec != null ? `${ageSec}s ago` : '—'}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </Fragment>
+                ))}
               </tbody>
             </table>
           </div>
@@ -1281,7 +1754,21 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
             </colgroup>
             <thead>
               <tr>
-                <th>Symbol</th>
+                <th scope="col">
+                  <button
+                    type="button"
+                    className="live-sort-header"
+                    onClick={() => setMsSortMode((m) => ((((m as number) % 5) + 1) as MarketStreamsSortMode))}
+                    title="Cycle sort: default (category + drag) → A–Z → Z–A → Long/Short groups → Short/Long groups"
+                  >
+                    <span className="live-sort-header__label">
+                      Symbol
+                      {msHeaderMeta.suffix ? <span className="live-sort-header__suffix">{msHeaderMeta.suffix}</span> : null}
+                    </span>
+                    {msHeaderMeta.arrow === 'up' ? <span className="live-sort-header__arrow live-sort-header__arrow--up" aria-hidden /> : null}
+                    {msHeaderMeta.arrow === 'down' ? <span className="live-sort-header__arrow live-sort-header__arrow--down" aria-hidden /> : null}
+                  </button>
+                </th>
                 {hasStreamAccounts && (
                   <>
                     <th colSpan={3} scope="colgroup" className="realtime-quote-colgroup">
@@ -1326,183 +1813,29 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                       : 'No rows match the selected filters.'}
                   </td>
                 </tr>
+              ) : marketStreamsGroupedOverride != null ? (
+                marketStreamsGroupedOverride.map((g, gi) => (
+                  <Fragment key={`ms-ov-${gi}-${g.label || 'flat'}`}>
+                    {g.showGroupHeader ? (
+                      <tr className="live-sort-group-header">
+                        <td colSpan={msColSpan}>
+                          <span className="live-sort-group-label">{g.label}</span>
+                          <span className={`live-sort-group-total ${g.totalPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                            SINCE Σ {fmtUsdRound0(g.totalPnl)}
+                          </span>
+                        </td>
+                      </tr>
+                    ) : null}
+                    {g.rows.map((row) => renderMarketStreamRow(row, row.category, false))}
+                  </Fragment>
+                ))
               ) : (
                 categoryOrderFiltered.map((cat) => (
                   <Fragment key={cat}>
                     <tr className="ib-stock-group-header">
-                      <td colSpan={hasStreamAccounts ? 12 : 6}>{cat}</td>
+                      <td colSpan={msColSpan}>{cat}</td>
                     </tr>
-                    {(sortedRowsByCategory[cat] ?? rowsByCategory[cat]).map((row) => {
-                      const {
-                        symbol,
-                        quote: q,
-                        qty,
-                        avgCost,
-                        changePct,
-                        pnlVsBench,
-                        pnlCost,
-                        hostQty,
-                        hostAvgCost,
-                        hostPnlCost,
-                        secondaryQty,
-                        secondaryAvgCost,
-                        secondaryPnlCost,
-                        positionDailyPrevClose,
-                      } = row
-                      const symbolFreshness = getQuoteFreshness(q?.ts)
-                      const symBench = benchmarks[(symbol || '').trim().toUpperCase()]
-                      const dailyLast = quoteDisplayLast(q)
-                      return (
-                        <tr
-                          key={row.symbol}
-                          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
-                          onDrop={(e) => {
-                            e.preventDefault()
-                            try {
-                              const raw = e.dataTransfer.getData('application/x-market-streams-symbol')
-                              if (!raw) return
-                              const { category: fromCat, symbol: fromSymbol } = JSON.parse(raw) as { category: string; symbol: string }
-                              if (fromCat === cat && fromSymbol !== row.symbol) applySymbolReorder(cat, fromSymbol, row.symbol)
-                            } catch {
-                              /* ignore */
-                            }
-                          }}
-                        >
-                      <td
-                        className={symbolFreshness ? `realtime-quote-symbol realtime-quote-symbol-${symbolFreshness}` : 'realtime-quote-symbol'}
-                        title={[
-                          q?.ts != null ? `Last update ${symbolFreshness === 'fresh' ? '<3s ago' : symbolFreshness === 'stale' ? '3–10s ago' : '>10s ago'}` : null,
-                          getDailyRefTooltip(benchmarks[(symbol || '').trim().toUpperCase()], quoteDisplayLast(q)),
-                        ]
-                          .filter(Boolean)
-                          .join('\n') || undefined}
-                      >
-                        <span
-                          className="realtime-quote-drag-handle"
-                          draggable
-                          onDragStart={(e) => {
-                            e.dataTransfer.setData('application/x-market-streams-symbol', JSON.stringify({ category: cat, symbol: row.symbol }))
-                            e.dataTransfer.effectAllowed = 'move'
-                          }}
-                          title="Drag to reorder symbol"
-                          aria-hidden
-                        >
-                          ⋮⋮
-                        </span>
-                        <strong>{symbol}</strong>
-                      </td>
-                      {hasStreamAccounts && (
-                        <>
-                          <td className="realtime-quote-num">{hostQty != null && Number.isFinite(hostQty) ? hostQty : '—'}</td>
-                          <td className="realtime-quote-num">{hostAvgCost != null && Number.isFinite(hostAvgCost) ? fmtUsd(hostAvgCost) : '—'}</td>
-                          <td className="realtime-quote-num">
-                            {hostPnlCost != null && Number.isFinite(hostPnlCost) ? (
-                              <span className={hostPnlCost > 0 ? 'pnl-positive' : hostPnlCost < 0 ? 'pnl-negative' : ''}>
-                                {fmtUsdRound0(hostPnlCost)}
-                              </span>
-                            ) : (
-                              '—'
-                            )}
-                          </td>
-                          <td className="realtime-quote-num">{secondaryQty != null && Number.isFinite(secondaryQty) ? secondaryQty : '—'}</td>
-                          <td className="realtime-quote-num">{secondaryAvgCost != null && Number.isFinite(secondaryAvgCost) ? fmtUsd(secondaryAvgCost) : '—'}</td>
-                          <td className="realtime-quote-num">
-                            {secondaryPnlCost != null && Number.isFinite(secondaryPnlCost) ? (
-                              <span className={secondaryPnlCost > 0 ? 'pnl-positive' : secondaryPnlCost < 0 ? 'pnl-negative' : ''}>
-                                {fmtUsdRound0(secondaryPnlCost)}
-                              </span>
-                            ) : (
-                              '—'
-                            )}
-                          </td>
-                        </>
-                      )}
-                      <td className="realtime-quote-num">{qty != null && Number.isFinite(qty) ? qty : '—'}</td>
-                      <td className="realtime-quote-num">{avgCost != null && Number.isFinite(avgCost) ? fmtUsd(avgCost) : '—'}</td>
-                      <td className="realtime-quote-num realtime-quote-last-bid-ask">
-                        {q ? (() => {
-                          const displayLast = quoteDisplayLast(q)
-                          const bid = q.bid != null && Number.isFinite(q.bid) ? q.bid : null
-                          const ask = q.ask != null && Number.isFinite(q.ask) ? q.ask : null
-                          const bidDiff = displayLast != null && bid != null ? bid - displayLast : null
-                          const askDiff = displayLast != null && ask != null ? ask - displayLast : null
-                          const bench = benchmarks[(symbol || '').trim().toUpperCase()]
-                          const prevClose = bench && (bench.prev_close != null && Number.isFinite(bench.prev_close))
-                            ? bench.prev_close
-                            : (bench && Number.isFinite(bench.close) ? bench.close : null)
-                          const lastVsPrev = displayLast != null && prevClose != null && prevClose > 0
-                            ? (displayLast > prevClose ? 'pnl-positive' : displayLast < prevClose ? 'pnl-negative' : '')
-                            : ''
-                          return (
-                            <>
-                              {displayLast != null ? (
-                                <span className={lastVsPrev}>{fmtUsd(displayLast)}</span>
-                              ) : '—'}
-                              {bidDiff != null && (
-                                <span className={`realtime-quote-spread ${bidDiff > 0 ? 'pnl-positive' : bidDiff < 0 ? 'pnl-negative' : ''}`} title="Bid vs Last"> {Math.abs(bidDiff).toFixed(2)}</span>
-                              )}
-                              {askDiff != null && (
-                                <span className={`realtime-quote-spread ${askDiff > 0 ? 'pnl-positive' : askDiff < 0 ? 'pnl-negative' : ''}`} title="Ask vs Last"> {Math.abs(askDiff).toFixed(2)}</span>
-                              )}
-                            </>
-                          )
-                        })() : '—'}
-                      </td>
-                      <td className="realtime-quote-num realtime-quote-pnl-stacked market-streams-daily-calc-cell">
-                        <span className="realtime-quote-pnl-stacked-line">
-                          {changePct != null && Number.isFinite(changePct) ? (
-                            <span className={changePct > 0 ? 'pnl-positive' : changePct < 0 ? 'pnl-negative' : ''}>
-                              {Math.abs(changePct).toFixed(2)}%
-                            </span>
-                          ) : (
-                            '—'
-                          )}
-                        </span>
-                        <span className="realtime-quote-pnl-stacked-line">
-                          {pnlVsBench != null && Number.isFinite(pnlVsBench) ? (
-                            <span className={pnlVsBench > 0 ? 'pnl-positive' : pnlVsBench < 0 ? 'pnl-negative' : ''}>
-                              {fmtUsd(Math.abs(pnlVsBench))}
-                            </span>
-                          ) : (
-                            '—'
-                          )}
-                        </span>
-                        <div className="market-streams-daily-calc-popup" role="tooltip">
-                          <MarketStreamsDailyCalcBreakdown
-                            symbol={(symbol || '').trim() || '—'}
-                            bench={symBench}
-                            positionDailyPrevClose={positionDailyPrevClose}
-                            last={dailyLast}
-                            qty={qty}
-                          />
-                        </div>
-                      </td>
-                      <td className="realtime-quote-num realtime-quote-pnl-stacked">
-                        <span className="realtime-quote-pnl-stacked-line">
-                          {(() => {
-                            const dl = quoteDisplayLast(q)
-                            if (avgCost == null || !Number.isFinite(avgCost) || avgCost <= 0 || dl == null) return '—'
-                            const sincePct = ((dl - avgCost) / avgCost) * 100
-                            return (
-                              <span className={sincePct > 0 ? 'pnl-positive' : sincePct < 0 ? 'pnl-negative' : ''}>
-                                {Math.abs(sincePct).toFixed(2)}%
-                              </span>
-                            )
-                          })()}
-                        </span>
-                        <span className="realtime-quote-pnl-stacked-line">
-                          {pnlCost != null && Number.isFinite(pnlCost) ? (
-                            <span className={pnlCost > 0 ? 'pnl-positive' : pnlCost < 0 ? 'pnl-negative' : ''}>
-                              {fmtUsdRound0(pnlCost)}
-                            </span>
-                          ) : (
-                            '—'
-                          )}
-                        </span>
-                      </td>
-                    </tr>
-                      )
-                    })}
+                    {(sortedRowsByCategory[cat] ?? rowsByCategory[cat]).map((row) => renderMarketStreamRow(row, cat, msDragEnabled))}
                   </Fragment>
                 ))
               )}

@@ -3379,7 +3379,9 @@ def get_stock_day_gap(
 ) -> Dict[str, Any]:
     """Compare stock_day bar coverage against the global trading-day calendar (purely local)."""
     import psycopg2
+    from datetime import timedelta
 
+    from src.massive.stock_ohlc_daily_smart import is_ny_session_safely_closed, ny_calendar_today
     from src.persistence.postgres.connection import _get_conn_params
     from src.vendor.massive.stock_day_gap import compute_stock_day_gap
 
@@ -3391,12 +3393,22 @@ def get_stock_day_gap(
     if not sym:
         return {"ok": False, "error": "symbol is required"}
 
+    # Cap the ref/covered sets at the last safely-closed trading date.
+    # When the NYSE session is still open, using CURRENT_DATE would count today
+    # as a phantom gap (other symbols may already have today's bar, this one doesn't).
+    # After 16:20 ET the session is considered closed and today is safe to include.
+    today_ny = ny_calendar_today()
+    session_closed = is_ny_session_safely_closed()
+    cap_d = today_ny if session_closed else today_ny - timedelta(days=1)
+
     try:
         params = _get_conn_params(db)
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor() as cur:
-                return compute_stock_day_gap(cur, sym, lookback_years=years)
+                result = compute_stock_day_gap(cur, sym, lookback_years=years, cap_date=cap_d)
+                result["today_pending"] = not session_closed
+                return result
         finally:
             conn.close()
     except Exception as exc:
@@ -3410,7 +3422,9 @@ def post_stock_day_gap_batch(
 ) -> Dict[str, Any]:
     """Batch stock_day gap check — max 20 symbols, no external API."""
     import psycopg2
+    from datetime import timedelta
 
+    from src.massive.stock_ohlc_daily_smart import is_ny_session_safely_closed, ny_calendar_today
     from src.persistence.postgres.connection import _get_conn_params
     from src.vendor.massive.stock_day_gap import compute_stock_day_gap
 
@@ -3437,6 +3451,11 @@ def post_stock_day_gap_batch(
     if len(syms) > 20:
         return {"ok": False, "error": "At most 20 symbols per batch"}
 
+    # Compute the safe date cap once for the whole batch (same session state for all symbols).
+    today_ny = ny_calendar_today()
+    session_closed = is_ny_session_safely_closed()
+    cap_d = today_ny if session_closed else today_ny - timedelta(days=1)
+
     results: Dict[str, Any] = {}
     try:
         params = _get_conn_params(db)
@@ -3445,7 +3464,9 @@ def post_stock_day_gap_batch(
             with conn.cursor() as cur:
                 for s in syms:
                     try:
-                        results[s] = compute_stock_day_gap(cur, s, lookback_years=years)
+                        r = compute_stock_day_gap(cur, s, lookback_years=years, cap_date=cap_d)
+                        r["today_pending"] = not session_closed
+                        results[s] = r
                     except Exception as exc:  # noqa: BLE001
                         results[s] = {"ok": False, "symbol": s, "error": str(exc)}
         finally:

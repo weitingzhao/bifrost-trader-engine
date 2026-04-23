@@ -1411,6 +1411,11 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                                 )
                                 if patch_open_close_date:
                                     try:
+                                        use_adj = (
+                                            True
+                                            if adjusted_bool is None
+                                            else adjusted_bool
+                                        )
                                         oc_data = client.fetch_stock_open_close(
                                             t,
                                             str(patch_open_close_date),

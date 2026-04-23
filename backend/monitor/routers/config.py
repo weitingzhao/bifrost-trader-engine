@@ -1,4 +1,4 @@
-"""Config: IB, Flex, active-strategy (position-categories live on Portfolio API)."""
+"""Config: IB, Flex, active-strategy (position-categories also mounted on Monitor for same DB when Portfolio process is off)."""
 
 import logging
 from typing import Any, Dict, List, Optional

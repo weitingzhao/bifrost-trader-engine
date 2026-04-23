@@ -277,6 +277,7 @@ def create_app(
         messages_router,
         status_router,
     )
+    from backend.portfolio.routers.config import router as portfolio_position_categories_router
 
     app.include_router(core_router)
     app.include_router(logs_router)
@@ -284,6 +285,8 @@ def create_app(
     app.include_router(status_router)
     app.include_router(daemon_router)
     app.include_router(config_router)
+    # Same StatusReader + DB as Portfolio API: dev often runs Monitor only (run_server.py); Vite proxies here.
+    app.include_router(portfolio_position_categories_router)
 
     # backend/monitor/app.py -> repo root (not backend/)
     _root = Path(__file__).resolve().parent.parent.parent

@@ -10,7 +10,6 @@ interface WatchlistPageProps {
   status: StatusResponse | null
 }
 
-/** 将用户输入规范为 contract_key（与 account_positions 一致）。纯 symbol 如 NVDA → NVDA|STK||| */
 function normalizeToContractKey(input: string): { contract_key: string; symbol?: string; sec_type?: string } {
   const t = input.trim()
   if (!t) return { contract_key: '' }
@@ -28,7 +27,6 @@ function positionToContractKey(p: IbPositionRow): string {
   return `${sym}|${sec}|${exp}|${str}|${rt}`
 }
 
-/** 自选股单项显示名 */
 function watchlistItemLabel(item: WatchlistItem): string {
   if (item.display_label && String(item.display_label).trim()) return item.display_label.trim()
   if (item.sec_type === 'OPT' && item.symbol) {
@@ -40,7 +38,6 @@ function watchlistItemLabel(item: WatchlistItem): string {
   return (item.symbol || item.contract_key || '').trim() || item.contract_key
 }
 
-/** 到期日格式化为 yyyy-mm-dd（支持 YYYYMMDD 或 YYYYMM） */
 function formatExpiry(expiry: string | null | undefined): string {
   if (expiry == null || expiry === '') return '—'
   const s = String(expiry).trim()
@@ -49,7 +46,6 @@ function formatExpiry(expiry: string | null | undefined): string {
   return s
 }
 
-/** 用户输入的到期日规范为 YYYYMMDD（支持 yyyy-mm-dd 或 8/6 位数字） */
 function normalizeExpiryInput(input: string): string {
   const s = input.trim().replace(/-/g, '')
   if (/^\d{8}$/.test(s)) return s
@@ -58,57 +54,42 @@ function normalizeExpiryInput(input: string): string {
   return input.trim()
 }
 
-/** 权利 C -> CALL, P -> PUT */
 function formatOptionRight(right: string | null | undefined): string {
   if (right == null || right === '') return '—'
   const r = String(right).trim().toUpperCase()
-  if (r === 'C') return 'CALL'
-  if (r === 'P') return 'PUT'
+  if (r === 'C') return 'C'
+  if (r === 'P') return 'P'
   return right
 }
 
-/** 行权价显示为美元 */
 function formatStrike(strike: number | null | undefined): string {
   if (strike == null) return '—'
   const n = Number(strike)
   if (Number.isNaN(n)) return '—'
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 4 }).format(n)
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(n)
 }
 
-/**
- * Watchlist: Last as primary figure; Bid/Ask as compact labeled deltas vs Last
- * (green if above Last, red if below).
- */
-function renderWatchlistLastBidAsk(q: RealtimeQuote | undefined): ReactNode {
-  if (!q) return '—'
+function renderQuoteCell(q: RealtimeQuote | undefined): ReactNode {
+  if (!q) return <span className="wl2-muted">—</span>
   const last = q.last != null && Number.isFinite(q.last) ? q.last : null
   const bid = q.bid != null && Number.isFinite(q.bid) ? q.bid : null
   const ask = q.ask != null && Number.isFinite(q.ask) ? q.ask : null
-  const bidDiff = last != null && bid != null ? bid - last : null
-  const askDiff = last != null && ask != null ? ask - last : null
-  const hasSpread = bidDiff != null || askDiff != null
   return (
-    <span className="watchlist-last-bid-ask-cell">
-      <span className="watchlist-quote-last">{last != null ? fmtUsd(last) : '—'}</span>
-      {hasSpread ? <span className="watchlist-quote-sep" aria-hidden>·</span> : null}
-      {bidDiff != null && (
-        <span className="watchlist-quote-spread" title="Bid vs Last">
-          <span className="watchlist-quote-spread-label">Bid</span>
-          <span
-            className={`watchlist-quote-spread-val ${bidDiff > 0 ? 'pnl-positive' : bidDiff < 0 ? 'pnl-negative' : ''}`}
-          >
-            {Math.abs(bidDiff).toFixed(2)}
-          </span>
-        </span>
-      )}
-      {askDiff != null && (
-        <span className="watchlist-quote-spread" title="Ask vs Last">
-          <span className="watchlist-quote-spread-label">Ask</span>
-          <span
-            className={`watchlist-quote-spread-val ${askDiff > 0 ? 'pnl-positive' : askDiff < 0 ? 'pnl-negative' : ''}`}
-          >
-            {Math.abs(askDiff).toFixed(2)}
-          </span>
+    <span className="wl2-quote">
+      <span className="wl2-quote__last">{last != null ? fmtUsd(last) : '—'}</span>
+      {(bid != null || ask != null) && (
+        <span className="wl2-quote__ba">
+          {bid != null && (
+            <span className={`wl2-quote__v${last != null && bid < last ? ' pnl-negative' : last != null && bid > last ? ' pnl-positive' : ''}`}>
+              {bid.toFixed(2)}
+            </span>
+          )}
+          <span className="wl2-quote__sep">/</span>
+          {ask != null && (
+            <span className={`wl2-quote__v${last != null && ask > last ? ' pnl-negative' : last != null && ask < last ? ' pnl-positive' : ''}`}>
+              {ask.toFixed(2)}
+            </span>
+          )}
         </span>
       )}
     </span>
@@ -131,12 +112,13 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
   const [fetchMarketDataError, setFetchMarketDataError] = useState<string | null>(null)
   const [realtimeQuotes, setRealtimeQuotes] = useState<RealtimeQuote[]>([])
   const [positionCategories, setPositionCategories] = useState<PositionCategory[]>([])
+  const [showPositionPicker, setShowPositionPicker] = useState(false)
+  const [activeSection, setActiveSection] = useState<'stocks' | 'options'>('stocks')
 
   const positions = useMemo(() => {
     return (status?.portfolio?.accounts || []).flatMap((acc: IbAccountSnapshot) => (acc.positions || []))
   }, [status?.portfolio?.accounts])
 
-  /** Contract keys that have a position in any account (for Holding column). */
   const contractKeysWithPosition = useMemo(
     () => new Set(positions.map(p => positionToContractKey(p))),
     [positions],
@@ -156,9 +138,7 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     }
   }, [])
 
-  useEffect(() => {
-    loadWatchlist()
-  }, [loadWatchlist])
+  useEffect(() => { loadWatchlist() }, [loadWatchlist])
 
   useEffect(() => {
     let cancelled = false
@@ -168,7 +148,6 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     return () => { cancelled = true }
   }, [])
 
-  /** R-RM*: 轮询实时行情（用于当前价列）；4 秒 */
   useEffect(() => {
     let cancelled = false
     const tick = async () => {
@@ -181,24 +160,19 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     }
     tick()
     const id = setInterval(tick, 4000)
-    return () => {
-      cancelled = true
-      clearInterval(id)
-    }
+    return () => { cancelled = true; clearInterval(id) }
   }, [])
 
-  /** STK / legacy ticks: IB ingestor includes contract_key on every tick; OPT rows use underlying symbol and must not overwrite STK. */
   const quoteBySymbol = useMemo(() => {
     const m: Record<string, RealtimeQuote> = {}
     for (const q of realtimeQuotes) {
       if (!q.symbol) continue
       const st = (q.sec_type ?? '').toUpperCase()
-      if (st === 'STK' || (st === '' && !q.contract_key)) {
-        m[q.symbol] = q
-      }
+      if (st === 'STK' || (st === '' && !q.contract_key)) m[q.symbol] = q
     }
     return m
   }, [realtimeQuotes])
+
   const quoteByContractKey = useMemo(
     () => Object.fromEntries(
       realtimeQuotes
@@ -227,7 +201,7 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
         if (res.ok) await loadWatchlist()
         else setWatchlistError(res.error || 'Add failed')
       } catch (e) {
-        setWatchlistError(e instanceof Error ? e.message : 'Add request failed; check network or API')
+        setWatchlistError(e instanceof Error ? e.message : 'Add request failed')
       } finally {
         setAddPending(false)
       }
@@ -290,7 +264,6 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
 
   const watchlistContractKeys = useMemo(() => new Set(watchlistItems.map(w => w.contract_key)), [watchlistItems])
 
-  /** 仅展示尚未在自选中的持仓，用于「从持仓添加」按钮列表；只列 STK（股票） */
   const positionsNotInWatchlist = useMemo(() => {
     return positions.filter(p => {
       const st = (p.secType ?? '').toString().trim().toUpperCase()
@@ -299,43 +272,25 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     })
   }, [positions, watchlistContractKeys])
 
-  /** STK rows with Option? on (same universe as Opportunity watchlist / Option Discovery). */
-  const watchlistStocks = useMemo(
-    () =>
-      watchlistItems.filter(
-        (w) => (w.sec_type || 'STK').toUpperCase() !== 'OPT' && w.optionable === true,
-      ),
+  const allStocks = useMemo(
+    () => watchlistItems.filter(w => (w.sec_type || 'STK').toUpperCase() !== 'OPT'),
     [watchlistItems],
   )
-  /** STK rows with Option? off — still manageable; not shown in main Stocks table. */
-  const watchlistStocksOptionOff = useMemo(
-    () =>
-      watchlistItems.filter(
-        (w) => (w.sec_type || 'STK').toUpperCase() !== 'OPT' && w.optionable !== true,
-      ),
+  const watchlistOptions = useMemo(
+    () => watchlistItems.filter(w => (w.sec_type || '').toUpperCase() === 'OPT'),
     [watchlistItems],
   )
-  const watchlistOptions = useMemo(() => watchlistItems.filter(w => (w.sec_type || '').toUpperCase() === 'OPT'), [watchlistItems])
 
-  /** Group stocks/options by category label (same order as Accounts: Uncategorized first, then alphabetical). */
   const stockByCategory = useMemo(() => {
     const map: Record<string, WatchlistItem[]> = {}
-    for (const item of watchlistStocks) {
+    for (const item of allStocks) {
       const k = (item.category && String(item.category).trim()) || 'Uncategorized'
       if (!map[k]) map[k] = []
       map[k].push(item)
     }
     return map
-  }, [watchlistStocks])
-  const stockByCategoryOptionOff = useMemo(() => {
-    const map: Record<string, WatchlistItem[]> = {}
-    for (const item of watchlistStocksOptionOff) {
-      const k = (item.category && String(item.category).trim()) || 'Uncategorized'
-      if (!map[k]) map[k] = []
-      map[k].push(item)
-    }
-    return map
-  }, [watchlistStocksOptionOff])
+  }, [allStocks])
+
   const optionByCategory = useMemo(() => {
     const map: Record<string, WatchlistItem[]> = {}
     for (const item of watchlistOptions) {
@@ -345,25 +300,32 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     }
     return map
   }, [watchlistOptions])
-  const watchlistCategoryOrder = useMemo(() => {
-    const keys = new Set<string>([...Object.keys(stockByCategory), ...Object.keys(optionByCategory)])
-    const arr = Array.from(keys)
+
+  const stockCategoryOrder = useMemo(() => {
+    const arr = Object.keys(stockByCategory)
     arr.sort((a, b) => {
       if (a === 'Uncategorized') return -1
       if (b === 'Uncategorized') return 1
       return a.localeCompare(b)
     })
     return arr
-  }, [stockByCategory, optionByCategory])
-  const watchlistCategoryOrderStocksOptionOff = useMemo(() => {
-    const arr = Object.keys(stockByCategoryOptionOff)
+  }, [stockByCategory])
+
+  const optionCategoryOrder = useMemo(() => {
+    const arr = Object.keys(optionByCategory)
     arr.sort((a, b) => {
       if (a === 'Uncategorized') return -1
       if (b === 'Uncategorized') return 1
       return a.localeCompare(b)
     })
     return arr
-  }, [stockByCategoryOptionOff])
+  }, [optionByCategory])
+
+  function symbolFromItem(item: WatchlistItem): string {
+    if (item.symbol && String(item.symbol).trim()) return String(item.symbol).trim()
+    const parts = (item.contract_key || '').split('|')
+    return (parts[0] || '').trim()
+  }
 
   function openAddOptionModal(item: WatchlistItem) {
     const symbol = (item.symbol || (item.contract_key || '').split('|')[0] || '').trim()
@@ -391,13 +353,6 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     closeAddOptionModal()
   }
 
-  /** 从 watchlist 项取 symbol（股票用，分析 Stock_xx 表） */
-  function symbolFromItem(item: WatchlistItem): string {
-    if (item.symbol && String(item.symbol).trim()) return String(item.symbol).trim()
-    const parts = (item.contract_key || '').split('|')
-    return (parts[0] || '').trim()
-  }
-
   async function handleAnalyze(item: WatchlistItem) {
     const sym = symbolFromItem(item)
     if (!sym) return
@@ -414,48 +369,23 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     }
   }
 
-  /** 智能拉取市场数据：首次拉取用 IB 允许的最大单次范围（日线 1 Y，分钟/小时 1 D），之后按最新 K 线距今天数补全。 */
   async function handleFetchMarketData() {
     if (!analysisResult) return
     const sym = analysisResult.symbol
     const { stock_day: dayCount, stock_min: minCounts = {} } = analysisResult.stats
     setFetchMarketDataError(null)
     const steps: { period: string; label: string; duration: string; smart: boolean }[] = [
-      {
-        period: '1 D',
-        label: 'Daily',
-        duration: dayCount === 0 ? '1 Y' : '30 D',
-        smart: dayCount > 0,
-      },
-      {
-        period: '1 min',
-        label: '1 min',
-        duration: (minCounts['1 min'] ?? 0) === 0 ? '1 D' : '5 D',
-        smart: (minCounts['1 min'] ?? 0) > 0,
-      },
-      {
-        period: '5 mins',
-        label: '5 min',
-        duration: (minCounts['5 mins'] ?? 0) === 0 ? '1 D' : '5 D',
-        smart: (minCounts['5 mins'] ?? 0) > 0,
-      },
-      {
-        period: '1 hour',
-        label: '1 hour',
-        duration: (minCounts['1 hour'] ?? 0) === 0 ? '1 D' : '5 D',
-        smart: (minCounts['1 hour'] ?? 0) > 0,
-      },
+      { period: '1 D', label: 'Daily', duration: dayCount === 0 ? '1 Y' : '30 D', smart: dayCount > 0 },
+      { period: '1 min', label: '1 min', duration: (minCounts['1 min'] ?? 0) === 0 ? '1 D' : '5 D', smart: (minCounts['1 min'] ?? 0) > 0 },
+      { period: '5 mins', label: '5 min', duration: (minCounts['5 mins'] ?? 0) === 0 ? '1 D' : '5 D', smart: (minCounts['5 mins'] ?? 0) > 0 },
+      { period: '1 hour', label: '1 hour', duration: (minCounts['1 hour'] ?? 0) === 0 ? '1 D' : '5 D', smart: (minCounts['1 hour'] ?? 0) > 0 },
     ]
     let lastError: string | null = null
     for (const { period, label, duration, smart } of steps) {
-      setFetchMarketDataStep(`Fetching ${label}${duration === '1 Y' ? ' (~1 year)' : ''}…`)
+      setFetchMarketDataStep(`${label}${duration === '1 Y' ? ' (~1 year)' : ''}…`)
       try {
         const res = await postBarsFetch(sym, period, duration, smart)
-        if (res.error) {
-          lastError = res.error
-          setFetchMarketDataError(res.error)
-          break
-        }
+        if (res.error) { lastError = res.error; setFetchMarketDataError(res.error); break }
       } catch (e) {
         lastError = e instanceof Error ? e.message : 'Fetch failed'
         setFetchMarketDataError(lastError)
@@ -467,224 +397,40 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
       try {
         const stats = await fetchBarStats(sym)
         setAnalysisResult({ symbol: sym, stats })
-      } catch {
-        // 保持原 analysisResult
-      }
+      } catch { /* keep existing */ }
     }
   }
 
-  function renderStockTableGrouped(
-    emptyText: string,
-    stocks: WatchlistItem[],
-    byCategory: Record<string, WatchlistItem[]>,
-    categoryOrder: string[],
-  ) {
-    if (stocks.length === 0) return <p className="replay-placeholder">{emptyText}</p>
-    return (
-      <table className="table-operations ib-positions-table realtime-quotes-table">
-        <thead>
-          <tr>
-            <th>Symbol</th>
-            <th title="Last price; Bid and Ask shown as spread vs Last (green if above Last, red if below)">Last (Bid / Ask)</th>
-            <th title="Show in Option Discovery when on">Option?</th>
-            <th>Category</th>
-            <th>Holding</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        {categoryOrder.map((catLabel) => {
-          const items = byCategory[catLabel] ?? []
-          if (items.length === 0) return null
-          return (
-            <tbody key={catLabel}>
-              <tr className="ib-stock-group-header">
-                <td colSpan={6}>{catLabel}</td>
-              </tr>
-              {items.map((item) => {
-                const sym = symbolFromItem(item)
-                const q = quoteByContractKey[item.contract_key] ?? quoteBySymbol[sym]
-                const hasHolding = contractKeysWithPosition.has(item.contract_key.trim())
-                const optionableOn = item.optionable === true
-                return (
-                  <tr key={item.contract_key}>
-                    <td title={item.contract_key} style={{ fontWeight: 'bold' }}>{watchlistItemLabel(item)}</td>
-                    <td className="realtime-quote-num watchlist-quote-last-td">{renderWatchlistLastBidAsk(q)}</td>
-                    <td>
-                      <span
-                        className="watchlist-toggle-switch"
-                        role="switch"
-                        aria-checked={optionableOn}
-                        aria-label={`Option? for ${watchlistItemLabel(item)}`}
-                        tabIndex={0}
-                        onClick={() => handleOptionableToggle(item)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOptionableToggle(item) } }}
-                      >
-                        <span className="watchlist-toggle-switch-track" />
-                        <span className={optionableOn ? 'watchlist-toggle-switch-thumb on' : 'watchlist-toggle-switch-thumb'} />
-                      </span>
-                    </td>
-                    <td>
-                      <select
-                        className="ib-position-category-select"
-                        value={item.category_id ?? ''}
-                        onChange={(e) => {
-                          const v = e.target.value
-                          handleWatchlistCategoryChange(item, v ? Number(v) : null)
-                        }}
-                        aria-label={`Category for ${watchlistItemLabel(item)}`}
-                        style={{ minWidth: '8rem' }}
-                      >
-                        <option value="">Uncategorized</option>
-                        {positionCategories.map((c) => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>{hasHolding ? 'Yes' : '—'}</td>
-                    <td>
-                      <span className="watchlist-action-btns">
-                        <button
-                          type="button"
-                          className="watchlist-action-btn"
-                          onClick={() => handleAnalyze(item)}
-                          disabled={analysisLoadingSymbol !== null}
-                          aria-label={`Analyze ${symbolFromItem(item) || watchlistItemLabel(item)} in Stock_xx`}
-                        >
-                          {analysisLoadingSymbol === symbolFromItem(item) ? 'Analyzing…' : 'Analyze'}
-                        </button>
-                        <button
-                          type="button"
-                          className="watchlist-action-btn"
-                          onClick={() => openAddOptionModal(item)}
-                          aria-label="Add option"
-                        >
-                          Options
-                        </button>
-                        <button
-                          type="button"
-                          className="watchlist-action-btn watchlist-action-btn--remove"
-                          onClick={() => handleRemoveWatchlist(item)}
-                          aria-label="Remove from watchlist"
-                        >
-                          X
-                        </button>
-                      </span>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          )
-        })}
-      </table>
-    )
-  }
-
-  function renderOptionsTableGrouped(emptyText: string) {
-    if (watchlistOptions.length === 0) return <p className="replay-placeholder">{emptyText}</p>
-    return (
-      <table className="table-operations ib-positions-table realtime-quotes-table">
-        <thead>
-          <tr>
-            <th>Symbol</th>
-            <th title="Underlying Last price; Bid and Ask shown as spread vs Last (green if above Last, red if below)">Last (Bid / Ask)</th>
-            <th>Expiry</th>
-            <th>Right</th>
-            <th>Strike</th>
-            <th>Category</th>
-            <th>Holding</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        {watchlistCategoryOrder.map((catLabel) => {
-          const items = optionByCategory[catLabel] ?? []
-          if (items.length === 0) return null
-          return (
-            <tbody key={`opt-${catLabel}`}>
-              <tr className="ib-stock-group-header">
-                <td colSpan={8}>{catLabel}</td>
-              </tr>
-              {items.map((item) => {
-                const q = quoteByContractKey[item.contract_key] ?? quoteBySymbol[symbolFromItem(item)]
-                const hasHolding = contractKeysWithPosition.has(item.contract_key.trim())
-                return (
-                  <tr key={item.contract_key}>
-                    <td title={item.contract_key}>{item.symbol || watchlistItemLabel(item)}</td>
-                    <td className="realtime-quote-num watchlist-quote-last-td">{renderWatchlistLastBidAsk(q)}</td>
-                    <td>{formatExpiry(item.expiry)}</td>
-                    <td>{formatOptionRight(item.option_right)}</td>
-                    <td>{item.strike != null ? formatStrike(item.strike) : '—'}</td>
-                    <td>
-                      <select
-                        className="ib-position-category-select"
-                        value={item.category_id ?? ''}
-                        onChange={(e) => {
-                          const v = e.target.value
-                          handleWatchlistCategoryChange(item, v ? Number(v) : null)
-                        }}
-                        aria-label={`Category for ${item.symbol || watchlistItemLabel(item)}`}
-                        style={{ minWidth: '8rem' }}
-                      >
-                        <option value="">Uncategorized</option>
-                        {positionCategories.map((c) => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>{hasHolding ? 'Yes' : '—'}</td>
-                    <td>
-                      <span className="watchlist-action-btns">
-                        <button
-                          type="button"
-                          className="watchlist-action-btn watchlist-action-btn--remove"
-                          onClick={() => handleRemoveWatchlist(item)}
-                          aria-label="Remove from watchlist"
-                        >
-                          X
-                        </button>
-                      </span>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          )
-        })}
-      </table>
-    )
-  }
+  const stockCount = allStocks.length
+  const optionCount = watchlistOptions.length
 
   return (
-    <div className="card process-section watchlist-page">
-      <h2 className="page-title-with-tooltip">
-        Watchlist
-        <InfoTooltip text="Watchlist for quotes and bars; add from positions or enter Symbol." />
-      </h2>
-
-      <section className="replay-section watchlist-page" aria-labelledby="watchlist-head">
-        <h3 id="watchlist-head" className="page-title-with-tooltip">
-          Stocks & options
-          <InfoTooltip text="Symbols here are part of the watchlist for monitoring and Market API focus lists. Live ticks come from IB Ingestor (Redis). The daemon syncs this list on heartbeat where applicable; no restart needed when you add or remove symbols." />
-        </h3>
-        {watchlistError && (
-          <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>
-            {watchlistError}
-          </div>
-        )}
-        <div className="replay-bar-symbol-row">
-          <label htmlFor="watchlist-symbol" className="replay-bar-symbol-label">Add stock</label>
+    <div className="wl2">
+      {/* ── Header bar ── */}
+      <header className="wl2-header">
+        <div className="wl2-header__left">
+          <h2 className="wl2-header__title">Watchlist</h2>
+          <InfoTooltip text="Symbols here are monitored for quotes, bars, and Market API focus lists. Live ticks come from IB Ingestor (Redis)." />
+          <span className="wl2-header__count">{watchlistItems.length}</span>
+        </div>
+        <div className="wl2-header__add">
           <input
-            id="watchlist-symbol"
             type="text"
-            className="replay-bar-symbol-input"
-            placeholder="Symbol, e.g. NVDA"
+            className="wl2-header__input"
+            placeholder="Add symbol…"
             value={addContractKey}
             onChange={e => setAddContractKey(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && addContractKey.trim()) {
+                const { contract_key, symbol, sec_type } = normalizeToContractKey(addContractKey)
+                if (contract_key) { handleAddWatchlist(contract_key, 'manual', symbol, sec_type); setAddContractKey('') }
+              }
+            }}
             aria-label="Enter Symbol to add stock"
           />
           <button
             type="button"
-            className="btn btn-secondary"
+            className="wl2-btn wl2-btn--primary wl2-header__add-btn"
             disabled={addPending || !addContractKey.trim()}
             onClick={() => {
               const { contract_key, symbol, sec_type } = normalizeToContractKey(addContractKey)
@@ -693,164 +439,351 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
               setAddContractKey('')
             }}
           >
-            {addPending ? 'Adding…' : 'Add'}
+            {addPending ? '…' : '+'}
           </button>
-        </div>
-        {positionsNotInWatchlist.length > 0 && (
-          <div className="replay-bar-symbol-row" style={{ flexWrap: 'wrap', gap: '0.25rem' }}>
-            <span className="replay-bar-symbol-label">Add from positions:</span>
-            {positionsNotInWatchlist.map((p, idx) => {
-              const ck = positionToContractKey(p)
-              const label = (p.symbol || '')
-                + (p.secType === 'OPT' && (p.expiry || p.lastTradeDateOrContractMonth) ? ` ${p.expiry || p.lastTradeDateOrContractMonth} ${p.right || ''} ${p.strike ?? ''}` : '')
-              return (
-                <button
-                  key={ck + String(idx)}
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={addPending}
-                  onClick={() => {
-                    const exp = (p.expiry ?? p.lastTradeDateOrContractMonth) as string | undefined
-                    handleAddWatchlist(ck, 'position', p.symbol || undefined, p.secType || undefined, exp, p.strike, p.right)
-                  }}
-                  title={ck}
-                >
-                  {label || ck}
-                </button>
-              )
-            })}
-          </div>
-        )}
-        {watchlistLoading ? (
-          <div className="replay-placeholder">Loading watchlist…</div>
-        ) : watchlistItems.length === 0 ? (
-          <div className="replay-placeholder">No items. Enter Symbol to add or add from positions.</div>
-        ) : (
-          <>
-            <h4 className="watchlist-subhead">Stocks (Option on)</h4>
-            {renderStockTableGrouped(
-              watchlistStocksOptionOff.length > 0
-                ? 'No stocks with Option? on. Turn Option? on below or add symbols.'
-                : 'No stocks in watchlist.',
-              watchlistStocks,
-              stockByCategory,
-              watchlistCategoryOrder,
-            )}
-            {watchlistStocksOptionOff.length > 0 && (
-              <>
-                <h4 className="watchlist-subhead" style={{ marginTop: '1rem' }}>Stocks (Option off)</h4>
-                <p className="section-hint" style={{ marginBottom: '0.5rem' }}>
-                  Not included in Opportunity watchlist scope or Option Discovery until Option? is on.
-                </p>
-                {renderStockTableGrouped(
-                  'No rows.',
-                  watchlistStocksOptionOff,
-                  stockByCategoryOptionOff,
-                  watchlistCategoryOrderStocksOptionOff,
-                )}
-              </>
-            )}
-            <h4 className="watchlist-subhead" style={{ marginTop: '1rem' }}>Options</h4>
-            {renderOptionsTableGrouped('No options in watchlist.')}
-          </>
-        )}
-      </section>
-
-      {analysisResult && (
-        <section className="replay-section market-data-analysis" aria-labelledby="watchlist-analysis-head">
-          <h3 id="watchlist-analysis-head" className="page-title-with-tooltip">
-            Bar stats for {analysisResult.symbol} in Stock_xx
-            <InfoTooltip text="K-line row counts for this symbol in DB." />
-          </h3>
-          <div className="analysis-stats">
-            <div className="analysis-stat-row">
-              <span className="analysis-stat-label">stock_day (daily)</span>
-              <span className="analysis-stat-value">{analysisResult.stats.stock_day}</span>
-              <span className="analysis-stat-desc">{analysisResult.stats.stock_day === 0 ? 'No data' : 'rows'}</span>
-            </div>
-            <div className="analysis-stat-row">
-              <span className="analysis-stat-label">stock_min (min/hour)</span>
-              <div className="analysis-stat-value">
-                {analysisResult.stats.stock_min && Object.keys(analysisResult.stats.stock_min).length > 0 ? (
-                  <ul className="analysis-period-list">
-                    {Object.entries(analysisResult.stats.stock_min).map(([period, count]) => (
-                      <li key={period}>{period}: {count} rows</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <span>No data</span>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="analysis-actions">
+          {positionsNotInWatchlist.length > 0 && (
             <button
               type="button"
-              className="btn btn-primary"
+              className="wl2-btn wl2-btn--ghost wl2-header__pos-btn"
+              onClick={() => setShowPositionPicker(v => !v)}
+              title="Add from positions"
+            >
+              Pos ({positionsNotInWatchlist.length})
+            </button>
+          )}
+        </div>
+      </header>
+
+      {watchlistError && (
+        <div className="wl2-error" role="alert">{watchlistError}</div>
+      )}
+
+      {/* ── Position picker ── */}
+      {showPositionPicker && positionsNotInWatchlist.length > 0 && (
+        <div className="wl2-pos-picker">
+          {positionsNotInWatchlist.map((p, idx) => {
+            const ck = positionToContractKey(p)
+            const label = p.symbol || ck.split('|')[0]
+            return (
+              <button
+                key={ck + String(idx)}
+                type="button"
+                className="wl2-pos-picker__chip"
+                disabled={addPending}
+                onClick={() => {
+                  const exp = (p.expiry ?? p.lastTradeDateOrContractMonth) as string | undefined
+                  handleAddWatchlist(ck, 'position', p.symbol || undefined, p.secType || undefined, exp, p.strike, p.right)
+                }}
+                title={ck}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* ── Tab bar ── */}
+      {!watchlistLoading && watchlistItems.length > 0 && (
+        <nav className="wl2-tabs" aria-label="Watchlist sections">
+          <button
+            type="button"
+            className={`wl2-tabs__btn${activeSection === 'stocks' ? ' wl2-tabs__btn--active' : ''}`}
+            onClick={() => setActiveSection('stocks')}
+          >
+            Stocks
+            <span className="wl2-tabs__badge">{stockCount}</span>
+          </button>
+          <button
+            type="button"
+            className={`wl2-tabs__btn${activeSection === 'options' ? ' wl2-tabs__btn--active' : ''}`}
+            onClick={() => setActiveSection('options')}
+          >
+            Options
+            <span className="wl2-tabs__badge">{optionCount}</span>
+          </button>
+        </nav>
+      )}
+
+      {/* ── Main content ── */}
+      {watchlistLoading ? (
+        <div className="wl2-empty">Loading…</div>
+      ) : watchlistItems.length === 0 ? (
+        <div className="wl2-empty">No items. Enter a symbol above to start.</div>
+      ) : (
+        <>
+          {/* ── Stocks table ── */}
+          {activeSection === 'stocks' && (
+            <div className="wl2-table-wrap">
+              {allStocks.length === 0 ? (
+                <div className="wl2-empty">No stocks in watchlist.</div>
+              ) : (
+                <table className="wl2-table">
+                  <thead>
+                    <tr>
+                      <th className="wl2-th--sym">Symbol</th>
+                      <th className="wl2-th--quote">Last / B·A</th>
+                      <th className="wl2-th--opt" title="Show in Option Discovery">Opt</th>
+                      <th className="wl2-th--cat">Category</th>
+                      <th className="wl2-th--acts" />
+                    </tr>
+                  </thead>
+                  {stockCategoryOrder.map(catLabel => {
+                    const items = stockByCategory[catLabel] ?? []
+                    if (items.length === 0) return null
+                    return (
+                      <tbody key={catLabel}>
+                        {stockCategoryOrder.length > 1 && (
+                          <tr className="wl2-group-row">
+                            <td colSpan={5}>
+                              <span className="wl2-group-label">{catLabel}</span>
+                              <span className="wl2-group-count">{items.length}</span>
+                            </td>
+                          </tr>
+                        )}
+                        {items.map(item => {
+                          const sym = symbolFromItem(item)
+                          const q = quoteByContractKey[item.contract_key] ?? quoteBySymbol[sym]
+                          const hasHolding = contractKeysWithPosition.has(item.contract_key.trim())
+                          const optOn = item.optionable === true
+                          return (
+                            <tr key={item.contract_key} className={!optOn ? 'wl2-row--dim' : undefined}>
+                              <td className="wl2-td--sym" title={item.contract_key}>
+                                <span className="wl2-sym">{watchlistItemLabel(item)}</span>
+                                {hasHolding && <span className="wl2-badge wl2-badge--hold" title="Holding">H</span>}
+                              </td>
+                              <td className="wl2-td--quote">{renderQuoteCell(q)}</td>
+                              <td className="wl2-td--opt">
+                                <button
+                                  type="button"
+                                  className={`wl2-opt-pill${optOn ? ' wl2-opt-pill--on' : ''}`}
+                                  onClick={() => handleOptionableToggle(item)}
+                                  aria-label={`Option? for ${watchlistItemLabel(item)}`}
+                                  title={optOn ? 'Included in Option Discovery' : 'Not in Option Discovery'}
+                                >
+                                  {optOn ? 'ON' : 'OFF'}
+                                </button>
+                              </td>
+                              <td className="wl2-td--cat">
+                                <select
+                                  className="wl2-cat-select"
+                                  value={item.category_id ?? ''}
+                                  onChange={e => {
+                                    const v = e.target.value
+                                    handleWatchlistCategoryChange(item, v ? Number(v) : null)
+                                  }}
+                                  aria-label={`Category for ${watchlistItemLabel(item)}`}
+                                >
+                                  <option value="">—</option>
+                                  {positionCategories.map(c => (
+                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="wl2-td--acts">
+                                <span className="wl2-acts">
+                                  <button
+                                    type="button"
+                                    className="wl2-act-icon"
+                                    onClick={() => handleAnalyze(item)}
+                                    disabled={analysisLoadingSymbol !== null}
+                                    title="Bar stats"
+                                    aria-label={`Analyze ${sym}`}
+                                  >
+                                    {analysisLoadingSymbol === sym ? '⏳' : '📊'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="wl2-act-icon"
+                                    onClick={() => openAddOptionModal(item)}
+                                    title="Add option contract"
+                                    aria-label="Add option"
+                                  >
+                                    ＋
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="wl2-act-icon wl2-act-icon--rm"
+                                    onClick={() => handleRemoveWatchlist(item)}
+                                    title="Remove"
+                                    aria-label="Remove from watchlist"
+                                  >
+                                    ✕
+                                  </button>
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    )
+                  })}
+                </table>
+              )}
+            </div>
+          )}
+
+          {/* ── Options table ── */}
+          {activeSection === 'options' && (
+            <div className="wl2-table-wrap">
+              {watchlistOptions.length === 0 ? (
+                <div className="wl2-empty">No options in watchlist.</div>
+              ) : (
+                <table className="wl2-table">
+                  <thead>
+                    <tr>
+                      <th className="wl2-th--sym">Symbol</th>
+                      <th className="wl2-th--quote">Last / B·A</th>
+                      <th className="wl2-th--exp">Expiry</th>
+                      <th className="wl2-th--right">R</th>
+                      <th className="wl2-th--strike">Strike</th>
+                      <th className="wl2-th--cat">Category</th>
+                      <th className="wl2-th--acts" />
+                    </tr>
+                  </thead>
+                  {optionCategoryOrder.map(catLabel => {
+                    const items = optionByCategory[catLabel] ?? []
+                    if (items.length === 0) return null
+                    return (
+                      <tbody key={`opt-${catLabel}`}>
+                        {optionCategoryOrder.length > 1 && (
+                          <tr className="wl2-group-row">
+                            <td colSpan={7}>
+                              <span className="wl2-group-label">{catLabel}</span>
+                              <span className="wl2-group-count">{items.length}</span>
+                            </td>
+                          </tr>
+                        )}
+                        {items.map(item => {
+                          const q = quoteByContractKey[item.contract_key] ?? quoteBySymbol[symbolFromItem(item)]
+                          const hasHolding = contractKeysWithPosition.has(item.contract_key.trim())
+                          return (
+                            <tr key={item.contract_key}>
+                              <td className="wl2-td--sym" title={item.contract_key}>
+                                <span className="wl2-sym">{item.symbol || watchlistItemLabel(item)}</span>
+                                {hasHolding && <span className="wl2-badge wl2-badge--hold" title="Holding">H</span>}
+                              </td>
+                              <td className="wl2-td--quote">{renderQuoteCell(q)}</td>
+                              <td className="wl2-td--exp">{formatExpiry(item.expiry)}</td>
+                              <td className="wl2-td--right">
+                                <span className={`wl2-right-badge${(item.option_right || '').toUpperCase() === 'C' || (item.option_right || '').toUpperCase() === 'CALL' ? ' wl2-right-badge--c' : ' wl2-right-badge--p'}`}>
+                                  {formatOptionRight(item.option_right)}
+                                </span>
+                              </td>
+                              <td className="wl2-td--strike">{item.strike != null ? formatStrike(item.strike) : '—'}</td>
+                              <td className="wl2-td--cat">
+                                <select
+                                  className="wl2-cat-select"
+                                  value={item.category_id ?? ''}
+                                  onChange={e => {
+                                    const v = e.target.value
+                                    handleWatchlistCategoryChange(item, v ? Number(v) : null)
+                                  }}
+                                  aria-label={`Category for ${item.symbol || watchlistItemLabel(item)}`}
+                                >
+                                  <option value="">—</option>
+                                  {positionCategories.map(c => (
+                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="wl2-td--acts">
+                                <button
+                                  type="button"
+                                  className="wl2-act-icon wl2-act-icon--rm"
+                                  onClick={() => handleRemoveWatchlist(item)}
+                                  title="Remove"
+                                  aria-label="Remove from watchlist"
+                                >
+                                  ✕
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    )
+                  })}
+                </table>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Analysis panel ── */}
+      {analysisResult && (
+        <section className="wl2-analysis" aria-labelledby="wl2-analysis-head">
+          <div className="wl2-analysis__header">
+            <h3 id="wl2-analysis-head" className="wl2-analysis__title">
+              {analysisResult.symbol}
+              <span className="wl2-analysis__sub">bar stats</span>
+            </h3>
+            <button
+              type="button"
+              className="wl2-btn wl2-btn--primary"
               disabled={!!fetchMarketDataStep}
               onClick={() => handleFetchMarketData()}
-              aria-label="Smart fetch bars for this symbol (daily up to 1Y, min/hour as needed)"
             >
-              {fetchMarketDataStep || 'Get market data'}
+              {fetchMarketDataStep || 'Fetch data'}
             </button>
-            {fetchMarketDataError && (
-              <span className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginLeft: '0.5rem' }}>
-                {fetchMarketDataError}
-              </span>
-            )}
+            <button type="button" className="wl2-act-icon" onClick={() => setAnalysisResult(null)} title="Close">✕</button>
+          </div>
+          {fetchMarketDataError && (
+            <span className="wl2-error wl2-error--inline">{fetchMarketDataError}</span>
+          )}
+          <div className="wl2-analysis__grid">
+            <div className="wl2-analysis__kpi">
+              <span className="wl2-analysis__kpi-label">stock_day</span>
+              <span className="wl2-analysis__kpi-val">{analysisResult.stats.stock_day.toLocaleString()}</span>
+            </div>
+            {analysisResult.stats.stock_min && Object.entries(analysisResult.stats.stock_min).map(([period, count]) => (
+              <div className="wl2-analysis__kpi" key={period}>
+                <span className="wl2-analysis__kpi-label">{period}</span>
+                <span className="wl2-analysis__kpi-val">{(count as number).toLocaleString()}</span>
+              </div>
+            ))}
           </div>
         </section>
       )}
 
+      {/* ── Add option modal ── */}
       {addOptionForSymbol != null && (
         <div
-          className="watchlist-modal-backdrop"
+          className="wl2-modal-backdrop"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="watchlist-add-option-title"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.4)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
-          }}
+          aria-labelledby="wl2-add-opt-title"
           onClick={e => e.target === e.currentTarget && closeAddOptionModal()}
         >
-          <div
-            className="watchlist-modal-content card"
-            style={{ padding: '1.25rem', minWidth: '18rem', maxWidth: '90vw' }}
-            onClick={e => e.stopPropagation()}
-          >
-            <h4 id="watchlist-add-option-title" style={{ marginTop: 0 }}>Add option for {addOptionForSymbol}</h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div className="replay-bar-symbol-row">
-                <label className="replay-bar-symbol-label">Expiry</label>
+          <div className="wl2-modal" onClick={e => e.stopPropagation()}>
+            <h4 id="wl2-add-opt-title" className="wl2-modal__title">
+              Add option · <strong>{addOptionForSymbol}</strong>
+            </h4>
+            <div className="wl2-modal__fields">
+              <label className="wl2-modal__field">
+                <span className="wl2-modal__field-label">Expiry</span>
                 <input
                   type="text"
-                  placeholder="yyyy-mm-dd or YYYYMMDD"
+                  placeholder="yyyy-mm-dd"
                   value={addOptExpiry}
                   onChange={e => setAddOptExpiry(e.target.value)}
-                  className="replay-bar-symbol-input"
-                  aria-label="Expiry"
+                  className="wl2-modal__input"
                 />
-              </div>
-              <div className="replay-bar-symbol-row">
-                <label className="replay-bar-symbol-label">Right</label>
+              </label>
+              <label className="wl2-modal__field">
+                <span className="wl2-modal__field-label">Right</span>
                 <select
                   value={addOptRight}
                   onChange={e => setAddOptRight(e.target.value as 'CALL' | 'PUT')}
-                  aria-label="Right"
-                  style={{ padding: '0.25rem 0.5rem', flex: 1 }}
+                  className="wl2-modal__input"
                 >
                   <option value="CALL">CALL</option>
                   <option value="PUT">PUT</option>
                 </select>
-              </div>
-              <div className="replay-bar-symbol-row">
-                <label className="replay-bar-symbol-label">Strike</label>
+              </label>
+              <label className="wl2-modal__field">
+                <span className="wl2-modal__field-label">Strike</span>
                 <input
                   type="number"
                   step="0.01"
@@ -858,23 +791,20 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
                   placeholder="e.g. 120"
                   value={addOptStrike}
                   onChange={e => setAddOptStrike(e.target.value)}
-                  className="replay-bar-symbol-input"
-                  aria-label="Strike"
+                  className="wl2-modal__input"
                 />
-              </div>
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-                <button type="button" className="btn btn-secondary" onClick={closeAddOptionModal}>
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={addPending || !addOptExpiry.trim() || !addOptStrike.trim()}
-                  onClick={() => submitAddOption()}
-                >
-                  {addPending ? 'Adding…' : 'Add'}
-                </button>
-              </div>
+              </label>
+            </div>
+            <div className="wl2-modal__footer">
+              <button type="button" className="wl2-btn wl2-btn--ghost" onClick={closeAddOptionModal}>Cancel</button>
+              <button
+                type="button"
+                className="wl2-btn wl2-btn--primary"
+                disabled={addPending || !addOptExpiry.trim() || !addOptStrike.trim()}
+                onClick={() => submitAddOption()}
+              >
+                {addPending ? 'Adding…' : 'Add'}
+              </button>
             </div>
           </div>
         </div>

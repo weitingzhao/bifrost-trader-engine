@@ -2972,6 +2972,14 @@ export interface StockDayGapResult {
   missing_by_year?: StockDayMissingYearRow[]
   compared_at?: string
   message?: string
+  /** YYYY-MM-DD ceiling applied to ref/covered CTEs (matches the fill's safe end date). */
+  cap_date?: string | null
+  /**
+   * True when cap_date < today (NYSE session still open at check time).
+   * Today's bar is excluded from the gap count to prevent phantom gaps —
+   * re-run Check after 4:20 PM ET to include today.
+   */
+  today_pending?: boolean
 }
 
 export interface StockDayGapBatchResponse {

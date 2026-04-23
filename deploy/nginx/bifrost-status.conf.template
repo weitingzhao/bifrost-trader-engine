@@ -4,7 +4,7 @@
 #
 # Path → backend (single origin :80; matches FastAPI route prefixes in backend/*/routers):
 #   /research/massive → Massive | /research/docs, /bifrost-api-docs/ → Docs | /ops → Ops
-#   /strategies/ → Strategy | /portfolio/, /position-categories → Portfolio
+#   /strategies/ → Strategy | /portfolio/ → Portfolio | /position-categories → Monitor (same DB; optional Portfolio process)
 #   /trading/, /executions, /performance, /transactions → Trading
 #   /bars, /watchlist, /quotes, /market/, /indices/ → Market
 #   /research/ (rest) → Research API (option discovery, max pain) — longer /research/massive|docs win first
@@ -116,7 +116,7 @@ server {
     }
 
     location ^~ /position-categories {
-        proxy_pass http://127.0.0.1:@@BIFROST_PORTFOLIO_PORT@@;
+        proxy_pass http://127.0.0.1:@@BIFROST_MONITOR_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

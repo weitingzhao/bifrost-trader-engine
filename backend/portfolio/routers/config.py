@@ -1,13 +1,29 @@
 """Portfolio config: position-categories management."""
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, Request
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["portfolio-config"])
+
+
+def _coerce_optional_int(value: Any) -> Optional[int]:
+    """Accept JSON int/float/str for sort_order; invalid values become None (omit from insert)."""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, float):
+            if not value.is_integer():
+                return None
+            return int(value)
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 @router.get("/position-categories")
@@ -29,14 +45,14 @@ def post_position_category(request: Request, body: Dict[str, Any] = Body(...)) -
     name = (b.get("name") or "").strip()
     if not name:
         return {"ok": False, "error": "name is required.", "id": None}
-    gid = reader.create_position_category(
+    gid, err = reader.create_position_category(
         name=name,
         description=b.get("description"),
-        sort_order=b.get("sort_order"),
+        sort_order=_coerce_optional_int(b.get("sort_order")),
     )
     if gid is not None:
         return {"ok": True, "id": gid, "name": name}
-    return {"ok": False, "error": "Failed to create category.", "id": None}
+    return {"ok": False, "error": err or "Failed to create category.", "id": None}
 
 
 @router.patch("/position-categories/{category_id:int}")
@@ -51,7 +67,7 @@ def patch_position_category(request: Request, category_id: int, body: Dict[str, 
         category_id,
         name=b.get("name"),
         description=b.get("description"),
-        sort_order=b.get("sort_order"),
+        sort_order=_coerce_optional_int(b.get("sort_order")),
     ):
         return {"ok": True, "id": category_id}
     return {"ok": False, "error": "Failed to update category."}

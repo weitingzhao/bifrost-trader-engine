@@ -880,10 +880,12 @@ class StatusReader:
         name: str,
         description: Optional[str] = None,
         sort_order: Optional[int] = None,
-    ) -> Optional[int]:
+    ) -> Tuple[Optional[int], Optional[str]]:
         if not self._connect():
-            return None
-        return position_categories_module.create_position_category(self._conn, name=name, description=description, sort_order=sort_order)
+            return None, "Database connection failed."
+        return position_categories_module.create_position_category(
+            self._conn, name=name, description=description, sort_order=sort_order
+        )
 
     def update_position_category(
         self,

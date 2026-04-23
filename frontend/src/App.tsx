@@ -1760,7 +1760,8 @@ export default function App() {
       {activeTab === 'research' && researchView === 'risk' && (
         <ResearchRiskAnalysisPage
           onGoToScreener={() => setResearchView('screener')}
-          breadcrumbLabel="Risk Model"
+          breadcrumbLabel="Risk & Position Sizer"
+          status={status}
         />
       )}
 

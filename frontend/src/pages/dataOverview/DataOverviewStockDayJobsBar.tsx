@@ -204,6 +204,11 @@ function AllGapsSheet({ open, onClose, gapBySymbol, poolSymbols, onOpenQualitySh
                           <span className={hasGap ? 'data-overview-wl-matrix__completeness-pct data-overview-wl-matrix__completeness-pct--bad' : ''}>
                             {g.gap != null ? (hasGap ? `+${g.gap.toLocaleString()}` : g.gap.toLocaleString()) : '—'}
                           </span>
+                          {g.today_pending && (
+                            <span style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginLeft: 4 }} title="Today excluded — market open. Re-check after 4:20 PM ET.">
+                              (today⌛)
+                            </span>
+                          )}
                         </td>
                         <td style={{ fontVariantNumeric: 'tabular-nums' }}>
                           {g.coverage_pct != null ? (
@@ -608,6 +613,7 @@ export function DataOverviewStockDayJobsBar({
 
   // Gap rollup for summary strip
   const checkedSymbols = poolUpper.filter(s => gapBySymbol[s]?.ok && gapBySymbol[s]?.compared_at)
+  const anyTodayPending = checkedSymbols.some(s => gapBySymbol[s]?.today_pending)
   const gapRollup = checkedSymbols.length > 0 ? (() => {
     let totalCovered = 0, totalRef = 0, totalGap = 0, n = 0
     for (const s of checkedSymbols) {
@@ -890,6 +896,11 @@ export function DataOverviewStockDayJobsBar({
               {gapRollup.comparedAt && (
                 <span className="data-overview-ref-strip__time" title="compared_at (UTC)">{' · '}{gapRollup.comparedAt}</span>
               )}
+              {anyTodayPending && (
+                <span className="data-overview-ref-strip__time" title="Today's bar is excluded from the gap count — NYSE session still open. Re-run Check after 4:20 PM ET to include today.">
+                  {' · '}today excluded (market open)
+                </span>
+              )}
             </span>
           ) : checkedSymbols.length === 1 ? (() => {
             const sym = checkedSymbols[0]!
@@ -907,6 +918,11 @@ export function DataOverviewStockDayJobsBar({
                   <>{' · '}<span className={g.coverage_pct >= 97 ? 'data-overview-ref-strip__cov-pct data-overview-ref-strip__cov-pct--ok' : 'data-overview-ref-strip__cov-pct data-overview-ref-strip__cov-pct--warn'}>{g.coverage_pct}%</span></>
                 )}
                 {g.compared_at && <span className="data-overview-ref-strip__time">{' · '}{g.compared_at.slice(0, 16)}</span>}
+                {g.today_pending && (
+                  <span className="data-overview-ref-strip__time" title="Today's bar is excluded from the gap count — NYSE session still open. Re-run Check after 4:20 PM ET to include today.">
+                    {' · '}today excluded (market open)
+                  </span>
+                )}
               </span>
             )
           })() : poolUpper.length > 0 ? (

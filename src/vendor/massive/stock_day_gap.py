@@ -8,7 +8,7 @@ Non-trading days are excluded using:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 
 # Shared SQL fragment for trading-day filtering in the ref CTE.
@@ -25,6 +25,7 @@ def compute_stock_day_gap(
     cur: Any,
     symbol: str,
     lookback_years: int = 10,
+    cap_date: Optional[date] = None,
 ) -> Dict[str, Any]:
     """Compare stock_day bar coverage for *symbol* against the global trading-day calendar.
 
@@ -32,8 +33,14 @@ def compute_stock_day_gap(
       ref     = DISTINCT bar_time FROM stock_day WHERE source='massive'
                   AND bar_time >= symbol.first_bar (clips pre-IPO dates)
                   AND is a trading day (no weekends, no NYSE holidays)
+                  AND bar_time::date <= cap_date  (when cap_date is provided)
       covered = DISTINCT bar_time for this symbol in same window
       gap     = ref_total - covered_total
+
+    cap_date should be passed as the last safely-closed trading date
+    (i.e. yesterday when the NYSE session is still open, today once it has closed).
+    This prevents today's bar from appearing as a phantom gap when the session
+    is still in progress and the bar cannot yet be reliably fetched.
 
     Returns a dict compatible with StockDayGapResult (frontend).
     """
@@ -42,6 +49,13 @@ def compute_stock_day_gap(
         return {"ok": False, "error": "symbol is required"}
 
     compared_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # When cap_date is provided, add a date ceiling to both ref and covered CTEs
+    # so that today's phantom gap is suppressed while the session is still open.
+    cap_filter_sql = "AND bar_time::date <= %(cap_date)s" if cap_date else ""
+    sql_params: Dict[str, Any] = {"years": lookback_years, "symbol": sym}
+    if cap_date:
+        sql_params["cap_date"] = cap_date.isoformat()
 
     # ── Query A: ref total vs covered total ───────────────────────────────────
     # Clip reference calendar to symbol's first known bar date so pre-IPO dates
@@ -68,6 +82,7 @@ def compute_stock_day_gap(
           WHERE source = 'massive'
             AND bar_time >= (SELECT ts FROM effective_start)
             AND {_TRADING_DAY_FILTER}
+            {cap_filter_sql}
         ),
         covered AS (
           SELECT DISTINCT bar_time
@@ -75,12 +90,13 @@ def compute_stock_day_gap(
           WHERE source = 'massive'
             AND UPPER(TRIM(symbol)) = %(symbol)s
             AND bar_time >= (SELECT ts FROM effective_start)
+            {cap_filter_sql}
         )
         SELECT
           (SELECT COUNT(*) FROM ref)::bigint     AS ref_total,
           (SELECT COUNT(*) FROM covered)::bigint AS covered_total
         """,
-        {"years": lookback_years, "symbol": sym},
+        sql_params,
     )
     row = cur.fetchone()
     ref_total = int(row[0] or 0) if row else 0
@@ -99,6 +115,7 @@ def compute_stock_day_gap(
             "coverage_pct": 100.0 if covered_total == 0 else None,
             "missing_by_year": [],
             "compared_at": compared_at,
+            "cap_date": cap_date.isoformat() if cap_date else None,
             "message": "No stock_day rows with source='massive' in the database yet.",
         }
 
@@ -131,6 +148,7 @@ def compute_stock_day_gap(
           WHERE source = 'massive'
             AND bar_time >= (SELECT ts FROM effective_start)
             AND {_TRADING_DAY_FILTER}
+            {cap_filter_sql}
         ),
         covered AS (
           SELECT DISTINCT bar_time
@@ -138,6 +156,7 @@ def compute_stock_day_gap(
           WHERE source = 'massive'
             AND UPPER(TRIM(symbol)) = %(symbol)s
             AND bar_time >= (SELECT ts FROM effective_start)
+            {cap_filter_sql}
         )
         SELECT
           EXTRACT(YEAR FROM r.bar_time)::int AS year,
@@ -150,7 +169,7 @@ def compute_stock_day_gap(
         GROUP BY year
         ORDER BY year DESC
         """,
-        {"years": lookback_years, "symbol": sym},
+        sql_params,
     )
     missing_by_year: List[Dict[str, Any]] = []
     for yr_row in (cur.fetchall() or []):
@@ -173,6 +192,7 @@ def compute_stock_day_gap(
         "coverage_pct": coverage_pct,
         "missing_by_year": missing_by_year,
         "compared_at": compared_at,
+        "cap_date": cap_date.isoformat() if cap_date else None,
     }
 
 

@@ -1,11 +1,22 @@
 """Position categories CRUD: read and write preference_position_categories / preference_position_category_tags."""
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
+import psycopg2
 from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
+
+
+def _pg_exc_message(exc: BaseException) -> str:
+    if isinstance(exc, psycopg2.Error):
+        detail = getattr(exc, "diag", None)
+        if detail is not None and getattr(detail, "message_primary", None):
+            return str(detail.message_primary).strip()
+        if getattr(exc, "pgerror", None):
+            return str(exc.pgerror).strip()
+    return str(exc).strip()[:500]
 
 
 def get_position_categories(conn: Any) -> List[Dict[str, Any]]:
@@ -32,9 +43,10 @@ def create_position_category(
     name: str,
     description: Optional[str] = None,
     sort_order: Optional[int] = None,
-) -> Optional[int]:
+) -> Tuple[Optional[int], Optional[str]]:
+    """Returns (new_id, error_message). error_message is set only on failure."""
     if not name or not str(name).strip() or conn is None:
-        return None
+        return None, "Invalid name or no database connection."
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -47,14 +59,17 @@ def create_position_category(
             )
             row = cur.fetchone()
         conn.commit()
-        return int(row[0]) if row and row[0] is not None else None
+        if row and row[0] is not None:
+            return int(row[0]), None
+        return None, "Insert returned no id."
     except Exception as e:
-        logger.debug("create_position_category failed: %s", e)
+        msg = _pg_exc_message(e)
+        logger.warning("create_position_category failed: %s", msg)
         try:
             conn.rollback()
         except Exception:
             pass
-        return None
+        return None, msg or "Database error."
 
 
 def update_position_category(
