@@ -63,7 +63,7 @@ function renderAggregatedLines(
   return items.map((item, i) => {
     const { level, timePart, body } = parseConsoleLogLine(item.line)
     return (
-      <span key={item.id} className={`celery-log-line celery-log--${level}`}>
+      <span key={`${item.source}-${item.id}-${i}`} className={`celery-log-line celery-log--${level}`}>
         {i > 0 ? '\n' : null}
         <span className={`architecture-log-source-tag architecture-log-source--${item.source}`} data-source={item.source}>
           [{sourceLabel(definitions, item.source)}]

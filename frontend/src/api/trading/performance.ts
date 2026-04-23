@@ -1,5 +1,6 @@
 import type { RiskSummaryResponse, PerformanceResponse, AccountTransaction } from '../../types'
 import { getTradingApiBase, joinServiceBase } from '../shared/apiRouting'
+import { apiBase as monitorApiBase } from '../shared/constants'
 
 function apiBase(): string {
   return getTradingApiBase()
@@ -10,7 +11,7 @@ function tradingUrl(path: string): string {
 }
 
 export async function fetchRiskSummary(): Promise<RiskSummaryResponse> {
-  const r = await fetch(tradingUrl('/risk_summary'))
+  const r = await fetch(`${monitorApiBase()}/risk_summary`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }

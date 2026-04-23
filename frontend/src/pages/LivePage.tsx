@@ -20,6 +20,26 @@ import {
 import { computeOptionLiveAvgPerShareFromExecutions } from '../utils/optionLiveBasis'
 
 const SYMBOL_ORDER_STORAGE_KEY = 'market_streams_symbol_order'
+const OPT_ROW_ORDER_STORAGE_KEY = 'market_streams_opt_row_order'
+
+function loadOptRowOrderFromStorage(): string[] {
+  try {
+    const raw = localStorage.getItem(OPT_ROW_ORDER_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? (parsed as string[]) : []
+  } catch {
+    return []
+  }
+}
+
+function saveOptRowOrderToStorage(order: string[]): void {
+  try {
+    localStorage.setItem(OPT_ROW_ORDER_STORAGE_KEY, JSON.stringify(order))
+  } catch {
+    /* ignore */
+  }
+}
 
 /** IB TWS-style FIN INSTRUMENT column sort cycle (unified STK + OPT → 9 modes). */
 type MarketStreamsSortMode = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
@@ -441,6 +461,8 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
   const [categoryOrder, setCategoryOrder] = useState<string[]>([])
   /** Symbol order per category (from DB; fallback localStorage). */
   const [symbolOrderByCategory, setSymbolOrderByCategory] = useState<Record<string, string[]>>(loadSymbolOrderFromStorage)
+  /** Custom order for Options position rows in drag mode (list of basisKeys: `accId\tcontract_key`). */
+  const [optRowOrder, setOptRowOrder] = useState<string[]>(loadOptRowOrderFromStorage)
   const [categoryOrderSaving, setCategoryOrderSaving] = useState(false)
   const [streamSyncFeedback, setStreamSyncFeedback] = useState<string | null>(null)
   const [msSortMode, setMsSortMode] = useState<MarketStreamsSortMode>(1)
@@ -1077,6 +1099,36 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
     putMarketStreamsSymbolOrder(cat, next).catch(() => { /* DB failed; localStorage already updated */ })
   }, [rowsByCategory, symbolOrderByCategory])
 
+  const applyOptRowReorder = useCallback((fromBasisKey: string, toBasisKey: string) => {
+    if (fromBasisKey === toBasisKey) return
+    const allBasisKeys = optPositionRows.map((r) => `${r.account_id.toLowerCase()}\t${r.contract_key}`)
+    const knownOrder = optRowOrder.filter((k) => allBasisKeys.includes(k))
+    const rest = allBasisKeys.filter((k) => !knownOrder.includes(k))
+    const current = [...knownOrder, ...rest]
+    const fromIdx = current.indexOf(fromBasisKey)
+    const toIdx = current.indexOf(toBasisKey)
+    if (fromIdx === -1 || toIdx === -1) return
+    const next = [...current]
+    next.splice(fromIdx, 1)
+    const newToIdx = next.indexOf(toBasisKey)
+    if (newToIdx === -1) return
+    next.splice(newToIdx, 0, fromBasisKey)
+    setOptRowOrder(next)
+    saveOptRowOrderToStorage(next)
+  }, [optPositionRows, optRowOrder])
+
+  const sortedOptRows = useMemo(() => {
+    const sorted = sortOptRowsAlpha(optPositionRows, 1)
+    if (msSortMode !== 1) return sorted
+    const basisKeyOf = (r: OptPositionRow) => `${r.account_id.toLowerCase()}\t${r.contract_key}`
+    const knownOrder = optRowOrder.filter((k) => sorted.some((r) => basisKeyOf(r) === k))
+    if (knownOrder.length === 0) return sorted
+    const rowByBasisKey = new Map(sorted.map((r) => [basisKeyOf(r), r]))
+    const inOrder = knownOrder.map((k) => rowByBasisKey.get(k)).filter((r): r is OptPositionRow => r != null)
+    const rest = sorted.filter((r) => !knownOrder.includes(basisKeyOf(r)))
+    return [...inOrder, ...rest]
+  }, [optPositionRows, optRowOrder, msSortMode])
+
   /** Mode 1 = null (category + drag for STK, OPT appended). Modes 2–9 = unified sorted/grouped STK+OPT. */
   const unifiedGroupedRows = useMemo((): LiveSortGroupMs[] | null => {
     if (msSortMode === 1) return null
@@ -1368,7 +1420,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
   )
 
   const renderOptStreamRow = useCallback(
-    (row: OptPositionRow) => {
+    (row: OptPositionRow, dragEnabled = false) => {
       const basisKey = `${row.account_id.toLowerCase()}\t${row.contract_key}`
       const q = quotesByContractKey[row.contract_key]
       const basis = optionLiveBasisByRow.get(basisKey)
@@ -1396,9 +1448,51 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
             </span>
           )
         : <span className="replay-muted" title={mtmTooltip}>—</span>
+      const symbolFreshness = getQuoteFreshness(q?.ts)
+      const freshnessTitle = q?.ts != null
+        ? `Last update ${symbolFreshness === 'fresh' ? '<3s ago' : symbolFreshness === 'stale' ? '3–10s ago' : '>10s ago'}`
+        : undefined
       return (
-        <tr key={basisKey} className="live-opt-inline-row">
-          <td title={row.contract_key} className="realtime-quote-symbol live-opt-inline-label">{contractLabel}</td>
+        <tr
+          key={basisKey}
+          className="live-opt-inline-row"
+          onDragOver={dragEnabled ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } : undefined}
+          onDrop={
+            dragEnabled
+              ? (e) => {
+                  e.preventDefault()
+                  try {
+                    const raw = e.dataTransfer.getData('application/x-market-streams-opt')
+                    if (!raw) return
+                    const { basisKey: fromKey } = JSON.parse(raw) as { basisKey: string }
+                    if (fromKey && fromKey !== basisKey) applyOptRowReorder(fromKey, basisKey)
+                  } catch {
+                    /* ignore */
+                  }
+                }
+              : undefined
+          }
+        >
+          <td
+            title={[row.contract_key, freshnessTitle].filter(Boolean).join('\n') || row.contract_key}
+            className={`live-opt-inline-label${symbolFreshness ? ` realtime-quote-symbol realtime-quote-symbol-${symbolFreshness}` : ' realtime-quote-symbol'}`}
+          >
+            {dragEnabled ? (
+              <span
+                className="realtime-quote-drag-handle"
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('application/x-market-streams-opt', JSON.stringify({ basisKey }))
+                  e.dataTransfer.effectAllowed = 'move'
+                }}
+                title="Drag to reorder option"
+                aria-hidden
+              >
+                ⋮⋮
+              </span>
+            ) : null}
+            {contractLabel}
+          </td>
           {hasStreamAccounts && (
             <>
               {/* Host columns */}
@@ -1435,7 +1529,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
         </tr>
       )
     },
-    [hasStreamAccounts, streamHostId, streamSecondaryId, quotesByContractKey, optionLiveBasisByRow],
+    [hasStreamAccounts, streamHostId, streamSecondaryId, quotesByContractKey, optionLiveBasisByRow, applyOptRowReorder],
   )
 
   return (
@@ -1683,7 +1777,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                       </tr>
                     ) : null}
                     {g.stkRows.map((row) => renderMarketStreamRow(row, row.category, false))}
-                    {g.optRows.map((row) => renderOptStreamRow(row))}
+                    {g.optRows.map((row) => renderOptStreamRow(row, false))}
                   </Fragment>
                 ))
               ) : (
@@ -1703,7 +1797,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                           <span className="live-sort-group-label">Options</span>
                         </td>
                       </tr>
-                      {sortOptRowsAlpha(optPositionRows, 1).map((row) => renderOptStreamRow(row))}
+                      {sortedOptRows.map((row) => renderOptStreamRow(row, msDragEnabled))}
                     </Fragment>
                   )}
                 </>
