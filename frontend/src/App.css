@@ -27105,6 +27105,63 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   margin-bottom: var(--space-2);
 }
 
+.wl2-portfolio-risk-power__toggle {
+  margin-left: auto;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.72rem;
+}
+
+.wl2-portfolio-risk-power-summary {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--color-border) 86%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-surface) 72%, var(--color-surface-elevated));
+  margin-bottom: var(--space-2);
+}
+
+.wl2-portfolio-risk-power-summary__item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  min-width: 0;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.wl2-portfolio-risk-power-summary__item--maxdd {
+  margin-left: auto;
+}
+
+.wl2-portfolio-risk-power-summary__name {
+  font-size: 0.67rem;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.wl2-portfolio-risk-power-summary__metric {
+  font-size: 0.78rem;
+  color: var(--color-text-main);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wl2-portfolio-risk-power-summary__metric-value {
+  font-weight: 700;
+  color: color-mix(in srgb, var(--color-accent) 86%, #f5ffef);
+}
+
+.wl2-portfolio-risk-power-summary__metric--emph {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--color-accent) 84%, var(--color-text-main));
+}
+
 .wl2-sizing-dash__title--inline {
   margin: 0;
   flex: 0 0 auto;
@@ -27222,8 +27279,8 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
 }
 
 .wl2-portfolio-max-dd-row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(11rem, 2fr) minmax(11rem, 2fr) minmax(0, 8fr);
   align-items: flex-start;
   gap: var(--space-3);
   margin-bottom: var(--space-2);
@@ -27231,12 +27288,12 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
 
 .wl2-portfolio-max-dd-row .wl2-range-field--portfolio {
   margin-bottom: 0;
-  flex: 0 1 min(28rem, 100%);
+  max-width: none;
+  min-width: 0;
 }
 
 .wl2-portfolio-max-dd-row .wl2-sizing-dash__table-wrap {
   margin-top: 0;
-  flex: 1 1 min(14rem, 100%);
   min-width: 0;
 }
 
@@ -27503,6 +27560,52 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   font-size: 0.7rem;
   line-height: 1.4;
   color: var(--color-text-muted);
+}
+
+.wl2-range-field__mini-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.wl2-range-field__mini-control input {
+  width: 4.1rem;
+  height: 1.6rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-main);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.wl2-range-field__mini-control-unit {
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+}
+
+.wl2-range-field__metric-tile--highlight {
+  border-color: var(--color-border);
+  background: var(--color-surface-elevated);
+  box-shadow: none;
+}
+
+.wl2-range-field__metric-tile--highlight .wl2-range-field__metric-tile-label {
+  color: color-mix(in srgb, var(--color-accent) 35%, var(--color-text-muted));
+}
+
+.wl2-range-field__metric-tile--highlight .wl2-range-field__metric-tile-value {
+  color: color-mix(in srgb, var(--color-accent) 92%, #f5ffef);
+  font-weight: 700;
+}
+
+.wl2-range-field__metrics-row--single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .wl2-portfolio-metric-table .wl2-td-num {

@@ -324,8 +324,11 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
   const [orderEntryPrice, setOrderEntryPrice] = useState('')
   const [orderExitPrice, setOrderExitPrice] = useState('')
   const [orderShareAmt, setOrderShareAmt] = useState('100')
+  const [portfolioRiskPowerCollapsed, setPortfolioRiskPowerCollapsed] = useState(false)
   /** Portfolio max-drawdown % (5–50); drives table Max DD $, static risk budget, and Order sizing ladder row. */
   const [staticMaxDdPctCap, setStaticMaxDdPctCap] = useState(20)
+  /** Per-trade static risk rate (% of total capital). */
+  const [staticRiskPctPerTrade, setStaticRiskPctPerTrade] = useState(1)
 
   const positions = useMemo(() => {
     return (status?.portfolio?.accounts || []).flatMap((acc: IbAccountSnapshot) => (acc.positions || []))
@@ -470,6 +473,12 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
     const pct = Math.max(5, Math.min(50, staticMaxDdPctCap))
     return (capital * pct) / 100
   }, [capital, staticMaxDdPctCap])
+
+  const staticRiskUsdPerTrade = useMemo(() => {
+    if (capital <= 0 || !Number.isFinite(staticRiskPctPerTrade)) return 0
+    const pct = Math.max(0.1, Math.min(5, staticRiskPctPerTrade))
+    return (capital * pct) / 100
+  }, [capital, staticRiskPctPerTrade])
 
   const kellyMetrics = useMemo<KellyMetrics>(() => {
     if (!perfSummary) return { kelly_pct: 0, effective_kelly: 0, is_valid: false }
@@ -1666,14 +1675,83 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                 Portfolio risk power
               </h4>
               <InfoTooltip text={WL_HELP_PORTFOLIO_TABLE} />
+              <button
+                type="button"
+                className="wl2-btn wl2-btn--ghost wl2-portfolio-risk-power__toggle"
+                onClick={() => setPortfolioRiskPowerCollapsed(v => !v)}
+                aria-expanded={!portfolioRiskPowerCollapsed}
+                aria-controls="wl2-portfolio-risk-power-body"
+                title={portfolioRiskPowerCollapsed ? 'Expand portfolio risk power' : 'Collapse portfolio risk power'}
+              >
+                {portfolioRiskPowerCollapsed ? 'Expand' : 'Collapse'}
+              </button>
             </div>
 
-            <div className="wl2-portfolio-max-dd-row">
+            {portfolioRiskPowerCollapsed ? (
+              <div id="wl2-portfolio-risk-power-body" className="wl2-portfolio-risk-power-summary" role="status" aria-live="polite">
+                <div className="wl2-portfolio-risk-power-summary__item">
+                  <span className="wl2-portfolio-risk-power-summary__name">Host</span>
+                  <span className="wl2-portfolio-risk-power-summary__metric">
+                    Cash:{' '}
+                    <span className="wl2-portfolio-risk-power-summary__metric-value">
+                      {hostCashPie ? fmtUsd(hostCashPie.cash) : '—'}
+                    </span>
+                  </span>
+                  <span className="wl2-portfolio-risk-power-summary__metric">
+                    STK:{' '}
+                    <span className="wl2-portfolio-risk-power-summary__metric-value">
+                      {hostCashPie ? fmtUsd(hostCashPie.stkExFi) : '—'}
+                    </span>
+                  </span>
+                </div>
+                <div className="wl2-portfolio-risk-power-summary__item">
+                  <span className="wl2-portfolio-risk-power-summary__name">Secondary</span>
+                  <span className="wl2-portfolio-risk-power-summary__metric">
+                    Cash:{' '}
+                    <span className="wl2-portfolio-risk-power-summary__metric-value">
+                      {secondaryCashPie ? fmtUsd(secondaryCashPie.cash) : '—'}
+                    </span>
+                  </span>
+                  <span className="wl2-portfolio-risk-power-summary__metric">
+                    STK:{' '}
+                    <span className="wl2-portfolio-risk-power-summary__metric-value">
+                      {secondaryCashPie ? fmtUsd(secondaryCashPie.stkExFi) : '—'}
+                    </span>
+                  </span>
+                </div>
+                <div className="wl2-portfolio-risk-power-summary__item wl2-portfolio-risk-power-summary__item--maxdd">
+                  <span className="wl2-portfolio-risk-power-summary__name">Max drawdown %</span>
+                  <span className="wl2-portfolio-risk-power-summary__metric wl2-portfolio-risk-power-summary__metric--emph">
+                    {staticMaxDdPctCap.toFixed(0)}%
+                  </span>
+                  <span className="wl2-portfolio-risk-power-summary__metric">
+                    Static risk budget:{' '}
+                    <span className="wl2-portfolio-risk-power-summary__metric-value">
+                      {capital > 0 ? fmtUsd(staticRiskBudgetUsd) : '—'}
+                    </span>
+                  </span>
+                  <span className="wl2-portfolio-risk-power-summary__metric">
+                    Max drawdown:{' '}
+                    <span className="wl2-portfolio-risk-power-summary__metric-value">
+                      {portfolioDdFromHistory.usd != null ? fmtUsd(portfolioDdFromHistory.usd) : '—'}
+                    </span>
+                  </span>
+                  <span className="wl2-portfolio-risk-power-summary__metric">
+                    Per-trade loss:{' '}
+                    <span className="wl2-portfolio-risk-power-summary__metric-value">
+                      {capital > 0 ? fmtUsd(staticRiskUsdPerTrade) : '—'}
+                    </span>
+                  </span>
+                </div>
+              </div>
+            ) : (
+            <>
+            <div id="wl2-portfolio-risk-power-body" className="wl2-portfolio-max-dd-row">
               <div className="wl2-range-field wl2-range-field--portfolio">
                 <div className="wl2-range-field__head">
                   <div className="wl2-range-field__label-row">
                     <label className="wl2-range-field__label" htmlFor="wl-portfolio-max-dd-pct">
-                      Max drawdown % (scenario)
+                      Max drawdown %
                     </label>
                     <InfoTooltip text={WL_HELP_MAX_DD_SCENARIO} />
                   </div>
@@ -1706,19 +1784,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                   <span>50%</span>
                 </div>
                 <div className="wl2-range-field__metrics-row">
-                  <div
-                    className="wl2-range-field__metric-tile"
-                    title={`${staticMaxDdPctCap}% × aggregate net liq. (= Total row Max DD $)`}
-                  >
-                    <span className="wl2-range-field__metric-tile-label">Static risk budget</span>
-                    <span className="wl2-range-field__metric-tile-value">
-                      {capital > 0 ? fmtUsd(staticRiskBudgetUsd) : '—'}
-                    </span>
-                    <span className="wl2-range-field__metric-tile-sub">
-                      {staticMaxDdPctCap}% NAV · Total row Max DD
-                    </span>
-                  </div>
-                  <div className="wl2-range-field__metric-tile">
+                  <div className="wl2-range-field__metric-tile wl2-range-field__metric-tile--highlight">
                     <span className="wl2-range-field__metric-tile-label">Max drawdown (history)</span>
                     <span className="wl2-range-field__metric-tile-value">
                       {portfolioDdFromHistory.usd != null ? fmtUsd(portfolioDdFromHistory.usd) : '—'}
@@ -1728,6 +1794,53 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                         {portfolioDdFromHistory.pctOfNav.toFixed(2)}% of NAV
                       </span>
                     ) : null}
+                  </div>
+                </div>
+              </div>
+              <div className="wl2-range-field wl2-range-field--portfolio">
+                <div className="wl2-range-field__head">
+                  <div className="wl2-range-field__label-row">
+                    <label className="wl2-range-field__label" htmlFor="wl-static-risk-pct">
+                      Static Risk % (per trade)
+                    </label>
+                  </div>
+                  <span className="wl2-range-field__readout" aria-live="polite">
+                    {staticRiskPctPerTrade.toFixed(1)}
+                    <span className="wl2-range-field__readout-unit">%</span>
+                  </span>
+                </div>
+                <input
+                  id="wl-static-risk-pct"
+                  type="range"
+                  className="wl2-range-elegant"
+                  min={0.1}
+                  max={5}
+                  step={0.1}
+                  value={staticRiskPctPerTrade}
+                  onChange={e =>
+                    setStaticRiskPctPerTrade(Math.max(0.1, Math.min(5, Number.parseFloat(e.target.value) || 1)))
+                  }
+                  aria-valuemin={0.1}
+                  aria-valuemax={5}
+                  aria-valuenow={staticRiskPctPerTrade}
+                  aria-label="Static risk percent per trade"
+                  style={{
+                    ['--wl-range-pct' as string]: `${((staticRiskPctPerTrade - 0.1) / (5 - 0.1)) * 100}%`,
+                  }}
+                />
+                <div className="wl2-range-field__scale" aria-hidden>
+                  <span>0.1%</span>
+                  <span>5.0%</span>
+                </div>
+                <div className="wl2-range-field__metrics-row wl2-range-field__metrics-row--single">
+                  <div className="wl2-range-field__metric-tile wl2-range-field__metric-tile--highlight">
+                    <span className="wl2-range-field__metric-tile-label">Per-trade fixed loss budget</span>
+                    <span className="wl2-range-field__metric-tile-value">
+                      {capital > 0 ? fmtUsd(staticRiskUsdPerTrade) : '—'}
+                    </span>
+                    <span className="wl2-range-field__metric-tile-sub">
+                      Total capital × {staticRiskPctPerTrade.toFixed(1)}%
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1854,7 +1967,10 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               </table>
               </div>
             </div>
+            </>
+            )}
 
+            {!portfolioRiskPowerCollapsed && (
             <div className="wl2-cash-pie-split-wrap">
               <div className="wl2-cash-pie-split-wrap__head">
                 <h5 className="wl2-sizing-dash__subtitle wl2-sizing-dash__subtitle--sm wl2-sizing-dash__subtitle--pie">
@@ -2059,6 +2175,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                 </div>
               </div>
             </div>
+            )}
 
           </section>
 
