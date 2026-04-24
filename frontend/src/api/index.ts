@@ -289,8 +289,9 @@ export {
   createStrategyInstance,
   updateStrategyInstance,
   deleteStrategyInstance,
+  fetchStrategyWinRate,
 } from './strategy/strategyInstances'
-export type { StrategyInstancesParams, CreateStrategyInstancePayload } from './strategy/strategyInstances'
+export type { StrategyInstancesParams, CreateStrategyInstancePayload, WinRateStructureRow, WinRateResponse } from './strategy/strategyInstances'
 export type {
   StrategyStructure,
   StructureLeg,

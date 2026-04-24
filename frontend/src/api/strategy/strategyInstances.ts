@@ -85,3 +85,37 @@ export async function deleteStrategyInstance(strategy_instance_id: number): Prom
     throw new Error((j as { detail?: string }).detail || r.statusText)
   }
 }
+
+export interface WinRateStructureRow {
+  structure_name: string
+  total_instances: number
+  profit_trades: number
+  loss_trades: number
+  total_profit: number | null
+  single_max_loss: number | null
+  profit_investment: number | null
+  loss_investment: number | null
+  total_investment: number | null
+  profit_avg_pct: number | null
+  loss_avg_pct: number | null
+  single_max_loss_pct: number | null
+  profit_avg_usd: number | null
+  loss_avg_usd: number | null
+}
+
+export interface WinRateResponse {
+  structures: WinRateStructureRow[]
+}
+
+export async function fetchStrategyWinRate(params?: {
+  since_ts?: number
+  until_ts?: number
+}): Promise<WinRateResponse> {
+  const p = new URLSearchParams()
+  if (params?.since_ts != null) p.set('since_ts', String(params.since_ts))
+  if (params?.until_ts != null) p.set('until_ts', String(params.until_ts))
+  const query = p.toString()
+  const r = await fetch(strategyUrl(`/strategies/win-rate${query ? `?${query}` : ''}`))
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}

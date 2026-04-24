@@ -18,6 +18,7 @@ from src.monitor.reader import gate_safety as gate_safety_module
 from src.monitor.reader import market as market_module
 from src.monitor.reader import strategy as strategy_module
 from src.monitor.reader import strategy_instance as strategy_instance_module
+from src.monitor.reader import strategy_win_rate as strategy_win_rate_module
 from src.monitor.reader import template_config as template_config_module
 from src.portfolio.reader import position_categories as position_categories_module
 from src.monitor.reader import settings as settings_module
@@ -584,6 +585,21 @@ class StatusReader:
         result = strategy_instance_module.get_instance_open_option_legs(self._conn, strategy_instance_id)
         self._end_read_txn()
         return result
+
+    def get_strategy_win_rate(
+        self,
+        since_ts: Optional[float] = None,
+        until_ts: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return per-structure win-rate aggregations from all instances with executions."""
+        if not self._connect():
+            return []
+        try:
+            return strategy_win_rate_module.compute_win_rate_by_structure(
+                self._conn, since_ts=since_ts, until_ts=until_ts
+            )
+        finally:
+            self._end_read_txn()
 
     # --- Risk (delegate to status module) ---
     def get_risk_summary(self) -> Dict[str, Any]:

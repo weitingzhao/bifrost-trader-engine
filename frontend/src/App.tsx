@@ -36,6 +36,7 @@ import OptionGreeksPage from './pages/OptionGreeksPage'
 import { StrategyStructurePage } from './pages/StrategyStructurePage'
 import { StrategyOpportunityPage } from './pages/StrategyOpportunityPage'
 import { StrategyInstancesPage } from './pages/StrategyInstancesPage'
+import { StrategyWinRatePage } from './pages/StrategyWinRatePage'
 import { StrategyAllocationPage } from './pages/StrategyAllocationPage'
 import { GatesConfigPage } from './pages/GatesConfigPage'
 import { StructureTypeConfigPage } from './pages/StructureTypeConfigPage'
@@ -347,7 +348,7 @@ export default function App() {
   const [urlHash, setUrlHash] = useState(() => (typeof window !== 'undefined' ? window.location.hash : ''))
   const [portfolioView, setPortfolioView] = useState<PortfolioView>('accounts')
   const [researchView, setResearchView] = useState<'risk' | 'screener' | 'watchlist' | 'backtest' | 'options' | 'greeks'>('risk')
-  const [strategyView, setStrategyView] = useState<'structure' | 'opportunity' | 'allocations' | 'gates' | 'typeConfig' | 'instances'>('structure')
+  const [strategyView, setStrategyView] = useState<'structure' | 'opportunity' | 'allocations' | 'gates' | 'typeConfig' | 'instances' | 'winRate'>('structure')
   /** Instance id from URL hash #/strategies/instances/:id; drives Strategy Instances detail view and back/forward. */
   const [urlStrategyInstanceId, setUrlStrategyInstanceId] = useState<number | null>(null)
   /** Opportunity id from #/strategies/opportunities/:id — opens edit form on Opportunity page. */
@@ -994,12 +995,15 @@ export default function App() {
   const strategySubmenuGroups: {
     id: string
     label: string
-    items: { id: 'structure' | 'opportunity' | 'allocations' | 'gates' | 'typeConfig' | 'instances'; label: string }[]
+    items: { id: 'structure' | 'opportunity' | 'allocations' | 'gates' | 'typeConfig' | 'instances' | 'winRate'; label: string }[]
   }[] = [
     {
       id: 'operations',
       label: 'Operations',
-      items: [{ id: 'instances', label: 'Instances' }],
+      items: [
+        { id: 'instances', label: 'Instances' },
+        { id: 'winRate', label: 'Win Rate' },
+      ],
     },
     {
       id: 'configuration',
@@ -1843,6 +1847,12 @@ export default function App() {
           urlStrategyInstanceId={urlStrategyInstanceId}
           onNavigateToStrategy={goStrategyStructure}
           breadcrumbLabel="Instances"
+        />
+      )}
+
+      {activeTab === 'strategy' && strategyView === 'winRate' && (
+        <StrategyWinRatePage
+          onGoToInstances={() => setStrategyView('instances')}
         />
       )}
 

@@ -342,6 +342,18 @@ def update_opportunity_endpoint(request: Request, opportunity_id: int, body: Opp
     return {"ok": True}
 
 
+@router.get("/win-rate")
+def get_strategy_win_rate(
+    request: Request,
+    since_ts: Optional[float] = Query(None, description="Filter: since Unix timestamp"),
+    until_ts: Optional[float] = Query(None, description="Filter: until Unix timestamp"),
+) -> Dict[str, Any]:
+    """Return per-structure win-rate aggregations from all instances with executions."""
+    reader = request.app.state.reader
+    structures = reader.get_strategy_win_rate(since_ts=since_ts, until_ts=until_ts)
+    return {"structures": structures}
+
+
 @router.get("/instances")
 def list_strategy_instances(
     request: Request,

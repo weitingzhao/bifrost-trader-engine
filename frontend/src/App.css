@@ -3013,6 +3013,239 @@ tr:hover .realtime-quote-drag-handle {
   color: var(--color-danger);
 }
 
+/* Strategy Win Rate — compact cards, multiple structures per row */
+.strategy-win-rate-page__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.strategy-win-rate-page__head-main {
+  flex: 1;
+  min-width: min(100%, 14rem);
+}
+
+.strategy-win-rate-page__head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.strategy-win-rate-page__head .page-title-with-tooltip {
+  margin: 0 0 var(--space-1);
+}
+
+.strategy-win-rate-page__hint {
+  margin: 0;
+  max-width: 48rem;
+}
+
+.strategy-win-rate-page__loading {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.strategy-win-rate-page .strategy-win-rate-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.strategy-win-rate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14.5rem, 1fr));
+  gap: var(--space-2);
+  align-items: stretch;
+}
+
+@media (min-width: 900px) {
+  .strategy-win-rate-grid {
+    grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  .strategy-win-rate-grid {
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  }
+}
+
+.strategy-win-rate-totals {
+  min-width: 0;
+}
+
+.strategy-win-rate-card {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-elevated);
+  padding: 0.55rem 0.65rem;
+}
+
+.strategy-win-rate-card--total {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface);
+}
+
+.strategy-win-rate-card__title {
+  margin: 0 0 0.45rem;
+  font-size: 0.88rem;
+  font-weight: 650;
+  line-height: 1.2;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.strategy-win-rate-card__section + .strategy-win-rate-card__section {
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.strategy-win-rate-card__section-label {
+  margin-bottom: 0.3rem;
+  font-size: 0.62rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-dim);
+}
+
+.strategy-win-rate-kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.3rem;
+}
+
+.strategy-win-rate-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 6px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  min-width: 0;
+}
+
+.strategy-win-rate-kpi--highlight {
+  border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.strategy-win-rate-kpi__label {
+  font-size: 0.65rem;
+  color: var(--color-text-dim);
+  line-height: 1.2;
+}
+
+.strategy-win-rate-kpi__value {
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  color: var(--color-text);
+}
+
+.strategy-win-rate-page .strategy-win-rate-kpi__value.pnl-positive {
+  color: var(--color-success);
+}
+
+.strategy-win-rate-page .strategy-win-rate-kpi__value.pnl-negative {
+  color: var(--color-danger);
+}
+
+.strategy-win-rate-kpi__value--neutral {
+  color: var(--color-text);
+}
+
+.strategy-win-rate-kpi__value--winpct {
+  font-size: 1.12rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.strategy-win-rate-kpi__value--winpct-dim {
+  color: var(--color-text-dim);
+}
+
+.strategy-win-rate-metrics {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.strategy-win-rate-metrics--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.strategy-win-rate-metrics--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 380px) {
+  .strategy-win-rate-metrics--3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.strategy-win-rate-metrics--wrap {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.strategy-win-rate-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  min-width: 0;
+}
+
+.strategy-win-rate-metric__label {
+  font-size: 0.62rem;
+  color: var(--color-text-dim);
+  line-height: 1.2;
+}
+
+.strategy-win-rate-metric__value {
+  font-size: 0.8rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+  line-height: 1.2;
+}
+
+.strategy-win-rate-page .strategy-win-rate-metric__value.pnl-positive {
+  color: var(--color-success);
+}
+
+.strategy-win-rate-page .strategy-win-rate-metric__value.pnl-negative {
+  color: var(--color-danger);
+}
+
+.strategy-win-rate-metrics--pnl .strategy-win-rate-metric__value--pnl {
+  font-size: 0.98rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.strategy-win-rate-metric__value--muted {
+  color: var(--color-text-dim);
+  font-weight: 500;
+}
+
+.strategy-win-rate-metric__value--pnl.strategy-win-rate-metric__value--muted {
+  color: var(--color-text-dim);
+  font-weight: 500;
+}
+
 /* Watchlist summary row: KPI-style stats bar */
 .watchlist-summary-row {
   display: flex;
