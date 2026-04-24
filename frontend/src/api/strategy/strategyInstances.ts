@@ -92,9 +92,13 @@ export interface WinRateStructureRow {
   profit_trades: number
   loss_trades: number
   total_profit: number | null
-  single_max_loss: number | null
+  /** Sum of each instance's worst losing trade (performance summary max_loss), same scope as structure / all. */
+  total_loss: number | null
+  /** Win Rate UI: underlying cost on net-PnL-positive instances (strike×|qty|×100, sell OPT). */
   profit_investment: number | null
+  /** Win Rate UI: underlying cost on net-PnL ≤ 0 instances. */
   loss_investment: number | null
+  /** Win Rate UI: profit_investment + loss_investment. */
   total_investment: number | null
   profit_avg_pct: number | null
   loss_avg_pct: number | null
@@ -105,6 +109,8 @@ export interface WinRateStructureRow {
 
 export interface WinRateResponse {
   structures: WinRateStructureRow[]
+  /** Aggregate over every instance (same shape as one structure row); for All structures card. */
+  totals_all?: WinRateStructureRow | null
 }
 
 export async function fetchStrategyWinRate(params?: {

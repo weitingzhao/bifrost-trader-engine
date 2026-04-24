@@ -3089,9 +3089,149 @@ tr:hover .realtime-quote-drag-handle {
   padding: 0.55rem 0.65rem;
 }
 
+button.strategy-win-rate-card {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+button.strategy-win-rate-card:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.strategy-win-rate-card--clickable:not(:disabled) {
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.strategy-win-rate-card--clickable:not(:disabled):hover {
+  border-color: var(--color-border-strong);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+
+.strategy-win-rate-card--clickable:not(:disabled):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
 .strategy-win-rate-card--total {
   border-color: var(--color-border-strong);
   background: var(--color-surface);
+}
+
+/* All structures: one row — 12-col band: Trades 3 | P&L 2 | Underlying 2 | Averages 5 */
+.strategy-win-rate-card--total .strategy-win-rate-card__title {
+  margin-bottom: 0.55rem;
+}
+
+.strategy-win-rate-card--total-panel {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--color-surface-elevated);
+}
+
+.strategy-win-rate-card--total-panel .strategy-win-rate-card__section-label {
+  margin-bottom: 0.28rem;
+  font-size: 0.65rem;
+}
+
+.strategy-win-rate-card--total-row {
+  display: grid;
+  grid-template-columns: 3fr 2fr 2fr 5fr;
+  gap: 0;
+  align-items: stretch;
+  padding: 0.55rem 0.65rem;
+  min-width: min(100%, 44rem);
+}
+
+/* Trades: inherit .strategy-win-rate-kpis — 2 cols × 2 rows (4 KPIs) */
+
+.strategy-win-rate-card--total-row > .strategy-win-rate-card__section--total-band {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+  padding-left: 0.55rem;
+  padding-right: 0.55rem;
+}
+
+.strategy-win-rate-card--total-row > .strategy-win-rate-card__section--total-band:first-child {
+  padding-left: 0;
+}
+
+.strategy-win-rate-card--total-row > .strategy-win-rate-card__section--total-band:not(:last-child) {
+  border-right: 1px solid var(--color-border);
+}
+
+.strategy-win-rate-card--total-row .strategy-win-rate-metrics--2 {
+  grid-template-columns: 1fr;
+}
+
+.strategy-win-rate-card--total-panel .strategy-win-rate-metric__value--pnl {
+  font-size: 0.88rem;
+}
+
+.strategy-win-rate-card--total-panel .strategy-win-rate-metrics--underlying-cost .strategy-win-rate-metric__label {
+  font-size: 0.65rem;
+}
+
+.strategy-win-rate-card--total-panel .strategy-win-rate-metrics--underlying-cost .strategy-win-rate-metric__value {
+  font-size: 0.88rem;
+}
+
+.strategy-win-rate-card--total-averages-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, auto);
+  grid-auto-flow: column;
+  gap: 0.28rem 0.4rem;
+  align-content: start;
+}
+
+.strategy-win-rate-card--total-averages-kpis .strategy-win-rate-kpi__label {
+  font-size: 0.58rem;
+  line-height: 1.15;
+}
+
+.strategy-win-rate-card--total-averages-kpis .strategy-win-rate-kpi__value {
+  font-size: 0.8rem;
+}
+
+@media (max-width: 768px) {
+  .strategy-win-rate-card--total-row {
+    grid-template-columns: 1fr;
+    gap: 0.45rem 0;
+    padding: 0.5rem 0.55rem;
+    min-width: 0;
+  }
+
+  .strategy-win-rate-card--total-averages-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto;
+    grid-auto-flow: row;
+  }
+
+  .strategy-win-rate-card--total-row > .strategy-win-rate-card__section--total-band:not(:last-child) {
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+    padding-bottom: 0.55rem;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .strategy-win-rate-card--total-row > .strategy-win-rate-card__section--total-band:last-child {
+    padding-bottom: 0;
+    border-bottom: none;
+  }
 }
 
 .strategy-win-rate-card__title {
@@ -3195,6 +3335,45 @@ tr:hover .realtime-quote-drag-handle {
   .strategy-win-rate-metrics--3 {
     grid-template-columns: 1fr;
   }
+}
+
+/* Underlying cost: one metric per row (label + value), fits narrow structure cards */
+.strategy-win-rate-metrics--underlying-cost {
+  grid-template-columns: 1fr;
+  gap: 0.35rem;
+}
+
+.strategy-win-rate-metrics--underlying-cost .strategy-win-rate-metric--row {
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 0;
+}
+
+.strategy-win-rate-metrics--underlying-cost .strategy-win-rate-metric__label {
+  flex-shrink: 0;
+}
+
+.strategy-win-rate-metrics--underlying-cost .strategy-win-rate-metric__value {
+  text-align: right;
+  flex: 1;
+  min-width: 0;
+}
+
+.strategy-win-rate-card__section:has(.strategy-win-rate-metrics--underlying-cost) .strategy-win-rate-card__section-label {
+  font-size: 0.7rem;
+}
+
+.strategy-win-rate-metrics--underlying-cost .strategy-win-rate-metric__label {
+  font-size: 0.75rem;
+  line-height: 1.25;
+}
+
+.strategy-win-rate-metrics--underlying-cost .strategy-win-rate-metric__value {
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .strategy-win-rate-metrics--wrap {
@@ -26337,6 +26516,145 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
 
 .instance-detail-non-opt {
   margin-top: 0.75rem;
+}
+
+/* Paired buy/sell fills table inside each contract group detail row */
+.instance-detail-paired-wrap {
+  margin: 0.15rem 0;
+  overflow-x: auto;
+}
+
+.instance-detail-paired-table {
+  font-size: 0.8rem;
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.instance-detail-paired-table th,
+.instance-detail-paired-table td {
+  padding: 0.28rem 0.45rem;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.instance-detail-paired-buy-header {
+  text-align: center;
+  color: var(--color-success, #3d9a62);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid rgba(61, 154, 98, 0.35);
+  background: rgba(61, 154, 98, 0.04);
+}
+
+.instance-detail-paired-sell-header {
+  text-align: center;
+  color: var(--color-danger, #c45c5c);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid rgba(196, 92, 92, 0.35);
+  background: rgba(196, 92, 92, 0.04);
+}
+
+.instance-detail-paired-buy-col {
+  background: rgba(61, 154, 98, 0.04);
+}
+
+.instance-detail-paired-sell-col {
+  background: rgba(196, 92, 92, 0.04);
+}
+
+.instance-detail-paired-table thead .instance-detail-paired-buy-col {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  border-bottom: 1px solid rgba(61, 154, 98, 0.2);
+}
+
+.instance-detail-paired-table thead .instance-detail-paired-sell-col {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  border-bottom: 1px solid rgba(196, 92, 92, 0.2);
+}
+
+.instance-detail-paired-divider-th,
+.instance-detail-paired-divider-td {
+  width: 3px;
+  min-width: 3px;
+  padding: 0;
+  background: var(--color-border);
+}
+
+.instance-detail-paired-comm-col {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.instance-detail-comm-negative {
+  color: var(--color-danger, #c45c5c);
+  font-size: 0.78rem;
+}
+
+.instance-detail-match-tfoot tr td {
+  border-top: 2px solid var(--color-border);
+  padding: 0.4rem 0.5rem;
+  background: rgba(128, 128, 128, 0.04);
+  font-size: var(--text-small, 0.8125rem);
+}
+
+.instance-detail-group-pnl-cell {
+  vertical-align: top;
+  padding: 0.35rem 0.5rem;
+}
+
+.instance-detail-group-pnl-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.instance-detail-group-pnl-net {
+  margin-top: 0.1rem;
+  font-weight: 600;
+}
+
+.instance-detail-pnl-source-tag {
+  font-size: 0.65rem;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  margin-left: 0.3em;
+  vertical-align: middle;
+  opacity: 0.8;
+}
+
+.instance-detail-pnl-metric--secondary {
+  opacity: 0.7;
+}
+
+.instance-detail-paired-table tbody tr:hover .instance-detail-paired-buy-col {
+  background: rgba(61, 154, 98, 0.09);
+}
+
+.instance-detail-paired-table tbody tr:hover .instance-detail-paired-sell-col {
+  background: rgba(196, 92, 92, 0.09);
+}
+
+.instance-detail-paired-fill-date {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.instance-detail-paired-fill-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.72rem;
 }
 
 .instance-detail-future-card {

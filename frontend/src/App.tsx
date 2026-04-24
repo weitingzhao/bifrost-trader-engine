@@ -353,6 +353,11 @@ export default function App() {
   const [urlStrategyInstanceId, setUrlStrategyInstanceId] = useState<number | null>(null)
   /** Opportunity id from #/strategies/opportunities/:id — opens edit form on Opportunity page. */
   const [urlStrategyOpportunityId, setUrlStrategyOpportunityId] = useState<number | null>(null)
+  /** Win Rate → Instances: pre-fill Structure bubble filter (token bumps on each navigation). */
+  const [instancesStructureFilterIntent, setInstancesStructureFilterIntent] = useState<{
+    token: number
+    structureName: string
+  } | null>(null)
   const [theme, setTheme] = useState<ThemeId>(loadTheme)
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const apiHealthProbes = useSettingsApiHealthProbes(true)
@@ -465,6 +470,7 @@ export default function App() {
       } else if (oppMatch) {
         setActiveTab('strategy')
         setStrategyView('opportunity')
+        setInstancesStructureFilterIntent(null)
         setUrlStrategyOpportunityId(oppMatch[1] != null ? Number(oppMatch[1]) : null)
         setUrlStrategyInstanceId(null)
       }
@@ -1266,6 +1272,7 @@ export default function App() {
                                 className={`app-submenu-item ${activeTab === 'strategy' && strategyView === viewId ? 'active' : ''}`}
                                 onClick={() => {
                                   setActiveTab('strategy')
+                                  setInstancesStructureFilterIntent(null)
                                   setStrategyView(viewId)
                                 }}
                               >
@@ -1847,12 +1854,23 @@ export default function App() {
           urlStrategyInstanceId={urlStrategyInstanceId}
           onNavigateToStrategy={goStrategyStructure}
           breadcrumbLabel="Instances"
+          instancesStructureFilterIntent={instancesStructureFilterIntent}
         />
       )}
 
       {activeTab === 'strategy' && strategyView === 'winRate' && (
         <StrategyWinRatePage
-          onGoToInstances={() => setStrategyView('instances')}
+          onGoToInstances={(opts) => {
+            if (opts?.structureFilter?.trim()) {
+              setInstancesStructureFilterIntent({
+                token: Date.now(),
+                structureName: opts.structureFilter.trim(),
+              })
+            } else {
+              setInstancesStructureFilterIntent(null)
+            }
+            setStrategyView('instances')
+          }}
         />
       )}
 

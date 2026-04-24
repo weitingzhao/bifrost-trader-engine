@@ -590,10 +590,10 @@ class StatusReader:
         self,
         since_ts: Optional[float] = None,
         until_ts: Optional[float] = None,
-    ) -> List[Dict[str, Any]]:
-        """Return per-structure win-rate aggregations from all instances with executions."""
+    ) -> Dict[str, Any]:
+        """Return ``structures`` plus ``totals_all`` (global aggregates / averages)."""
         if not self._connect():
-            return []
+            return {"structures": [], "totals_all": None}
         try:
             return strategy_win_rate_module.compute_win_rate_by_structure(
                 self._conn, since_ts=since_ts, until_ts=until_ts

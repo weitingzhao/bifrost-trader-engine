@@ -33,6 +33,7 @@ export function InstancePnLStrip({
   executionsForNotional,
   optionStockSlippageAdjustment = 0,
   linkedStockPnlRows = [],
+  execDerivedNetPnl = null,
 }: {
   loading: boolean
   performance: PerformanceResponse | null
@@ -41,6 +42,8 @@ export function InstancePnLStrip({
   optionStockSlippageAdjustment?: number
   /** Per parent OPT execution: full slippage, allocation ratio, attributed slippage (matches add-on sum). */
   linkedStockPnlRows?: InstanceLinkedStockPnlRow[]
+  /** Net PnL summed bottom-up from execution group PnLs (premium ± commission per fill + stock slippage). */
+  execDerivedNetPnl?: number | null
 }) {
   const metricsExplainTitleId = useId()
   const [metricsExplainOpen, setMetricsExplainOpen] = useState(false)
@@ -111,21 +114,41 @@ export function InstancePnLStrip({
       ) : (
         <>
           <div className="instance-detail-pnl-strip" role="group" aria-label="PnL this instance">
+            {/* Primary Net PnL: exec-derived when available (matches Group PnL sum in Executions table), else backend summary */}
             <div className="instance-detail-pnl-metric">
               <span
                 className="instance-detail-pnl-label"
                 title={
-                  optionStockSlippageAdjustment !== 0
-                    ? 'Performance summary net PnL plus prorated option–stock link slippage (same layer as Trade Ledger).'
-                    : undefined
+                  execDerivedNetPnl != null
+                    ? 'Sum of per-contract Group PnL from the Executions table below (premium ± commission per fill + linked-stock slippage). This is the execution-consistent Net PnL.'
+                    : optionStockSlippageAdjustment !== 0
+                      ? 'Performance summary net PnL plus prorated option–stock link slippage (same layer as Trade Ledger).'
+                      : undefined
                 }
               >
                 Net PnL
+                {execDerivedNetPnl != null && (
+                  <span className="instance-detail-pnl-source-tag">exec.</span>
+                )}
               </span>
-              <span className={`instance-detail-pnl-value ${signedPnlClass(adjustedNetPnl)}`}>
-                {fmtUsd(adjustedNetPnl)}
+              <span className={`instance-detail-pnl-value ${signedPnlClass(execDerivedNetPnl ?? adjustedNetPnl)}`}>
+                {fmtUsd(execDerivedNetPnl ?? adjustedNetPnl)}
               </span>
             </div>
+            {/* Secondary: backend performance summary Net PnL for reference when exec-derived is available */}
+            {execDerivedNetPnl != null && (
+              <div className="instance-detail-pnl-metric instance-detail-pnl-metric--secondary">
+                <span
+                  className="instance-detail-pnl-label"
+                  title="Performance summary net PnL (server-side, from account_executions_final). May differ from exec-derived due to methodology differences."
+                >
+                  Perf. Net PnL
+                </span>
+                <span className={`instance-detail-pnl-value ${signedPnlClass(adjustedNetPnl)}`} style={{ fontSize: '0.85em' }}>
+                  {fmtUsd(adjustedNetPnl)}
+                </span>
+              </div>
+            )}
             <div className="instance-detail-pnl-metric">
               <span className="instance-detail-pnl-label">Realized</span>
               <span className={`instance-detail-pnl-value ${signedPnlClass(Number(summary.total_realized_pnl))}`}>
@@ -135,6 +158,23 @@ export function InstancePnLStrip({
             <div className="instance-detail-pnl-metric">
               <span className="instance-detail-pnl-label">Commission</span>
               <span className="instance-detail-pnl-value is-commission">{fmtUsd(summary.total_commission)}</span>
+            </div>
+            <div className="instance-detail-pnl-metric">
+              <span
+                className="instance-detail-pnl-label"
+                title="Worst single-trade realized loss in this instance (min of negative realized PnL per fill, allocation-weighted). Same field as performance summary max_loss."
+              >
+                Total loss
+              </span>
+              <span
+                className={`instance-detail-pnl-value tabular-nums ${signedPnlClass(
+                  summary.max_loss != null && Number.isFinite(Number(summary.max_loss)) ? Number(summary.max_loss) : null,
+                )}`}
+              >
+                {summary.max_loss != null && Number.isFinite(Number(summary.max_loss))
+                  ? fmtUsd(Number(summary.max_loss))
+                  : '—'}
+              </span>
             </div>
             <div className="instance-detail-pnl-metric">
               <span className="instance-detail-pnl-label">Trades</span>
@@ -188,6 +228,11 @@ export function InstancePnLStrip({
               </div>
             }
           >
+            {execDerivedNetPnl != null && (
+              <p className="muted" style={{ marginBottom: 'var(--space-3)', borderLeft: '3px solid var(--color-border)', paddingLeft: '0.75rem' }}>
+                <strong>Exec. Net PnL ({fmtUsd(execDerivedNetPnl)})</strong> — summed bottom-up from execution fills: for each OPT contract group, <code>Σ (premium × qty × 100 − commission)</code> per fill direction (buy subtracts, sell adds), plus prorated linked-stock slippage when links exist. Non-OPT fills add their DB <code>realized_pnl</code>. This matches the Group PnL column in the Executions section.
+              </p>
+            )}
             <p className="muted" style={{ marginBottom: 'var(--space-3)' }}>
               <strong>Net PnL</strong> starts from the <strong>performance summary</strong> net for this instance (server-side,
               requested time range). When option executions have <strong>linked stock legs</strong> (exercise/assignment), we add
@@ -200,7 +245,8 @@ export function InstancePnLStrip({
               ) : (
                 <> (add-on is zero when there are no links or slippage).</>
               )}{' '}
-              <strong>Realized</strong>, <strong>commission</strong>, and <strong>trades</strong> stay as in the summary.
+              <strong>Realized</strong>, <strong>commission</strong>, <strong>total loss</strong> (worst losing trade
+              realized), and <strong>trades</strong> stay as in the summary.
               Hold time, underlying cost, and annual return use <strong>execution rows</strong> on this page (final book).
             </p>
 

@@ -213,6 +213,9 @@ function SortableInstancesTh({
   )
 }
 
+/** One-shot intent from Win Rate (or similar): apply Structure bubble filter when token changes. */
+export type InstancesStructureFilterIntent = { token: number; structureName: string }
+
 export interface StrategyInstancesPageProps {
   status: StatusResponse | null
   loadStatus: () => Promise<StatusResponse | null>
@@ -220,6 +223,8 @@ export interface StrategyInstancesPageProps {
   urlStrategyInstanceId?: number | null
   onNavigateToStrategy?: () => void
   breadcrumbLabel?: string
+  /** When set with a new `token`, sets the in-panel Structure filter to `structureName`. */
+  instancesStructureFilterIntent?: InstancesStructureFilterIntent | null
 }
 
 export function StrategyInstancesPage({
@@ -228,6 +233,7 @@ export function StrategyInstancesPage({
   urlStrategyInstanceId = null,
   onNavigateToStrategy,
   breadcrumbLabel = 'Instances',
+  instancesStructureFilterIntent = null,
 }: StrategyInstancesPageProps) {
   const [items, setItems] = useState<StrategyInstance[]>([])
   const [loading, setLoading] = useState(true)
@@ -289,6 +295,12 @@ export function StrategyInstancesPage({
   useEffect(() => {
     loadOpportunities()
   }, [loadOpportunities])
+
+  useEffect(() => {
+    if (instancesStructureFilterIntent == null) return
+    const name = instancesStructureFilterIntent.structureName.trim()
+    if (name) setInstStructureFilter(name)
+  }, [instancesStructureFilterIntent?.token, instancesStructureFilterIntent?.structureName])
 
   const loadInstances = useCallback(() => {
     setLoading(true)

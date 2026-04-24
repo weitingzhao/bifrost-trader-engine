@@ -348,10 +348,9 @@ def get_strategy_win_rate(
     since_ts: Optional[float] = Query(None, description="Filter: since Unix timestamp"),
     until_ts: Optional[float] = Query(None, description="Filter: until Unix timestamp"),
 ) -> Dict[str, Any]:
-    """Return per-structure win-rate aggregations from all instances with executions."""
+    """Return per-structure win-rate rows and ``totals_all`` (all instances combined)."""
     reader = request.app.state.reader
-    structures = reader.get_strategy_win_rate(since_ts=since_ts, until_ts=until_ts)
-    return {"structures": structures}
+    return reader.get_strategy_win_rate(since_ts=since_ts, until_ts=until_ts)
 
 
 @router.get("/instances")

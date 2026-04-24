@@ -1108,6 +1108,11 @@ def _performance_response_summary_only(
     net_pnl: float,
     win_count: int,
     loss_count: int,
+    max_win: Optional[float] = None,
+    max_loss: Optional[float] = None,
+    avg_win: Optional[float] = None,
+    avg_loss: Optional[float] = None,
+    profit_factor: Optional[float] = None,
 ) -> Dict[str, Any]:
     win_rate = (win_count / trade_count) if trade_count else None
     return {
@@ -1122,11 +1127,13 @@ def _performance_response_summary_only(
             "win_count": win_count,
             "loss_count": loss_count,
             "win_rate": round(win_rate, 4) if win_rate is not None else None,
-            "profit_factor": None,
-            "avg_win": None,
-            "avg_loss": None,
-            "max_win": None,
-            "max_loss": None,
+            "profit_factor": round(profit_factor, 4)
+            if profit_factor is not None and math.isfinite(profit_factor)
+            else profit_factor,
+            "avg_win": round(avg_win, 2) if avg_win is not None else None,
+            "avg_loss": round(avg_loss, 2) if avg_loss is not None else None,
+            "max_win": round(max_win, 2) if max_win is not None else None,
+            "max_loss": round(max_loss, 2) if max_loss is not None else None,
             "max_drawdown": None,
             "return_pct": None,
             "total_unrealized_pnl": 0.0,
@@ -1189,6 +1196,8 @@ def get_performance_instance_summary_only(
         trade_count = 0
         win_count = 0
         loss_count = 0
+        wins_rp: List[float] = []
+        losses_rp: List[float] = []
         for e in executions:
             w = weight_realized_for_strategy_instance(e, sid)
             if w <= 0:
@@ -1204,9 +1213,20 @@ def get_performance_instance_summary_only(
             trade_count += 1
             if rp > 0:
                 win_count += 1
+                wins_rp.append(rp)
             elif rp < 0:
                 loss_count += 1
+                losses_rp.append(rp)
         net_pnl = total_rp - total_comm
+        sum_wins = sum(wins_rp) if wins_rp else 0.0
+        sum_losses_abs = abs(sum(losses_rp)) if losses_rp else 0.0
+        profit_factor_n = (
+            (sum_wins / sum_losses_abs) if sum_losses_abs > 0 else (None if not sum_wins else float("inf"))
+        )
+        avg_win_v = (sum_wins / win_count) if win_count else None
+        avg_loss_v = (sum(losses_rp) / loss_count) if loss_count else None
+        max_win_v = max(wins_rp) if wins_rp else None
+        max_loss_v = min(losses_rp) if losses_rp else None
         return _performance_response_summary_only(
             trade_count=trade_count,
             total_realized_pnl=total_rp,
@@ -1214,6 +1234,11 @@ def get_performance_instance_summary_only(
             net_pnl=net_pnl,
             win_count=win_count,
             loss_count=loss_count,
+            max_win=max_win_v,
+            max_loss=max_loss_v,
+            avg_win=avg_win_v,
+            avg_loss=avg_loss_v,
+            profit_factor=pf,
         )
     except Exception as e:
         logger.debug("get_performance_instance_summary_only failed: %s", e)

@@ -9,7 +9,6 @@ import {
   instanceAttributedSlippageForFill,
   instanceAttributedStockSlippageForOptGroup,
   ledgerOptDetailRowPnlInstanceSlice,
-  sumInstanceGroupDisplayRealizedPnl,
 } from '../../portfolio/ledgerOptHelpers'
 import { ViewOptionStockLinksModal } from '../../portfolio/ViewOptionStockLinksModal'
 import { InstanceAllocationSplitIcon } from './InstanceAllocationSplitIcon'
@@ -32,6 +31,214 @@ function contractLabel(g: OptExecutionGroup): string {
   const sym = (t?.symbol ?? '').trim().split(/\s+/)[0] ?? ''
   const r = (t?.option_right ?? '').toString().toUpperCase().slice(0, 1) || '—'
   return `${sym} ${g.expiry ?? '—'} ${formatStrike(g.strike)} ${r}`.trim()
+}
+
+function isBuySide(e: Execution): boolean {
+  const s = (e.side ?? '').toUpperCase()
+  return s === 'BUY' || s === 'BOT' || s === 'B'
+}
+
+function isSellSide(e: Execution): boolean {
+  const s = (e.side ?? '').toUpperCase()
+  return s === 'SELL' || s === 'SLD' || s === 'S'
+}
+
+function FillCells({
+  e,
+  source,
+  splitMetaByExecId,
+  optionStockLinkByOptionId,
+  parentOptQtyByExecId,
+  onViewOptionStockLinks,
+  side,
+}: {
+  e: Execution | undefined
+  source: ExecutionSourceTab
+  splitMetaByExecId?: Map<number, { ratioLabel: string; tooltip: string }>
+  optionStockLinkByOptionId: Record<number, OptionStockLinkSummary>
+  parentOptQtyByExecId: Map<number, number>
+  onViewOptionStockLinks: (rows: OptionStockLinkRow[], title: string, slippage: number | null, attr: number | null) => void
+  side: 'buy' | 'sell'
+}) {
+  const colClass = side === 'buy' ? 'instance-detail-paired-buy-col' : 'instance-detail-paired-sell-col'
+  if (!e) {
+    return (
+      <>
+        <td className={colClass} />
+        <td className={colClass} />
+        <td className={colClass} />
+        <td className={colClass} />
+        <td className={colClass} />
+      </>
+    )
+  }
+  const isTwsRaw = source === 'tws_raw'
+  const execId =
+    e.account_executions_id != null && Number.isFinite(Number(e.account_executions_id))
+      ? Number(e.account_executions_id)
+      : null
+  const splitMeta =
+    !isTwsRaw && execId != null && splitMetaByExecId ? splitMetaByExecId.get(execId) : undefined
+  const optLedger =
+    (e.sec_type ?? '').toUpperCase() === 'OPT' && execId != null
+      ? ledgerOptDetailRowPnlInstanceSlice(e, parentOptQtyByExecId.get(execId), optionStockLinkByOptionId)
+      : null
+  const realizedDisplay =
+    optLedger != null
+      ? fmtUsd(optLedger.displayPnl)
+      : e.realized_pnl != null
+        ? fmtUsd(e.realized_pnl)
+        : '—'
+  const stockLinkDetail =
+    execId != null && (e.sec_type ?? '').toUpperCase() === 'OPT'
+      ? getOptionStockLinkDetailForExecution(e, optionStockLinkByOptionId)
+      : { linkIds: [] as number[], links: [] as OptionStockLinkRow[], slippageTotal: null as number | null }
+  const fillStockAttr =
+    execId != null && (e.sec_type ?? '').toUpperCase() === 'OPT'
+      ? instanceAttributedSlippageForFill(e, parentOptQtyByExecId, optionStockLinkByOptionId)
+      : null
+  const detailTitle = `${(e.symbol ?? '').trim().split(/\s+/)[0] ?? '—'} ${formatStrike(e.strike)}`.trim()
+  return (
+    <>
+      <td className={colClass}>
+        <div className="instance-detail-paired-fill-date">
+          <span>{e.trade_date ?? (e.time != null ? fmtTsShort(e.time) : '—')}</span>
+          <span className="instance-detail-paired-fill-meta">
+            {execId != null && (
+              <span className="instance-detail-exec-id muted">#{execId}</span>
+            )}
+            {splitMeta != null && (
+              <>
+                <InstanceAllocationSplitIcon title={splitMeta.tooltip} />
+                <span className="muted instance-detail-split-ratio" title={splitMeta.tooltip}>
+                  {splitMeta.ratioLabel}
+                </span>
+              </>
+            )}
+            {stockLinkDetail.linkIds.length > 0 && (
+              <span className="ledger-opt-link-stock-badges">
+                {stockLinkDetail.linkIds.map((lid) => (
+                  <button
+                    key={lid}
+                    type="button"
+                    className="ledger-opt-link-stock-badge"
+                    title="View linked stock executions"
+                    onClick={(ev) => {
+                      ev.stopPropagation()
+                      onViewOptionStockLinks(
+                        stockLinkDetail.links,
+                        `Link #${lid} · Exec #${execId ?? '?'} · ${detailTitle}`,
+                        stockLinkDetail.slippageTotal,
+                        fillStockAttr,
+                      )
+                    }}
+                  >
+                    #{lid}
+                  </button>
+                ))}
+              </span>
+            )}
+          </span>
+        </div>
+      </td>
+      <td className={`${colClass} tabular-nums`}>
+        {e.quantity == null || !Number.isFinite(Number(e.quantity))
+          ? '—'
+          : isTwsRaw
+            ? String(Math.abs(Number(e.quantity)))
+            : String(e.quantity)}
+      </td>
+      <td className={`${colClass} tabular-nums`}>
+        {e.price != null ? Number(e.price).toFixed(2) : '—'}
+      </td>
+      <td className={`${colClass} tabular-nums instance-detail-paired-comm-col`} title="Commission for this fill">
+        {e.commission != null && Number.isFinite(Number(e.commission))
+          ? fmtUsd(Number(e.commission))
+          : '—'}
+      </td>
+      <td
+        className={`${colClass} tabular-nums`}
+        title={optLedger?.hasCombinedStock ? 'Option premium economics + prorated linked-stock slippage' : undefined}
+      >
+        {realizedDisplay}
+      </td>
+    </>
+  )
+}
+
+function BuySellPairedFillsTable({
+  trades,
+  source,
+  splitMetaByExecId,
+  optionStockLinkByOptionId,
+  parentOptQtyByExecId,
+  onViewOptionStockLinks,
+}: {
+  trades: Execution[]
+  source: ExecutionSourceTab
+  splitMetaByExecId?: Map<number, { ratioLabel: string; tooltip: string }>
+  optionStockLinkByOptionId: Record<number, OptionStockLinkSummary>
+  parentOptQtyByExecId: Map<number, number>
+  onViewOptionStockLinks: (rows: OptionStockLinkRow[], title: string, slippage: number | null, attr: number | null) => void
+}) {
+  const buyFills = trades.filter(isBuySide)
+  const sellFills = trades.filter(isSellSide)
+  const maxLen = Math.max(buyFills.length, sellFills.length, 1)
+  return (
+    <div className="instance-detail-paired-wrap">
+      <table className="instance-detail-paired-table">
+        <thead>
+          <tr>
+            <th colSpan={5} className="instance-detail-paired-buy-header">
+              Buy fills ({buyFills.length})
+            </th>
+            <th className="instance-detail-paired-divider-th" />
+            <th colSpan={5} className="instance-detail-paired-sell-header">
+              Sell fills ({sellFills.length})
+            </th>
+          </tr>
+          <tr>
+            <th className="instance-detail-paired-buy-col">Date</th>
+            <th className="instance-detail-paired-buy-col">Qty</th>
+            <th className="instance-detail-paired-buy-col">Price</th>
+            <th className="instance-detail-paired-buy-col instance-detail-paired-comm-col">Comm</th>
+            <th className="instance-detail-paired-buy-col">PnL</th>
+            <th className="instance-detail-paired-divider-th" />
+            <th className="instance-detail-paired-sell-col">Date</th>
+            <th className="instance-detail-paired-sell-col">Qty</th>
+            <th className="instance-detail-paired-sell-col">Price</th>
+            <th className="instance-detail-paired-sell-col instance-detail-paired-comm-col">Comm</th>
+            <th className="instance-detail-paired-sell-col">PnL</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: maxLen }, (_, i) => (
+            <tr key={i}>
+              <FillCells
+                e={buyFills[i]}
+                source={source}
+                splitMetaByExecId={splitMetaByExecId}
+                optionStockLinkByOptionId={optionStockLinkByOptionId}
+                parentOptQtyByExecId={parentOptQtyByExecId}
+                onViewOptionStockLinks={onViewOptionStockLinks}
+                side="buy"
+              />
+              <td className="instance-detail-paired-divider-td" />
+              <FillCells
+                e={sellFills[i]}
+                source={source}
+                splitMetaByExecId={splitMetaByExecId}
+                optionStockLinkByOptionId={optionStockLinkByOptionId}
+                parentOptQtyByExecId={parentOptQtyByExecId}
+                onViewOptionStockLinks={onViewOptionStockLinks}
+                side="sell"
+              />
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 }
 
 function ExecutionFillsTable({
@@ -245,6 +452,27 @@ export function InstanceExecutionsPanel({
     [activeRows],
   )
 
+  const groupTotals = useMemo(() => {
+    if (groups.length === 0) return null
+    let totalGrossPnl = 0
+    let totalComm = 0
+    let totalNetPnl = 0
+    let totalBuyComm = 0
+    let totalSellComm = 0
+    for (const g of groups) {
+      const buyRaw = (g.buy_avg_price ?? 0) * g.buy_volume * 100
+      const sellRaw = (g.sell_avg_price ?? 0) * g.sell_volume * 100
+      totalGrossPnl += sellRaw - buyRaw
+      const buyCommG = Math.max(0, g.buy_cost - buyRaw)
+      const sellCommG = Math.max(0, sellRaw - g.sell_premium)
+      totalBuyComm += buyCommG
+      totalSellComm += sellCommG
+      totalComm += buyCommG + sellCommG
+      totalNetPnl += g.realized_pnl
+    }
+    return { totalGrossPnl, totalComm, totalNetPnl, totalBuyComm, totalSellComm }
+  }, [groups])
+
   if (loading) {
     return (
       <section className="detail-block instance-detail-executions">
@@ -353,6 +581,17 @@ export function InstanceExecutionsPanel({
                           </svg>
                         </button>
                       ) : null
+                    const buyComm = g.trades
+                      .filter(isBuySide)
+                      .reduce((s, e) => s + (e.commission != null && Number.isFinite(Number(e.commission)) ? Math.abs(Number(e.commission)) : 0), 0)
+                    const sellComm = g.trades
+                      .filter(isSellSide)
+                      .reduce((s, e) => s + (e.commission != null && Number.isFinite(Number(e.commission)) ? Math.abs(Number(e.commission)) : 0), 0)
+                    const buyRaw = (g.buy_avg_price ?? 0) * g.buy_volume * 100
+                    const sellRaw = (g.sell_avg_price ?? 0) * g.sell_volume * 100
+                    const grossPnl = sellRaw - buyRaw
+                    const groupComm = Math.max(0, g.buy_cost - buyRaw) + Math.max(0, sellRaw - g.sell_premium)
+                    const netPnl = g.realized_pnl
                     return (
                       <Fragment key={g.contract_key}>
                         <tr className={`instance-detail-match-row ${matched ? 'is-matched' : ''}`}>
@@ -370,6 +609,12 @@ export function InstanceExecutionsPanel({
                                 <span className="muted">$</span>{' '}
                                 <span>{fmtUsd(g.buy_cost)}</span>
                               </span>
+                              {buyComm > 0 && (
+                                <span>
+                                  <span className="muted">Comm</span>{' '}
+                                  <span className="tabular-nums instance-detail-comm-negative">{fmtUsd(-buyComm)}</span>
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="instance-detail-match-center">
@@ -402,21 +647,37 @@ export function InstanceExecutionsPanel({
                                 <span className="muted">$</span>{' '}
                                 <span>{fmtUsd(g.sell_premium)}</span>
                               </span>
+                              {sellComm > 0 && (
+                                <span>
+                                  <span className="muted">Comm</span>{' '}
+                                  <span className="tabular-nums instance-detail-comm-negative">{fmtUsd(-sellComm)}</span>
+                                </span>
+                              )}
                             </div>
                           </td>
-                          <td
-                            className="tabular-nums"
-                            title="Premium match PnL plus prorated linked-stock slippage per fill (same as Trade Ledger layer)"
-                          >
-                            {fmtUsd(
-                              sumInstanceGroupDisplayRealizedPnl(g, optionStockLinkByOptionId, parentOptQtyByExecId),
-                            )}
+                          <td className="instance-detail-group-pnl-cell">
+                            <div className="instance-detail-group-pnl-stack">
+                              <span>
+                                <span className="muted">Gross</span>{' '}
+                                <span className="tabular-nums">{fmtUsd(grossPnl)}</span>
+                              </span>
+                              {groupComm > 0 && (
+                                <span>
+                                  <span className="muted">Comm</span>{' '}
+                                  <span className="tabular-nums instance-detail-comm-negative">{fmtUsd(-groupComm)}</span>
+                                </span>
+                              )}
+                              <span className="instance-detail-group-pnl-net">
+                                <span className="muted">Net</span>{' '}
+                                <span className={`tabular-nums ${netPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(netPnl)}</span>
+                              </span>
+                            </div>
                           </td>
                         </tr>
                         <tr className="instance-detail-match-detail-row">
                           <td colSpan={4}>
-                            <ExecutionFillsTable
-                              rows={g.trades}
+                            <BuySellPairedFillsTable
+                              trades={g.trades}
                               source={tab}
                               splitMetaByExecId={tab === 'performance_book' ? splitMetaByExecId : undefined}
                               optionStockLinkByOptionId={optionStockLinkByOptionId}
@@ -429,6 +690,58 @@ export function InstanceExecutionsPanel({
                     )
                   })}
                 </tbody>
+                {groupTotals != null && (
+                  <tfoot className="instance-detail-match-tfoot">
+                    <tr>
+                      <td className="instance-detail-match-buy">
+                        <div className="instance-detail-match-stack">
+                          <span className="muted" style={{ fontWeight: 600 }}>Total</span>
+                          {groupTotals.totalBuyComm > 0 && (
+                            <span>
+                              <span className="muted">Comm</span>{' '}
+                              <span className="tabular-nums instance-detail-comm-negative">{fmtUsd(-groupTotals.totalBuyComm)}</span>
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td />
+                      <td className="instance-detail-match-sell">
+                        <div className="instance-detail-match-stack">
+                          {groupTotals.totalSellComm > 0 && (
+                            <span>
+                              <span className="muted">Comm</span>{' '}
+                              <span className="tabular-nums instance-detail-comm-negative">{fmtUsd(-groupTotals.totalSellComm)}</span>
+                            </span>
+                          )}
+                          {groupTotals.totalComm > 0 && (
+                            <span>
+                              <span className="muted">Total comm</span>{' '}
+                              <span className="tabular-nums instance-detail-comm-negative">{fmtUsd(-groupTotals.totalComm)}</span>
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="instance-detail-group-pnl-cell" title="Totals across all contract groups">
+                        <div className="instance-detail-group-pnl-stack">
+                          <span>
+                            <span className="muted">Gross</span>{' '}
+                            <span className="tabular-nums" style={{ fontWeight: 600 }}>{fmtUsd(groupTotals.totalGrossPnl)}</span>
+                          </span>
+                          {groupTotals.totalComm > 0 && (
+                            <span>
+                              <span className="muted">Comm</span>{' '}
+                              <span className="tabular-nums instance-detail-comm-negative" style={{ fontWeight: 600 }}>{fmtUsd(-groupTotals.totalComm)}</span>
+                            </span>
+                          )}
+                          <span className="instance-detail-group-pnl-net">
+                            <span className="muted">Net</span>{' '}
+                            <span className={`tabular-nums ${groupTotals.totalNetPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`} style={{ fontWeight: 600 }}>{fmtUsd(groupTotals.totalNetPnl)}</span>
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
           )}
