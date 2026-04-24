@@ -56,6 +56,9 @@
   --color-success: #22c55e;
   --color-success-soft: rgba(34, 197, 94, 0.15);
 
+  /* Watchlist sizing pie — STK ex‑FI ring / dot (cyan vs lime cash accent) */
+  --wl2-pie-stk: #38bdf8;
+
   /* Payoff chart (dark: high-contrast on dark plot) */
   --risk-payoff-plot-bg: #0d1118;
   --risk-payoff-plot-border: rgba(74, 222, 128, 0.22);
@@ -141,6 +144,8 @@
   --color-dashboard-shadow: rgba(0, 0, 0, 0.08);
   --color-success: #16a34a;
   --color-success-soft: rgba(22, 163, 74, 0.12);
+
+  --wl2-pie-stk: #a855f7;
 
   --risk-payoff-plot-bg: #f9fafb;
   --risk-payoff-plot-border: rgba(0, 0, 0, 0.08);
@@ -26901,6 +26906,16 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   opacity: 0.88;
 }
 
+.wl2-btn--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  min-width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+}
+
 .wl2-btn--ghost {
   background: transparent;
   color: var(--color-text-muted);
@@ -27043,12 +27058,62 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   background: color-mix(in srgb, var(--color-surface) 70%, transparent);
 }
 
+.wl2-sizing-workflow-split {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 9fr);
+  gap: var(--space-3);
+  align-items: start;
+  margin-bottom: var(--space-4);
+}
+
+.wl2-sizing-workflow-split:not(.wl2-sizing-workflow-split--has-panel) .wl2-sizing-dash--workflow-col {
+  grid-column: 1 / -1;
+}
+
+.wl2-sizing-dash--workflow-col {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.wl2-sizing-workflow-split__panel {
+  min-width: 0;
+}
+
+.wl2-sizing-workflow-split__panel .wl2-sizing-panel {
+  margin-top: 0;
+}
+
+@media (max-width: 1024px) {
+  .wl2-sizing-workflow-split.wl2-sizing-workflow-split--has-panel {
+    grid-template-columns: 1fr;
+  }
+}
+
 .wl2-sizing-dash__title {
   margin: 0 0 var(--space-1) 0;
   font-size: 0.95rem;
   font-weight: 650;
   letter-spacing: -0.02em;
   color: var(--color-text-main);
+}
+
+.wl2-sizing-dash__title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin-bottom: var(--space-2);
+}
+
+.wl2-sizing-dash__title--inline {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.wl2-sizing-dash__title-row .info-tooltip-popup,
+.wl2-range-field__label-row .info-tooltip-popup,
+.wl2-cash-pie-split-wrap__head .info-tooltip-popup {
+  max-width: min(26rem, 92vw);
 }
 
 .wl2-sizing-dash__subtitle {
@@ -27063,6 +27128,16 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   font-size: 0.82rem;
   font-weight: 600;
   color: var(--color-text-muted);
+}
+
+.wl2-sizing-dash__subtitle--pie {
+  margin-top: 0;
+  margin-bottom: 0;
+  flex: 0 0 auto;
+}
+
+.wl2-sizing-dash__subtitle--workflow {
+  margin-top: var(--space-3);
 }
 
 .wl2-sizing-dash__hint {
@@ -27194,6 +27269,178 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   color: var(--color-text-main);
 }
 
+.wl2-order-compact-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.9fr);
+  gap: 0.45rem 0.6rem;
+  align-items: end;
+}
+
+.wl2-order-compact-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.wl2-order-compact-field--readonly {
+  justify-content: flex-end;
+  padding-bottom: 0.15rem;
+}
+
+.wl2-order-compact-field__label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-size: 0.64rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.wl2-order-compact-field__hint {
+  font-size: 0.6rem;
+  font-weight: 550;
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.85;
+}
+
+.wl2-order-compact-field__value {
+  font-size: 0.9rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-main);
+  line-height: 1.2;
+}
+
+.wl2-order-compact-field__sub {
+  font-size: 0.66rem;
+  color: var(--color-text-muted);
+  line-height: 1.2;
+  min-height: 0.8rem;
+}
+
+.wl2-order-compact-field input {
+  width: 100%;
+  height: 1.85rem;
+  padding: 0.22rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 92%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 84%, var(--color-surface-elevated));
+  color: var(--color-text-main);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.wl2-order-compact-field input:focus {
+  border-color: var(--color-accent);
+  box-shadow:
+    0 0 0 1px var(--color-accent),
+    0 0 0 3px color-mix(in srgb, var(--color-accent) 28%, transparent);
+}
+
+.wl2-order-compact-field input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.wl2-order-metric__suffix {
+  font-weight: 550;
+  color: var(--color-text-muted);
+  font-size: 0.82em;
+}
+
+.wl2-order-risk-group {
+  margin-top: var(--space-2);
+}
+
+.wl2-order-risk-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: var(--space-1);
+}
+
+.wl2-order-risk-head__title {
+  margin: 0;
+}
+
+.wl2-order-atr-sheet {
+  margin-top: var(--space-2);
+  padding: 0.45rem 0.6rem;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 55%, var(--color-surface-elevated));
+}
+
+.wl2-order-atr-sheet__title {
+  margin: 0 0 0.35rem 0;
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.wl2-order-atr-sheet .wl2-sizing-dash__cards {
+  gap: 0.35rem;
+}
+
+.wl2-order-atr-sheet .wl2-sizing-dash__card {
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+}
+
+.wl2-order-atr-sheet .wl2-sizing-dash__label {
+  margin-bottom: 0.12rem;
+  font-size: 0.62rem;
+}
+
+.wl2-order-atr-sheet .wl2-sizing-dash__value {
+  font-size: 0.8rem;
+}
+
+.wl2-order-atr-sheet .wl2-order-metric__suffix {
+  font-size: 0.74em;
+}
+
+.wl2-order-sheet-two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.wl2-order-sheet-two-col__col {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.wl2-order-two-col-cards {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.wl2-sizing-dash__card--highlight {
+  border-color: color-mix(in srgb, var(--color-border) 85%, transparent);
+  background: var(--color-surface-elevated);
+  box-shadow: none;
+}
+
+.wl2-sizing-dash__card--highlight .wl2-sizing-dash__label {
+  color: color-mix(in srgb, var(--color-accent) 35%, var(--color-text-muted));
+  opacity: 0.9;
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.22rem;
+}
+
+.wl2-sizing-dash__card--highlight .wl2-sizing-dash__value {
+  color: color-mix(in srgb, var(--color-accent) 92%, #f5ffef);
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
 /* Max drawdown (Order sizing): elegant range slider */
 .wl2-range-field {
   flex: 1 1 100%;
@@ -27206,7 +27453,49 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
 
 .wl2-range-field--portfolio {
   flex: none;
-  max-width: min(28rem, 100%);
+  max-width: min(34rem, 100%);
+}
+
+.wl2-range-field--kelly-compact {
+  max-width: 100%;
+  width: 100%;
+  padding: var(--space-2);
+  margin: 0;
+}
+
+.wl2-range-field__readout--kelly {
+  font-size: 0.95rem;
+}
+
+.wl2-range-field__kelly-num {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  margin-top: 0.4rem;
+}
+
+.wl2-range-field__kelly-num-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.wl2-range-field__kelly-num-input {
+  width: 4.25rem;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.85rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-main);
+}
+
+.wl2-sizing-panel__control--block {
+  flex: 1 1 100%;
+  width: 100%;
+  min-width: 0;
 }
 
 .wl2-range-field__caption {
@@ -27216,14 +27505,19 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   color: var(--color-text-muted);
 }
 
-.wl2-sizing-dash__cards--after-table {
-  margin-top: var(--space-3);
-}
-
 .wl2-portfolio-metric-table .wl2-td-num {
   text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* Fixed width: header "Max DD @ n%" + $ amounts do not reflow columns when slider % changes */
+.wl2-portfolio-metric-table th.wl2-portfolio-metric-table__max-dd,
+.wl2-portfolio-metric-table td.wl2-portfolio-metric-table__max-dd {
+  width: 11.5rem;
+  min-width: 11.5rem;
+  max-width: 11.5rem;
+  box-sizing: border-box;
 }
 
 .wl2-portfolio-num--emph {
@@ -27247,11 +27541,19 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   background: color-mix(in srgb, var(--color-surface-elevated) 90%, transparent);
 }
 
+.wl2-cash-pie-split-wrap__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin-bottom: var(--space-2);
+}
+
 .wl2-cash-pie-split {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(15.5rem, 1fr));
   gap: var(--space-3);
-  margin-top: var(--space-2);
+  margin-top: 0;
 }
 
 .wl2-cash-pie-panel {
@@ -27324,12 +27626,22 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
 }
 
 .wl2-cash-pie__pct {
-  font-size: 1.15rem;
+  font-size: 1.02rem;
   font-weight: 750;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.03em;
-  line-height: 1.1;
+  line-height: 1.05;
   color: var(--color-accent);
+}
+
+.wl2-cash-pie__pct--stk {
+  margin-top: 0.06rem;
+  font-size: 0.88rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: var(--wl2-pie-stk);
 }
 
 .wl2-cash-pie__label {
@@ -27349,41 +27661,56 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   min-width: min(14rem, 100%);
 }
 
-.wl2-cash-pie-legend li {
+.wl2-cash-pie-legend--paired {
+  display: flex;
+  flex-direction: column;
+  gap: 0.38rem;
+}
+
+.wl2-cash-pie-legend__pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(7.5rem, max-content);
+  gap: 0.3rem 0.75rem;
+  align-items: start;
+}
+
+.wl2-cash-pie-legend__pair-left {
   display: flex;
   align-items: flex-start;
   gap: 0.45rem;
-  margin-bottom: 0.45rem;
+  min-width: 0;
   font-size: 0.78rem;
   color: var(--color-text-muted);
 }
 
-.wl2-cash-pie-legend li:last-child {
-  margin-bottom: 0;
+.wl2-cash-pie-legend__pair-right {
+  min-width: 0;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  border-left: 1px dashed color-mix(in srgb, var(--color-border) 70%, transparent);
+  padding-left: 0.65rem;
 }
 
-.wl2-cash-pie-legend__net {
-  margin-top: 0.35rem;
-  padding-top: 0.45rem;
-  border-top: 1px dashed color-mix(in srgb, var(--color-border) 80%, transparent);
+.wl2-cash-pie-legend__text--tr {
+  align-items: flex-end;
+  text-align: right;
 }
 
-.wl2-cash-pie-legend__exfi {
-  margin-top: 0.2rem;
-  padding-top: 0.35rem;
-  border-top: 1px dashed color-mix(in srgb, var(--color-border) 55%, transparent);
-}
+@media (max-width: 26rem) {
+  .wl2-cash-pie-legend__pair {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
 
-.wl2-cash-pie-legend__exfi--tail {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: none;
-}
+  .wl2-cash-pie-legend__pair-right {
+    border-left: none;
+    padding-left: calc(0.55rem + 0.45rem);
+  }
 
-.wl2-cash-pie-legend__exfi-spacer {
-  flex-shrink: 0;
-  width: 0.55rem;
-  margin-top: 0.28rem;
+  .wl2-cash-pie-legend__text--tr {
+    align-items: flex-start;
+    text-align: left;
+  }
 }
 
 .wl2-cash-pie-legend__text {
@@ -27405,6 +27732,13 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   color: var(--color-text-main);
 }
 
+.wl2-cash-pie-legend__pct {
+  font-weight: 600;
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
 .wl2-cash-pie-dot {
   flex-shrink: 0;
   width: 0.55rem;
@@ -27416,6 +27750,11 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
 .wl2-cash-pie-dot--cash {
   background: color-mix(in srgb, var(--color-accent) 85%, #050a10);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+.wl2-cash-pie-dot--stk {
+  background: color-mix(in srgb, var(--wl2-pie-stk) 82%, var(--color-bg));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--wl2-pie-stk) 45%, transparent);
 }
 
 .wl2-cash-pie-dot--rest {
@@ -27444,7 +27783,17 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   margin-bottom: 0.4rem;
 }
 
+.wl2-range-field__label-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.45rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .wl2-range-field__label {
+  flex-shrink: 0;
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--color-text-muted);
@@ -27452,6 +27801,7 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
 }
 
 .wl2-range-field__readout {
+  flex-shrink: 0;
   font-size: 1.05rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -27475,6 +27825,51 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   font-weight: 500;
   color: var(--color-text-muted);
   opacity: 0.9;
+}
+
+.wl2-range-field__metrics-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.55rem;
+}
+
+.wl2-range-field__metric-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  flex: 1 1 min(11.5rem, 100%);
+  min-width: 0;
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 42%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent-soft) 70%, var(--color-surface-elevated));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.wl2-range-field__metric-tile-label {
+  font-size: 0.64rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.wl2-range-field__metric-tile-value {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 1rem;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: color-mix(in srgb, var(--color-accent) 88%, var(--color-text-main));
+}
+
+.wl2-range-field__metric-tile-sub {
+  font-size: 0.66rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--color-text-muted);
 }
 
 .wl2-range-elegant {
@@ -27674,12 +28069,23 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   margin-bottom: var(--space-4);
 }
 
+.wl2-sizing-promote--inline {
+  flex-wrap: nowrap;
+  align-items: stretch;
+}
+
 /* Custom combobox for “Watching → Sizing” (avoids native <select> + .wl2-cat-select width clash). */
 .wl2-promote-combobox {
   position: relative;
   flex: 1 1 14rem;
   min-width: min(14rem, 100%);
   max-width: min(26rem, 100%);
+}
+
+.wl2-promote-combobox--compact {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: min(12rem, calc(100% - 2.75rem));
 }
 
 .wl2-promote-combobox__trigger {
@@ -28080,6 +28486,61 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
 
 .wl2-row--dim:hover {
   opacity: 0.85;
+}
+
+.wl2-row--sizing-selected {
+  background: color-mix(in srgb, var(--color-accent) 11%, transparent);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.wl2-row--sizing-selected:hover {
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+}
+
+.wl2-row--sizing-selected.wl2-row--dim {
+  opacity: 1;
+}
+
+/* Sizing symbol sheet: avoid horizontal scrollbar in narrow workflow column */
+.wl2-sizing-symbol-sheet-wrap {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+.wl2-sizing-symbol-sheet-wrap .wl2-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.wl2-sizing-symbol-sheet-wrap .wl2-table thead th,
+.wl2-sizing-symbol-sheet-wrap .wl2-table tbody td {
+  white-space: normal;
+}
+
+.wl2-sizing-symbol-sheet-wrap .wl2-td--sym,
+.wl2-sizing-symbol-sheet-wrap .wl2-th--sym {
+  width: 36%;
+  min-width: 0;
+}
+
+.wl2-sizing-symbol-sheet-wrap .wl2-td--quote,
+.wl2-sizing-symbol-sheet-wrap .wl2-th--quote {
+  min-width: 0;
+}
+
+.wl2-sizing-symbol-sheet-wrap .wl2-td--quote {
+  overflow-wrap: anywhere;
+}
+
+.wl2-sizing-symbol-sheet-wrap .wl2-td--acts,
+.wl2-sizing-symbol-sheet-wrap .wl2-th--acts {
+  width: 4.5rem;
+  white-space: nowrap;
+}
+
+.wl2-sizing-symbol-sheet-wrap .wl2-quote {
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 /* ── Group header row ── */

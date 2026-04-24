@@ -121,6 +121,23 @@ export function fixedIncomeMarketValue(account: IbAccountSnapshot): number {
 }
 
 /**
+ * STK rows that are neither fixed income nor cash-like (money market, etc.).
+ * Approximates common-stock / option-underlying equity from classified legs.
+ */
+export function stkMarketValueExFiExCashLike(account: IbAccountSnapshot): number {
+  let mv = 0
+  for (const pos of account.positions ?? []) {
+    const st = (pos.secType ?? '').toUpperCase()
+    if (st !== 'STK') continue
+    const cat = String(pos.category ?? '')
+    if (isLedgerFixedIncomeCategory(cat)) continue
+    if (isLedgerCashLikeCategory(cat)) continue
+    mv += ibPositionMarketValue(pos)
+  }
+  return mv
+}
+
+/**
  * IB `TotalCashValue` plus STK lines tagged cash-like (money market, etc.),
  * matching the Accounts portfolio “Cash + cash-like STK” merge for display.
  */
