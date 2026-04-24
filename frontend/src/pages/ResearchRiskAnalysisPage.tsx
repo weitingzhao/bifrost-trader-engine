@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { RiskSummaryResponse } from '../types'
 import { fetchRiskSummary } from '../api'
-import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 import { fmtUsd } from '../utils/format'
 
 interface ResearchRiskAnalysisPageProps {
@@ -33,26 +33,14 @@ export function ResearchRiskAnalysisPage({ onGoToScreener, breadcrumbLabel = 'Ri
 
   return (
     <div className="card process-section">
-      <h2 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-        {onGoToScreener ? (
-          <>
-            <button
-              type="button"
-              className="page-title-breadcrumb-link"
-              onClick={onGoToScreener}
-              aria-label="Go to Screener"
-            >
-              Research
-            </button>
-            {' / '}
-            {breadcrumbLabel}
-            {' '}
-          </>
-        ) : (
-          <>Risk Model{' '}</>
-        )}
-        <InfoTooltip text="Risk model summary from daemon auto status and operations (daily hedge count, daily PnL, spot, ops 24h). Data from GET /risk_summary." />
-      </h2>
+      <SectionPageTitle
+        menu="Research"
+        pageTitle={breadcrumbLabel}
+        onMenuClick={onGoToScreener}
+        menuNavigateAriaLabel="Research home"
+        infoText="Risk model summary from daemon auto status and operations (daily hedge count, daily PnL, spot, ops 24h). Data from GET /risk_summary."
+        style={{ marginBottom: 'var(--space-2)' }}
+      />
       <p className="section-hint">
         Summary of risk model metrics; refreshes every 30s. Source: daemon auto status + operations (last 24h).
         Position sizing analysis is available in Watchlist → Sizing step.

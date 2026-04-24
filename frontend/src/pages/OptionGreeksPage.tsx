@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 import { fetchGreeks, fetchGreeksAvailableDates } from '../api/research/research'
 import type { GreeksRow, GreeksResponse } from '../api/research/research'
 import { bsComputeDetail } from '../utils/bsCalc'
@@ -322,27 +322,16 @@ export default function OptionGreeksPage({ onBreadcrumbResearch, breadcrumbLabel
   const today = tradeDate ? new Date(tradeDate) : new Date()
 
   return (
-    <div className="option-greeks-page">
-      <div className="research-page-head" style={{ marginBottom: 'var(--space-3)' }}>
-        <h2 className="page-title-with-tooltip" style={{ margin: 0 }}>
-          {onBreadcrumbResearch ? (
-            <>
-              <button
-                type="button"
-                className="page-title-breadcrumb-link"
-                onClick={onBreadcrumbResearch}
-                aria-label="Research home"
-              >
-                Research
-              </button>
-              {' / '}
-              {breadcrumbLabel}
-            </>
-          ) : (
-            breadcrumbLabel
-          )}
-          <InfoTooltip text="Historical option greeks from the research API: pick symbol and trade date, then fetch chain rows." />
-        </h2>
+    <div className="card process-section option-greeks-page">
+      <div className="research-page-head">
+        <SectionPageTitle
+          menu="Research"
+          pageTitle={breadcrumbLabel}
+          onMenuClick={onBreadcrumbResearch}
+          menuNavigateAriaLabel="Research home"
+          infoText="Historical option greeks from the research API: pick symbol and trade date, then fetch chain rows."
+          style={{ margin: 0 }}
+        />
       </div>
 
       {/* Controls */}

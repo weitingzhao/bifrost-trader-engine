@@ -9,10 +9,12 @@ import {
   carExplainCodeTitle,
   carLegTypeDescription,
 } from './modelAnalysisExplain'
+import type { PortfolioView } from './portfolio/types'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 
 interface Props {
   status: StatusResponse | null
-  onViewChange?: (view: 'accounts') => void
+  onViewChange?: (view: PortfolioView) => void
 }
 
 interface ScenarioBreakdown {
@@ -121,7 +123,7 @@ function riskBadge(t: string): string {
   return t === 'unlimited' ? 'Unlimited' : 'Defined'
 }
 
-export function ModelAnalysisPage({ status }: Props) {
+export function ModelAnalysisPage({ status, onViewChange }: Props) {
   const accounts: IbAccountSnapshot[] = useMemo(() => status?.portfolio?.accounts ?? [], [status])
 
   const { hostId, secondaryId, hostSelectable, secondarySelectable } = useMemo(() => {
@@ -185,7 +187,13 @@ export function ModelAnalysisPage({ status }: Props) {
   return (
     <div className="bifrost-model-analysis">
       <div className="model-analysis-header">
-        <h2 className="model-analysis-title">Model Analysis</h2>
+        <SectionPageTitle
+          className="model-analysis-title"
+          menu="Portfolio"
+          pageTitle="Model Analysis"
+          onMenuClick={() => onViewChange?.('accounts')}
+          infoText="Hypothetical portfolio stress and Greeks from the Portfolio API (R-M8). Not actual performance; uses model assumptions and configured Host / Secondary accounts."
+        />
         <span className="model-analysis-hypothetical-badge" title="Hypothetical — not actual performance">
           ⚠ Hypothetical
         </span>

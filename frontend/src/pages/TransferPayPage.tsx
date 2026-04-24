@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { StatusResponse, AccountTransaction } from '../types'
 import { getTransactions, postTransactionsFetch } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 import { fmtDate, fmtUsd, fmtUsd0 } from '../utils/format'
 
 interface TransferPayPageProps {
@@ -335,17 +336,14 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
   return (
     <div className="card process-section transfer-pay-page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
-        <h2 id="transfer-pay-head" style={{ margin: 0 }} className="page-title-with-tooltip">
-          <button
-            type="button"
-            className="page-title-breadcrumb-link"
-            onClick={() => onViewChange?.('accounts')}
-          >
-            Portfolio
-          </button>
-          {' / Transfer & Pay'}
-          <InfoTooltip text="Data is stored in account_transactions and used for Performance net cash flow. Configure in Settings → IB Connection → Flex." />
-        </h2>
+        <SectionPageTitle
+          id="transfer-pay-head"
+          menu="Portfolio"
+          pageTitle="Transfer & Pay"
+          onMenuClick={() => onViewChange?.('accounts')}
+          infoText="Data is stored in account_transactions and used for Performance net cash flow. Configure in Settings → IB Connection → Flex."
+          style={{ margin: 0 }}
+        />
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           <fieldset
             className="performance-filter"

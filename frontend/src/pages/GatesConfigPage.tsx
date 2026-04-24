@@ -13,7 +13,7 @@ import {
   type GateSafetyGates,
   type StrategyDimRow,
 } from '../api'
-import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 
 export interface GatesConfigPageProps {
   status: StatusResponse | null
@@ -292,25 +292,15 @@ export function GatesConfigPage({
 
   return (
     <div className="card process-section">
-      <h2 id="gates-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-        {onGoToStrategy ? (
-          <>
-            <button
-              type="button"
-              className="page-title-breadcrumb-link"
-              onClick={onGoToStrategy}
-              aria-label="Go to Strategy"
-            >
-              Strategy
-            </button>
-            {' / '}
-            {breadcrumbLabel}
-          </>
-        ) : (
-          breadcrumbLabel
-        )}
-        <InfoTooltip text="Create and edit gate safety boundary sets; set which set is active for the daemon." />
-      </h2>
+      <SectionPageTitle
+        id="gates-head"
+        menu="Strategy"
+        pageTitle={breadcrumbLabel}
+        onMenuClick={onGoToStrategy}
+        menuNavigateAriaLabel="Strategy home"
+        infoText="Create and edit gate safety boundary sets; set which set is active for the daemon."
+        style={{ marginBottom: 'var(--space-2)' }}
+      />
 
       <section className="strategy-section" style={{ marginBottom: 'var(--space-4)' }}>
         <h3 className="section-subtitle">Current active</h3>

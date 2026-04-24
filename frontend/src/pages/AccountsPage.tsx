@@ -4,6 +4,7 @@ import { fetchBarsBenchmark, fetchQuotes, fetchExecutionsFreshness, postExecutio
 import { fetchPositionCategories, postPositionCategory, patchPositionCategory, deletePositionCategory, putPositionCategoryTag } from '../api'
 import type { PositionCategory } from '../types'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 import { fmtExpiry, fmtUsd, fmtUsdRound0 } from '../utils/format'
 import {
   computeDailyChange,
@@ -464,16 +465,13 @@ export function AccountsPage({
     return (
       <div className="card process-section">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
-          <h2 style={{ margin: 0 }} className="page-title-with-tooltip">
-            <button
-              type="button"
-              className="page-title-breadcrumb-link"
-              onClick={() => onViewChange?.('accounts')}
-            >
-              Portfolio
-            </button>
-            {' / Accounts'}
-            <InfoTooltip text="Multi-account summary & positions from DB; auto-refresh every 1h." />
+          <SectionPageTitle
+            menu="Portfolio"
+            pageTitle="Accounts"
+            onMenuClick={() => onViewChange?.('accounts')}
+            infoText="Multi-account summary & positions from DB; auto-refresh every 1h."
+            style={{ margin: 0 }}
+          >
             {(() => {
               const asdHb = (status as any)?.account_sync_daemon?.heartbeat
               if (!asdHb) return null
@@ -491,7 +489,7 @@ export function AccountsPage({
                 </span>
               )
             })()}
-          </h2>
+          </SectionPageTitle>
           <div className="accounts-page-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
             <span
               className="accounts-page-header-icon-wrap"
@@ -782,17 +780,13 @@ export function AccountsPage({
   return (
     <div className="card process-section">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
-        <h2 style={{ margin: 0 }} className="page-title-with-tooltip">
-          <button
-            type="button"
-            className="page-title-breadcrumb-link"
-            onClick={() => onViewChange?.('accounts')}
-          >
-            Portfolio
-          </button>
-          {' / Accounts'}
-          <InfoTooltip text="Multi-account summary & positions from DB; auto-refresh every 1h." />
-        </h2>
+        <SectionPageTitle
+          menu="Portfolio"
+          pageTitle="Accounts"
+          onMenuClick={() => onViewChange?.('accounts')}
+          infoText="Multi-account summary & positions from DB; auto-refresh every 1h."
+          style={{ margin: 0 }}
+        />
         <div className="accounts-page-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
           <span
             className="accounts-page-header-icon-wrap"

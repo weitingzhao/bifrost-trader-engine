@@ -947,6 +947,12 @@ export default function App() {
     setResearchView('risk')
   }, [])
 
+  /** Strategy submenu “Strategy” crumb → Structure (home). */
+  const goStrategyStructure = useCallback(() => {
+    setActiveTab('strategy')
+    setStrategyView('structure')
+  }, [])
+
   const tabList: { id: TabId; label: string; group: TabGroup; lamp?: 'green' | 'yellow' | 'red' | 'none'; lampTitle?: string }[] = [
     { id: 'live', label: 'Live', group: 'market', lamp: liveLamp, lampTitle: liveLamp !== 'green' ? liveNavLamp.title : undefined },
     { id: 'research', label: 'Research', group: 'research' },
@@ -1003,7 +1009,7 @@ export default function App() {
         { id: 'opportunity', label: 'Opportunity' },
         { id: 'allocations', label: 'Allocations' },
         { id: 'gates', label: 'Gates' },
-        { id: 'typeConfig', label: 'Option Type Config' },
+        { id: 'typeConfig', label: 'Option Category' },
       ],
     },
   ]
@@ -1816,6 +1822,7 @@ export default function App() {
           status={status}
           loadStatus={loadStatus}
           breadcrumbLabel="Structure"
+          onNavigateToStrategy={goStrategyStructure}
         />
       )}
 
@@ -1825,6 +1832,7 @@ export default function App() {
           loadStatus={loadStatus}
           breadcrumbLabel="Opportunity"
           urlFocusOpportunityId={urlStrategyOpportunityId}
+          onNavigateToStrategy={goStrategyStructure}
         />
       )}
 
@@ -1833,7 +1841,7 @@ export default function App() {
           status={status}
           loadStatus={loadStatus}
           urlStrategyInstanceId={urlStrategyInstanceId}
-          onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
+          onNavigateToStrategy={goStrategyStructure}
           breadcrumbLabel="Instances"
         />
       )}
@@ -1843,6 +1851,7 @@ export default function App() {
           status={status}
           loadStatus={loadStatus}
           breadcrumbLabel="Allocations"
+          onNavigateToStrategy={goStrategyStructure}
         />
       )}
 
@@ -1850,7 +1859,7 @@ export default function App() {
         <GatesConfigPage
           status={status}
           loadStatus={loadStatus}
-          onGoToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
+          onGoToStrategy={goStrategyStructure}
           breadcrumbLabel="Gates"
         />
       )}
@@ -1860,13 +1869,13 @@ export default function App() {
       )}
 
       {activeTab === 'strategy' && strategyView === 'typeConfig' && (
-        <StructureTypeConfigPage breadcrumbLabel="Option Type Config" />
+        <StructureTypeConfigPage breadcrumbLabel="Option Category" onNavigateToStrategy={goStrategyStructure} />
       )}
 
       {activeTab === 'live' && (
         <LivePage
           status={status}
-          onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
+          onNavigateToStrategy={goStrategyStructure}
           onNavigateToSubscribe={() => openSettingsSectionById('settings-subscribe')}
         />
       )}
@@ -1876,7 +1885,7 @@ export default function App() {
           status={status}
           loadStatus={loadStatus}
           operations={operations}
-          onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
+          onNavigateToStrategy={goStrategyStructure}
           onNavigateToSocket={openSocketInSettings}
           onGoToScreener={goResearchHome}
           celeryLamp={celeryLamp}

@@ -72,6 +72,14 @@ export function SubmenuIcon({ name }: { name: string }) {
         <polygon points="5 3 19 12 5 21 5 3" />
       </svg>
     ),
+    /** IV & Greeks: axes + smooth curve (vol / greeks surface). */
+    greeks: (
+      <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M4 19h16" />
+        <path d="M4 19V6" />
+        <path d="M5 17c3.5-6 7-9 11.5-7.5S20 12 21 8" />
+      </svg>
+    ),
     options: (
       <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <line x1="4" y1="9" x2="20" y2="9" />

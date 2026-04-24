@@ -21,6 +21,7 @@ import {
 } from '../api'
 import { DraggableModal } from '../components/DraggableModal'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 import {
   DEFAULT_STRUCTURE_PAYLOAD,
   getStructureDisplayLabel,
@@ -59,12 +60,15 @@ export interface StrategyStructurePageProps {
   status: StatusResponse | null
   loadStatus: () => Promise<StatusResponse | null>
   breadcrumbLabel?: string
+  /** Breadcrumb: Strategy home (Structure tab). */
+  onNavigateToStrategy?: () => void
 }
 
 export function StrategyStructurePage({
   status,
   loadStatus,
   breadcrumbLabel = 'Structure',
+  onNavigateToStrategy,
 }: StrategyStructurePageProps) {
   const [structures, setStructures] = useState<StrategyStructure[]>([])
   const [history, setHistory] = useState<StrategyHistoryRow[]>([])
@@ -719,7 +723,7 @@ export function StrategyStructurePage({
       >
         <p style={{ whiteSpace: 'pre-wrap', marginBottom: 'var(--space-3)' }}>{availabilityError}</p>
         <p className="form-hint" style={{ marginBottom: 0 }}>
-          The structure was not changed. Fix the issue in Option Type Config or Edit (e.g. meta) and try again.
+          The structure was not changed. Fix the issue in Option Category or Edit (e.g. meta) and try again.
         </p>
       </DraggableModal>
 
@@ -859,10 +863,15 @@ export function StrategyStructurePage({
         )}
       </DraggableModal>
 
-      <h2 id="strategy-structure-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-        Strategy / {breadcrumbLabel}
-        <InfoTooltip text="View and set active strategy structure and gate safety set; daemon uses these on next start." />
-      </h2>
+      <SectionPageTitle
+        id="strategy-structure-head"
+        menu="Strategy"
+        pageTitle={breadcrumbLabel}
+        onMenuClick={onNavigateToStrategy}
+        menuNavigateAriaLabel="Strategy home"
+        infoText="View and set active strategy structure and gate safety set; daemon uses these on next start."
+        style={{ marginBottom: 'var(--space-2)' }}
+      />
 
       <section className="strategy-section" style={{ marginBottom: 'var(--space-4)' }}>
         <h3 className="section-subtitle">Current active</h3>
@@ -1058,7 +1067,7 @@ export function StrategyStructurePage({
               <p>{formError}</p>
               {formErrorIsSchemaMismatch && (
                 <p className="form-hint" style={{ marginTop: 'var(--space-1)' }}>
-                  Legs do not match the expected schema for this type/subtype. Update Option Type Config if needed.
+                  Legs do not match the expected schema for this type/subtype. Update Option Category if needed.
                 </p>
               )}
             </div>

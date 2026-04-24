@@ -12,6 +12,7 @@ import type { StrategyInstance } from '../types'
 import { fetchExecutions, fetchPerformance, fetchOpportunities, fetchStrategyInstances, postOptionStockLinksQuery } from '../api'
 import ExecSourceBadge from '../components/ExecSourceBadge'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 import { ViewOptionStockLinksModal } from './portfolio/ViewOptionStockLinksModal'
 import {
   getOptionStockLinkDetailForExecution,
@@ -545,16 +546,12 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
   return (
     <div className="app-page-stack performance-page">
       <section className="card performance-summary-section" aria-label="Performance">
-        <h2 className="card-title page-title-with-tooltip">
-          <button
-            type="button"
-            className="page-title-breadcrumb-link"
-            onClick={() => onViewChange?.('accounts')}
-          >
-            Portfolio
-          </button>
-          {' / Performance'}
-        </h2>
+        <SectionPageTitle
+          menu="Portfolio"
+          pageTitle="Performance"
+          onMenuClick={() => onViewChange?.('accounts')}
+          infoText="Track realized and unrealized PnL with daily drill-downs. Charts and aggregates above use Flex Trades and journal-closed executions only."
+        />
         <p className="performance-page-subtitle">
           Track realized and unrealized PnL with daily drill-downs. Charts and aggregates above use Flex Trades and journal-closed executions only.
         </p>

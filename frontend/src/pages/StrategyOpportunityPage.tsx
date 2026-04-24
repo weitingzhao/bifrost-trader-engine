@@ -15,7 +15,7 @@ import {
   type GateSafetySet,
 } from '../api'
 import { DraggableModal } from '../components/DraggableModal'
-import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 import {
   SCOPE_TYPES,
   CONDITION_TYPES,
@@ -34,12 +34,15 @@ export interface StrategyOpportunityPageProps {
   breadcrumbLabel?: string
   /** From hash #/strategies/opportunities/:id — open edit drawer for this opportunity. */
   urlFocusOpportunityId?: number | null
+  /** Breadcrumb: Strategy home (Structure tab). */
+  onNavigateToStrategy?: () => void
 }
 
 export function StrategyOpportunityPage({
   loadStatus,
   breadcrumbLabel = 'Opportunity',
   urlFocusOpportunityId = null,
+  onNavigateToStrategy,
 }: StrategyOpportunityPageProps) {
   const [structures, setStructures] = useState<StrategyStructure[]>([])
   const [gateSafetySets, setGateSafetySets] = useState<GateSafetySet[]>([])
@@ -356,10 +359,15 @@ export function StrategyOpportunityPage({
         <p style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{availabilityError}</p>
       </DraggableModal>
 
-      <h2 id="strategy-opportunity-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-        Strategy / {breadcrumbLabel}
-        <InfoTooltip text="Define opportunity strategies linked to a structure; scope and entry conditions." />
-      </h2>
+      <SectionPageTitle
+        id="strategy-opportunity-head"
+        menu="Strategy"
+        pageTitle={breadcrumbLabel}
+        onMenuClick={onNavigateToStrategy}
+        menuNavigateAriaLabel="Strategy home"
+        infoText="Define opportunity strategies linked to a structure; scope and entry conditions."
+        style={{ marginBottom: 'var(--space-2)' }}
+      />
 
       {/* ── List section ── */}
       <section className="opp-list-section">

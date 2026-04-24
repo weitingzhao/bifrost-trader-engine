@@ -6,6 +6,7 @@ import { fetchOpportunities, fetchStructures } from '../api/strategy/strategies'
 import type { StrategyOpportunity, StrategyStructure } from '../api/strategy/strategies'
 import ExecSourceBadge from '../components/ExecSourceBadge'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 import { computeRiskProfile, formatRiskHedgedBreakdown, formatRiskLabel } from '../utils/riskProfile'
 import type { RiskPosition } from '../utils/riskProfile'
 import { RiskProfileDl } from '../components/RiskProfileDl'
@@ -2679,17 +2680,13 @@ export function PositionsPage({
   return (
     <div className="card process-section replay-page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
-        <h2 className="page-title-with-tooltip" style={{ margin: 0 }}>
-          <button
-            type="button"
-            className="page-title-breadcrumb-link"
-            onClick={() => onViewChange?.('accounts')}
-          >
-            Portfolio
-          </button>
-          {' / Positions'}
-          <InfoTooltip text="Open positions (Pool On and Off) and manual execution records." />
-        </h2>
+        <SectionPageTitle
+          menu="Portfolio"
+          pageTitle="Positions"
+          onMenuClick={() => onViewChange?.('accounts')}
+          infoText="Open positions (Pool On and Off) and manual execution records."
+          style={{ margin: 0 }}
+        />
       </div>
 
       <section className="replay-section replay-section-trade-records" aria-label="Open positions">

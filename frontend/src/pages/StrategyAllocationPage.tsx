@@ -12,18 +12,20 @@ import {
   type StrategyAllocation,
   type GateSafetySet,
 } from '../api'
-import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 
 export interface StrategyAllocationPageProps {
   status: StatusResponse | null
   loadStatus: () => Promise<StatusResponse | null>
   breadcrumbLabel?: string
+  onNavigateToStrategy?: () => void
 }
 
 export function StrategyAllocationPage({
   status,
   loadStatus,
   breadcrumbLabel = 'Allocations',
+  onNavigateToStrategy,
 }: StrategyAllocationPageProps) {
   const [opportunities, setOpportunities] = useState<StrategyOpportunity[]>([])
   const [gateSafetySets, setGateSafetySets] = useState<GateSafetySet[]>([])
@@ -193,10 +195,15 @@ export function StrategyAllocationPage({
 
   return (
     <div className="card process-section">
-      <h2 id="strategy-allocation-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-        Strategy / {breadcrumbLabel}
-        <InfoTooltip text="Combine multiple opportunity strategies into an allocation; optional gate safety and limits." />
-      </h2>
+      <SectionPageTitle
+        id="strategy-allocation-head"
+        menu="Strategy"
+        pageTitle={breadcrumbLabel}
+        onMenuClick={onNavigateToStrategy}
+        menuNavigateAriaLabel="Strategy home"
+        infoText="Combine multiple opportunity strategies into an allocation; optional gate safety and limits."
+        style={{ marginBottom: 'var(--space-2)' }}
+      />
 
       <section className="strategy-section" style={{ marginBottom: 'var(--space-4)' }}>
         <h3 className="section-subtitle">Current active</h3>

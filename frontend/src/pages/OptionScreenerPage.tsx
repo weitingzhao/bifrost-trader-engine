@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { StatusResponse } from '../types'
-import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 import type { ScreenerFilters, ScreenerContractRow, ScreenerSymbolGroup, ScreenerResponse } from '../api/research/screener'
 import { runScreener } from '../api/research/screener'
 import type { StrategyStructure, OpportunityPayload, EntryConditionItem } from '../api/strategy/strategies'
@@ -727,26 +727,14 @@ export function OptionScreenerPage({
   return (
     <div className="card process-section watchlist-page stock-screener-page option-screener-page wl2">
       <div className="research-page-head">
-        <h2 className="page-title-with-tooltip" style={{ margin: 0 }}>
-          {onBreadcrumbResearch ? (
-            <>
-              <button
-                type="button"
-                className="page-title-breadcrumb-link"
-                onClick={onBreadcrumbResearch}
-                aria-label="Research home"
-              >
-                Research
-              </button>
-              {' / '}
-              {breadcrumbLabel}
-              {' '}
-            </>
-          ) : (
-            <>Option Screener{' '}</>
-          )}
-          <InfoTooltip text="Option screener (Research → Screener → Option Screener): filter by structure and run against Massive-backed data. Same card theme as Stock Screener." />
-        </h2>
+        <SectionPageTitle
+          menu="Research"
+          pageTitle={breadcrumbLabel}
+          onMenuClick={onBreadcrumbResearch}
+          menuNavigateAriaLabel="Research home"
+          infoText="Option screener (Research → Screener → Option Screener): filter by structure and run against Massive-backed data. Same card theme as Stock Screener."
+          style={{ margin: 0 }}
+        />
       </div>
       <p className="section-hint" style={{ marginBottom: 'var(--space-3)' }}>
         Screen option contracts by strategy structure and scoring criteria (V1: cash-secured puts).

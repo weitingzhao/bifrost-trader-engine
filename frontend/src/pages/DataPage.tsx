@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DraggableModal } from '../components/DraggableModal'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 import type { Bar, StatusResponse } from '../types'
 import { fetchBars, fetchBarsJobs, deleteBarsJob, deleteAllBarsJobs, postRetryBarsJob, postRetryFailedBarsJobs } from '../api'
 import { inspectBarsLimitForPeriod } from './data/dataCoverageUtils'
@@ -151,13 +152,14 @@ export function DataPage({
   return (
     <div className={`card process-section market-data-page${embeddedInSettings ? ' market-data-page--settings-embed' : ''}`}>
       {(onGoToScreener || onBreadcrumbParent) && (
-        <h2 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-          <button type="button" className="page-title-breadcrumb-link" onClick={onBreadcrumbParent ?? onGoToScreener} aria-label={`Go to ${breadcrumbParentLabel}`}>
-            {breadcrumbParentLabel}
-          </button>
-          {' / '}
-          {breadcrumbLabel}
-        </h2>
+        <SectionPageTitle
+          menu={breadcrumbParentLabel}
+          pageTitle={breadcrumbLabel}
+          onMenuClick={onBreadcrumbParent ?? onGoToScreener}
+          menuNavigateAriaLabel={`Go to ${breadcrumbParentLabel}`}
+          infoText="Inspect bars from PostgreSQL, run backfill jobs, and manage bar sync jobs for this market data feed."
+          style={{ marginBottom: 'var(--space-2)' }}
+        />
       )}
 
       <h4 className="feed-massive-section-header" id="feed-ib-section-inspect">Inspect</h4>

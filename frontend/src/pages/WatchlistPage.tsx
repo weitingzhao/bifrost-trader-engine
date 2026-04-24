@@ -25,6 +25,7 @@ import {
   deleteWatchlist,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 import { fmtUsd } from '../utils/format'
 import { computeAtr, computeKelly, computePositionSize } from '../api/research/risk'
 import type { AtrResult, KellyMetrics, PositionSizeResult } from '../api/research/risk'
@@ -78,7 +79,7 @@ const WL_HELP_ORDER_RISK_VERIFY =
   'Distance vs bid % = ROUND((Entry - Bid) / Bid, 2) shown as a percent. Positional drawdown = ROUND(Risk per share / Entry price, 2). ATR sheet uses ATR(14) from sizing compute. Order risk ($) uses |Risk per share| × Share amt.'
 
 const WL_HELP_ORDER_SECTION =
-  'Current bid is live. Entry price, exit price, and share amt are editable; share amt steps in 100s by default.'
+  'Danger zone: live bid and editable entry, exit, and share amount feed downstream order sizing. Share amount steps in 100s by default. Verify every field before trading.'
 
 function categoryIdForName(cats: PositionCategory[], name: string): number | null {
   const n = name.trim().toLowerCase()
@@ -1063,6 +1064,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
   }
 
   const handleSizeCompute = useCallback(async (sym: string) => {
+    setPortfolioRiskPowerCollapsed(true)
     setSelectedSizingSymbol(sym)
     setSizeComputeLoading(true)
     setSizeComputeError(null)
@@ -1411,25 +1413,16 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
       {/* ── Header bar ── */}
       <header className="wl2-header">
         <div className="research-page-head">
-          <h2 className="page-title-with-tooltip" style={{ margin: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem' }}>
-            {onBreadcrumbResearch ? (
-              <>
-                <button
-                  type="button"
-                  className="page-title-breadcrumb-link"
-                  onClick={onBreadcrumbResearch}
-                  aria-label="Research home"
-                >
-                  Research
-                </button>
-                {' / Stock Screener'}
-              </>
-            ) : (
-              <>Stock Screener</>
-            )}
-            <InfoTooltip text="Stock screener workflow: Watching (ideas) → Sizing (pre-trade sizing) → Positions (live IB holdings). Categories Watching / Sizing match Portfolio → Accounts. Quotes use IB / Redis. Bar-chart OHLC in the analysis panel is read from PostgreSQL (Massive or IB sources); use Fetch from Massive to enqueue Massive custom_bars sync." />
+          <SectionPageTitle
+            menu="Research"
+            pageTitle="Stock Screener"
+            onMenuClick={onBreadcrumbResearch}
+            menuNavigateAriaLabel="Research home"
+            infoText="Stock screener workflow: Watching (ideas) → Sizing (pre-trade sizing) → Positions (live IB holdings). Categories Watching / Sizing match Portfolio → Accounts. Quotes use IB / Redis. Bar-chart OHLC in the analysis panel is read from PostgreSQL (Massive or IB sources); use Fetch from Massive to enqueue Massive custom_bars sync."
+            style={{ margin: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem' }}
+          >
             <span className="wl2-header__count">{watchlistItems.length}</span>
-          </h2>
+          </SectionPageTitle>
           <div className="wl2-header__add">
           {(primaryTab === 'watching' || primaryTab === 'positions') && positionsNotInWatchlist.length > 0 && (
             <button
@@ -1669,7 +1662,13 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
             <strong>Step 2.</strong> The table lists stocks tagged <strong>Sizing</strong>. Pick any stock symbol from your watchlist below, then <strong>Move to Sizing</strong>.
           </p>
 
-          <section className="wl2-sizing-dash" aria-labelledby="wl2-sizing-dash-portfolio-risk-power-head">
+          <div
+            className={`wl2-sizing-tab-reorder${selectedSizingSymbol ? ' wl2-sizing-tab-reorder--symbol-focus' : ''}`}
+          >
+          <section
+            className="wl2-sizing-dash wl2-sizing-tab-reorder__portfolio"
+            aria-labelledby="wl2-sizing-dash-portfolio-risk-power-head"
+          >
             <div className="wl2-sizing-dash__title-row">
               <h4 id="wl2-sizing-dash-portfolio-risk-power-head" className="wl2-sizing-dash__title wl2-sizing-dash__title--inline">
                 Portfolio risk power
@@ -1677,13 +1676,30 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               <InfoTooltip text={WL_HELP_PORTFOLIO_TABLE} />
               <button
                 type="button"
-                className="wl2-btn wl2-btn--ghost wl2-portfolio-risk-power__toggle"
+                className="section-header-icon-btn wl2-portfolio-risk-power__toggle"
                 onClick={() => setPortfolioRiskPowerCollapsed(v => !v)}
                 aria-expanded={!portfolioRiskPowerCollapsed}
                 aria-controls="wl2-portfolio-risk-power-body"
                 title={portfolioRiskPowerCollapsed ? 'Expand portfolio risk power' : 'Collapse portfolio risk power'}
+                aria-label={portfolioRiskPowerCollapsed ? 'Expand portfolio risk power' : 'Collapse portfolio risk power'}
               >
-                {portfolioRiskPowerCollapsed ? 'Expand' : 'Collapse'}
+                <svg
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path
+                    d={
+                      portfolioRiskPowerCollapsed ? 'M9 18l6-6-6-6' : 'M6 9l6 6 6-6'
+                    }
+                  />
+                </svg>
               </button>
             </div>
 
@@ -2179,142 +2195,14 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
 
           </section>
 
-          <div className={`wl2-sizing-workflow-split${selectedSizingSymbol ? ' wl2-sizing-workflow-split--has-panel' : ''}`}>
-          <section className="wl2-sizing-dash wl2-sizing-dash--workflow-col" aria-labelledby="wl2-sizing-workflow-head">
-            <h4 id="wl2-sizing-workflow-head" className="wl2-sizing-dash__title">
-              Sizing sheet
-            </h4>
-
-            <div className="wl2-sizing-promote wl2-sizing-promote--inline">
-            <div className="wl2-promote-combobox wl2-promote-combobox--compact" ref={promoteComboboxRef}>
-              <button
-                type="button"
-                className="wl2-promote-combobox__trigger"
-                id="wl2-promote-combobox-trigger"
-                aria-label="pick new symbol — choose a watchlist row to move to Sizing"
-                aria-expanded={promotePickerOpen}
-                aria-controls="wl2-promote-listbox"
-                aria-haspopup="listbox"
-                onClick={() => {
-                  setPromotePickerOpen(o => {
-                    const next = !o
-                    if (!next) setPromoteFilter('')
-                    return next
-                  })
-                }}
-                onKeyDown={e => {
-                  if (e.key === 'Escape' && promotePickerOpen) {
-                    e.preventDefault()
-                    closePromotePicker()
-                  }
-                }}
-              >
-                <span
-                  className={`wl2-promote-combobox__value${promoteSelectedItem ? '' : ' wl2-promote-combobox__value--placeholder'}`}
-                  title={
-                    promoteSelectedItem
-                      ? watchlistItemLabel(promoteSelectedItem)
-                      : 'pick new symbol'
-                  }
-                >
-                  {promoteSelectedItem
-                    ? watchlistItemLabel(promoteSelectedItem)
-                    : 'pick new symbol'}
-                </span>
-                <span className="wl2-promote-combobox__chev" aria-hidden>
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </span>
-              </button>
-              {promotePickerOpen && (
-                <ul id="wl2-promote-listbox" role="listbox" className="wl2-promote-combobox__menu" aria-labelledby="wl2-promote-combobox-trigger">
-                  <li className="wl2-promote-combobox__filter-li" role="presentation" onPointerDown={e => e.preventDefault()}>
-                    <input
-                      type="search"
-                      className="wl2-promote-combobox__filter"
-                      value={promoteFilter}
-                      onChange={e => setPromoteFilter(e.target.value)}
-                      placeholder="Filter symbols…"
-                      autoComplete="off"
-                      spellCheck={false}
-                      aria-label="Filter watchlist symbols"
-                      autoFocus
-                      onKeyDown={e => {
-                        if (e.key === 'Escape') {
-                          e.preventDefault()
-                          e.stopPropagation()
-                          closePromotePicker()
-                        }
-                      }}
-                    />
-                  </li>
-                  {promoteFilter.trim() === '' && stocksForPromoteToSizing.length > 0 && (
-                    <li
-                      role="option"
-                      aria-selected={promoteContractKey.trim() === ''}
-                      className={`wl2-promote-combobox__opt wl2-promote-combobox__opt--placeholder${promoteContractKey.trim() === '' ? ' wl2-promote-combobox__opt--active' : ''}`}
-                      onPointerDown={e => e.preventDefault()}
-                      onClick={() => {
-                        setPromoteContractKey('')
-                        closePromotePicker()
-                      }}
-                    >
-                      pick new symbol
-                    </li>
-                  )}
-                  {stocksForPromoteMenu.length === 0 ? (
-                    <li className="wl2-promote-combobox__opt wl2-promote-combobox__opt--nomatch" role="presentation">
-                      {promoteFilter.trim() ? 'No matches' : 'No symbols in your watchlist'}
-                    </li>
-                  ) : (
-                    stocksForPromoteMenu.map(item => {
-                      const key = item.contract_key.trim()
-                      const sel = promoteContractKey.trim() === key
-                      return (
-                        <li
-                          key={key}
-                          role="option"
-                          aria-selected={sel}
-                          className={`wl2-promote-combobox__opt${sel ? ' wl2-promote-combobox__opt--active' : ''}`}
-                          onPointerDown={e => e.preventDefault()}
-                          onClick={() => {
-                            setPromoteContractKey(key)
-                            closePromotePicker()
-                          }}
-                        >
-                          {watchlistItemLabel(item)}
-                        </li>
-                      )
-                    })
-                  )}
-                </ul>
-              )}
-            </div>
-            <button
-              type="button"
-              className="wl2-btn wl2-btn--primary wl2-btn--icon"
-              disabled={!promoteContractKey.trim() || sizingCategoryId == null || addPending}
-              onClick={() => void handlePromoteToSizing()}
-              title="Move to Sizing"
-              aria-label="Move to Sizing"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                <path
-                  d="M5 12h12M13 6l6 6-6 6"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-            </div>
-            {sizingCategoryId == null && (
-              <p className="wl2-tier-hint wl2-tier-hint--warn">The <strong>Sizing</strong> category is missing; you cannot promote rows yet.</p>
-            )}
-
-            <h5 className="wl2-sizing-dash__subtitle wl2-sizing-dash__subtitle--workflow">Sizing symbol sheet</h5>
+          <div
+            className="wl2-sizing-tab-reorder__workflow wl2-sizing-workflow-split"
+          >
+          <section className="wl2-sizing-dash wl2-sizing-dash--workflow-col">
+            <div className="wl2-symbol-section" aria-labelledby="wl2-sizing-symbol-sheet-head">
+            <h5 id="wl2-sizing-symbol-sheet-head" className="wl2-sizing-dash__subtitle wl2-sizing-dash__subtitle--workflow">
+              Sizing symbol sheet
+            </h5>
             <div className="wl2-table-wrap wl2-sizing-symbol-sheet-wrap">
               {sizingStockRows.length === 0 ? (
                 <div className="wl2-empty">No Sizing symbols yet. Promote from Watching above.</div>
@@ -2333,23 +2221,29 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
             </div>
 
             {selectedSizingSymbol && !sizeComputeLoading && sizeAtrResult && (
-              <section className="wl2-sizing-dash wl2-sizing-dash--nested" aria-labelledby="wl2-order-section-head">
+              <section
+                className="wl2-sizing-dash wl2-sizing-dash--nested wl2-order-section--danger"
+                aria-labelledby="wl2-order-section-head"
+              >
                 <div className="wl2-order-risk-head">
                   <h5 id="wl2-order-section-head" className="wl2-sizing-dash__subtitle wl2-order-risk-head__title">
                     Order section
                   </h5>
                   <InfoTooltip text={WL_HELP_ORDER_SECTION} />
                 </div>
-                <div className="wl2-order-compact-grid">
-                  <div className="wl2-order-compact-field wl2-order-compact-field--readonly">
-                    <span className="wl2-order-compact-field__label">Current bid</span>
-                    <span className="wl2-order-compact-field__value">
-                      {selectedSizingBid != null ? fmtUsd(selectedSizingBid) : '—'}
-                    </span>
-                    <span className="wl2-order-compact-field__sub">{selectedSizingSymbol}</span>
-                  </div>
+                <div className="wl2-order-bid-symbol-row">
+                  <span className="wl2-order-bid-symbol-row__label">Current bid</span>
+                  <span className="wl2-order-bid-symbol-row__value">
+                    {selectedSizingBid != null ? fmtUsd(selectedSizingBid) : '—'}
+                  </span>
+                  <span className="wl2-order-bid-symbol-row__sep" aria-hidden>
+                    ,
+                  </span>
+                  <span className="wl2-order-bid-symbol-row__sym">{selectedSizingSymbol}</span>
+                </div>
+                <div className="wl2-order-compact-grid wl2-order-compact-grid--order-row2">
                   <label className="wl2-order-compact-field" htmlFor="wl-order-entry">
-                    <span className="wl2-order-compact-field__label">Entry price</span>
+                    <span className="wl2-order-compact-field__label">ENTRY</span>
                     <input
                       id="wl-order-entry"
                       type="number"
@@ -2362,7 +2256,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                     />
                   </label>
                   <label className="wl2-order-compact-field" htmlFor="wl-order-exit">
-                    <span className="wl2-order-compact-field__label">Exit price</span>
+                    <span className="wl2-order-compact-field__label">EXIT</span>
                     <input
                       id="wl-order-exit"
                       type="number"
@@ -2376,7 +2270,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                   </label>
                   <label className="wl2-order-compact-field" htmlFor="wl-order-shares">
                     <span className="wl2-order-compact-field__label">
-                      Share amt
+                      AMT
                       <span className="wl2-order-compact-field__hint">step 100</span>
                     </span>
                     <input
@@ -2524,9 +2418,145 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                 ) : null}
               </section>
             )}
+            </div>
+
+            <div className="wl2-sizing-sheet-block" aria-labelledby="wl2-sizing-workflow-head">
+              <h4 id="wl2-sizing-workflow-head" className="wl2-sizing-dash__title">
+                Sizing sheet
+              </h4>
+
+              <div className="wl2-sizing-promote wl2-sizing-promote--inline">
+                <div className="wl2-promote-combobox wl2-promote-combobox--compact" ref={promoteComboboxRef}>
+                  <button
+                    type="button"
+                    className="wl2-promote-combobox__trigger"
+                    id="wl2-promote-combobox-trigger"
+                    aria-label="pick new symbol — choose a watchlist row to move to Sizing"
+                    aria-expanded={promotePickerOpen}
+                    aria-controls="wl2-promote-listbox"
+                    aria-haspopup="listbox"
+                    onClick={() => {
+                      setPromotePickerOpen(o => {
+                        const next = !o
+                        if (!next) setPromoteFilter('')
+                        return next
+                      })
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Escape' && promotePickerOpen) {
+                        e.preventDefault()
+                        closePromotePicker()
+                      }
+                    }}
+                  >
+                    <span
+                      className={`wl2-promote-combobox__value${promoteSelectedItem ? '' : ' wl2-promote-combobox__value--placeholder'}`}
+                      title={
+                        promoteSelectedItem
+                          ? watchlistItemLabel(promoteSelectedItem)
+                          : 'pick new symbol'
+                      }
+                    >
+                      {promoteSelectedItem
+                        ? watchlistItemLabel(promoteSelectedItem)
+                        : 'pick new symbol'}
+                    </span>
+                    <span className="wl2-promote-combobox__chev" aria-hidden>
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </span>
+                  </button>
+                  {promotePickerOpen && (
+                    <ul id="wl2-promote-listbox" role="listbox" className="wl2-promote-combobox__menu" aria-labelledby="wl2-promote-combobox-trigger">
+                      <li className="wl2-promote-combobox__filter-li" role="presentation" onPointerDown={e => e.preventDefault()}>
+                        <input
+                          type="search"
+                          className="wl2-promote-combobox__filter"
+                          value={promoteFilter}
+                          onChange={e => setPromoteFilter(e.target.value)}
+                          placeholder="Filter symbols…"
+                          autoComplete="off"
+                          spellCheck={false}
+                          aria-label="Filter watchlist symbols"
+                          autoFocus
+                          onKeyDown={e => {
+                            if (e.key === 'Escape') {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              closePromotePicker()
+                            }
+                          }}
+                        />
+                      </li>
+                      {promoteFilter.trim() === '' && stocksForPromoteToSizing.length > 0 && (
+                        <li
+                          role="option"
+                          aria-selected={promoteContractKey.trim() === ''}
+                          className={`wl2-promote-combobox__opt wl2-promote-combobox__opt--placeholder${promoteContractKey.trim() === '' ? ' wl2-promote-combobox__opt--active' : ''}`}
+                          onPointerDown={e => e.preventDefault()}
+                          onClick={() => {
+                            setPromoteContractKey('')
+                            closePromotePicker()
+                          }}
+                        >
+                          pick new symbol
+                        </li>
+                      )}
+                      {stocksForPromoteMenu.length === 0 ? (
+                        <li className="wl2-promote-combobox__opt wl2-promote-combobox__opt--nomatch" role="presentation">
+                          {promoteFilter.trim() ? 'No matches' : 'No symbols in your watchlist'}
+                        </li>
+                      ) : (
+                        stocksForPromoteMenu.map(item => {
+                          const key = item.contract_key.trim()
+                          const sel = promoteContractKey.trim() === key
+                          return (
+                            <li
+                              key={key}
+                              role="option"
+                              aria-selected={sel}
+                              className={`wl2-promote-combobox__opt${sel ? ' wl2-promote-combobox__opt--active' : ''}`}
+                              onPointerDown={e => e.preventDefault()}
+                              onClick={() => {
+                                setPromoteContractKey(key)
+                                closePromotePicker()
+                              }}
+                            >
+                              {watchlistItemLabel(item)}
+                            </li>
+                          )
+                        })
+                      )}
+                    </ul>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="wl2-btn wl2-btn--primary wl2-btn--icon"
+                  disabled={!promoteContractKey.trim() || sizingCategoryId == null || addPending}
+                  onClick={() => void handlePromoteToSizing()}
+                  title="Move to Sizing"
+                  aria-label="Move to Sizing"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                    <path
+                      d="M5 12h12M13 6l6 6-6 6"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+              {sizingCategoryId == null && (
+                <p className="wl2-tier-hint wl2-tier-hint--warn">The <strong>Sizing</strong> category is missing; you cannot promote rows yet.</p>
+              )}
+            </div>
           </section>
 
-          {/* ── Position sizing (selected symbol) beside workflow ── */}
+          {/* ── Order sizing (selected symbol) below Sizing sheet ── */}
           {selectedSizingSymbol && (
             <div className="wl2-sizing-workflow-split__panel">
             <div className="wl2-sizing-panel">
@@ -2639,7 +2669,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                       Order sizing
                     </h5>
                     <p className="wl2-sizing-dash__hint" style={{ marginTop: 0 }}>
-                      Auto sizing suggestion from ATR + Kelly. Portfolio <strong>Max drawdown %</strong> and <strong>static risk budget</strong> are set in <strong>Portfolio risk power</strong> above; the ladder row <em>Portfolio max DD budget</em> uses the same percentage.
+                      Auto sizing suggestion from ATR + Kelly. Portfolio <strong>Max drawdown %</strong> and <strong>static risk budget</strong> are set in <strong>Portfolio risk power</strong> (expand if collapsed); the ladder row <em>Portfolio max DD budget</em> uses the same percentage.
                     </p>
                     <div className="wl2-sizing-dash__cards wl2-sizing-dash__cards--tight">
                       <div className="wl2-sizing-dash__card">
@@ -2793,6 +2823,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
             </div>
             </div>
           )}
+          </div>
           </div>
         </>
       ) : (

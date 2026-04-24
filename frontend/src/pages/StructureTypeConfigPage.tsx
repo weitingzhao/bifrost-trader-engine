@@ -26,6 +26,7 @@ import {
   type StructureTypeConfigOption,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 
 const DIM_TYPES = [
   'direction',
@@ -56,12 +57,14 @@ const DIM_ICONS: Record<string, string> = {
 
 export interface StructureTypeConfigPageProps {
   breadcrumbLabel?: string
+  onNavigateToStrategy?: () => void
 }
 
-const PAGE_TITLE_SUFFIX = 'Option Type Config'
+const PAGE_TITLE_SUFFIX = 'Option Category'
 
 export function StructureTypeConfigPage({
   breadcrumbLabel = PAGE_TITLE_SUFFIX,
+  onNavigateToStrategy,
 }: StructureTypeConfigPageProps) {
   const [templates, setTemplates] = useState<StrategyTemplateRow[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -349,14 +352,20 @@ export function StructureTypeConfigPage({
     await loadDims()
   }
 
+  const titleInfo =
+    'Option categories: structure templates, dimensions, legs, and metadata used when creating strategy structures.'
+
   if (loading && !templates.length) {
     return (
-      <div className="otc-page">
+      <div className="card process-section otc-page">
         <header className="otc-page-header">
-          <h1 className="otc-page-title">
-            <span className="otc-page-title-prefix">Strategy / </span>
-            {breadcrumbLabel}
-          </h1>
+          <SectionPageTitle
+            menu="Strategy"
+            pageTitle={breadcrumbLabel}
+            onMenuClick={onNavigateToStrategy}
+            menuNavigateAriaLabel="Strategy home"
+            infoText={titleInfo}
+          />
         </header>
         <div className="otc-loading">Loading…</div>
       </div>
@@ -365,12 +374,15 @@ export function StructureTypeConfigPage({
 
   if (err && !templates.length) {
     return (
-      <div className="otc-page">
+      <div className="card process-section otc-page">
         <header className="otc-page-header">
-          <h1 className="otc-page-title">
-            <span className="otc-page-title-prefix">Strategy / </span>
-            {breadcrumbLabel}
-          </h1>
+          <SectionPageTitle
+            menu="Strategy"
+            pageTitle={breadcrumbLabel}
+            onMenuClick={onNavigateToStrategy}
+            menuNavigateAriaLabel="Strategy home"
+            infoText={titleInfo}
+          />
         </header>
         <div className="otc-error">{err}</div>
       </div>
@@ -378,12 +390,15 @@ export function StructureTypeConfigPage({
   }
 
   return (
-    <div className="otc-page">
+    <div className="card process-section otc-page">
       <header className="otc-page-header">
-        <h1 className="otc-page-title">
-          <span className="otc-page-title-prefix">Strategy / </span>
-          {breadcrumbLabel}
-        </h1>
+        <SectionPageTitle
+          menu="Strategy"
+          pageTitle={breadcrumbLabel}
+          onMenuClick={onNavigateToStrategy}
+          menuNavigateAriaLabel="Strategy home"
+          infoText={titleInfo}
+        />
         <div className="otc-page-actions">
           <button type="button" className="otc-btn otc-btn-ghost" onClick={() => setDimsOpen(true)}>
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>

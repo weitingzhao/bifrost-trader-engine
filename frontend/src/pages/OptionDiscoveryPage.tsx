@@ -28,6 +28,7 @@ import type {
 } from '../api'
 import type { OptionSnapshotRow } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 import { fmtUsd } from '../utils/format'
 import { buildPolygonOptionsTicker } from '../utils/polygonOptionsTicker'
 import { OptionDiscoveryMaxPainPanel } from './optionDiscovery/OptionDiscoveryMaxPainPanel'
@@ -1459,40 +1460,29 @@ export function OptionDiscoveryPage({
   return (
     <div className="card process-section">
       <div className="research-page-head">
-        <h2 className="page-title-with-tooltip" style={{ margin: 0 }}>
-          {onGoToScreener ? (
-            <>
-              <button
-                type="button"
-                className="page-title-breadcrumb-link"
-                onClick={onGoToScreener}
-                aria-label="Research home"
-              >
-                Research
-              </button>
-              {' / '}
-              {breadcrumbLabel}
-              {' '}
-            </>
-          ) : (
-            <>{breadcrumbLabel}{' '}</>
+        <SectionPageTitle
+          menu="Research"
+          pageTitle={breadcrumbLabel}
+          onMenuClick={onGoToScreener}
+          menuNavigateAriaLabel="Research home"
+          infoText="Option Discovery: choose underlying (from Watchlist STK with Option? on) and expiration. Expirations and quotes use Massive delayed snapshot sync + PostgreSQL."
+          style={{ margin: 0 }}
+        >
+          {massiveStatus?.configured && (
+            <span
+              className="section-hint"
+              style={{ marginLeft: '0.5rem', fontWeight: 600 }}
+              title={massiveStatus.delay_notice}
+            >
+              Massive · 15 min delayed
+            </span>
           )}
-          <InfoTooltip text="Option Discovery: choose underlying (from Watchlist STK with Option? on) and expiration. Expirations and quotes use Massive delayed snapshot sync + PostgreSQL." />
-        {massiveStatus?.configured && (
-          <span
-            className="section-hint"
-            style={{ marginLeft: '0.5rem', fontWeight: 600 }}
-            title={massiveStatus.delay_notice}
-          >
-            Massive · 15 min delayed
-          </span>
-        )}
-        {massiveStatus?.configured && massiveStatus && !massiveStatus.trades_enabled && (
-          <span className="page-title-with-tooltip" style={{ marginLeft: '0.35rem' }}>
-            <InfoTooltip text="Tape (last trades) is not available on this tier. Enable trades in Massive config for Developer." />
-          </span>
-        )}
-        </h2>
+          {massiveStatus?.configured && massiveStatus && !massiveStatus.trades_enabled && (
+            <span className="page-title-with-tooltip" style={{ marginLeft: '0.35rem' }}>
+              <InfoTooltip text="Tape (last trades) is not available on this tier. Enable trades in Massive config for Developer." />
+            </span>
+          )}
+        </SectionPageTitle>
       </div>
 
       {/* ── Session bar: Chain title + daily data on one row ── */}

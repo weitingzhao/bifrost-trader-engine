@@ -9,6 +9,7 @@ import {
   fetchPerformance,
   fetchExecutions,
 } from '../api'
+import { SectionPageTitle } from '../components/SectionPageTitle'
 import { StrategyOpportunityCombobox } from '../components/StrategyOpportunityCombobox'
 import { StrategyInstanceDetailPage } from './StrategyInstanceDetailPage'
 import { fmtUsd, parseOptionContractKey } from '../utils/format'
@@ -911,17 +912,14 @@ export function StrategyInstancesPage({
   return (
     <div className="card process-section">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
-        <h2 className="page-title-with-tooltip" style={{ margin: 0 }}>
-          <button
-            type="button"
-            className="page-title-breadcrumb-link"
-            onClick={onNavigateToStrategy}
-          >
-            Strategy
-          </button>
-          {' / '}
-          {breadcrumbLabel}
-        </h2>
+        <SectionPageTitle
+          menu="Strategy"
+          pageTitle={breadcrumbLabel}
+          onMenuClick={onNavigateToStrategy}
+          menuNavigateAriaLabel="Strategy home"
+          infoText="Running strategy instances per account; create from an opportunity, inspect PnL and executions, or open the instance sheet."
+          style={{ margin: 0 }}
+        />
         <button
           type="button"
           className="btn btn-primary"

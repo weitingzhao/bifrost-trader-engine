@@ -6319,6 +6319,23 @@ button:disabled {
   border-radius: 2px;
 }
 
+/* Breadcrumb suffix: separator + page name (main text, bold) */
+.page-title-breadcrumb-tail {
+  color: var(--color-text-main);
+  font-weight: 700;
+}
+
+.page-title-breadcrumb-page {
+  font-weight: 700;
+}
+
+/* Menu label when not a link (same accent as breadcrumb link, no hover underline) */
+.page-title-breadcrumb-menu-static {
+  color: var(--color-link);
+  font-weight: 700;
+  letter-spacing: inherit;
+}
+
 .info-tooltip-wrap {
   display: inline-flex;
   align-items: center;
@@ -14369,23 +14386,6 @@ th {
 .performance-page .performance-calendar-section>* {
   position: relative;
   z-index: 1;
-}
-
-/* Page title with breadcrumb */
-.performance-page .card-title.page-title-with-tooltip {
-  font-size: clamp(1.1rem, 2vw, 1.25rem);
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
-.performance-page .page-title-breadcrumb-link {
-  font-weight: 500;
-  opacity: 0.6;
-  transition: opacity var(--transition-fast), color var(--transition-fast);
-}
-
-.performance-page .page-title-breadcrumb-link:hover {
-  opacity: 1;
 }
 
 /* Subtitle */
@@ -23906,7 +23906,7 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
 }
 
 /* ==========================================================================
-   Option Type Config (OTC) — StructureTypeConfigPage
+   Option Category (OTC) — StructureTypeConfigPage
    ========================================================================== */
 
 .otc-page {
@@ -23916,12 +23916,20 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   flex: 1;
 }
 
+.card.process-section.otc-page > .otc-page-header {
+  margin-bottom: var(--space-2);
+}
+
 .otc-page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: var(--space-3) 0;
   flex-shrink: 0;
+}
+
+.otc-page-header .page-title-with-tooltip {
+  margin: 0;
 }
 
 .otc-page-title {
@@ -25097,6 +25105,11 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   color: var(--color-text-main);
 }
 
+.model-analysis-title.page-title-with-tooltip {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .model-analysis-hypothetical-badge {
   display: inline-flex;
   align-items: center;
@@ -26109,10 +26122,14 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
    ========================================================================== */
 
 .option-greeks-page {
-  padding: var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+/* Outer shell matches other Research pages (.card.process-section); padding comes from .card */
+.card.process-section.option-greeks-page > .research-page-head {
+  margin-bottom: var(--space-2);
 }
 
 .option-greeks-page__controls {
@@ -27058,16 +27075,36 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   background: color-mix(in srgb, var(--color-surface) 70%, transparent);
 }
 
-.wl2-sizing-workflow-split {
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 9fr);
-  gap: var(--space-3);
-  align-items: start;
-  margin-bottom: var(--space-4);
+/* Sizing tab: when a symbol is selected, workflow (sheet + order) stacks above Portfolio risk power */
+.wl2-sizing-tab-reorder {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
-.wl2-sizing-workflow-split:not(.wl2-sizing-workflow-split--has-panel) .wl2-sizing-dash--workflow-col {
-  grid-column: 1 / -1;
+.wl2-sizing-tab-reorder__portfolio {
+  order: 1;
+}
+
+.wl2-sizing-tab-reorder__workflow {
+  order: 2;
+}
+
+.wl2-sizing-tab-reorder--symbol-focus .wl2-sizing-tab-reorder__portfolio {
+  order: 2;
+}
+
+.wl2-sizing-tab-reorder--symbol-focus .wl2-sizing-tab-reorder__workflow {
+  order: 1;
+}
+
+/* Sizing workflow: symbol block → Sizing sheet → Order sizing, stacked vertically */
+.wl2-sizing-workflow-split {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: stretch;
+  margin-bottom: var(--space-4);
 }
 
 .wl2-sizing-dash--workflow-col {
@@ -27075,18 +27112,24 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   margin-bottom: 0;
 }
 
+.wl2-symbol-section {
+  min-width: 0;
+}
+
+.wl2-sizing-sheet-block {
+  min-width: 0;
+  padding-top: var(--space-2);
+  margin-top: var(--space-1);
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
+}
+
 .wl2-sizing-workflow-split__panel {
   min-width: 0;
+  width: 100%;
 }
 
 .wl2-sizing-workflow-split__panel .wl2-sizing-panel {
   margin-top: 0;
-}
-
-@media (max-width: 1024px) {
-  .wl2-sizing-workflow-split.wl2-sizing-workflow-split--has-panel {
-    grid-template-columns: 1fr;
-  }
 }
 
 .wl2-sizing-dash__title {
@@ -27107,8 +27150,11 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
 
 .wl2-portfolio-risk-power__toggle {
   margin-left: auto;
-  padding: 0.2rem 0.55rem;
-  font-size: 0.72rem;
+}
+
+.wl2-portfolio-risk-power__toggle.section-header-icon-btn:hover,
+.wl2-portfolio-risk-power__toggle.section-header-icon-btn:active {
+  transform: none;
 }
 
 .wl2-portfolio-risk-power-summary {
@@ -27326,11 +27372,74 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   color: var(--color-text-main);
 }
 
+/* Stock Screener → Order section: full red tint — live order inputs */
+.wl2-order-section--danger {
+  background: color-mix(in srgb, var(--color-danger-soft) 55%, var(--color-danger) 8%) !important;
+  border-color: color-mix(in srgb, var(--color-danger) 42%, var(--color-border)) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-danger) 22%, transparent);
+}
+
+.wl2-order-section--danger .wl2-order-risk-head__title {
+  color: var(--color-danger);
+}
+
+.wl2-order-bid-symbol-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: baseline;
+  gap: 0.45rem 0.55rem;
+  margin-bottom: var(--space-2);
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-surface-elevated) 65%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 22%, var(--color-border));
+  white-space: nowrap;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.wl2-order-bid-symbol-row__label {
+  flex: 0 0 auto;
+  font-size: 0.64rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.wl2-order-bid-symbol-row__value {
+  flex: 0 0 auto;
+  font-size: 0.95rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-main);
+}
+
+.wl2-order-bid-symbol-row__sep {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  font-weight: 550;
+  color: var(--color-text-muted);
+}
+
+.wl2-order-bid-symbol-row__sym {
+  flex: 0 0 auto;
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--color-text-main);
+}
+
 .wl2-order-compact-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.9fr);
   gap: 0.45rem 0.6rem;
   align-items: end;
+}
+
+.wl2-order-compact-grid--order-row2 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .wl2-order-compact-field {
