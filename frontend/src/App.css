@@ -27207,6 +27207,40 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   box-shadow: 0 0 0 1px var(--color-accent);
 }
 
+/* Step 2 (Sizing): stronger affordance — pre-trade sizing is easy to miss otherwise */
+.wl2-step--sizing-hub {
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 42%, transparent),
+    0 1px 0 rgba(0, 0, 0, 0.12);
+}
+
+.wl2-step--sizing-hub:not(.wl2-step--active) {
+  color: color-mix(in srgb, var(--color-text-main) 88%, var(--color-accent));
+}
+
+.wl2-step--sizing-hub:hover {
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
+.wl2-step--sizing-hub .wl2-step__title {
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+}
+
+.wl2-step--sizing-hub:not(.wl2-step--active) .wl2-step__index {
+  background: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+  color: var(--color-text-main);
+}
+
+.wl2-step--sizing-hub.wl2-step--active {
+  box-shadow:
+    0 0 0 2px var(--color-accent),
+    inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+
 .wl2-step--done:not(.wl2-step--active) {
   color: var(--color-text-main);
   opacity: 0.92;
@@ -27412,6 +27446,48 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
 .wl2-td--strike { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
 /* ── Symbol cell ── */
+.wl2-sym-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.wl2-sym-btn {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 4px;
+  max-width: 100%;
+}
+
+.wl2-sym-btn:hover:not(:disabled) {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.wl2-sym-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.wl2-sym-btn:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.wl2-sym-btn__wait {
+  font-size: 0.75rem;
+  text-decoration: none !important;
+}
+
 .wl2-sym {
   font-weight: 650;
   letter-spacing: -0.01em;
@@ -27653,6 +27729,95 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
   margin-top: 1px;
+}
+
+.wl2-analysis__chart-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.wl2-analysis__chart-tabs {
+  display: inline-flex;
+  border-radius: 8px;
+  padding: 2px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  gap: 2px;
+}
+
+.wl2-analysis__chart-tab {
+  border: none;
+  border-radius: 6px;
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  background: transparent;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.wl2-analysis__chart-tab:hover {
+  color: var(--color-text-main);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.wl2-analysis__chart-tab--active {
+  color: var(--color-text-main);
+  background: var(--color-accent-soft);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 50%, transparent);
+}
+
+.wl2-analysis__chart-reload {
+  flex-shrink: 0;
+}
+
+.wl2-analysis__chart-hint {
+  margin-top: var(--space-2);
+  margin-bottom: 0;
+}
+
+.wl2-analysis__chart-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-2);
+  border-radius: 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+
+.wl2-analysis__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.wl2-analysis__toggle input {
+  accent-color: var(--color-accent);
+}
+
+.wl2-analysis__chart-wrap {
+  margin-top: var(--space-3);
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  padding: var(--space-2);
 }
 
 /* ── Modal ── */

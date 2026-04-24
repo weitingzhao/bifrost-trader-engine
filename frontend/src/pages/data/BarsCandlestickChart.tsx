@@ -1,14 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import type { Bar } from '../../types'
 import { fmtTs, fmtTsForPeriod, fmtUsd } from '../../utils/format'
+import {
+  bollingerSeries,
+  macdSeries,
+  normalizeBarForChart,
+  pivotLevelsFromHlc,
+  rsiSeries,
+  swingHighLow,
+} from './barsChartMath'
 
 export interface BarsCandlestickChartProps {
   bars: Bar[]
   period?: string
-  /** When true (default), draw VWAP line/dot and legend when bar data includes vwap. */
+  /** When true, draw VWAP line when bar data includes vwap (or server synthetic). */
   showVwap?: boolean
-  /** Drag on the chart to select start/end bar index (Option Discovery). */
   enableTimeRangeBrush?: boolean
+  /** Volume panel below price (default true when any bar has volume). */
+  showVolume?: boolean
+  showMacd?: boolean
+  showBollinger?: boolean
+  showRsi?: boolean
+  /** Pivot (prev bar H/L/C) + 20-bar swing high/low as horizontal lines. */
+  showSr?: boolean
 }
 
 /** API may send vwap as string; Number.isFinite rejects strings. */
@@ -19,6 +33,14 @@ export function finiteVwap(raw: unknown): number | null {
 }
 
 const VWAP_STROKE = '#0ea5e9'
+const BB_UPPER = '#a78bfa'
+const BB_MID = '#94a3b8'
+const BB_LOWER = '#a78bfa'
+const MACD_LINE = '#38bdf8'
+const MACD_SIG = '#f97316'
+const RSI_STROKE = '#e879f9'
+const SR_PIVOT = '#facc15'
+const SR_SWING = '#22d3ee'
 
 const CHART_WIDTH = 800
 const PADDING_LEFT = 56
@@ -41,13 +63,22 @@ function svgClientXToSvgX(svgEl: SVGSVGElement, clientX: number, viewBoxWidth: n
 }
 
 export function BarsCandlestickChart({
-  bars: fullBars,
+  bars: rawBars,
   period = '1 D',
   showVwap = true,
   enableTimeRangeBrush = false,
+  showVolume = true,
+  showMacd = false,
+  showBollinger = false,
+  showRsi = false,
+  showSr = false,
 }: BarsCandlestickChartProps) {
+  const fullBars = useMemo(
+    () => (rawBars || []).map(normalizeBarForChart).filter((x): x is Bar => x != null),
+    [rawBars],
+  )
+
   const svgRef = useRef<SVGSVGElement>(null)
-  /** Inclusive indices into fullBars; null = full range */
   const [viewRange, setViewRange] = useState<{ startIdx: number; endIdx: number } | null>(null)
   const [drag, setDrag] = useState<{ anchorIdx: number; x0: number; x1: number } | null>(null)
 
@@ -73,21 +104,97 @@ export function BarsCandlestickChart({
 
   const isFiltered = viewRange != null && (view.startIdx > 0 || view.endIdx < fullCount - 1)
 
+  const closesAll = useMemo(() => fullBars.map(b => b.close), [fullBars])
+  const rsiAll = useMemo(() => (showRsi && fullBars.length > 0 ? rsiSeries(closesAll, 14) : []), [closesAll, fullBars.length, showRsi])
+  const macdAll = useMemo(() => (showMacd && fullBars.length > 0 ? macdSeries(closesAll) : []), [closesAll, fullBars.length, showMacd])
+  const bbAll = useMemo(
+    () => (showBollinger && fullBars.length > 0 ? bollingerSeries(closesAll, 20, 2) : []),
+    [closesAll, fullBars.length, showBollinger],
+  )
+
+  const pivotLevels = useMemo(() => {
+    if (!showSr || fullBars.length < 2) return null
+    const ref = fullBars[fullBars.length - 2]
+    return pivotLevelsFromHlc(ref.high, ref.low, ref.close)
+  }, [fullBars, showSr])
+
+  const swing = useMemo(() => {
+    if (!showSr || fullBars.length < 3) return null
+    const hs = fullBars.map(b => b.high)
+    const ls = fullBars.map(b => b.low)
+    return swingHighLow(hs, ls, 20)
+  }, [fullBars, showSr])
+
   const width = CHART_WIDTH
   const priceHeight = 200
   const volumeHeight = 72
+  const macdHeight = 78
+  const rsiHeight = 58
   const gap = 8
   const paddingLeft = PADDING_LEFT
   const paddingRight = PADDING_RIGHT
   const paddingTop = 12
   const paddingBottom = 28
-  const height = paddingTop + priceHeight + gap + volumeHeight + paddingBottom
+
+  const priceStats = useMemo(() => {
+    const pricePoints: number[] = []
+    for (const b of bars) {
+      if (Number.isFinite(b.high)) pricePoints.push(b.high)
+      if (Number.isFinite(b.low)) pricePoints.push(b.low)
+      if (showBollinger) {
+        for (let li = 0; li < bars.length; li++) {
+          const g = view.startIdx + li
+          const pt = bbAll[g]
+          if (pt?.upper != null) pricePoints.push(pt.upper)
+          if (pt?.lower != null) pricePoints.push(pt.lower)
+        }
+      }
+      if (showVwap) {
+        const vw = finiteVwap(b.vwap)
+        if (vw != null) pricePoints.push(vw)
+      }
+    }
+    if (showSr && pivotLevels) {
+      pricePoints.push(pivotLevels.p, pivotLevels.r1, pivotLevels.s1, pivotLevels.r2, pivotLevels.s2)
+    }
+    if (showSr && swing) {
+      pricePoints.push(swing.resistance, swing.support)
+    }
+    if (pricePoints.length === 0) return null
+    const minPrice = Math.min(...pricePoints)
+    const maxPrice = Math.max(...pricePoints)
+    const priceRange = maxPrice - minPrice || 1
+    const hasVolume = bars.some(b => b.volume != null && Number.isFinite(b.volume))
+    const volumes = bars.map(b => (b.volume != null && Number.isFinite(b.volume) ? Number(b.volume) : 0))
+    const maxVolume = hasVolume ? Math.max(...volumes, 1) : 1
+    return { minPrice, maxPrice, priceRange, hasVolume, volumes, maxVolume }
+  }, [bars, showVwap, showBollinger, bbAll, view.startIdx, showSr, pivotLevels, swing])
+
+  const showVolPanel = showVolume && (priceStats?.hasVolume ?? false)
   const innerWidth = width - paddingLeft - paddingRight
-  const innerPriceHeight = priceHeight - 0
-  const innerVolumeHeight = volumeHeight - 0
+  const innerPriceHeight = priceHeight
+  const innerVolumeHeight = volumeHeight
+  const innerMacdHeight = showMacd ? macdHeight : 0
+  const innerRsiHeight = showRsi ? rsiHeight : 0
+
   const volumeTop = paddingTop + priceHeight + gap
   const volumeBottom = volumeTop + innerVolumeHeight
-  const plotBottom = volumeBottom
+
+  let stackBottom = paddingTop + innerPriceHeight
+  if (showVolPanel) stackBottom = volumeBottom
+  const macdTop = showMacd ? stackBottom + gap : 0
+  if (showMacd) stackBottom = macdTop + innerMacdHeight
+  const rsiTop = showRsi ? stackBottom + gap : 0
+  if (showRsi) stackBottom = rsiTop + innerRsiHeight
+  const height = stackBottom + paddingBottom
+
+  const xTickIndices = useMemo(() => {
+    const n = bars.length
+    if (n <= 1) return [0]
+    const count = Math.min(6, n)
+    const step = (n - 1) / (count - 1)
+    return Array.from({ length: count }, (_, i) => Math.round(i * step))
+  }, [bars.length])
 
   const svgXToFullIdx = useCallback(
     (svgX: number) => {
@@ -146,34 +253,6 @@ export function BarsCandlestickChart({
   const onBrushPointerCancel = useCallback(() => {
     setDrag(null)
   }, [])
-
-  const priceStats = useMemo(() => {
-    const pricePoints: number[] = []
-    for (const b of bars) {
-      if (Number.isFinite(b.high)) pricePoints.push(b.high)
-      if (Number.isFinite(b.low)) pricePoints.push(b.low)
-      if (showVwap) {
-        const vw = finiteVwap(b.vwap)
-        if (vw != null) pricePoints.push(vw)
-      }
-    }
-    if (pricePoints.length === 0) return null
-    const minPrice = Math.min(...pricePoints)
-    const maxPrice = Math.max(...pricePoints)
-    const priceRange = maxPrice - minPrice || 1
-    const hasVolume = bars.some(b => b.volume != null && Number.isFinite(b.volume))
-    const volumes = bars.map(b => (b.volume != null && Number.isFinite(b.volume) ? Number(b.volume) : 0))
-    const maxVolume = hasVolume ? Math.max(...volumes, 1) : 1
-    return { minPrice, maxPrice, priceRange, hasVolume, volumes, maxVolume }
-  }, [bars, showVwap])
-
-  const xTickIndices = useMemo(() => {
-    const n = bars.length
-    if (n <= 1) return [0]
-    const count = Math.min(6, n)
-    const step = (n - 1) / (count - 1)
-    return Array.from({ length: count }, (_, i) => Math.round(i * step))
-  }, [bars.length])
 
   const vwapLineEls = useMemo(() => {
     if (!showVwap || !priceStats) return [] as ReactElement[]
@@ -235,6 +314,86 @@ export function BarsCandlestickChart({
     view.startIdx,
   ])
 
+  const bollingerEls = useMemo(() => {
+    if (!showBollinger || !priceStats || bars.length === 0) return [] as ReactElement[]
+    const { minPrice, priceRange } = priceStats
+    const yAt = (p: number) => paddingTop + innerPriceHeight * (1 - (p - minPrice) / priceRange)
+    const xForIndex = (i: number) =>
+      xForFullIndex(view.startIdx + i, fullCount, innerWidth, paddingLeft)
+    const mkPoly = (key: string, stroke: string, pick: (g: number) => number | null) => {
+      const pts: string[] = []
+      for (let i = 0; i < bars.length; i++) {
+        const g = view.startIdx + i
+        const v = pick(g)
+        if (v == null || !Number.isFinite(v)) continue
+        pts.push(`${xForIndex(i)},${yAt(v)}`)
+      }
+      if (pts.length < 2) return null
+      return (
+        <polyline
+          key={key}
+          fill="none"
+          stroke={stroke}
+          strokeWidth={key.includes('mid') ? 1.25 : 1}
+          strokeDasharray={key.includes('mid') ? '4 3' : undefined}
+          points={pts.join(' ')}
+          vectorEffect="nonScalingStroke"
+          pointerEvents="none"
+          opacity={0.95}
+        />
+      )
+    }
+    return [
+      mkPoly('bb-up', BB_UPPER, g => bbAll[g]?.upper ?? null),
+      mkPoly('bb-mid', BB_MID, g => bbAll[g]?.mid ?? null),
+      mkPoly('bb-lo', BB_LOWER, g => bbAll[g]?.lower ?? null),
+    ].filter(Boolean) as ReactElement[]
+  }, [bars, bbAll, fullCount, innerWidth, paddingLeft, innerPriceHeight, paddingTop, priceStats, showBollinger, view.startIdx])
+
+  const srLineEls = useMemo(() => {
+    if (!showSr || !priceStats) return [] as ReactElement[]
+    const { minPrice, priceRange } = priceStats
+    const yAt = (p: number) => paddingTop + innerPriceHeight * (1 - (p - minPrice) / priceRange)
+    const x1 = paddingLeft
+    const x2 = paddingLeft + innerWidth
+    const els: ReactElement[] = []
+    const addH = (key: string, p: number, stroke: string, dash: string | undefined, label: string) => {
+      if (!Number.isFinite(p)) return
+      const y = yAt(p)
+      els.push(
+        <line
+          key={key}
+          x1={x1}
+          y1={y}
+          x2={x2}
+          y2={y}
+          stroke={stroke}
+          strokeWidth={1}
+          strokeDasharray={dash}
+          vectorEffect="nonScalingStroke"
+          pointerEvents="none"
+        />,
+      )
+      els.push(
+        <text key={`${key}-lbl`} x={x2 - 4} y={y - 2} textAnchor="end" fontSize="9" fill={stroke}>
+          {label}
+        </text>,
+      )
+    }
+    if (pivotLevels) {
+      addH('sr-p', pivotLevels.p, SR_PIVOT, '4 2', 'P')
+      addH('sr-r1', pivotLevels.r1, SR_PIVOT, '2 2', 'R1')
+      addH('sr-s1', pivotLevels.s1, SR_PIVOT, '2 2', 'S1')
+      addH('sr-r2', pivotLevels.r2, SR_PIVOT, '6 3', 'R2')
+      addH('sr-s2', pivotLevels.s2, SR_PIVOT, '6 3', 'S2')
+    }
+    if (swing) {
+      addH('sr-rsw', swing.resistance, SR_SWING, undefined, 'RH')
+      addH('sr-ssw', swing.support, SR_SWING, undefined, 'RL')
+    }
+    return els
+  }, [innerWidth, paddingLeft, paddingTop, innerPriceHeight, pivotLevels, priceStats, showSr, swing])
+
   const dragPreviewEl = useMemo(() => {
     if (!drag) return null
     const x1 = Math.min(drag.x0, drag.x1)
@@ -244,16 +403,198 @@ export function BarsCandlestickChart({
         x={x1}
         y={paddingTop}
         width={Math.max(1, x2 - x1)}
-        height={plotBottom - paddingTop}
+        height={(showVolPanel ? volumeBottom : paddingTop + innerPriceHeight) - paddingTop}
         fill="rgba(14, 165, 233, 0.18)"
         stroke="rgba(14, 165, 233, 0.55)"
         strokeWidth={1}
         pointerEvents="none"
       />
     )
-  }, [drag, paddingTop, plotBottom])
+  }, [drag, paddingTop, innerPriceHeight, showVolPanel, volumeBottom])
 
-  if (!priceStats) return null
+  const macdPanelEls = useMemo(() => {
+    if (!showMacd || !priceStats || bars.length === 0 || macdTop <= 0 || innerMacdHeight <= 0) return [] as ReactElement[]
+    const xs = (i: number) => xForFullIndex(view.startIdx + i, fullCount, innerWidth, paddingLeft)
+    let mn = Infinity
+    let mx = -Infinity
+    for (let i = 0; i < bars.length; i++) {
+      const g = view.startIdx + i
+      const pt = macdAll[g]
+      if (!pt) continue
+      for (const v of [pt.macd, pt.signal, pt.hist]) {
+        if (v != null && Number.isFinite(v)) {
+          mn = Math.min(mn, v)
+          mx = Math.max(mx, v)
+        }
+      }
+    }
+    if (!Number.isFinite(mn) || !Number.isFinite(mx) || mn === mx) {
+      mn = -1
+      mx = 1
+    }
+    const pad = (mx - mn) * 0.08 || 0.01
+    mn -= pad
+    mx += pad
+    const rng = mx - mn || 1
+    const yM = (v: number) => macdTop + innerMacdHeight * (1 - (v - mn) / rng)
+    const els: ReactElement[] = []
+    els.push(
+      <rect
+        key="macd-bg"
+        x={paddingLeft}
+        y={macdTop}
+        width={innerWidth}
+        height={innerMacdHeight}
+        fill="var(--color-surface)"
+        stroke="var(--color-border)"
+        strokeWidth={1}
+        rx={6}
+      />,
+    )
+    els.push(
+      <line
+        key="macd-zero"
+        x1={paddingLeft}
+        x2={paddingLeft + innerWidth}
+        y1={yM(0)}
+        y2={yM(0)}
+        stroke="var(--color-border-strong)"
+        strokeDasharray="3 3"
+        strokeWidth={0.75}
+      />,
+    )
+    for (let i = 0; i < bars.length; i++) {
+      const g = view.startIdx + i
+      const pt = macdAll[g]
+      if (pt?.hist == null || !Number.isFinite(pt.hist)) continue
+      const x = xs(i)
+      const xn = i + 1 < bars.length ? xs(i + 1) : x
+      const w = Math.max(1, Math.abs(xn - x) * 0.55)
+      const y0 = yM(0)
+      const y1 = yM(pt.hist)
+      const top = Math.min(y0, y1)
+      const h = Math.max(1, Math.abs(y1 - y0))
+      els.push(
+        <rect
+          key={`macd-hist-${g}`}
+          x={x - w / 2}
+          y={top}
+          width={w}
+          height={h}
+          fill={pt.hist >= 0 ? 'rgba(34,197,94,0.55)' : 'rgba(239,68,68,0.55)'}
+        />,
+      )
+    }
+    const linePts = (pick: (p: NonNullable<(typeof macdAll)[0]>) => number | null) => {
+      const pts: string[] = []
+      for (let i = 0; i < bars.length; i++) {
+        const g = view.startIdx + i
+        const pt = macdAll[g]
+        if (!pt) continue
+        const v = pick(pt)
+        if (v == null || !Number.isFinite(v)) continue
+        pts.push(`${xs(i)},${yM(v)}`)
+      }
+      return pts
+    }
+    const mPts = linePts(pt => pt.macd)
+    const sPts = linePts(pt => pt.signal)
+    if (mPts.length >= 2) {
+      els.push(
+        <polyline key="macd-m" fill="none" stroke={MACD_LINE} strokeWidth={1.5} points={mPts.join(' ')} vectorEffect="nonScalingStroke" />,
+      )
+    }
+    if (sPts.length >= 2) {
+      els.push(
+        <polyline key="macd-s" fill="none" stroke={MACD_SIG} strokeWidth={1.25} points={sPts.join(' ')} vectorEffect="nonScalingStroke" />,
+      )
+    }
+    els.push(
+      <text key="macd-lbl" x={paddingLeft + 4} y={macdTop + 12} fontSize="10" fill="var(--color-text-muted)">
+        MACD
+      </text>,
+    )
+    return els
+  }, [
+    bars.length,
+    fullCount,
+    innerWidth,
+    innerMacdHeight,
+    macdAll,
+    macdTop,
+    paddingLeft,
+    priceStats,
+    showMacd,
+    view.startIdx,
+  ])
+
+  const rsiPanelEls = useMemo(() => {
+    if (!showRsi || rsiTop <= 0 || bars.length === 0) return [] as ReactElement[]
+    const xs = (i: number) => xForFullIndex(view.startIdx + i, fullCount, innerWidth, paddingLeft)
+    const yR = (rv: number) => rsiTop + innerRsiHeight * (1 - rv / 100)
+    const els: ReactElement[] = []
+    els.push(
+      <rect
+        key="rsi-bg"
+        x={paddingLeft}
+        y={rsiTop}
+        width={innerWidth}
+        height={innerRsiHeight}
+        fill="var(--color-surface)"
+        stroke="var(--color-border)"
+        strokeWidth={1}
+        rx={6}
+      />,
+    )
+    for (const lvl of [30, 50, 70]) {
+      els.push(
+        <line
+          key={`rsi-${lvl}`}
+          x1={paddingLeft}
+          x2={paddingLeft + innerWidth}
+          y1={yR(lvl)}
+          y2={yR(lvl)}
+          stroke={lvl === 50 ? 'var(--color-border)' : 'var(--color-border-strong)'}
+          strokeDasharray={lvl === 50 ? '2 4' : '3 3'}
+          strokeWidth={0.6}
+        />,
+      )
+    }
+    const pts: string[] = []
+    for (let i = 0; i < bars.length; i++) {
+      const g = view.startIdx + i
+      const rv = rsiAll[g]
+      if (rv == null || !Number.isFinite(rv)) continue
+      pts.push(`${xs(i)},${yR(rv)}`)
+    }
+    if (pts.length >= 2) {
+      els.push(
+        <polyline key="rsi-line" fill="none" stroke={RSI_STROKE} strokeWidth={1.5} points={pts.join(' ')} vectorEffect="nonScalingStroke" />,
+      )
+    }
+    els.push(
+      <text key="rsi-lbl" x={paddingLeft + 4} y={rsiTop + 12} fontSize="10" fill="var(--color-text-muted)">
+        RSI(14)
+      </text>,
+    )
+    return els
+  }, [bars.length, fullCount, innerRsiHeight, innerWidth, paddingLeft, rsiAll, rsiTop, showRsi, view.startIdx])
+
+  if (fullCount === 0) {
+    return (
+      <div className="data-bars-chart">
+        <p className="section-hint" style={{ margin: 0 }}>No bar rows to chart.</p>
+      </div>
+    )
+  }
+
+  if (!priceStats) {
+    return (
+      <div className="data-bars-chart">
+        <p className="section-hint" style={{ margin: 0 }}>Unable to derive price scale (check OHLC values).</p>
+      </div>
+    )
+  }
 
   const { minPrice, maxPrice, priceRange, hasVolume, volumes, maxVolume } = priceStats
 
@@ -306,10 +647,12 @@ export function BarsCandlestickChart({
           : 12
 
   const lastBar = bars[bars.length - 1]
-  const lastVwap = finiteVwap(lastBar.vwap)
+  const lastVwap = lastBar ? finiteVwap(lastBar.vwap) : null
 
   const firstFull = fullBars[view.startIdx]
   const lastFull = fullBars[view.endIdx]
+
+  const brushBottom = (showVolPanel ? volumeBottom : paddingTop + innerPriceHeight)
 
   return (
     <div className="data-bars-chart">
@@ -373,6 +716,9 @@ export function BarsCandlestickChart({
           )
         })}
 
+        {srLineEls}
+        {bollingerEls}
+
         {bars.map((b, i) => {
           const x = xForIndex(i)
           const highY = yForPrice(b.high)
@@ -425,42 +771,50 @@ export function BarsCandlestickChart({
             {fmtTs(lastBar.time)}
           </text>
         )}
-        <rect
-          x={paddingLeft}
-          y={volumeTop}
-          width={innerWidth}
-          height={innerVolumeHeight}
-          fill="var(--color-surface)"
-          stroke="var(--color-border)"
-          strokeWidth={1}
-          rx={6}
-        />
-        {hasVolume &&
-          bars.map((b, i) => {
-            const v = volumes[i]
-            if (v <= 0) return null
-            const x = xForIndex(i)
-            const isUp = b.close >= b.open
-            const color = isUp ? 'var(--success, #16a34a)' : 'var(--danger, #b91c1c)'
-            const barW = Math.max(
-              volumeBarWidthMin,
-              Math.abs(xStep) > 0 ? Math.min(volumeBarWidthMax, Math.abs(xStep) * volumeBarWidthFactor) : 5,
-            )
-            const y = yForVolume(v)
-            const h = volumeBottom - y
-            return (
-              <rect
-                key={`vol-${view.startIdx + i}`}
-                x={x - barW / 2}
-                y={y}
-                width={barW}
-                height={Math.max(h, 1)}
-                fill={color}
-                fillOpacity={0.7}
-                rx={1}
-              />
-            )
-          })}
+
+        {showVolPanel && (
+          <>
+            <rect
+              x={paddingLeft}
+              y={volumeTop}
+              width={innerWidth}
+              height={innerVolumeHeight}
+              fill="var(--color-surface)"
+              stroke="var(--color-border)"
+              strokeWidth={1}
+              rx={6}
+            />
+            {hasVolume &&
+              bars.map((b, i) => {
+                const v = volumes[i]
+                if (v <= 0) return null
+                const x = xForIndex(i)
+                const isUp = b.close >= b.open
+                const color = isUp ? 'var(--success, #16a34a)' : 'var(--danger, #b91c1c)'
+                const barW = Math.max(
+                  volumeBarWidthMin,
+                  Math.abs(xStep) > 0 ? Math.min(volumeBarWidthMax, Math.abs(xStep) * volumeBarWidthFactor) : 5,
+                )
+                const y = yForVolume(v)
+                const h = volumeBottom - y
+                return (
+                  <rect
+                    key={`vol-${view.startIdx + i}`}
+                    x={x - barW / 2}
+                    y={y}
+                    width={barW}
+                    height={Math.max(h, 1)}
+                    fill={color}
+                    fillOpacity={0.7}
+                    rx={1}
+                  />
+                )
+              })}
+          </>
+        )}
+
+        {macdPanelEls}
+        {rsiPanelEls}
 
         {xTickIndices.map((i) => {
           const bar = bars[i]
@@ -490,7 +844,7 @@ export function BarsCandlestickChart({
             x={paddingLeft}
             y={paddingTop}
             width={innerWidth}
-            height={plotBottom - paddingTop}
+            height={brushBottom - paddingTop}
             fill="transparent"
             stroke="none"
             style={{ cursor: 'crosshair', touchAction: 'none' }}

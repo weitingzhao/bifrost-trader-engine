@@ -1768,8 +1768,7 @@ export default function App() {
       {activeTab === 'research' && researchView === 'risk' && (
         <ResearchRiskAnalysisPage
           onGoToScreener={goResearchHome}
-          breadcrumbLabel="Risk & Position Sizer"
-          status={status}
+          breadcrumbLabel="Risk Model"
         />
       )}
 

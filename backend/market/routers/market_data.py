@@ -133,8 +133,9 @@ def get_bars(
 
     per = (period or "1 D").strip()
     items = reader.get_bars(symbol=sym, period=per, limit=limit)
-    bars = [
-        {
+    bars = []
+    for r in items:
+        row: Dict[str, Any] = {
             "time": float(r["time"]) if r.get("time") is not None else 0,
             "open": float(r["open"]) if r.get("open") is not None else 0,
             "high": float(r["high"]) if r.get("high") is not None else 0,
@@ -142,8 +143,20 @@ def get_bars(
             "close": float(r["close"]) if r.get("close") is not None else 0,
             "volume": float(r["volume"]) if r.get("volume") is not None else 0,
         }
-        for r in items
-    ]
+        vw = r.get("vwap")
+        resolved: Optional[float] = None
+        if vw is not None:
+            try:
+                resolved = float(vw)
+            except (TypeError, ValueError):
+                resolved = None
+        if resolved is None:
+            syn = _synthetic_option_vwap_from_ohlcv(r)
+            if syn is not None:
+                resolved = syn
+        if resolved is not None:
+            row["vwap"] = resolved
+        bars.append(row)
     out: Dict[str, Any] = {"bars": bars, "asset": "stock"}
     if source:
         out["source"] = source

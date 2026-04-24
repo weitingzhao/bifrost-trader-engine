@@ -763,6 +763,7 @@ export interface Bar {
 
 export interface BarsResponse {
   bars: Bar[]
+  /** Present when the server has no rows or a soft validation message. */
   message?: string
 }
 

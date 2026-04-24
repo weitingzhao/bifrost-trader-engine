@@ -122,10 +122,10 @@ def get_bars(
                 cur.execute(
                     """
                     SELECT symbol, '1 D' AS period, extract(epoch from bar_time) AS time,
-                           open, high, low, close, volume
+                           open, high, low, close, volume, vwap
                     FROM (
                       SELECT DISTINCT ON (symbol, bar_time)
-                        symbol, bar_time, open, high, low, close, volume
+                        symbol, bar_time, open, high, low, close, volume, vwap
                       FROM stock_day
                       WHERE symbol = %s
                       ORDER BY symbol, bar_time DESC,
@@ -141,10 +141,10 @@ def get_bars(
                 cur.execute(
                     """
                     SELECT symbol, period, extract(epoch from bar_time) AS time,
-                           open, high, low, close, volume
+                           open, high, low, close, volume, vwap
                     FROM (
                       SELECT DISTINCT ON (symbol, period, bar_time)
-                        symbol, period, bar_time, open, high, low, close, volume
+                        symbol, period, bar_time, open, high, low, close, volume, vwap
                       FROM stock_min
                       WHERE symbol = %s AND period = %s
                       ORDER BY symbol, period, bar_time DESC,
