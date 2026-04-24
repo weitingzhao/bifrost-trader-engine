@@ -1,5 +1,5 @@
 import type { IbAccountSnapshot, IbPositionRow, RealtimeQuote } from '../../types'
-import { isLedgerCashLikeCategory } from '../portfolio/ledgerStockCategoryBuckets'
+import { isLedgerCashLikeCategory, isLedgerFixedIncomeCategory } from '../portfolio/ledgerStockCategoryBuckets'
 
 export type DailyBenchmark = {
   bar_time: number
@@ -109,6 +109,15 @@ export function positionsGrossMarketValue(account: IbAccountSnapshot): number {
     s += ibPositionMarketValue(pos)
   }
   return s
+}
+
+/** Market value of positions tagged Fixed income (same category rules as Accounts / ledger). */
+export function fixedIncomeMarketValue(account: IbAccountSnapshot): number {
+  let mv = 0
+  for (const pos of account.positions ?? []) {
+    if (isLedgerFixedIncomeCategory(String(pos.category ?? ''))) mv += ibPositionMarketValue(pos)
+  }
+  return mv
 }
 
 /**

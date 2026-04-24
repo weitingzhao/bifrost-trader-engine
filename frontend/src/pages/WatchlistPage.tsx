@@ -31,6 +31,7 @@ import { computeAtr, computeKelly, computePositionSize } from '../api/research/r
 import type { AtrResult, KellyMetrics, PositionSizeResult } from '../api/research/risk'
 import {
   cashLikeStkMarketValueOnly,
+  fixedIncomeMarketValue,
   getNetLiq,
   ibParsedTotalCashValue,
   positionsGrossMarketValue,
@@ -141,6 +142,44 @@ function fuzzyMatchWatchlistItem(item: WatchlistItem, queryRaw: string): boolean
     i = j + 1
   }
   return true
+}
+
+/** Cash total vs net liq. for one account row (Host / Secondary pie). */
+function portfolioCashPieFromRow(
+  row:
+    | {
+        cashTotal: number
+        netLiq: number
+        netLiqExFi: number
+        cashPctExFi: number | null
+      }
+    | null
+    | undefined,
+): {
+  cash: number
+  nonCash: number
+  net: number
+  pct: number
+  ratio: number
+  netLiqExFi: number
+  cashPctExFi: number | null
+} | null {
+  if (!row) return null
+  const cash = row.cashTotal
+  const net = row.netLiq
+  const nonCash = Math.max(0, net - cash)
+  const denom = net > 0 ? net : Math.max(cash + nonCash, 1e-9)
+  const ratio = Math.min(1, Math.max(0, cash / denom))
+  const pct = ratio * 100
+  return {
+    cash,
+    nonCash,
+    net,
+    pct,
+    ratio,
+    netLiqExFi: row.netLiqExFi,
+    cashPctExFi: row.cashPctExFi,
+  }
 }
 
 function formatExpiry(expiry: string | null | undefined): string {
@@ -324,24 +363,37 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
       const ib = ibParsedTotalCashValue(acc)
       const cl = cashLikeStkMarketValueOnly(acc)
       const nl = getNetLiq(acc)
+      const fiMv = fixedIncomeMarketValue(acc)
+      const ct = ib + cl
+      const netLiqExFi = Math.max(0, nl - fiMv)
+      const cashPctExFi = netLiqExFi > 0 ? (ct / netLiqExFi) * 100 : null
       return {
         ibCash: ib,
         cashLike: cl,
-        cashTotal: ib + cl,
+        cashTotal: ct,
         positionsMv: positionsGrossMarketValue(acc),
+        fixedIncomeMv: fiMv,
         netLiq: nl,
+        netLiqExFi,
+        cashPctExFi,
         maxDdUsd: nl * pct,
       }
     }
 
     const sumAcc = (fn: (a: IbAccountSnapshot) => number) => accounts.reduce((s, a) => s + fn(a), 0)
     const totalNet = accounts.reduce((s, a) => s + getNetLiq(a), 0)
+    const totalFiMv = sumAcc(fixedIncomeMarketValue)
+    const totalCashSum = sumAcc(totalCashIncludingCashLikePositions)
+    const totalNetExFi = Math.max(0, totalNet - totalFiMv)
     const totalRow = {
       ibCash: sumAcc(ibParsedTotalCashValue),
       cashLike: sumAcc(cashLikeStkMarketValueOnly),
-      cashTotal: sumAcc(totalCashIncludingCashLikePositions),
+      cashTotal: totalCashSum,
       positionsMv: sumAcc(positionsGrossMarketValue),
+      fixedIncomeMv: totalFiMv,
       netLiq: totalNet,
+      netLiqExFi: totalNetExFi,
+      cashPctExFi: totalNetExFi > 0 ? (totalCashSum / totalNetExFi) * 100 : null,
       maxDdUsd: totalNet * pct,
     }
 
@@ -356,15 +408,14 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
     }
   }, [status?.portfolio?.accounts, status?.config?.ib_client?.account, staticMaxDdPctCap])
 
-  const portfolioCashPie = useMemo(() => {
-    const cash = portfolioAccountTable.totalRow.cashTotal
-    const net = portfolioAccountTable.totalRow.netLiq
-    const nonCash = Math.max(0, net - cash)
-    const denom = net > 0 ? net : Math.max(cash + nonCash, 1e-9)
-    const ratio = Math.min(1, Math.max(0, cash / denom))
-    const pct = ratio * 100
-    return { cash, nonCash, net, pct, ratio }
-  }, [portfolioAccountTable])
+  const hostCashPie = useMemo(
+    () => portfolioCashPieFromRow(portfolioAccountTable.hostRow ?? undefined),
+    [portfolioAccountTable],
+  )
+  const secondaryCashPie = useMemo(
+    () => portfolioCashPieFromRow(portfolioAccountTable.secondaryRow ?? undefined),
+    [portfolioAccountTable],
+  )
 
   const portfolioDdFromHistory = useMemo(() => {
     const md = perfSummary?.max_drawdown
@@ -1450,56 +1501,57 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               <code className="wl2-code">event_secondary</code>. <strong>Total</strong> sums every account in the snapshot.
             </p>
 
-            <div className="wl2-range-field wl2-range-field--portfolio">
-              <div className="wl2-range-field__head">
-                <label className="wl2-range-field__label" htmlFor="wl-portfolio-max-dd-pct">
-                  Max drawdown % (scenario)
-                </label>
-                <span className="wl2-range-field__readout" aria-live="polite">
-                  {staticMaxDdPctCap}
-                  <span className="wl2-range-field__readout-unit">%</span>
-                </span>
+            <div className="wl2-portfolio-max-dd-row">
+              <div className="wl2-range-field wl2-range-field--portfolio">
+                <div className="wl2-range-field__head">
+                  <label className="wl2-range-field__label" htmlFor="wl-portfolio-max-dd-pct">
+                    Max drawdown % (scenario)
+                  </label>
+                  <span className="wl2-range-field__readout" aria-live="polite">
+                    {staticMaxDdPctCap}
+                    <span className="wl2-range-field__readout-unit">%</span>
+                  </span>
+                </div>
+                <input
+                  id="wl-portfolio-max-dd-pct"
+                  type="range"
+                  className="wl2-range-elegant"
+                  min={5}
+                  max={50}
+                  step={1}
+                  value={staticMaxDdPctCap}
+                  onChange={e =>
+                    setStaticMaxDdPctCap(Math.max(5, Math.min(50, Number.parseInt(e.target.value, 10) || 20)))
+                  }
+                  aria-valuemin={5}
+                  aria-valuemax={50}
+                  aria-valuenow={staticMaxDdPctCap}
+                  aria-label="Scenario max drawdown percent of net liquidation per account"
+                  style={{
+                    ['--wl-range-pct' as string]: `${((staticMaxDdPctCap - 5) / (50 - 5)) * 100}%`,
+                  }}
+                />
+                <div className="wl2-range-field__scale" aria-hidden>
+                  <span>5%</span>
+                  <span>50%</span>
+                </div>
+                <p className="wl2-range-field__caption">
+                  Max drawdown $ = <strong>Net liq.</strong> × this % for Host / Secondary; Total row uses aggregate net liq.{' '}
+                  <strong>Static risk budget</strong> (below) uses the same % × aggregate net liq.
+                </p>
               </div>
-              <input
-                id="wl-portfolio-max-dd-pct"
-                type="range"
-                className="wl2-range-elegant"
-                min={5}
-                max={50}
-                step={1}
-                value={staticMaxDdPctCap}
-                onChange={e =>
-                  setStaticMaxDdPctCap(Math.max(5, Math.min(50, Number.parseInt(e.target.value, 10) || 20)))
-                }
-                aria-valuemin={5}
-                aria-valuemax={50}
-                aria-valuenow={staticMaxDdPctCap}
-                aria-label="Scenario max drawdown percent of net liquidation per account"
-                style={{
-                  ['--wl-range-pct' as string]: `${((staticMaxDdPctCap - 5) / (50 - 5)) * 100}%`,
-                }}
-              />
-              <div className="wl2-range-field__scale" aria-hidden>
-                <span>5%</span>
-                <span>50%</span>
-              </div>
-              <p className="wl2-range-field__caption">
-                Max drawdown $ = <strong>Net liq.</strong> × this % for Host / Secondary; Total row uses aggregate net liq.{' '}
-                <strong>Static risk budget</strong> (below) uses the same % × aggregate net liq.
-              </p>
-            </div>
 
-            <div className="wl2-table-wrap wl2-sizing-dash__table-wrap">
+              <div className="wl2-table-wrap wl2-sizing-dash__table-wrap">
               <table className="wl2-table wl2-table--dense wl2-portfolio-metric-table">
                 <thead>
                   <tr>
                     <th>Account</th>
-                    <th className="wl2-td-num wl2-portfolio-col--emph">Cash (IB)</th>
-                    <th className="wl2-td-num wl2-portfolio-col--emph">Cash-like</th>
+                    <th className="wl2-td-num">Cash (IB)</th>
+                    <th className="wl2-td-num">Cash-like</th>
                     <th className="wl2-td-num">Cash total</th>
                     <th className="wl2-td-num">Positions MV</th>
                     <th className="wl2-td-num">Net liq.</th>
-                    <th className="wl2-td-num wl2-portfolio-col--emph">Max DD @ {staticMaxDdPctCap}%</th>
+                    <th className="wl2-td-num">Max DD @ {staticMaxDdPctCap}%</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1516,21 +1568,33 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                     </td>
                     {portfolioAccountTable.hostRow ? (
                       <>
-                        <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.hostRow.ibCash)}</td>
-                        <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.hostRow.cashLike)}</td>
+                        <td className="wl2-td-num">
+                          <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.hostRow.ibCash)}</span>
+                        </td>
+                        <td className="wl2-td-num">
+                          <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.hostRow.cashLike)}</span>
+                        </td>
                         <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.hostRow.cashTotal)}</td>
                         <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.hostRow.positionsMv)}</td>
                         <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.hostRow.netLiq)}</td>
-                        <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.hostRow.maxDdUsd)}</td>
+                        <td className="wl2-td-num">
+                          <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.hostRow.maxDdUsd)}</span>
+                        </td>
                       </>
                     ) : (
                       <>
-                        <td className="wl2-td-num wl2-portfolio-col--emph">—</td>
-                        <td className="wl2-td-num wl2-portfolio-col--emph">—</td>
+                        <td className="wl2-td-num">
+                          <span className="wl2-portfolio-num--emph wl2-portfolio-num--muted">—</span>
+                        </td>
+                        <td className="wl2-td-num">
+                          <span className="wl2-portfolio-num--emph wl2-portfolio-num--muted">—</span>
+                        </td>
                         <td className="wl2-td-num">—</td>
                         <td className="wl2-td-num">—</td>
                         <td className="wl2-td-num">—</td>
-                        <td className="wl2-td-num wl2-portfolio-col--emph">—</td>
+                        <td className="wl2-td-num">
+                          <span className="wl2-portfolio-num--emph wl2-portfolio-num--muted">—</span>
+                        </td>
                       </>
                     )}
                   </tr>
@@ -1547,21 +1611,33 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                     </td>
                     {portfolioAccountTable.secondaryRow ? (
                       <>
-                        <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.secondaryRow.ibCash)}</td>
-                        <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.secondaryRow.cashLike)}</td>
+                        <td className="wl2-td-num">
+                          <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.secondaryRow.ibCash)}</span>
+                        </td>
+                        <td className="wl2-td-num">
+                          <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.secondaryRow.cashLike)}</span>
+                        </td>
                         <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.secondaryRow.cashTotal)}</td>
                         <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.secondaryRow.positionsMv)}</td>
                         <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.secondaryRow.netLiq)}</td>
-                        <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.secondaryRow.maxDdUsd)}</td>
+                        <td className="wl2-td-num">
+                          <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.secondaryRow.maxDdUsd)}</span>
+                        </td>
                       </>
                     ) : (
                       <>
-                        <td className="wl2-td-num wl2-portfolio-col--emph">—</td>
-                        <td className="wl2-td-num wl2-portfolio-col--emph">—</td>
+                        <td className="wl2-td-num">
+                          <span className="wl2-portfolio-num--emph wl2-portfolio-num--muted">—</span>
+                        </td>
+                        <td className="wl2-td-num">
+                          <span className="wl2-portfolio-num--emph wl2-portfolio-num--muted">—</span>
+                        </td>
                         <td className="wl2-td-num">—</td>
                         <td className="wl2-td-num">—</td>
                         <td className="wl2-td-num">—</td>
-                        <td className="wl2-td-num wl2-portfolio-col--emph">—</td>
+                        <td className="wl2-td-num">
+                          <span className="wl2-portfolio-num--emph wl2-portfolio-num--muted">—</span>
+                        </td>
                       </>
                     )}
                   </tr>
@@ -1570,64 +1646,181 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                       <strong>Total</strong>
                       <div className="wl2-portfolio-metric-table__sub">All accounts in snapshot</div>
                     </td>
-                    <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.totalRow.ibCash)}</td>
-                    <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.totalRow.cashLike)}</td>
+                    <td className="wl2-td-num">
+                      <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.totalRow.ibCash)}</span>
+                    </td>
+                    <td className="wl2-td-num">
+                      <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.totalRow.cashLike)}</span>
+                    </td>
                     <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.totalRow.cashTotal)}</td>
                     <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.totalRow.positionsMv)}</td>
                     <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.totalRow.netLiq)}</td>
-                    <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.totalRow.maxDdUsd)}</td>
+                    <td className="wl2-td-num">
+                      <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.totalRow.maxDdUsd)}</span>
+                    </td>
                   </tr>
                 </tbody>
               </table>
+              </div>
             </div>
 
-            <div className="wl2-cash-pie-wrap">
-              <h5 className="wl2-sizing-dash__subtitle wl2-sizing-dash__subtitle--sm">Cash share of net liquidation (Total)</h5>
+            <div className="wl2-cash-pie-split-wrap">
+              <h5 className="wl2-sizing-dash__subtitle wl2-sizing-dash__subtitle--sm">Cash share of net liquidation</h5>
               <p className="wl2-cash-pie-wrap__hint">
-                <strong>Cash total</strong> (IB + cash-like) vs. the rest of net liq. (≈ invested / other components). Same Total row as the sheet above.
+                One ring per slot: <strong>cash total</strong> (IB + cash-like) vs. <strong>other</strong> (net liq. − cash) for that account only.
+                Below each ring: <strong>ex‑FI net liq.</strong> is net liq. minus fixed-income position MV (approx. pool for stock option underlyings); <strong>cash / ex‑FI</strong> is cash total as a % of that amount.
               </p>
-              <div className="wl2-cash-pie-layout">
-                <div
-                  className="wl2-cash-pie"
-                  role="img"
-                  aria-label={`Cash is ${portfolioCashPie.pct.toFixed(1)} percent of net liquidation`}
-                >
-                  <div
-                    className="wl2-cash-pie__ring"
-                    style={{
-                      background: `conic-gradient(
-                        color-mix(in srgb, var(--color-accent) 88%, #050a10) 0turn ${portfolioCashPie.ratio}turn,
-                        color-mix(in srgb, var(--color-border) 72%, var(--color-surface)) ${portfolioCashPie.ratio}turn 1turn
-                      )`,
-                    }}
-                  />
-                  <div className="wl2-cash-pie__hole">
-                    <span className="wl2-cash-pie__pct">{portfolioCashPie.pct.toFixed(1)}%</span>
-                    <span className="wl2-cash-pie__label">cash</span>
-                  </div>
+              <div className="wl2-cash-pie-split">
+                <div className="wl2-cash-pie-panel">
+                  <h6 className="wl2-cash-pie-panel__title">Host</h6>
+                  {hostCashPie ? (
+                    <>
+                      <div className="wl2-cash-pie-layout">
+                        <div
+                          className="wl2-cash-pie"
+                          role="img"
+                          aria-label={`Host: cash is ${hostCashPie.pct.toFixed(1)} percent of net liquidation`}
+                        >
+                          <div
+                            className="wl2-cash-pie__ring"
+                            style={{
+                              background: `conic-gradient(
+                                color-mix(in srgb, var(--color-accent) 88%, #050a10) 0turn ${hostCashPie.ratio}turn,
+                                color-mix(in srgb, var(--color-border) 72%, var(--color-surface)) ${hostCashPie.ratio}turn 1turn
+                              )`,
+                            }}
+                          />
+                          <div className="wl2-cash-pie__hole">
+                            <span className="wl2-cash-pie__pct">{hostCashPie.pct.toFixed(1)}%</span>
+                            <span className="wl2-cash-pie__label">cash</span>
+                          </div>
+                        </div>
+                        <ul className="wl2-cash-pie-legend">
+                          <li>
+                            <span className="wl2-cash-pie-dot wl2-cash-pie-dot--cash" aria-hidden />
+                            <span className="wl2-cash-pie-legend__text">
+                              <strong>Cash total</strong>
+                              <span className="wl2-cash-pie-legend__val">{fmtUsd(hostCashPie.cash)}</span>
+                            </span>
+                          </li>
+                          <li>
+                            <span className="wl2-cash-pie-dot wl2-cash-pie-dot--rest" aria-hidden />
+                            <span className="wl2-cash-pie-legend__text">
+                              <strong>Other</strong>
+                              <span className="wl2-cash-pie-legend__val">{fmtUsd(hostCashPie.nonCash)}</span>
+                            </span>
+                          </li>
+                          <li className="wl2-cash-pie-legend__net">
+                            <span className="wl2-cash-pie-legend__text">
+                              <strong>Net liq.</strong>
+                              <span className="wl2-cash-pie-legend__val">{fmtUsd(hostCashPie.net)}</span>
+                            </span>
+                          </li>
+                          <li className="wl2-cash-pie-legend__exfi">
+                            <span className="wl2-cash-pie-legend__exfi-spacer" aria-hidden />
+                            <span className="wl2-cash-pie-legend__text">
+                              <strong>Ex‑FI net liq.</strong>
+                              <span className="wl2-cash-pie-legend__val">{fmtUsd(hostCashPie.netLiqExFi)}</span>
+                            </span>
+                          </li>
+                          <li className="wl2-cash-pie-legend__exfi wl2-cash-pie-legend__exfi--tail">
+                            <span className="wl2-cash-pie-legend__exfi-spacer" aria-hidden />
+                            <span className="wl2-cash-pie-legend__text">
+                              <strong>Cash / ex‑FI</strong>
+                              <span className="wl2-cash-pie-legend__val">
+                                {hostCashPie.cashPctExFi != null ? `${hostCashPie.cashPctExFi.toFixed(1)}%` : '—'}
+                              </span>
+                            </span>
+                          </li>
+                        </ul>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="wl2-cash-pie-panel__empty">
+                      {portfolioCashRollup.hostReason === 'no_config'
+                        ? 'Set event_host or trading in Settings → IB.'
+                        : portfolioCashRollup.hostReason === 'no_account'
+                          ? `Account ${portfolioCashRollup.hostId ?? '—'} is not in this snapshot.`
+                          : '—'}
+                    </p>
+                  )}
                 </div>
-                <ul className="wl2-cash-pie-legend">
-                  <li>
-                    <span className="wl2-cash-pie-dot wl2-cash-pie-dot--cash" aria-hidden />
-                    <span className="wl2-cash-pie-legend__text">
-                      <strong>Cash total</strong>
-                      <span className="wl2-cash-pie-legend__val">{fmtUsd(portfolioCashPie.cash)}</span>
-                    </span>
-                  </li>
-                  <li>
-                    <span className="wl2-cash-pie-dot wl2-cash-pie-dot--rest" aria-hidden />
-                    <span className="wl2-cash-pie-legend__text">
-                      <strong>Other</strong> (net liq. − cash)
-                      <span className="wl2-cash-pie-legend__val">{fmtUsd(portfolioCashPie.nonCash)}</span>
-                    </span>
-                  </li>
-                  <li className="wl2-cash-pie-legend__net">
-                    <span className="wl2-cash-pie-legend__text">
-                      <strong>Net liq.</strong>
-                      <span className="wl2-cash-pie-legend__val">{fmtUsd(portfolioCashPie.net)}</span>
-                    </span>
-                  </li>
-                </ul>
+                <div className="wl2-cash-pie-panel">
+                  <h6 className="wl2-cash-pie-panel__title">Secondary</h6>
+                  {secondaryCashPie ? (
+                    <>
+                      <div className="wl2-cash-pie-layout">
+                        <div
+                          className="wl2-cash-pie"
+                          role="img"
+                          aria-label={`Secondary: cash is ${secondaryCashPie.pct.toFixed(1)} percent of net liquidation`}
+                        >
+                          <div
+                            className="wl2-cash-pie__ring"
+                            style={{
+                              background: `conic-gradient(
+                                color-mix(in srgb, var(--color-accent) 88%, #050a10) 0turn ${secondaryCashPie.ratio}turn,
+                                color-mix(in srgb, var(--color-border) 72%, var(--color-surface)) ${secondaryCashPie.ratio}turn 1turn
+                              )`,
+                            }}
+                          />
+                          <div className="wl2-cash-pie__hole">
+                            <span className="wl2-cash-pie__pct">{secondaryCashPie.pct.toFixed(1)}%</span>
+                            <span className="wl2-cash-pie__label">cash</span>
+                          </div>
+                        </div>
+                        <ul className="wl2-cash-pie-legend">
+                          <li>
+                            <span className="wl2-cash-pie-dot wl2-cash-pie-dot--cash" aria-hidden />
+                            <span className="wl2-cash-pie-legend__text">
+                              <strong>Cash total</strong>
+                              <span className="wl2-cash-pie-legend__val">{fmtUsd(secondaryCashPie.cash)}</span>
+                            </span>
+                          </li>
+                          <li>
+                            <span className="wl2-cash-pie-dot wl2-cash-pie-dot--rest" aria-hidden />
+                            <span className="wl2-cash-pie-legend__text">
+                              <strong>Other</strong>
+                              <span className="wl2-cash-pie-legend__val">{fmtUsd(secondaryCashPie.nonCash)}</span>
+                            </span>
+                          </li>
+                          <li className="wl2-cash-pie-legend__net">
+                            <span className="wl2-cash-pie-legend__text">
+                              <strong>Net liq.</strong>
+                              <span className="wl2-cash-pie-legend__val">{fmtUsd(secondaryCashPie.net)}</span>
+                            </span>
+                          </li>
+                          <li className="wl2-cash-pie-legend__exfi">
+                            <span className="wl2-cash-pie-legend__exfi-spacer" aria-hidden />
+                            <span className="wl2-cash-pie-legend__text">
+                              <strong>Ex‑FI net liq.</strong>
+                              <span className="wl2-cash-pie-legend__val">{fmtUsd(secondaryCashPie.netLiqExFi)}</span>
+                            </span>
+                          </li>
+                          <li className="wl2-cash-pie-legend__exfi wl2-cash-pie-legend__exfi--tail">
+                            <span className="wl2-cash-pie-legend__exfi-spacer" aria-hidden />
+                            <span className="wl2-cash-pie-legend__text">
+                              <strong>Cash / ex‑FI</strong>
+                              <span className="wl2-cash-pie-legend__val">
+                                {secondaryCashPie.cashPctExFi != null
+                                  ? `${secondaryCashPie.cashPctExFi.toFixed(1)}%`
+                                  : '—'}
+                              </span>
+                            </span>
+                          </li>
+                        </ul>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="wl2-cash-pie-panel__empty">
+                      {portfolioCashRollup.secondaryReason === 'no_config'
+                        ? 'event_secondary is optional; not set.'
+                        : portfolioCashRollup.secondaryReason === 'no_account'
+                          ? `Account ${portfolioCashRollup.secondaryId ?? '—'} is not in this snapshot.`
+                          : '—'}
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
 
