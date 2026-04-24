@@ -1,6 +1,17 @@
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Bar, BarStatsResponse, IbAccountSnapshot, IbPositionRow, PerformanceSummary, PositionCategory, RealtimeQuote, StatusResponse, WatchlistItem } from '../types'
+import type {
+  Bar,
+  BarStatsResponse,
+  IbAccountSnapshot,
+  IbPositionRow,
+  OpenOrder,
+  PerformanceSummary,
+  PositionCategory,
+  RealtimeQuote,
+  StatusResponse,
+  WatchlistItem,
+} from '../types'
 import {
   fetchBars,
   fetchBarStats,
@@ -15,10 +26,17 @@ import {
   deleteWatchlist,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
-import { fmtUsd, fmtUsd0 } from '../utils/format'
+import { fmtUsd } from '../utils/format'
 import { computeAtr, computeKelly, computePositionSize } from '../api/research/risk'
 import type { AtrResult, KellyMetrics, PositionSizeResult } from '../api/research/risk'
-import { getNetLiq } from './accounts/accountsUtils'
+import {
+  cashLikeStkMarketValueOnly,
+  getNetLiq,
+  ibParsedTotalCashValue,
+  positionsGrossMarketValue,
+  quoteDisplayLast,
+  totalCashIncludingCashLikePositions,
+} from './accounts/accountsUtils'
 import { BarsCandlestickChart } from './data/BarsCandlestickChart'
 import { inspectBarsLimitForPeriod } from './data/dataCoverageUtils'
 import {
@@ -102,6 +120,27 @@ function watchlistItemLabel(item: WatchlistItem): string {
     return `${item.symbol} ${exp} ${right} ${strike}`.trim() || item.contract_key
   }
   return (item.symbol || item.contract_key || '').trim() || item.contract_key
+}
+
+/** Substring (multi-token AND) or ordered subsequence over label + symbol + contract_key. */
+function fuzzyMatchWatchlistItem(item: WatchlistItem, queryRaw: string): boolean {
+  const q0 = queryRaw.trim().toLowerCase()
+  if (!q0) return true
+  const label = watchlistItemLabel(item).toLowerCase()
+  const sym = String(item.symbol || '').trim().toLowerCase()
+  const ck = String(item.contract_key || '').trim().toLowerCase()
+  const hay = `${label} ${sym} ${ck}`.trim()
+  const tokens = q0.split(/\s+/).filter(Boolean)
+  if (tokens.length > 1) return tokens.every(t => hay.includes(t))
+  const single = tokens[0]
+  if (hay.includes(single)) return true
+  let i = 0
+  for (const ch of single) {
+    const j = hay.indexOf(ch, i)
+    if (j === -1) return false
+    i = j + 1
+  }
+  return true
 }
 
 function formatExpiry(expiry: string | null | undefined): string {
@@ -195,6 +234,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
   const [positionSubTab, setPositionSubTab] = useState<'stocks' | 'options'>('stocks')
   const [promoteContractKey, setPromoteContractKey] = useState('')
   const [promotePickerOpen, setPromotePickerOpen] = useState(false)
+  const [promoteFilter, setPromoteFilter] = useState('')
   const promoteComboboxRef = useRef<HTMLDivElement>(null)
   const watchlistCategoryEnsureAttempted = useRef(false)
 
@@ -208,6 +248,8 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
   const [sizeCurrentPrice, setSizeCurrentPrice] = useState<number | null>(null)
   const [sizeAtrResult, setSizeAtrResult] = useState<AtrResult | null>(null)
   const [sizePosResult, setSizePosResult] = useState<PositionSizeResult | null>(null)
+  /** Portfolio max-drawdown % (5–50); drives table Max DD $, static risk budget, and Order sizing ladder row. */
+  const [staticMaxDdPctCap, setStaticMaxDdPctCap] = useState(20)
 
   const positions = useMemo(() => {
     return (status?.portfolio?.accounts || []).flatMap((acc: IbAccountSnapshot) => (acc.positions || []))
@@ -222,6 +264,129 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
     const accounts = status?.portfolio?.accounts ?? []
     return accounts.reduce((sum, a) => sum + getNetLiq(a), 0)
   }, [status?.portfolio?.accounts])
+
+  const portfolioCashRollup = useMemo(() => {
+    const accounts = status?.portfolio?.accounts ?? []
+    const ibAcc = status?.config?.ib_client?.account
+    const hostId =
+      (ibAcc?.event_host ?? ibAcc?.trading ?? '').toString().trim() || null
+    const secondaryId = (ibAcc?.event_secondary ?? '').toString().trim() || null
+
+    let totalCashMerged = 0
+    let totalBuyingPower = 0
+    for (const a of accounts) {
+      totalCashMerged += totalCashIncludingCashLikePositions(a)
+      const bpRaw = a.summary?.BuyingPower
+      if (bpRaw != null) {
+        const n = parseFloat(String(bpRaw))
+        if (Number.isFinite(n)) totalBuyingPower += n
+      }
+    }
+
+    const findAcc = (id: string | null) =>
+      id ? accounts.find(x => (x.account_id ?? '').toString().trim() === id) : undefined
+    const hostAcc = findAcc(hostId)
+    const secondaryAcc = findAcc(secondaryId)
+
+    return {
+      totalCashMerged,
+      totalBuyingPower,
+      hostId,
+      secondaryId,
+      hostMerged: hostId ? (hostAcc ? totalCashIncludingCashLikePositions(hostAcc) : null) : null,
+      hostReason: !hostId ? ('no_config' as const) : !hostAcc ? ('no_account' as const) : null,
+      secondaryMerged: secondaryId
+        ? secondaryAcc
+          ? totalCashIncludingCashLikePositions(secondaryAcc)
+          : null
+        : null,
+      secondaryReason: !secondaryId
+        ? ('no_config' as const)
+        : !secondaryAcc
+          ? ('no_account' as const)
+          : null,
+    }
+  }, [status?.portfolio?.accounts, status?.config?.ib_client?.account])
+
+  const portfolioAccountTable = useMemo(() => {
+    const accounts = status?.portfolio?.accounts ?? []
+    const ibAcc = status?.config?.ib_client?.account
+    const hostId = (ibAcc?.event_host ?? ibAcc?.trading ?? '').toString().trim() || null
+    const secondaryId = (ibAcc?.event_secondary ?? '').toString().trim() || null
+    const findAcc = (id: string | null) =>
+      id ? accounts.find(x => (x.account_id ?? '').toString().trim() === id) : undefined
+    const hostAcc = findAcc(hostId)
+    const secondaryAcc = findAcc(secondaryId)
+    const pct = Math.max(5, Math.min(50, staticMaxDdPctCap)) / 100
+
+    const rowFromAcc = (acc: IbAccountSnapshot | undefined) => {
+      if (!acc) return null
+      const ib = ibParsedTotalCashValue(acc)
+      const cl = cashLikeStkMarketValueOnly(acc)
+      const nl = getNetLiq(acc)
+      return {
+        ibCash: ib,
+        cashLike: cl,
+        cashTotal: ib + cl,
+        positionsMv: positionsGrossMarketValue(acc),
+        netLiq: nl,
+        maxDdUsd: nl * pct,
+      }
+    }
+
+    const sumAcc = (fn: (a: IbAccountSnapshot) => number) => accounts.reduce((s, a) => s + fn(a), 0)
+    const totalNet = accounts.reduce((s, a) => s + getNetLiq(a), 0)
+    const totalRow = {
+      ibCash: sumAcc(ibParsedTotalCashValue),
+      cashLike: sumAcc(cashLikeStkMarketValueOnly),
+      cashTotal: sumAcc(totalCashIncludingCashLikePositions),
+      positionsMv: sumAcc(positionsGrossMarketValue),
+      netLiq: totalNet,
+      maxDdUsd: totalNet * pct,
+    }
+
+    return {
+      hostId,
+      secondaryId,
+      hostAcc,
+      secondaryAcc,
+      hostRow: rowFromAcc(hostAcc),
+      secondaryRow: rowFromAcc(secondaryAcc),
+      totalRow,
+    }
+  }, [status?.portfolio?.accounts, status?.config?.ib_client?.account, staticMaxDdPctCap])
+
+  const portfolioCashPie = useMemo(() => {
+    const cash = portfolioAccountTable.totalRow.cashTotal
+    const net = portfolioAccountTable.totalRow.netLiq
+    const nonCash = Math.max(0, net - cash)
+    const denom = net > 0 ? net : Math.max(cash + nonCash, 1e-9)
+    const ratio = Math.min(1, Math.max(0, cash / denom))
+    const pct = ratio * 100
+    return { cash, nonCash, net, pct, ratio }
+  }, [portfolioAccountTable])
+
+  const portfolioDdFromHistory = useMemo(() => {
+    const md = perfSummary?.max_drawdown
+    if (md == null || !Number.isFinite(md)) return { usd: null as number | null, pctOfNav: null as number | null }
+    const usd = Math.abs(md)
+    const pctOfNav = capital > 0 ? (usd / capital) * 100 : null
+    return { usd, pctOfNav }
+  }, [perfSummary?.max_drawdown, capital])
+
+  const staticRiskBudgetUsd = useMemo(() => {
+    if (capital <= 0 || !Number.isFinite(staticMaxDdPctCap)) return 0
+    const pct = Math.max(5, Math.min(50, staticMaxDdPctCap))
+    return (capital * pct) / 100
+  }, [capital, staticMaxDdPctCap])
+
+  const stockOpenOrders = useMemo(() => {
+    const raw = status?.portfolio?.open_orders ?? []
+    return raw.filter(o => {
+      const st = (o.sec_type ?? 'STK').toUpperCase()
+      return st === 'STK' && Boolean((o.symbol ?? '').trim())
+    })
+  }, [status?.portfolio?.open_orders])
 
   const kellyMetrics = useMemo<KellyMetrics>(() => {
     if (!perfSummary) return { kelly_pct: 0, effective_kelly: 0, is_valid: false }
@@ -347,6 +512,14 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
     return m
   }, [realtimeQuotes])
 
+  const quoteBySymbolUpper = useMemo(() => {
+    const m: Record<string, RealtimeQuote> = {}
+    for (const [k, v] of Object.entries(quoteBySymbol)) {
+      m[k.trim().toUpperCase()] = v
+    }
+    return m
+  }, [quoteBySymbol])
+
   const quoteByContractKey = useMemo(
     () => Object.fromEntries(
       realtimeQuotes
@@ -355,6 +528,125 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
     ),
     [realtimeQuotes],
   )
+
+  const sizingOrderAnalytics = useMemo(() => {
+    const atr14 = sizeAtrResult?.atr14 ?? 0
+    const stopD =
+      sizePosResult != null && sizePosResult.stop_distance > 0
+        ? sizePosResult.stop_distance
+        : atr14 > 0
+          ? sizeAtrMultiplier * atr14
+          : 0
+    const price = sizeCurrentPrice
+    const verify =
+      price != null && price > 0 && atr14 > 0 && stopD > 0
+        ? {
+            distance: stopD,
+            atr: atr14,
+            atrRiskUsd: sizePosResult?.dollar_risk ?? null,
+            atrPctOfPrice: (atr14 / price) * 100,
+            riskPerShare: stopD,
+            positionalDrawdownPct:
+              capital > 0 && sizePosResult?.is_valid ? (sizePosResult.dollar_risk / capital) * 100 : null,
+          }
+        : null
+
+    const shares = sizePosResult?.is_valid ? sizePosResult.shares : 0
+    const notional = price != null && price > 0 && shares > 0 ? shares * price : null
+    const investmentWeightPct = notional != null && capital > 0 ? (notional / capital) * 100 : null
+    const intendedRiskPct = sizePosResult?.is_valid ? sizePosResult.risk_pct : null
+    const cashLeftAfter = notional != null ? portfolioCashRollup.totalCashMerged - notional : null
+
+    const maxSharesFromRisk = (usd: number | null | undefined) => {
+      if (usd == null || !Number.isFinite(usd) || usd <= 0 || stopD <= 0) return null
+      return Math.floor(usd / stopD)
+    }
+
+    const pctCap = Math.max(5, Math.min(50, staticMaxDdPctCap))
+    const portfolioScenarioRiskUsd = capital > 0 && Number.isFinite(staticMaxDdPctCap) ? (capital * pctCap) / 100 : null
+    const histMaxLossUsd =
+      perfSummary?.max_loss != null && Number.isFinite(perfSummary.max_loss) ? Math.abs(perfSummary.max_loss) : null
+    const histAvgLossUsd =
+      perfSummary?.avg_loss != null && Number.isFinite(perfSummary.avg_loss) ? Math.abs(perfSummary.avg_loss) : null
+
+    const kellyShares = sizePosResult?.is_valid ? sizePosResult.shares : null
+    const kellyRiskUsd = sizePosResult?.is_valid ? sizePosResult.dollar_risk : null
+    const capRows = [
+      {
+        key: 'kelly',
+        label: 'Order sizing (Kelly)',
+        maxRiskUsd: kellyRiskUsd,
+        maxShares: kellyShares,
+      },
+      {
+        key: 'portfolioDd',
+        label: `Portfolio max DD budget (${pctCap}% NAV, linked)`,
+        maxRiskUsd: portfolioScenarioRiskUsd,
+        maxShares: maxSharesFromRisk(portfolioScenarioRiskUsd),
+      },
+      {
+        key: 'histMax',
+        label: 'History max loss (abs)',
+        maxRiskUsd: histMaxLossUsd,
+        maxShares: maxSharesFromRisk(histMaxLossUsd),
+      },
+      {
+        key: 'histAvg',
+        label: 'History avg loss (abs)',
+        maxRiskUsd: histAvgLossUsd,
+        maxShares: maxSharesFromRisk(histAvgLossUsd),
+      },
+    ] as const
+
+    const cashCapShares =
+      price != null && price > 0 && portfolioCashRollup.totalCashMerged > 0
+        ? Math.floor(portfolioCashRollup.totalCashMerged / price)
+        : null
+
+    const shareCandidates = [
+      ...capRows.map(r => r.maxShares).filter((x): x is number => x != null && Number.isFinite(x) && x >= 0),
+      cashCapShares,
+    ].filter((x): x is number => x != null && Number.isFinite(x))
+
+    const availableMinShares = shareCandidates.length > 0 ? Math.min(...shareCandidates) : null
+
+    return {
+      stopD,
+      verify,
+      intendedShares: shares,
+      intendedRiskPct,
+      investmentUsd: notional,
+      investmentWeightPct,
+      cashLeftAfter,
+      capRows,
+      cashCapShares,
+      availableMinShares,
+    }
+  }, [
+    sizeAtrResult,
+    sizePosResult,
+    sizeAtrMultiplier,
+    sizeCurrentPrice,
+    capital,
+    portfolioCashRollup,
+    staticMaxDdPctCap,
+    perfSummary?.max_loss,
+    perfSummary?.avg_loss,
+  ])
+
+  function openOrderTypeLabel(o: OpenOrder): string {
+    const lp = o.limit_price
+    if (lp != null && Number.isFinite(Number(lp))) return 'LMT'
+    return 'MKT'
+  }
+
+  function openOrderSharesDisplay(o: OpenOrder): string {
+    const r = o.remaining
+    const t = o.total_quantity
+    if (r != null && Number.isFinite(r)) return String(r)
+    if (t != null && Number.isFinite(t)) return String(t)
+    return '—'
+  }
 
   const handleAddWatchlist = useCallback(
     async (
@@ -519,11 +811,21 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
     })
   }, [watchlistOptions, matchesSizing, matchesWatching])
 
-  /** STK rows in Watching — eligible to move to Sizing (includes symbols you already hold). */
-  const watchingOnlyForPromote = useMemo(
-    () => allStocks.filter(s => matchesWatching(s)),
-    [allStocks, matchesWatching],
+  /** All STK rows on the watchlist (any category) — any can be moved to Sizing. */
+  const stocksForPromoteToSizing = useMemo(
+    () => [...allStocks].sort((a, b) => watchlistItemLabel(a).localeCompare(watchlistItemLabel(b))),
+    [allStocks],
   )
+
+  const stocksForPromoteMenu = useMemo(
+    () => stocksForPromoteToSizing.filter(item => fuzzyMatchWatchlistItem(item, promoteFilter)),
+    [stocksForPromoteToSizing, promoteFilter],
+  )
+
+  const closePromotePicker = useCallback(() => {
+    setPromotePickerOpen(false)
+    setPromoteFilter('')
+  }, [])
 
   const watchingTabCount = watchingStockRows.length + watchingOptionRows.length
   const sizingTabCount = sizingStockRows.length
@@ -532,31 +834,31 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
   const handlePromoteToSizing = useCallback(async () => {
     const ck = promoteContractKey.trim()
     if (!ck || sizingCategoryId == null) return
-    const item = watchingOnlyForPromote.find(i => i.contract_key.trim() === ck)
+    const item = stocksForPromoteToSizing.find(i => i.contract_key.trim() === ck)
     if (!item) return
     await handleWatchlistCategoryChange(item, sizingCategoryId)
     setPromoteContractKey('')
-    setPromotePickerOpen(false)
-  }, [promoteContractKey, sizingCategoryId, watchingOnlyForPromote, handleWatchlistCategoryChange])
+    closePromotePicker()
+  }, [promoteContractKey, sizingCategoryId, stocksForPromoteToSizing, handleWatchlistCategoryChange, closePromotePicker])
 
   const promoteSelectedItem = useMemo(
-    () => watchingOnlyForPromote.find(i => i.contract_key.trim() === promoteContractKey.trim()),
-    [watchingOnlyForPromote, promoteContractKey],
+    () => stocksForPromoteToSizing.find(i => i.contract_key.trim() === promoteContractKey.trim()),
+    [stocksForPromoteToSizing, promoteContractKey],
   )
 
   useEffect(() => {
     if (!promotePickerOpen) return
     function onPointerDown(ev: PointerEvent) {
       const root = promoteComboboxRef.current
-      if (root && !root.contains(ev.target as Node)) setPromotePickerOpen(false)
+      if (root && !root.contains(ev.target as Node)) closePromotePicker()
     }
     document.addEventListener('pointerdown', onPointerDown)
     return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [promotePickerOpen])
+  }, [promotePickerOpen, closePromotePicker])
 
   useEffect(() => {
-    setPromotePickerOpen(false)
-  }, [primaryTab])
+    closePromotePicker()
+  }, [primaryTab, closePromotePicker])
 
   function symbolFromItem(item: WatchlistItem): string {
     if (item.symbol && String(item.symbol).trim()) return String(item.symbol).trim()
@@ -1133,23 +1435,307 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
       ) : primaryTab === 'sizing' ? (
         <>
           <p className="wl2-tier-hint">
-            <strong>Step 2.</strong> The table lists stocks tagged <strong>Sizing</strong>. Promote only from Watching: pick a symbol, then <strong>Move to Sizing</strong>.
+            <strong>Step 2.</strong> The table lists stocks tagged <strong>Sizing</strong>. Pick any stock symbol from your watchlist below, then <strong>Move to Sizing</strong>.
           </p>
+
+          <section className="wl2-sizing-dash" aria-labelledby="wl2-sizing-dash-portfolio-head">
+            <h4 id="wl2-sizing-dash-portfolio-head" className="wl2-sizing-dash__title">
+              Portfolio situation
+            </h4>
+            <p className="wl2-sizing-dash__hint">
+              Per-account columns use the IB snapshot on this page. <strong>Cash (IB)</strong> is <code className="wl2-code">TotalCashValue</code>;{' '}
+              <strong>Cash-like</strong> is STK lines tagged cash-like (money market, etc.); <strong>Cash total</strong> is their sum.{' '}
+              <strong>Positions MV</strong> is Σ|qty|×mark across all legs. Host / Secondary rows follow Settings → IB{' '}
+              <code className="wl2-code">event_host</code> / <code className="wl2-code">trading</code> and{' '}
+              <code className="wl2-code">event_secondary</code>. <strong>Total</strong> sums every account in the snapshot.
+            </p>
+
+            <div className="wl2-range-field wl2-range-field--portfolio">
+              <div className="wl2-range-field__head">
+                <label className="wl2-range-field__label" htmlFor="wl-portfolio-max-dd-pct">
+                  Max drawdown % (scenario)
+                </label>
+                <span className="wl2-range-field__readout" aria-live="polite">
+                  {staticMaxDdPctCap}
+                  <span className="wl2-range-field__readout-unit">%</span>
+                </span>
+              </div>
+              <input
+                id="wl-portfolio-max-dd-pct"
+                type="range"
+                className="wl2-range-elegant"
+                min={5}
+                max={50}
+                step={1}
+                value={staticMaxDdPctCap}
+                onChange={e =>
+                  setStaticMaxDdPctCap(Math.max(5, Math.min(50, Number.parseInt(e.target.value, 10) || 20)))
+                }
+                aria-valuemin={5}
+                aria-valuemax={50}
+                aria-valuenow={staticMaxDdPctCap}
+                aria-label="Scenario max drawdown percent of net liquidation per account"
+                style={{
+                  ['--wl-range-pct' as string]: `${((staticMaxDdPctCap - 5) / (50 - 5)) * 100}%`,
+                }}
+              />
+              <div className="wl2-range-field__scale" aria-hidden>
+                <span>5%</span>
+                <span>50%</span>
+              </div>
+              <p className="wl2-range-field__caption">
+                Max drawdown $ = <strong>Net liq.</strong> × this % for Host / Secondary; Total row uses aggregate net liq.{' '}
+                <strong>Static risk budget</strong> (below) uses the same % × aggregate net liq.
+              </p>
+            </div>
+
+            <div className="wl2-table-wrap wl2-sizing-dash__table-wrap">
+              <table className="wl2-table wl2-table--dense wl2-portfolio-metric-table">
+                <thead>
+                  <tr>
+                    <th>Account</th>
+                    <th className="wl2-td-num wl2-portfolio-col--emph">Cash (IB)</th>
+                    <th className="wl2-td-num wl2-portfolio-col--emph">Cash-like</th>
+                    <th className="wl2-td-num">Cash total</th>
+                    <th className="wl2-td-num">Positions MV</th>
+                    <th className="wl2-td-num">Net liq.</th>
+                    <th className="wl2-td-num wl2-portfolio-col--emph">Max DD @ {staticMaxDdPctCap}%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <strong>Host</strong>
+                      {portfolioAccountTable.hostId ? (
+                        <div className="wl2-portfolio-metric-table__sub">
+                          <code className="wl2-code">{portfolioAccountTable.hostId}</code>
+                        </div>
+                      ) : (
+                        <div className="wl2-portfolio-metric-table__sub">event_host / trading not set</div>
+                      )}
+                    </td>
+                    {portfolioAccountTable.hostRow ? (
+                      <>
+                        <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.hostRow.ibCash)}</td>
+                        <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.hostRow.cashLike)}</td>
+                        <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.hostRow.cashTotal)}</td>
+                        <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.hostRow.positionsMv)}</td>
+                        <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.hostRow.netLiq)}</td>
+                        <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.hostRow.maxDdUsd)}</td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="wl2-td-num wl2-portfolio-col--emph">—</td>
+                        <td className="wl2-td-num wl2-portfolio-col--emph">—</td>
+                        <td className="wl2-td-num">—</td>
+                        <td className="wl2-td-num">—</td>
+                        <td className="wl2-td-num">—</td>
+                        <td className="wl2-td-num wl2-portfolio-col--emph">—</td>
+                      </>
+                    )}
+                  </tr>
+                  <tr>
+                    <td>
+                      <strong>Secondary</strong>
+                      {portfolioAccountTable.secondaryId ? (
+                        <div className="wl2-portfolio-metric-table__sub">
+                          <code className="wl2-code">{portfolioAccountTable.secondaryId}</code>
+                        </div>
+                      ) : (
+                        <div className="wl2-portfolio-metric-table__sub">event_secondary not set (optional)</div>
+                      )}
+                    </td>
+                    {portfolioAccountTable.secondaryRow ? (
+                      <>
+                        <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.secondaryRow.ibCash)}</td>
+                        <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.secondaryRow.cashLike)}</td>
+                        <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.secondaryRow.cashTotal)}</td>
+                        <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.secondaryRow.positionsMv)}</td>
+                        <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.secondaryRow.netLiq)}</td>
+                        <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.secondaryRow.maxDdUsd)}</td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="wl2-td-num wl2-portfolio-col--emph">—</td>
+                        <td className="wl2-td-num wl2-portfolio-col--emph">—</td>
+                        <td className="wl2-td-num">—</td>
+                        <td className="wl2-td-num">—</td>
+                        <td className="wl2-td-num">—</td>
+                        <td className="wl2-td-num wl2-portfolio-col--emph">—</td>
+                      </>
+                    )}
+                  </tr>
+                  <tr className="wl2-portfolio-metric-table__total">
+                    <td>
+                      <strong>Total</strong>
+                      <div className="wl2-portfolio-metric-table__sub">All accounts in snapshot</div>
+                    </td>
+                    <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.totalRow.ibCash)}</td>
+                    <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.totalRow.cashLike)}</td>
+                    <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.totalRow.cashTotal)}</td>
+                    <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.totalRow.positionsMv)}</td>
+                    <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.totalRow.netLiq)}</td>
+                    <td className="wl2-td-num wl2-portfolio-col--emph">{fmtUsd(portfolioAccountTable.totalRow.maxDdUsd)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div className="wl2-cash-pie-wrap">
+              <h5 className="wl2-sizing-dash__subtitle wl2-sizing-dash__subtitle--sm">Cash share of net liquidation (Total)</h5>
+              <p className="wl2-cash-pie-wrap__hint">
+                <strong>Cash total</strong> (IB + cash-like) vs. the rest of net liq. (≈ invested / other components). Same Total row as the sheet above.
+              </p>
+              <div className="wl2-cash-pie-layout">
+                <div
+                  className="wl2-cash-pie"
+                  role="img"
+                  aria-label={`Cash is ${portfolioCashPie.pct.toFixed(1)} percent of net liquidation`}
+                >
+                  <div
+                    className="wl2-cash-pie__ring"
+                    style={{
+                      background: `conic-gradient(
+                        color-mix(in srgb, var(--color-accent) 88%, #050a10) 0turn ${portfolioCashPie.ratio}turn,
+                        color-mix(in srgb, var(--color-border) 72%, var(--color-surface)) ${portfolioCashPie.ratio}turn 1turn
+                      )`,
+                    }}
+                  />
+                  <div className="wl2-cash-pie__hole">
+                    <span className="wl2-cash-pie__pct">{portfolioCashPie.pct.toFixed(1)}%</span>
+                    <span className="wl2-cash-pie__label">cash</span>
+                  </div>
+                </div>
+                <ul className="wl2-cash-pie-legend">
+                  <li>
+                    <span className="wl2-cash-pie-dot wl2-cash-pie-dot--cash" aria-hidden />
+                    <span className="wl2-cash-pie-legend__text">
+                      <strong>Cash total</strong>
+                      <span className="wl2-cash-pie-legend__val">{fmtUsd(portfolioCashPie.cash)}</span>
+                    </span>
+                  </li>
+                  <li>
+                    <span className="wl2-cash-pie-dot wl2-cash-pie-dot--rest" aria-hidden />
+                    <span className="wl2-cash-pie-legend__text">
+                      <strong>Other</strong> (net liq. − cash)
+                      <span className="wl2-cash-pie-legend__val">{fmtUsd(portfolioCashPie.nonCash)}</span>
+                    </span>
+                  </li>
+                  <li className="wl2-cash-pie-legend__net">
+                    <span className="wl2-cash-pie-legend__text">
+                      <strong>Net liq.</strong>
+                      <span className="wl2-cash-pie-legend__val">{fmtUsd(portfolioCashPie.net)}</span>
+                    </span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="wl2-sizing-dash__cards wl2-sizing-dash__cards--after-table">
+              <div className="wl2-sizing-dash__card">
+                <span className="wl2-sizing-dash__label">Static risk budget</span>
+                <span className="wl2-sizing-dash__value" title={`Linked: ${staticMaxDdPctCap}% × aggregate net liq. (= Total row Max DD $)`}>
+                  {capital > 0 ? fmtUsd(staticRiskBudgetUsd) : '—'}
+                </span>
+                <span className="wl2-sizing-dash__sub">{staticMaxDdPctCap}% of NAV · same as table Total Max DD</span>
+              </div>
+              <div className="wl2-sizing-dash__card">
+                <span className="wl2-sizing-dash__label">Max drawdown (history)</span>
+                <span className="wl2-sizing-dash__value">
+                  {portfolioDdFromHistory.usd != null ? fmtUsd(portfolioDdFromHistory.usd) : '—'}
+                  {portfolioDdFromHistory.pctOfNav != null ? (
+                    <span className="wl2-sizing-dash__sub">{portfolioDdFromHistory.pctOfNav.toFixed(2)}% of NAV</span>
+                  ) : null}
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <section className="wl2-sizing-dash" aria-labelledby="wl2-sizing-dash-orders-head">
+            <h4 id="wl2-sizing-dash-orders-head" className="wl2-sizing-dash__title">
+              Open orders (stocks)
+            </h4>
+            <p className="wl2-sizing-dash__hint">
+              From <code className="wl2-code">GET /status</code> open orders. Exit price uses sizing stop when the row matches the symbol selected for sizing below.
+            </p>
+            {stockOpenOrders.length === 0 ? (
+              <p className="wl2-sizing-dash__empty">No open stock orders.</p>
+            ) : (
+              <div className="wl2-table-wrap wl2-sizing-dash__table-wrap">
+                <table className="wl2-table wl2-table--dense">
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th>Order type</th>
+                      <th>Current bid</th>
+                      <th>Entry price</th>
+                      <th>Exit (sizing stop)</th>
+                      <th>Shares</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockOpenOrders.map((o, idx) => {
+                      const sym = (o.symbol ?? '').trim().toUpperCase()
+                      const q = quoteBySymbolUpper[sym]
+                      const bid = q?.bid != null && Number.isFinite(Number(q.bid)) && Number(q.bid) > 0 ? Number(q.bid) : null
+                      const bidDisp = bid != null ? fmtUsd(bid) : quoteDisplayLast(q) != null ? fmtUsd(quoteDisplayLast(q)!) : '—'
+                      const entry =
+                        o.limit_price != null && Number.isFinite(Number(o.limit_price)) ? fmtUsd(Number(o.limit_price)) : '—'
+                      const matchSizing =
+                        Boolean(selectedSizingSymbol && sym === selectedSizingSymbol.trim().toUpperCase())
+                      const act = (o.action ?? '').toUpperCase()
+                      const exitPx =
+                        matchSizing && sizePosResult?.is_valid
+                          ? act === 'SELL' || act === 'SLD'
+                            ? sizePosResult.stop_loss_short
+                            : sizePosResult.stop_loss_long
+                          : null
+                      return (
+                        <tr
+                          key={`${o.order_id ?? o.perm_id ?? sym}-${idx}`}
+                          className={matchSizing ? 'wl2-dash-row--focus' : undefined}
+                        >
+                          <td>{sym}</td>
+                          <td>
+                            {openOrderTypeLabel(o)}
+                            {o.action ? (
+                              <span className="wl2-sizing-dash__mono">{` · ${o.action}`}</span>
+                            ) : null}
+                          </td>
+                          <td>{bidDisp}</td>
+                          <td>{entry}</td>
+                          <td>{exitPx != null && Number.isFinite(exitPx) ? fmtUsd(exitPx) : '—'}</td>
+                          <td>{openOrderSharesDisplay(o)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
           <div className="wl2-sizing-promote">
             <div className="wl2-promote-combobox" ref={promoteComboboxRef}>
               <button
                 type="button"
                 className="wl2-promote-combobox__trigger"
                 id="wl2-promote-combobox-trigger"
-                aria-label="Pick a Watching symbol to move to Sizing"
+                aria-label="Pick a watchlist symbol to move to Sizing"
                 aria-expanded={promotePickerOpen}
                 aria-controls="wl2-promote-listbox"
                 aria-haspopup="listbox"
-                onClick={() => setPromotePickerOpen(o => !o)}
+                onClick={() => {
+                  setPromotePickerOpen(o => {
+                    const next = !o
+                    if (!next) setPromoteFilter('')
+                    return next
+                  })
+                }}
                 onKeyDown={e => {
                   if (e.key === 'Escape' && promotePickerOpen) {
                     e.preventDefault()
-                    setPromotePickerOpen(false)
+                    closePromotePicker()
                   }
                 }}
               >
@@ -1158,12 +1744,12 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                   title={
                     promoteSelectedItem
                       ? watchlistItemLabel(promoteSelectedItem)
-                      : 'Choose a Watching symbol…'
+                      : 'Choose a watchlist symbol…'
                   }
                 >
                   {promoteSelectedItem
                     ? watchlistItemLabel(promoteSelectedItem)
-                    : 'Choose a Watching symbol…'}
+                    : 'Choose a watchlist symbol…'}
                 </span>
                 <span className="wl2-promote-combobox__chev" aria-hidden>
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1173,37 +1759,65 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               </button>
               {promotePickerOpen && (
                 <ul id="wl2-promote-listbox" role="listbox" className="wl2-promote-combobox__menu" aria-labelledby="wl2-promote-combobox-trigger">
-                  <li
-                    role="option"
-                    aria-selected={promoteContractKey.trim() === ''}
-                    className={`wl2-promote-combobox__opt wl2-promote-combobox__opt--placeholder${promoteContractKey.trim() === '' ? ' wl2-promote-combobox__opt--active' : ''}`}
-                    onPointerDown={e => e.preventDefault()}
-                    onClick={() => {
-                      setPromoteContractKey('')
-                      setPromotePickerOpen(false)
-                    }}
-                  >
-                    Choose a Watching symbol…
+                  <li className="wl2-promote-combobox__filter-li" role="presentation" onPointerDown={e => e.preventDefault()}>
+                    <input
+                      type="search"
+                      className="wl2-promote-combobox__filter"
+                      value={promoteFilter}
+                      onChange={e => setPromoteFilter(e.target.value)}
+                      placeholder="Filter symbols…"
+                      autoComplete="off"
+                      spellCheck={false}
+                      aria-label="Filter watchlist symbols"
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Escape') {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          closePromotePicker()
+                        }
+                      }}
+                    />
                   </li>
-                  {watchingOnlyForPromote.map(item => {
-                    const key = item.contract_key.trim()
-                    const sel = promoteContractKey.trim() === key
-                    return (
-                      <li
-                        key={key}
-                        role="option"
-                        aria-selected={sel}
-                        className={`wl2-promote-combobox__opt${sel ? ' wl2-promote-combobox__opt--active' : ''}`}
-                        onPointerDown={e => e.preventDefault()}
-                        onClick={() => {
-                          setPromoteContractKey(key)
-                          setPromotePickerOpen(false)
-                        }}
-                      >
-                        {watchlistItemLabel(item)}
-                      </li>
-                    )
-                  })}
+                  {promoteFilter.trim() === '' && stocksForPromoteToSizing.length > 0 && (
+                    <li
+                      role="option"
+                      aria-selected={promoteContractKey.trim() === ''}
+                      className={`wl2-promote-combobox__opt wl2-promote-combobox__opt--placeholder${promoteContractKey.trim() === '' ? ' wl2-promote-combobox__opt--active' : ''}`}
+                      onPointerDown={e => e.preventDefault()}
+                      onClick={() => {
+                        setPromoteContractKey('')
+                        closePromotePicker()
+                      }}
+                    >
+                      Choose a watchlist symbol…
+                    </li>
+                  )}
+                  {stocksForPromoteMenu.length === 0 ? (
+                    <li className="wl2-promote-combobox__opt wl2-promote-combobox__opt--nomatch" role="presentation">
+                      {promoteFilter.trim() ? 'No matches' : 'No symbols in your watchlist'}
+                    </li>
+                  ) : (
+                    stocksForPromoteMenu.map(item => {
+                      const key = item.contract_key.trim()
+                      const sel = promoteContractKey.trim() === key
+                      return (
+                        <li
+                          key={key}
+                          role="option"
+                          aria-selected={sel}
+                          className={`wl2-promote-combobox__opt${sel ? ' wl2-promote-combobox__opt--active' : ''}`}
+                          onPointerDown={e => e.preventDefault()}
+                          onClick={() => {
+                            setPromoteContractKey(key)
+                            closePromotePicker()
+                          }}
+                        >
+                          {watchlistItemLabel(item)}
+                        </li>
+                      )
+                    })
+                  )}
                 </ul>
               )}
             </div>
@@ -1240,9 +1854,9 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
 
           {/* ── Position Sizing Analysis Panel ── */}
           {selectedSizingSymbol && (
-            <div style={{ marginTop: 'var(--space-4)', padding: 'var(--space-3)', border: '1px solid var(--color-border)', borderRadius: '6px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', marginBottom: 'var(--space-3)', flexWrap: 'wrap' }}>
-                <h4 style={{ margin: 0 }}>Position Sizing — {selectedSizingSymbol}</h4>
+            <div className="wl2-sizing-panel">
+              <div className="wl2-sizing-panel__head">
+                <h4 className="wl2-sizing-panel__title">Position sizing — {selectedSizingSymbol}</h4>
                 <button
                   type="button"
                   className="wl2-act-icon wl2-act-icon--rm"
@@ -1260,9 +1874,8 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                 </button>
               </div>
 
-              {/* Controls */}
-              <div style={{ display: 'flex', gap: 'var(--space-4)', alignItems: 'center', flexWrap: 'wrap', marginBottom: 'var(--space-3)' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <div className="wl2-sizing-panel__controls">
+                <span className="wl2-sizing-panel__control">
                   <label htmlFor="wl-kelly-fraction" style={{ whiteSpace: 'nowrap' }}>
                     Kelly fraction: <strong>{kellyFraction.toFixed(2)}</strong>
                   </label>
@@ -1287,7 +1900,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                     aria-label="Kelly fraction"
                   />
                 </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span className="wl2-sizing-panel__control">
                   <label htmlFor="wl-atr-mult" style={{ whiteSpace: 'nowrap' }}>ATR multiplier</label>
                   <input
                     id="wl-atr-mult"
@@ -1311,73 +1924,250 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               </div>
 
               {sizeComputeError && (
-                <p className="msg-error" role="alert" style={{ marginBottom: 'var(--space-2)' }}>
+                <p className="msg-error wl2-sizing-panel__alert" role="alert">
                   {sizeComputeError}
                 </p>
               )}
               {sizeComputeLoading && <p className="section-hint">Fetching bars and quote…</p>}
 
               {!sizeComputeLoading && sizeAtrResult && (
-                <div className="risk-summary-cards">
-                  <div className="risk-card">
-                    <span className="risk-card-label">ATR(14)</span>
-                    <span className="risk-card-value">{fmtUsd(sizeAtrResult.atr14)}</span>
+                <>
+                  <section className="wl2-sizing-dash wl2-sizing-dash--nested" aria-labelledby="wl2-planned-order-head">
+                    <h5 id="wl2-planned-order-head" className="wl2-sizing-dash__subtitle">
+                      Planned order (Kelly preview)
+                    </h5>
+                    <p className="wl2-sizing-dash__hint">
+                      Hypothetical long at the live quote / last used for sizing. Open IB orders are listed in <strong>Open orders (stocks)</strong> above.
+                    </p>
+                    <div className="wl2-table-wrap wl2-sizing-dash__table-wrap">
+                      <table className="wl2-table wl2-table--dense">
+                        <thead>
+                          <tr>
+                            <th>Symbol</th>
+                            <th>Order type</th>
+                            <th>Current bid</th>
+                            <th>Entry price</th>
+                            <th>Exit price</th>
+                            <th>Shares</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td>{selectedSizingSymbol}</td>
+                            <td>Plan · MKT (long)</td>
+                            <td>
+                              {(() => {
+                                const q = quoteBySymbolUpper[selectedSizingSymbol.trim().toUpperCase()]
+                                const bid = q?.bid != null && Number.isFinite(Number(q.bid)) && Number(q.bid) > 0 ? Number(q.bid) : null
+                                if (bid != null) return fmtUsd(bid)
+                                const last = quoteDisplayLast(q ?? null)
+                                return last != null ? fmtUsd(last) : '—'
+                              })()}
+                            </td>
+                            <td>{sizeCurrentPrice != null ? fmtUsd(sizeCurrentPrice) : '—'}</td>
+                            <td>{sizePosResult?.is_valid ? fmtUsd(sizePosResult.stop_loss_long) : '—'}</td>
+                            <td>{sizePosResult?.is_valid ? sizePosResult.shares.toLocaleString() : '—'}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+
+                  {sizingOrderAnalytics.verify ? (
+                    <section className="wl2-sizing-dash wl2-sizing-dash--nested" aria-labelledby="wl2-risk-verify-head">
+                      <h5 id="wl2-risk-verify-head" className="wl2-sizing-dash__subtitle">
+                        Order risk verify
+                      </h5>
+                      <p className="wl2-sizing-dash__hint">
+                        Stop distance = ATR multiplier × ATR(14). ATR risk = intended shares × stop distance (Kelly row).
+                      </p>
+                      <div className="wl2-sizing-dash__cards wl2-sizing-dash__cards--tight">
+                        <div className="wl2-sizing-dash__card">
+                          <span className="wl2-sizing-dash__label">Distance ({sizeAtrMultiplier}× ATR)</span>
+                          <span className="wl2-sizing-dash__value">{fmtUsd(sizingOrderAnalytics.verify.distance)}</span>
+                        </div>
+                        <div className="wl2-sizing-dash__card">
+                          <span className="wl2-sizing-dash__label">ATR(14)</span>
+                          <span className="wl2-sizing-dash__value">{fmtUsd(sizingOrderAnalytics.verify.atr)}</span>
+                        </div>
+                        <div className="wl2-sizing-dash__card">
+                          <span className="wl2-sizing-dash__label">ATR risk ($)</span>
+                          <span className="wl2-sizing-dash__value">
+                            {sizingOrderAnalytics.verify.atrRiskUsd != null ? fmtUsd(sizingOrderAnalytics.verify.atrRiskUsd) : '—'}
+                          </span>
+                        </div>
+                        <div className="wl2-sizing-dash__card">
+                          <span className="wl2-sizing-dash__label">ATR % of price</span>
+                          <span className="wl2-sizing-dash__value">
+                            {`${sizingOrderAnalytics.verify.atrPctOfPrice.toFixed(2)}%`}
+                          </span>
+                        </div>
+                        <div className="wl2-sizing-dash__card">
+                          <span className="wl2-sizing-dash__label">Risk per share</span>
+                          <span className="wl2-sizing-dash__value">{fmtUsd(sizingOrderAnalytics.verify.riskPerShare)}</span>
+                        </div>
+                        <div className="wl2-sizing-dash__card">
+                          <span className="wl2-sizing-dash__label">Positional drawdown</span>
+                          <span className="wl2-sizing-dash__value">
+                            {sizingOrderAnalytics.verify.positionalDrawdownPct != null
+                              ? `${sizingOrderAnalytics.verify.positionalDrawdownPct.toFixed(2)}% of NAV`
+                              : '—'}
+                          </span>
+                        </div>
+                      </div>
+                    </section>
+                  ) : null}
+
+                  <section className="wl2-sizing-dash wl2-sizing-dash--nested" aria-labelledby="wl2-order-sizing-head">
+                    <h5 id="wl2-order-sizing-head" className="wl2-sizing-dash__subtitle">
+                      Order sizing
+                    </h5>
+                    <p className="wl2-sizing-dash__hint" style={{ marginTop: 0 }}>
+                      Portfolio <strong>Max drawdown %</strong> and <strong>static risk budget</strong> are set in <strong>Portfolio situation</strong> above; the ladder row <em>Portfolio max DD budget</em> uses the same percentage.
+                    </p>
+                    <div className="wl2-sizing-dash__cards wl2-sizing-dash__cards--tight">
+                      <div className="wl2-sizing-dash__card">
+                        <span className="wl2-sizing-dash__label">Intended shares</span>
+                        <span className="wl2-sizing-dash__value">
+                          {sizingOrderAnalytics.intendedShares > 0 ? sizingOrderAnalytics.intendedShares.toLocaleString() : '—'}
+                        </span>
+                      </div>
+                      <div className="wl2-sizing-dash__card">
+                        <span className="wl2-sizing-dash__label">Intended risk %</span>
+                        <span className="wl2-sizing-dash__value">
+                          {sizingOrderAnalytics.intendedRiskPct != null ? `${sizingOrderAnalytics.intendedRiskPct.toFixed(2)}%` : '—'}
+                        </span>
+                      </div>
+                      <div className="wl2-sizing-dash__card">
+                        <span className="wl2-sizing-dash__label">Investment</span>
+                        <span className="wl2-sizing-dash__value">
+                          {sizingOrderAnalytics.investmentUsd != null ? fmtUsd(sizingOrderAnalytics.investmentUsd) : '—'}
+                        </span>
+                      </div>
+                      <div className="wl2-sizing-dash__card">
+                        <span className="wl2-sizing-dash__label">Investment weight</span>
+                        <span className="wl2-sizing-dash__value">
+                          {sizingOrderAnalytics.investmentWeightPct != null
+                            ? `${sizingOrderAnalytics.investmentWeightPct.toFixed(2)}% of NAV`
+                            : '—'}
+                        </span>
+                      </div>
+                      <div className="wl2-sizing-dash__card">
+                        <span className="wl2-sizing-dash__label">Cash left (after notional)</span>
+                        <span
+                          className={`wl2-sizing-dash__value${
+                            sizingOrderAnalytics.cashLeftAfter != null && sizingOrderAnalytics.cashLeftAfter < 0
+                              ? ' wl2-sizing-dash__value--warn'
+                              : ''
+                          }`}
+                        >
+                          {sizingOrderAnalytics.cashLeftAfter != null ? fmtUsd(sizingOrderAnalytics.cashLeftAfter) : '—'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <h6 className="wl2-sizing-dash__subtitle wl2-sizing-dash__subtitle--sm">Constraint ladder (max shares @ stop)</h6>
+                    <div className="wl2-table-wrap wl2-sizing-dash__table-wrap">
+                      <table className="wl2-table wl2-table--dense">
+                        <thead>
+                          <tr>
+                            <th>Source</th>
+                            <th>Max $ at risk</th>
+                            <th>Max shares</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sizingOrderAnalytics.capRows.map(row => (
+                            <tr key={row.key}>
+                              <td>{row.label}</td>
+                              <td>{row.maxRiskUsd != null ? fmtUsd(row.maxRiskUsd) : '—'}</td>
+                              <td>{row.maxShares != null ? row.maxShares.toLocaleString() : '—'}</td>
+                            </tr>
+                          ))}
+                          <tr>
+                            <td>Cash merged (IB + cash-like, ÷ entry)</td>
+                            <td>—</td>
+                            <td>{sizingOrderAnalytics.cashCapShares != null ? sizingOrderAnalytics.cashCapShares.toLocaleString() : '—'}</td>
+                          </tr>
+                          <tr className="wl2-dash-row--focus">
+                            <td>
+                              <strong>Available (min)</strong>
+                            </td>
+                            <td>—</td>
+                            <td>
+                              <strong>
+                                {sizingOrderAnalytics.availableMinShares != null
+                                  ? sizingOrderAnalytics.availableMinShares.toLocaleString()
+                                  : '—'}
+                              </strong>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="wl2-sizing-dash__footnote">
+                      Buying power (aggregate): {fmtUsd(portfolioCashRollup.totalBuyingPower)}. History losses use GET /performance summary (same window as Kelly).
+                    </p>
+                  </section>
+
+                  <h5 className="wl2-sizing-dash__subtitle wl2-sizing-dash__subtitle--sm">Kelly &amp; ATR summary</h5>
+                  <div className="risk-summary-cards">
+                    <div className="risk-card">
+                      <span className="risk-card-label">ATR(14)</span>
+                      <span className="risk-card-value">{fmtUsd(sizeAtrResult.atr14)}</span>
+                    </div>
+                    <div className="risk-card">
+                      <span className="risk-card-label">Current price</span>
+                      <span className="risk-card-value">{sizeCurrentPrice != null ? fmtUsd(sizeCurrentPrice) : '—'}</span>
+                    </div>
+                    <div className="risk-card">
+                      <span className="risk-card-label">Raw Kelly %</span>
+                      <span className="risk-card-value">
+                        {kellyMetrics.is_valid ? `${(kellyMetrics.kelly_pct * 100).toFixed(2)}%` : '—'}
+                      </span>
+                    </div>
+                    <div className="risk-card">
+                      <span className="risk-card-label">Eff. Kelly % ({kellyFraction.toFixed(2)}×)</span>
+                      <span className="risk-card-value">
+                        {kellyMetrics.is_valid ? `${(kellyMetrics.effective_kelly * 100).toFixed(2)}%` : '—'}
+                      </span>
+                    </div>
+                    <div className="risk-card">
+                      <span className="risk-card-label">Stop dist. ({sizeAtrMultiplier}× ATR)</span>
+                      <span className="risk-card-value">{sizePosResult ? fmtUsd(sizePosResult.stop_distance) : '—'}</span>
+                    </div>
+                    <div className="risk-card">
+                      <span className="risk-card-label">Shares</span>
+                      <span className="risk-card-value">
+                        {sizePosResult?.is_valid ? sizePosResult.shares.toLocaleString() : '—'}
+                      </span>
+                    </div>
+                    <div className="risk-card">
+                      <span className="risk-card-label">Dollar risk</span>
+                      <span className="risk-card-value">
+                        {sizePosResult?.is_valid ? fmtUsd(sizePosResult.dollar_risk) : '—'}
+                      </span>
+                    </div>
+                    <div className="risk-card">
+                      <span className="risk-card-label">Risk %</span>
+                      <span className="risk-card-value">
+                        {sizePosResult?.is_valid ? `${sizePosResult.risk_pct.toFixed(2)}%` : '—'}
+                      </span>
+                    </div>
+                    <div className="risk-card">
+                      <span className="risk-card-label">Stop loss (long)</span>
+                      <span className="risk-card-value">
+                        {sizePosResult?.is_valid ? fmtUsd(sizePosResult.stop_loss_long) : '—'}
+                      </span>
+                    </div>
+                    <div className="risk-card">
+                      <span className="risk-card-label">Stop loss (short)</span>
+                      <span className="risk-card-value">
+                        {sizePosResult?.is_valid ? fmtUsd(sizePosResult.stop_loss_short) : '—'}
+                      </span>
+                    </div>
                   </div>
-                  <div className="risk-card">
-                    <span className="risk-card-label">Current price</span>
-                    <span className="risk-card-value">{sizeCurrentPrice != null ? fmtUsd(sizeCurrentPrice) : '—'}</span>
-                  </div>
-                  <div className="risk-card">
-                    <span className="risk-card-label">Capital</span>
-                    <span className="risk-card-value">{capital > 0 ? fmtUsd0(capital) : '—'}</span>
-                  </div>
-                  <div className="risk-card">
-                    <span className="risk-card-label">Raw Kelly %</span>
-                    <span className="risk-card-value">
-                      {kellyMetrics.is_valid ? `${(kellyMetrics.kelly_pct * 100).toFixed(2)}%` : '—'}
-                    </span>
-                  </div>
-                  <div className="risk-card">
-                    <span className="risk-card-label">Eff. Kelly % ({kellyFraction.toFixed(2)}×)</span>
-                    <span className="risk-card-value">
-                      {kellyMetrics.is_valid ? `${(kellyMetrics.effective_kelly * 100).toFixed(2)}%` : '—'}
-                    </span>
-                  </div>
-                  <div className="risk-card">
-                    <span className="risk-card-label">Stop dist. ({sizeAtrMultiplier}× ATR)</span>
-                    <span className="risk-card-value">{sizePosResult ? fmtUsd(sizePosResult.stop_distance) : '—'}</span>
-                  </div>
-                  <div className="risk-card">
-                    <span className="risk-card-label">Shares</span>
-                    <span className="risk-card-value">
-                      {sizePosResult?.is_valid ? sizePosResult.shares.toLocaleString() : '—'}
-                    </span>
-                  </div>
-                  <div className="risk-card">
-                    <span className="risk-card-label">Dollar risk</span>
-                    <span className="risk-card-value">
-                      {sizePosResult?.is_valid ? fmtUsd(sizePosResult.dollar_risk) : '—'}
-                    </span>
-                  </div>
-                  <div className="risk-card">
-                    <span className="risk-card-label">Risk %</span>
-                    <span className="risk-card-value">
-                      {sizePosResult?.is_valid ? `${sizePosResult.risk_pct.toFixed(2)}%` : '—'}
-                    </span>
-                  </div>
-                  <div className="risk-card">
-                    <span className="risk-card-label">Stop loss (long)</span>
-                    <span className="risk-card-value">
-                      {sizePosResult?.is_valid ? fmtUsd(sizePosResult.stop_loss_long) : '—'}
-                    </span>
-                  </div>
-                  <div className="risk-card">
-                    <span className="risk-card-label">Stop loss (short)</span>
-                    <span className="risk-card-value">
-                      {sizePosResult?.is_valid ? fmtUsd(sizePosResult.stop_loss_short) : '—'}
-                    </span>
-                  </div>
-                </div>
+                </>
               )}
               {!sizeComputeLoading && sizeAtrResult && sizePosResult && !sizePosResult.is_valid && (
                 <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>

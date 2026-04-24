@@ -1,4 +1,5 @@
-import type { IbAccountSnapshot, RealtimeQuote } from '../../types'
+import type { IbAccountSnapshot, IbPositionRow, RealtimeQuote } from '../../types'
+import { isLedgerCashLikeCategory } from '../portfolio/ledgerStockCategoryBuckets'
 
 export type DailyBenchmark = {
   bar_time: number
@@ -67,6 +68,55 @@ export function getNetLiq(a: IbAccountSnapshot): number {
   if (v == null) return 0
   const n = parseFloat(String(v))
   return Number.isFinite(n) ? n : 0
+}
+
+/** Absolute market value for one position row (|qty| × mark or avg). Same as Accounts STK MV helper. */
+export function ibPositionMarketValue(pos: IbPositionRow): number {
+  const qty = Number(pos.position)
+  if (!Number.isFinite(qty) || qty === 0) return 0
+  const price =
+    pos.price != null && Number.isFinite(Number(pos.price))
+      ? Number(pos.price)
+      : pos.avgCost != null && Number.isFinite(Number(pos.avgCost))
+        ? Number(pos.avgCost)
+        : 0
+  return Math.abs(qty) * (Number.isFinite(price) ? price : 0)
+}
+
+/** Parsed IB `TotalCashValue` only (excludes cash-like STK lines). */
+export function ibParsedTotalCashValue(account: IbAccountSnapshot): number {
+  const cashRaw = account.summary?.TotalCashValue
+  if (cashRaw == null) return 0
+  const n = parseFloat(String(cashRaw))
+  return Number.isFinite(n) ? n : 0
+}
+
+/** STK positions tagged cash-like: market value only. */
+export function cashLikeStkMarketValueOnly(account: IbAccountSnapshot): number {
+  let mv = 0
+  for (const pos of account.positions ?? []) {
+    const st = (pos.secType ?? '').toUpperCase()
+    if (st !== 'STK') continue
+    if (isLedgerCashLikeCategory(String(pos.category ?? ''))) mv += ibPositionMarketValue(pos)
+  }
+  return mv
+}
+
+/** Sum of |qty|×mark for all position rows on the account (STK, OPT, etc.). */
+export function positionsGrossMarketValue(account: IbAccountSnapshot): number {
+  let s = 0
+  for (const pos of account.positions ?? []) {
+    s += ibPositionMarketValue(pos)
+  }
+  return s
+}
+
+/**
+ * IB `TotalCashValue` plus STK lines tagged cash-like (money market, etc.),
+ * matching the Accounts portfolio “Cash + cash-like STK” merge for display.
+ */
+export function totalCashIncludingCashLikePositions(account: IbAccountSnapshot): number {
+  return ibParsedTotalCashValue(account) + cashLikeStkMarketValueOnly(account)
 }
 
 export function rightLabel(r: string | undefined): string {

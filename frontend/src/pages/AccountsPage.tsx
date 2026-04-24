@@ -9,6 +9,7 @@ import {
   computeDailyChange,
   formatLastUpdate,
   getNetLiq,
+  ibPositionMarketValue,
   mergeQuotesIntoSymbolMap,
   optionIntrinsic,
   resolvePreferredPrice,
@@ -37,22 +38,6 @@ function positionCategorySelectValue(pos: IbPositionRow, categories: PositionCat
     if (hit != null) return String(hit.id)
   }
   return ''
-}
-
-function ibPositionMarketValue(pos: {
-  position?: number | string | null
-  price?: number | null
-  avgCost?: number | null
-}): number {
-  const qty = Number(pos.position)
-  if (!Number.isFinite(qty) || qty === 0) return 0
-  const price =
-    pos.price != null && Number.isFinite(Number(pos.price))
-      ? Number(pos.price)
-      : pos.avgCost != null && Number.isFinite(Number(pos.avgCost))
-        ? Number(pos.avgCost)
-        : 0
-  return Math.abs(qty) * (Number.isFinite(price) ? price : 0)
 }
 
 /** Tag icon for header Categories (stroke follows currentColor). */
