@@ -108,6 +108,9 @@
   --od-max-pain-axis-fill: #d8dee8;
   --od-max-pain-axis-line: #64748b;
   --od-max-pain-grid-stroke: rgba(148, 163, 184, 0.38);
+
+  /* Strategy Instance detail — same width in Instances list (`DetailSidebar`) and embedded `RightInspectorDrawer` */
+  --instance-detail-sidebar-width: 960px;
 }
 
 /* ---------- 明亮主题 ---------- */
@@ -9492,11 +9495,11 @@ th {
   margin-bottom: 0.25rem;
 }
 
-/* Compare drawer */
+/* Compare drawer (above contract detail drawer when both open) */
 .od-compare-drawer-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: 201;
   background: rgba(0, 0, 0, 0.45);
   display: flex;
   justify-content: flex-end;
@@ -9511,6 +9514,102 @@ th {
   padding: var(--space-4);
   overflow-y: auto;
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15);
+}
+
+/* Right inspector drawer (Option contract, Stock inspector, reuse anywhere) */
+.riv-inspector-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: transparent;
+  pointer-events: none;
+  display: flex;
+  justify-content: flex-end;
+  align-items: stretch;
+}
+
+.riv-inspector-panel {
+  width: min(36rem, 100vw);
+  max-width: 100%;
+  background: var(--color-bg, var(--color-surface));
+  border-left: 1px solid var(--color-border);
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  pointer-events: auto;
+}
+
+.riv-inspector-panel--instance-detail {
+  width: min(var(--instance-detail-sidebar-width, 960px), 100vw);
+}
+
+.riv-inspector-inner {
+  padding: var(--space-3);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Positions / tables: symbol opens stock inspector */
+.riv-stock-symbol-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: inherit;
+}
+
+.riv-stock-symbol-btn:hover,
+.riv-stock-symbol-btn:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+
+.riv-stock-symbol-btn--compact {
+  font-size: 0.85em;
+  vertical-align: baseline;
+}
+
+.instance-sheet-symbols--buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem 0.35rem;
+}
+
+.instance-sheet-symbols-sep {
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+/* Positions: option contract column opens option inspector */
+.riv-opt-contract-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.riv-opt-contract-btn:hover,
+.riv-opt-contract-btn:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+
+.od-event-warnings--drawer {
+  margin-bottom: var(--space-2);
+}
+
+.od-contract-detail--drawer {
+  margin-top: 0;
 }
 
 .od-compare-drawer-header {
@@ -17303,6 +17402,66 @@ th {
   row-gap: 2px;
 }
 
+/* Positions → Open → Strategy (dark): calmer link-style actions + readable filter chips */
+[data-theme="dark"] .instance-sheet-filters .replay-bubble-switch {
+  background: rgba(8, 10, 14, 0.85);
+  border-color: var(--color-border-strong, #3d4754);
+}
+
+[data-theme="dark"] .instance-sheet-filters .replay-bubble-switch-btn.active {
+  background: rgba(125, 211, 252, 0.12);
+  color: #e0f2fe;
+  box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.32);
+}
+
+[data-theme="dark"] .instance-sheet-filters .replay-bubble-switch-btn:hover:not(:disabled):not(.active) {
+  color: var(--color-text-main, #e4e9ef);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .instance-sheet-filters .btn-secondary {
+  background: var(--color-surface-elevated, #1a1f26);
+  color: var(--color-text-main, #e4e9ef);
+  border-color: var(--color-border-strong, #3d4754);
+}
+
+[data-theme="dark"] .instance-sheet-filters .btn-secondary:hover:not(:disabled) {
+  background: rgba(125, 211, 252, 0.1);
+  border-color: rgba(125, 211, 252, 0.45);
+  color: var(--color-link-hover, #bae6fd);
+}
+
+[data-theme="dark"] .instance-sheet-table button.ledger-instance-icon-link:not(.ledger-instance-icon-link--mixed):not(.ledger-instance-icon-link--multiple):not(.ledger-instance-icon-link--same),
+[data-theme="dark"] .replay-strategy-opp-cell button.ledger-instance-icon-link:not(.ledger-instance-icon-link--mixed):not(.ledger-instance-icon-link--multiple):not(.ledger-instance-icon-link--same),
+[data-theme="dark"] .detail-execution-row button.ledger-instance-icon-link:not(.ledger-instance-icon-link--mixed):not(.ledger-instance-icon-link--multiple):not(.ledger-instance-icon-link--same) {
+  color: var(--color-link, #7dd3fc);
+}
+
+[data-theme="dark"] .instance-sheet-table button.ledger-instance-icon-link:not(.ledger-instance-icon-link--mixed):not(.ledger-instance-icon-link--multiple):not(.ledger-instance-icon-link--same):hover,
+[data-theme="dark"] .replay-strategy-opp-cell button.ledger-instance-icon-link:not(.ledger-instance-icon-link--mixed):not(.ledger-instance-icon-link--multiple):not(.ledger-instance-icon-link--same):hover,
+[data-theme="dark"] .detail-execution-row button.ledger-instance-icon-link:not(.ledger-instance-icon-link--mixed):not(.ledger-instance-icon-link--multiple):not(.ledger-instance-icon-link--same):hover {
+  color: var(--color-link-hover, #bae6fd);
+  opacity: 1;
+}
+
+[data-theme="dark"] .instance-sheet-symbols--buttons .riv-stock-symbol-btn {
+  color: var(--color-link, #7dd3fc);
+}
+
+[data-theme="dark"] .instance-sheet-symbols--buttons .riv-stock-symbol-btn:hover,
+[data-theme="dark"] .instance-sheet-symbols--buttons .riv-stock-symbol-btn:focus-visible {
+  color: var(--color-link-hover, #bae6fd);
+}
+
+[data-theme="dark"] .instance-sheet-sub-table .riv-opt-contract-btn {
+  color: var(--color-link, #7dd3fc);
+}
+
+[data-theme="dark"] .instance-sheet-sub-table .riv-opt-contract-btn:hover,
+[data-theme="dark"] .instance-sheet-sub-table .riv-opt-contract-btn:focus-visible {
+  color: var(--color-link-hover, #bae6fd);
+}
+
 /* Strategy Instances list: Detail view + symbol group bubble controls */
 .instance-list-symbol-toolbar {
   display: flex;
@@ -17520,6 +17679,7 @@ th {
 
 .instance-sheet-table {
   width: 100%;
+  table-layout: fixed;
 }
 
 .instance-sheet-row {
@@ -17538,6 +17698,12 @@ th {
 
 .instance-sheet-row td {
   white-space: nowrap;
+}
+
+/* Symbols column: allow wrapping so fixed-layout table does not force huge min width */
+.instance-sheet-table > tbody > tr.instance-sheet-row > td:nth-child(4) {
+  white-space: normal;
+  vertical-align: top;
 }
 
 .instance-sheet-exec-qty-cell {
@@ -17633,6 +17799,16 @@ th {
 .instance-sheet-detail-cell {
   padding: var(--space-2) var(--space-3) var(--space-3) !important;
   border-top: none !important;
+  /* Colspan row: without this, nested wide tables expand the parent and the outer wrap gets a horizontal scrollbar. */
+  max-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Avoid nested horizontal scroll areas (detail cell already scrolls). */
+.instance-sheet-detail-cell .replay-portfolio-table-wrap {
+  overflow-x: visible;
 }
 
 .instance-sheet-sub-section {
@@ -17666,6 +17842,7 @@ th {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
+  min-width: 0;
 }
 
 .instance-sheet-opp-name {
@@ -17695,6 +17872,40 @@ th {
 .instance-sheet-inst-sublabel {
   font-size: 0.8em;
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Same as .instance-sheet-inst-link but for <button> (no UA “gray pill” in dark theme) */
+button.instance-sheet-inst-link {
+  appearance: none;
+  font: inherit;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  text-align: left;
+  color: var(--color-link, #7dd3fc);
+  text-decoration: none;
+  transition: color var(--transition-fast, 0.15s);
+}
+
+button.instance-sheet-inst-link:hover {
+  color: var(--color-link-hover, #bae6fd);
+  text-decoration: underline;
+}
+
+button.instance-sheet-inst-link:focus-visible {
+  outline: 2px solid var(--color-link, #7dd3fc);
+  outline-offset: 2px;
+}
+
+button.instance-sheet-inst-link.instance-sheet-inst-sublabel {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .instance-sheet-symbols {
@@ -23794,6 +24005,16 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   display: block;
 }
 
+button.ledger-instance-icon-link {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
 /* Options sheet Contract cell: instance icon by Details state */
 .ledger-instance-icon-link--mixed {
   color: var(--color-warning, #ca8a04);
@@ -26174,7 +26395,7 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
 }
 
 .detail-sidebar-panel {
-  width: min(var(--detail-sidebar-width, 720px), 100vw);
+  width: min(var(--detail-sidebar-width, var(--instance-detail-sidebar-width, 960px)), 100vw);
   max-width: 100%;
   height: 100%;
   background: var(--color-bg, var(--color-surface));
@@ -26193,7 +26414,7 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
 }
 
 .detail-sidebar-panel.detail-sidebar-panel-docked {
-  width: min(var(--detail-sidebar-width, 720px), 100vw);
+  width: min(var(--detail-sidebar-width, var(--instance-detail-sidebar-width, 960px)), 100vw);
   height: 100vh;
   transform: none;
   position: fixed;
@@ -26262,7 +26483,7 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
 
 .strategy-instances-list-pane.with-floating-detail-sidebar {
   /* Matches --instances-floating-sidebar-reserve on .strategy-instances-page (sidebar width + thin gutter). */
-  padding-right: var(--instances-floating-sidebar-reserve, calc(960px + 4px));
+  padding-right: var(--instances-floating-sidebar-reserve, calc(var(--instance-detail-sidebar-width, 960px) + 4px));
 }
 
 .strategy-instances-table-wrap {
@@ -27341,6 +27562,46 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
 .positions-opt-instance-table col.poi-col-account { width: 8.75rem; }
 .positions-opt-instance-table col.poi-col-opp { width: 5.25rem; }
 .positions-opt-instance-table col.poi-col-actions { width: 5.5rem; }
+
+/* Strategy row expand: nested instance options table must fit pane width (avoid inner horizontal scroll). */
+.instance-sheet-detail-cell .positions-opt-instance-table {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 0.82rem;
+}
+
+/* Percent widths sum to 100% for table-layout: fixed inside narrow detail cell */
+.instance-sheet-detail-cell .positions-opt-instance-table col.poi-col-expand { width: 3%; }
+.instance-sheet-detail-cell .positions-opt-instance-table col.poi-col-contract { width: 25%; }
+.instance-sheet-detail-cell .positions-opt-instance-table col.poi-col-expiry { width: 6%; }
+.instance-sheet-detail-cell .positions-opt-instance-table col.poi-col-strike { width: 5%; }
+.instance-sheet-detail-cell .positions-opt-instance-table col.poi-col-last { width: 6%; }
+.instance-sheet-detail-cell .positions-opt-instance-table col.poi-col-qty { width: 4%; }
+.instance-sheet-detail-cell .positions-opt-instance-table col.poi-col-at { width: 4%; }
+.instance-sheet-detail-cell .positions-opt-instance-table col.poi-col-value { width: 6%; }
+.instance-sheet-detail-cell .positions-opt-instance-table col.poi-col-quote { width: 6%; }
+.instance-sheet-detail-cell .positions-opt-instance-table col.poi-col-time { width: 6%; }
+.instance-sheet-detail-cell .positions-opt-instance-table col.poi-col-unpnl { width: 7%; }
+.instance-sheet-detail-cell .positions-opt-instance-table col.poi-col-pool { width: 3%; }
+.instance-sheet-detail-cell .positions-opt-instance-table col.poi-col-attr { width: 4%; }
+.instance-sheet-detail-cell .positions-opt-instance-table col.poi-col-account { width: 6%; }
+.instance-sheet-detail-cell .positions-opt-instance-table col.poi-col-opp { width: 5%; }
+.instance-sheet-detail-cell .positions-opt-instance-table col.poi-col-actions { width: 4%; }
+
+.instance-sheet-detail-cell .positions-opt-instance-table > thead > tr > th:nth-child(2),
+.instance-sheet-detail-cell .positions-opt-instance-table > tbody > tr.detail-position-row > td:nth-child(2) {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+}
+
+.instance-sheet-detail-cell .positions-opt-instance-table .riv-opt-contract-btn {
+  white-space: normal;
+  text-align: left;
+  word-break: break-word;
+}
 
 /* Expiry: date + DTE on two lines */
 .positions-opt-main-table > thead > tr > th:nth-child(3),
@@ -29953,6 +30214,15 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   padding: var(--space-2);
+}
+
+/* StockBarStatsPanel inside position / option inspector drawer */
+.riv-stock-bar-stats--embedded {
+  margin-top: var(--space-3);
+}
+
+.riv-stock-bar-stats__header--embedded {
+  flex-wrap: wrap;
 }
 
 /* ── Modal ── */

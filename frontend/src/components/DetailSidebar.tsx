@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { INSTANCE_DETAIL_SIDEBAR_WIDTH_PX } from '../constants/instanceDetailSidebar'
 
 export interface DetailSidebarProps {
   open: boolean
@@ -15,7 +16,7 @@ export function DetailSidebar({
   onClose,
   title,
   children,
-  width = 720,
+  width = INSTANCE_DETAIL_SIDEBAR_WIDTH_PX,
   destroyOnClose = false,
   mode = 'modal',
 }: DetailSidebarProps) {

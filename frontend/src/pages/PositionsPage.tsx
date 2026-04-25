@@ -370,6 +370,10 @@ import { ExecutionFormModal } from './portfolio/ExecutionFormModal'
 import type { LinkExecutionContext } from './portfolio/LinkExecutionRecordModal'
 import { LinkExecutionRecordModal } from './portfolio/LinkExecutionRecordModal'
 import { QuickCloseModal } from './portfolio/QuickCloseModal'
+import { OptionContractDetailFromOpenPosition } from './optionDiscovery/OptionContractDetailFromOpenPosition'
+import { RightInspectorDrawer } from '../components/RightInspectorDrawer'
+import { StockInspectorPanel } from '../components/StockInspectorPanel'
+import { StrategyInstanceDetailPage } from './StrategyInstanceDetailPage'
 import type {
   InstanceAllGroup,
   InstancePositionGroup,
@@ -379,10 +383,15 @@ import type {
   PortfolioView,
   StockCoverageItem,
 } from './portfolio/types'
+import { findLiveStockRowForAccount } from './portfolio/positionsInspectorUtils'
 import { OFF_TRACK_ACCOUNT_ID, useExecutions } from './portfolio/useExecutions'
 
 /** Rows for open STK table: account sub-headers + position lines (used under category sections). */
-function buildOpenStockPositionRows(positions: LivePositionRow[], rowKeyPrefix: string): JSX.Element[] {
+function buildOpenStockPositionRows(
+  positions: LivePositionRow[],
+  rowKeyPrefix: string,
+  onInspectStock?: (p: LivePositionRow) => void,
+): JSX.Element[] {
   const byAccount: Record<string, LivePositionRow[]> = {}
   for (const position of positions) {
     const accId = (position.account_id ?? '').trim() || '—'
@@ -422,7 +431,18 @@ function buildOpenStockPositionRows(positions: LivePositionRow[], rowKeyPrefix: 
         <tr key={`${rowKeyPrefix}-open-stk-${accId}-${position.symbol ?? ''}-${contractKey}`}>
           <td>{accId}</td>
           <td>
-            <strong>{position.symbol ?? '—'}</strong>
+            {onInspectStock ? (
+              <button
+                type="button"
+                className="riv-stock-symbol-btn"
+                onClick={() => onInspectStock(position)}
+                aria-label={`Open details for ${position.symbol ?? 'symbol'}`}
+              >
+                <strong>{position.symbol ?? '—'}</strong>
+              </button>
+            ) : (
+              <strong>{position.symbol ?? '—'}</strong>
+            )}
           </td>
           <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
           <td>{Number.isFinite(qty) ? qty : '—'}</td>
@@ -450,7 +470,11 @@ function buildOpenStockPositionRows(positions: LivePositionRow[], rowKeyPrefix: 
   return rows
 }
 
-function renderIndependentHoldingRow(position: LivePositionRow, keyPrefix: string): JSX.Element {
+function renderIndependentHoldingRow(
+  position: LivePositionRow,
+  keyPrefix: string,
+  onInspectStock?: (p: LivePositionRow) => void,
+): JSX.Element {
   const accId = (position.account_id ?? '').trim() || '—'
   const qty = Number(position.position)
   const lastPrice =
@@ -483,7 +507,18 @@ function renderIndependentHoldingRow(position: LivePositionRow, keyPrefix: strin
     <tr key={`${keyPrefix}-${accId}-${position.symbol ?? ''}-${ck || 'stk'}`}>
       <td>{accId}</td>
       <td>
-        <strong>{position.symbol ?? '—'}</strong>
+        {onInspectStock ? (
+          <button
+            type="button"
+            className="riv-stock-symbol-btn"
+            onClick={() => onInspectStock(position)}
+            aria-label={`Open details for ${position.symbol ?? 'symbol'}`}
+          >
+            <strong>{position.symbol ?? '—'}</strong>
+          </button>
+        ) : (
+          <strong>{position.symbol ?? '—'}</strong>
+        )}
       </td>
       <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
       <td>{Number.isFinite(qty) ? qty : '—'}</td>
@@ -576,7 +611,13 @@ function underlyingCoverageStockMetrics(
   }
 }
 
-function StrategyAttributionCells({ ex }: { ex: Execution | null }) {
+function StrategyAttributionCells({
+  ex,
+  onOpenStrategyInstance,
+}: {
+  ex: Execution | null
+  onOpenStrategyInstance?: (strategyInstanceId: number) => void
+}) {
   if (!ex) return <td className="replay-strategy-opp-cell">—</td>
   const oppName = ex.strategy_opportunity_name?.trim()
   const instanceId = ex.strategy_instance_id
@@ -586,9 +627,18 @@ function StrategyAttributionCells({ ex }: { ex: Execution | null }) {
     <td className="replay-strategy-opp-cell" title={[instanceTitle, oppName].filter(Boolean).join(' · ') || undefined}>
       <span className="replay-strategy-opp-cell-inner">
         {instanceId != null ? (
-          <a href={`#/strategies/instances/${instanceId}`} className="ledger-instance-icon-link" target="_blank" rel="noopener noreferrer" title={instanceTitle} aria-label={instanceTitle || 'View strategy'} onClick={e => e.stopPropagation()}>
+          <button
+            type="button"
+            className="ledger-instance-icon-link"
+            title={instanceTitle}
+            aria-label={instanceTitle || 'View strategy'}
+            onClick={e => {
+              e.stopPropagation()
+              onOpenStrategyInstance?.(instanceId)
+            }}
+          >
             <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="5" y="5" width="14" height="14" rx="1" /></svg>
-          </a>
+          </button>
         ) : null}
         <span className="replay-strategy-opp-text">{oppName || '—'}</span>
       </span>
@@ -612,6 +662,8 @@ interface PositionsPageProps {
   currentView?: PortfolioView
   onViewChange?: (view: PortfolioView) => void
   showViewTabs?: boolean
+  /** Switch app to Research → Option Discovery (MVP: user picks expiry/strike there). */
+  onOpenOptionDiscovery?: () => void
 }
 
 export function PositionsPage({
@@ -619,6 +671,7 @@ export function PositionsPage({
   currentView: _currentView,
   onViewChange,
   showViewTabs: _showViewTabs = true,
+  onOpenOptionDiscovery,
 }: PositionsPageProps) {
   const { executionsFinal, executionsTws, executionsCanonical, loadReplayData, executionAccountOptions } = useExecutions(
     status,
@@ -725,6 +778,42 @@ export function PositionsPage({
   const [openFilterExpiryStart, setOpenFilterExpiryStart] = useState('')
   const [openFilterAccountId, setOpenFilterAccountId] = useState<string>('all')
   const [openTab, setOpenTab] = useState<OpenPositionsTab>('instance')
+  const [stockInspector, setStockInspector] = useState<{
+    symbol: string
+    accountId: string
+    position: LivePositionRow
+  } | null>(null)
+  const [optionInspector, setOptionInspector] = useState<OpenOptionPosition | null>(null)
+  const [strategyInspectorInstanceId, setStrategyInspectorInstanceId] = useState<number | null>(null)
+
+  const openStockInspector = useCallback((p: LivePositionRow) => {
+    const sym = (p.symbol ?? '').trim().toUpperCase()
+    const acc = (p.account_id ?? '').trim() || '—'
+    if (!sym) return
+    setOptionInspector(null)
+    setStrategyInspectorInstanceId(null)
+    setStockInspector({ symbol: sym, accountId: acc, position: p })
+  }, [])
+
+  const openOptionInspector = useCallback((p: OpenOptionPosition) => {
+    setStockInspector(null)
+    setStrategyInspectorInstanceId(null)
+    setPageError(null)
+    setOptionInspector(p)
+  }, [])
+
+  const openStrategyInspector = useCallback((strategyInstanceId: number) => {
+    if (!Number.isFinite(strategyInstanceId)) return
+    setStockInspector(null)
+    setOptionInspector(null)
+    setPageError(null)
+    setStrategyInspectorInstanceId(strategyInstanceId)
+  }, [])
+
+  const handleNavigateOptionDiscovery = useCallback(() => {
+    setOptionInspector(null)
+    onOpenOptionDiscovery?.()
+  }, [onOpenOptionDiscovery])
   const [instanceFilterStructureType, setInstanceFilterStructureType] = useState<string>('all')
   const [instanceFilterScopeType, setInstanceFilterScopeType] = useState<string>('all')
   const [instanceFilterOppName, setInstanceFilterOppName] = useState<string>('all')
@@ -854,17 +943,18 @@ export function PositionsPage({
                   <>
                     {' '}
                     <span className="replay-muted">·</span>{' '}
-                    <a
-                      href={`#/strategies/instances/${execInstanceId}`}
+                    <button
+                      type="button"
                       className="ledger-instance-icon-link"
-                      target="_blank"
-                      rel="noopener noreferrer"
                       title={`strategy_instance_id ${execInstanceId}`}
                       aria-label={`View strategy #${execInstanceId}`}
-                      onClick={e => e.stopPropagation()}
+                      onClick={e => {
+                        e.stopPropagation()
+                        openStrategyInspector(execInstanceId)
+                      }}
                     >
                       strategy #{execInstanceId}
-                    </a>
+                    </button>
                   </>
                 ) : null}
               </div>
@@ -931,7 +1021,7 @@ export function PositionsPage({
           <td className="replay-muted" />
           {includeAttrColumn ? <td className="replay-muted" /> : null}
           <td className="replay-muted positions-opt-account-cell">{ex.account_id ?? '—'}</td>
-          <StrategyAttributionCells ex={ex} />
+          <StrategyAttributionCells ex={ex} onOpenStrategyInstance={openStrategyInspector} />
           <td className="replay-opt-actions-cell">
             <span className="replay-exec-row-actions">
               <button
@@ -1457,6 +1547,47 @@ export function PositionsPage({
     }
     return { fixedIncomeStockPositions, cashLikeStockPositions, coreStockPositions }
   }, [liveStockPositions])
+
+  const tryOpenStockFromSymbolAccount = useCallback(
+    (symbol: string, accountId: string) => {
+      const row = findLiveStockRowForAccount(liveStockPositions, symbol, accountId)
+      if (!row) {
+        const symU = (symbol ?? '').trim().toUpperCase()
+        const acct = (accountId ?? '').trim() || '—'
+        setPageError(`No ${symU} stock position in account ${acct} for the current filters (Open positions).`)
+        return
+      }
+      setPageError(null)
+      openStockInspector(row)
+    },
+    [liveStockPositions, openStockInspector],
+  )
+
+  /** Underlying spot for Option Discovery–style contract panel (BS / moneyness) when PG omits underlying_price. */
+  const optionInspectorUnderlyingHint = useMemo(() => {
+    if (optionInspector == null) return null
+    const und = getContractLabelParts(optionInspector.contract_key).symbol.trim().toUpperCase()
+    const acct = (optionInspector.account_id ?? '').trim()
+    if (!und) return null
+    const row = findLiveStockRowForAccount(liveStockPositions, und, acct)
+    const px = row?.price != null && Number.isFinite(Number(row.price)) ? Number(row.price) : null
+    return px
+  }, [optionInspector, liveStockPositions])
+
+  useEffect(() => {
+    setStockInspector(null)
+    setOptionInspector(null)
+    setStrategyInspectorInstanceId(null)
+  }, [openTab])
+
+  const instanceDefaultAccountForStockInspect = useCallback((allGroup: InstanceAllGroup): string => {
+    const fromOpts = allGroup.options.map(o => (o.account_id ?? '').trim()).filter(Boolean)
+    const uniq = [...new Set(fromOpts)]
+    if (uniq.length === 1) return uniq[0]!
+    const sc = allGroup.stock_coverage[0]?.account_id?.trim()
+    if (sc) return sc
+    return uniq[0] ?? ''
+  }, [])
 
   const instanceAllGroups = useMemo((): InstanceAllGroup[] => {
     type Bucket = {
@@ -2314,6 +2445,8 @@ export function PositionsPage({
         dir: 'asc' | 'desc'
         onColumnClick: (col: CoveragePoolSortCol) => void
       }
+      /** When set, Symbol column opens stock inspector for that (symbol, account). */
+      onInspectCoverageSymbol?: (ci: StockCoverageItem) => void
     },
   ) => {
     const slim = tableOpts?.underlyingPoolSlim === true
@@ -2392,7 +2525,18 @@ export function PositionsPage({
       return (
         <tr key={rowKey}>
           <td>
-            <strong>{ci.symbol}</strong>
+            {tableOpts?.onInspectCoverageSymbol ? (
+              <button
+                type="button"
+                className="riv-stock-symbol-btn"
+                onClick={() => tableOpts.onInspectCoverageSymbol?.(ci)}
+                aria-label={`Stock details for ${ci.symbol} in account ${acc}`}
+              >
+                {ci.symbol}
+              </button>
+            ) : (
+              <strong>{ci.symbol}</strong>
+            )}
           </td>
           {!poolGroupByAccount && <td className="replay-muted">{acc}</td>}
           {!hideBacked && (
@@ -2644,6 +2788,7 @@ export function PositionsPage({
     rows: LivePositionRow[],
     rowKeyPrefix: string,
     emptyHint: string,
+    onInspectStock?: (p: LivePositionRow) => void,
   ) => (
     <div
       id={panelId}
@@ -2670,7 +2815,7 @@ export function PositionsPage({
                 <th className="coverage-pnl-stacked-th">Since $/&nbsp;%</th>
               </tr>
             </thead>
-            <tbody>{buildOpenStockPositionRows(rows, rowKeyPrefix)}</tbody>
+            <tbody>{buildOpenStockPositionRows(rows, rowKeyPrefix, onInspectStock)}</tbody>
           </table>
         </div>
       )}
@@ -2983,11 +3128,36 @@ export function PositionsPage({
                             const opp = allGroup.strategy_opportunity_id != null ? oppMap.get(allGroup.strategy_opportunity_id) : undefined
                             const scopeSymbols = opp?.symbols ?? []
                             const scopeType = allGroup.scope_type
-                            const symbolsCell = scopeType === 'watchlist_stk'
-                              ? <span className="instance-sheet-badge instance-sheet-badge-scope">Watchlist</span>
-                              : scopeSymbols.length > 0
-                                ? <span className="instance-sheet-symbols">{scopeSymbols.join(', ')}</span>
-                                : <span className="replay-muted">—</span>
+                            const defaultAccForScope = instanceDefaultAccountForStockInspect(allGroup)
+                            const symbolsCell =
+                              scopeType === 'watchlist_stk' ? (
+                                <span className="instance-sheet-badge instance-sheet-badge-scope">Watchlist</span>
+                              ) : scopeSymbols.length > 0 ? (
+                                <span className="instance-sheet-symbols instance-sheet-symbols--buttons">
+                                  {scopeSymbols.map((symRaw, i) => {
+                                    const t = String(symRaw ?? '').trim()
+                                    if (!t) return null
+                                    return (
+                                      <Fragment key={`${instKey}-scope-sym-${i}-${t}`}>
+                                        {i > 0 ? <span className="instance-sheet-symbols-sep" aria-hidden>, </span> : null}
+                                        <button
+                                          type="button"
+                                          className="riv-stock-symbol-btn riv-stock-symbol-btn--compact"
+                                          onClick={e => {
+                                            e.stopPropagation()
+                                            tryOpenStockFromSymbolAccount(t, defaultAccForScope)
+                                          }}
+                                          aria-label={`Stock details for ${t} (account ${defaultAccForScope || '—'})`}
+                                        >
+                                          {t}
+                                        </button>
+                                      </Fragment>
+                                    )
+                                  })}
+                                </span>
+                              ) : (
+                                <span className="replay-muted">—</span>
+                              )
                             return [
                               <tr
                                 key={`inst-row-${instKey}`}
@@ -3009,16 +3179,17 @@ export function PositionsPage({
                                       {oppName ? (
                                         <span className="instance-sheet-opp-name">{oppName}</span>
                                       ) : null}
-                                      <a
-                                        href={`#/strategies/instances/${allGroup.strategy_instance_id}`}
+                                      <button
+                                        type="button"
                                         className="instance-sheet-inst-link instance-sheet-inst-sublabel"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
                                         title={`View strategy: ${instLabel}`}
-                                        onClick={e => e.stopPropagation()}
+                                        onClick={e => {
+                                          e.stopPropagation()
+                                          openStrategyInspector(allGroup.strategy_instance_id!)
+                                        }}
                                       >
                                         {instLabel}
-                                      </a>
+                                      </button>
                                     </>
                                   ) : (
                                     <span>{oppName || instLabel}</span>
@@ -3160,7 +3331,35 @@ export function PositionsPage({
                                                       {(() => {
                                                         const p = getContractLabelParts(pos.contract_key)
                                                         const strikeStr = pos.strike != null ? ` ${pos.strike}` : ''
-                                                        return p.symbol ? (<><strong>{p.symbol}</strong> {p.rightLabel}{strikeStr}</>) : pos.contract_key
+                                                        const aria = p.symbol
+                                                          ? `Option details for ${p.symbol} ${p.rightLabel}${strikeStr}`
+                                                          : `Option details for ${pos.contract_key}`
+                                                        return p.symbol ? (
+                                                          <button
+                                                            type="button"
+                                                            className="riv-opt-contract-btn"
+                                                            onClick={e => {
+                                                              e.stopPropagation()
+                                                              openOptionInspector(pos)
+                                                            }}
+                                                            aria-label={aria}
+                                                          >
+                                                            <strong>{p.symbol}</strong> {p.rightLabel}
+                                                            {strikeStr}
+                                                          </button>
+                                                        ) : (
+                                                          <button
+                                                            type="button"
+                                                            className="riv-opt-contract-btn"
+                                                            onClick={e => {
+                                                              e.stopPropagation()
+                                                              openOptionInspector(pos)
+                                                            }}
+                                                            aria-label={aria}
+                                                          >
+                                                            {pos.contract_key}
+                                                          </button>
+                                                        )
                                                       })()}
                                                     </td>
                                                     <td className="positions-opt-expiry-cell">
@@ -3360,7 +3559,16 @@ export function PositionsPage({
                                                 const hasStock = m.held !== 0 || m.cost_basis_total != null
                                                 return (
                                                   <tr key={`ia-cov-${instKey}-${sc.symbol}-${acct || 'x'}`}>
-                                                    <td><strong>{sc.symbol}</strong></td>
+                                                    <td>
+                                                      <button
+                                                        type="button"
+                                                        className="riv-stock-symbol-btn"
+                                                        onClick={() => tryOpenStockFromSymbolAccount(sc.symbol, acct || '')}
+                                                        aria-label={`Stock details for ${sc.symbol} in account ${acct || '—'}`}
+                                                      >
+                                                        {sc.symbol}
+                                                      </button>
+                                                    </td>
                                                     <td>
                                                       <span className="underlying-coverage-account" title="Stock hedge must be in this account (same as options above)">
                                                         {acct || '—'}
@@ -3950,6 +4158,7 @@ export function PositionsPage({
                                 dir: underlyingPoolSort.dir,
                                 onColumnClick: onUnderlyingPoolSortClick,
                               },
+                              onInspectCoverageSymbol: ci => tryOpenStockFromSymbolAccount(ci.symbol, ci.account_id),
                             })}
                           </div>
                         {watchlistOptionableCoverageItems.length > 0 && (
@@ -3967,6 +4176,7 @@ export function PositionsPage({
                                 dir: backingPoolSort.dir,
                                 onColumnClick: onBackingPoolSortClick,
                               },
+                              onInspectCoverageSymbol: ci => tryOpenStockFromSymbolAccount(ci.symbol, ci.account_id),
                             })}
                           </div>
                         )}
@@ -4011,7 +4221,7 @@ export function PositionsPage({
                                     <strong>{section.title}</strong>
                                   </td>
                                 </tr>,
-                                ...section.rows.map(p => renderIndependentHoldingRow(p, section.key)),
+                                ...section.rows.map(p => renderIndependentHoldingRow(p, section.key, openStockInspector)),
                               ])}
                           </tbody>
                         </table>
@@ -4106,10 +4316,10 @@ export function PositionsPage({
                               <tr
                                 key={posKey}
                                 className="detail-position-row"
-                                onClick={hasExecutions ? () => togglePositionExpand(posKey) : undefined}
+                                onClick={hasExecutions ? e => { e.stopPropagation(); togglePositionExpand(posKey) } : undefined}
                                 role={hasExecutions ? 'button' : undefined}
                                 tabIndex={hasExecutions ? 0 : undefined}
-                                onKeyDown={hasExecutions ? e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePositionExpand(posKey) } } : undefined}
+                                onKeyDown={hasExecutions ? e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); togglePositionExpand(posKey) } } : undefined}
                                 aria-expanded={hasExecutions ? isPosExpanded : undefined}
                               >
                                 <td className="replay-opt-expand-col">
@@ -4167,12 +4377,33 @@ export function PositionsPage({
                                     return p.symbol ? (
                                       <>
                                         {instanceIcon}
-                                        <strong>{p.symbol}</strong> {p.rightLabel}{strikeStr}
+                                        <button
+                                          type="button"
+                                          className="riv-opt-contract-btn"
+                                          onClick={e => {
+                                            e.stopPropagation()
+                                            openOptionInspector(pos)
+                                          }}
+                                          aria-label={`Option details for ${p.symbol} ${p.rightLabel}${strikeStr}`}
+                                        >
+                                          <strong>{p.symbol}</strong> {p.rightLabel}
+                                          {strikeStr}
+                                        </button>
                                       </>
                                     ) : (
                                       <>
                                         {instanceIcon}
-                                        {pos.contract_key}
+                                        <button
+                                          type="button"
+                                          className="riv-opt-contract-btn"
+                                          onClick={e => {
+                                            e.stopPropagation()
+                                            openOptionInspector(pos)
+                                          }}
+                                          aria-label={`Option details for ${pos.contract_key}`}
+                                        >
+                                          {pos.contract_key}
+                                        </button>
                                       </>
                                     )
                                   })()}
@@ -4315,6 +4546,7 @@ export function PositionsPage({
                   coreStockPositions,
                   'stk',
                   'No open stock positions under the current filters.',
+                  openStockInspector,
                 )
               ) : openTab === 'fixed_income' ? (
                 renderLiveStockBucketPanel(
@@ -4324,6 +4556,7 @@ export function PositionsPage({
                   fixedIncomeStockPositions,
                   'fi',
                   'No open fixed income positions under the current filters.',
+                  openStockInspector,
                 )
               ) : (
                 renderLiveStockBucketPanel(
@@ -4333,6 +4566,7 @@ export function PositionsPage({
                   cashLikeStockPositions,
                   'cash',
                   'No open cash-like positions under the current filters.',
+                  openStockInspector,
                 )
               )}
             </div>
@@ -4483,6 +4717,48 @@ export function PositionsPage({
         onClose={() => setCloseAgainstExec(null)}
         onSuccess={() => { loadReplayData(); loadAttributions() }}
       />
+      <RightInspectorDrawer open={stockInspector != null} ariaLabel="Stock position">
+        {stockInspector != null && (
+          <StockInspectorPanel
+            symbol={stockInspector.symbol}
+            accountId={stockInspector.accountId}
+            position={stockInspector.position}
+            onClose={() => setStockInspector(null)}
+          />
+        )}
+      </RightInspectorDrawer>
+      <RightInspectorDrawer open={optionInspector != null} ariaLabel="Option contract detail">
+        {optionInspector != null && (
+          <OptionContractDetailFromOpenPosition
+            position={optionInspector}
+            optionQuote={quotesMap[optionInspector.contract_key]}
+            underlyingHint={optionInspectorUnderlyingHint}
+            onClose={() => setOptionInspector(null)}
+            onOpenOptionDiscovery={onOpenOptionDiscovery != null ? handleNavigateOptionDiscovery : undefined}
+          />
+        )}
+      </RightInspectorDrawer>
+      <RightInspectorDrawer open={strategyInspectorInstanceId != null} ariaLabel="Strategy instance detail" variant="instance-detail">
+        {strategyInspectorInstanceId != null && (
+          <div className="riv-stock-inspector" aria-label="Strategy instance detail">
+            <div className="od-detail-header riv-stock-inspector-header">
+              <h3 className="od-detail-title">
+                Strategy Instance
+                <span className="od-detail-expiry"> · #{strategyInspectorInstanceId}</span>
+              </h3>
+              <button
+                type="button"
+                className="od-detail-close"
+                onClick={() => setStrategyInspectorInstanceId(null)}
+                aria-label="Close strategy instance inspector"
+              >
+                ✕
+              </button>
+            </div>
+            <StrategyInstanceDetailPage strategyInstanceId={strategyInspectorInstanceId} status={status} embedded />
+          </div>
+        )}
+      </RightInspectorDrawer>
     </div>
   )
 }

@@ -1,8 +1,6 @@
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  Bar,
-  BarStatsResponse,
   IbAccountSnapshot,
   IbPositionRow,
   PerformanceSummary,
@@ -13,19 +11,18 @@ import type {
 } from '../types'
 import {
   fetchBars,
-  fetchBarStats,
-  fetchMarketTradingDay,
   fetchPerformance,
   fetchPositionCategories,
   fetchQuotes,
   fetchWatchlist,
-  postMassiveSync,
   postPositionCategory,
   postWatchlist,
   deleteWatchlist,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { RightInspectorDrawer } from '../components/RightInspectorDrawer'
 import { SectionPageTitle } from '../components/SectionPageTitle'
+import { StockBarStatsPanel } from '../components/StockBarStatsPanel'
 import { fmtUsd } from '../utils/format'
 import { computeAtr, computeKelly, computePositionSize } from '../api/research/risk'
 import type { AtrResult, KellyMetrics, PositionSizeResult } from '../api/research/risk'
@@ -38,28 +35,11 @@ import {
   stkMarketValueExFiExCashLike,
   totalCashIncludingCashLikePositions,
 } from './accounts/accountsUtils'
-import { BarsCandlestickChart } from './data/BarsCandlestickChart'
-import { inspectBarsLimitForPeriod } from './data/dataCoverageUtils'
-import {
-  addCalendarDaysNy,
-  nyCalendarDateIso,
-  presetNyRegularSessionForDate,
-} from './massive/customBarsTimePresets'
 
 interface WatchlistPageProps {
   status: StatusResponse | null
   /** Breadcrumb: Research home (same pattern as other Research pages). */
   onBreadcrumbResearch?: () => void
-}
-
-async function findLastNyTradingDayForWatchlist(): Promise<string | null> {
-  let ymd = nyCalendarDateIso()
-  for (let i = 0; i < 15; i++) {
-    const r = await fetchMarketTradingDay(ymd)
-    if (r.is_trading_day) return ymd
-    ymd = addCalendarDaysNy(ymd, -1)
-  }
-  return null
 }
 
 /** Position category names for Research → Screener → Stock Screener workflow (same DB as Portfolio → Accounts categories). */
@@ -281,22 +261,12 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
   const [addOptExpiry, setAddOptExpiry] = useState('')
   const [addOptRight, setAddOptRight] = useState<'CALL' | 'PUT'>('CALL')
   const [addOptStrike, setAddOptStrike] = useState('')
-  const [analysisLoadingSymbol, setAnalysisLoadingSymbol] = useState<string | null>(null)
-  const [analysisResult, setAnalysisResult] = useState<{ symbol: string; stats: BarStatsResponse } | null>(null)
-  const [fetchMarketDataStep, setFetchMarketDataStep] = useState<string | null>(null)
-  const [fetchMarketDataError, setFetchMarketDataError] = useState<string | null>(null)
-  /** Bar-stats panel: chart from PG via GET /bars (stock_day / stock_min). */
-  const [analysisChartPeriod, setAnalysisChartPeriod] = useState<'1 D' | '1 min'>('1 D')
-  const [analysisChartBars, setAnalysisChartBars] = useState<Bar[]>([])
-  const [analysisChartLoading, setAnalysisChartLoading] = useState(false)
-  const [analysisChartError, setAnalysisChartError] = useState<string | null>(null)
-  const [analysisChartInfo, setAnalysisChartInfo] = useState<string | null>(null)
-  const [chartShowVolume, setChartShowVolume] = useState(true)
-  const [chartShowVwap, setChartShowVwap] = useState(false)
-  const [chartShowMacd, setChartShowMacd] = useState(true)
-  const [chartShowBb, setChartShowBb] = useState(true)
-  const [chartShowRsi, setChartShowRsi] = useState(true)
-  const [chartShowSr, setChartShowSr] = useState(false)
+  /** Right drawer: bar stats + K-line (shared with Positions stock inspector content). */
+  const [barStatsInspector, setBarStatsInspector] = useState<string | null>(null)
+  const [barStatsLoadingSymbol, setBarStatsLoadingSymbol] = useState<string | null>(null)
+  const onBarStatsLoading = useCallback((sym: string, loading: boolean) => {
+    setBarStatsLoadingSymbol(loading ? sym : null)
+  }, [])
   const [realtimeQuotes, setRealtimeQuotes] = useState<RealtimeQuote[]>([])
   const [positionCategories, setPositionCategories] = useState<PositionCategory[]>([])
   const [showPositionPicker, setShowPositionPicker] = useState(false)
@@ -554,39 +524,6 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
       .catch(() => { if (!cancelled) setPerfSummary(null) })
     return () => { cancelled = true }
   }, [])
-
-  const loadAnalysisChartFromDb = useCallback(async (sym: string, period: '1 D' | '1 min') => {
-    setAnalysisChartLoading(true)
-    setAnalysisChartError(null)
-    try {
-      const res = await fetchBars(sym, period, inspectBarsLimitForPeriod(period))
-      const rows = res.bars ?? []
-      setAnalysisChartBars(rows)
-      if (rows.length === 0) {
-        const hint =
-          (typeof res.message === 'string' && res.message.trim()) ||
-          `No ${period} bars in PostgreSQL for ${sym}. Use Fetch from Massive, wait for the Celery job to finish, then Reload chart.`
-        setAnalysisChartInfo(hint)
-      } else {
-        setAnalysisChartInfo(null)
-      }
-    } catch (e) {
-      setAnalysisChartBars([])
-      setAnalysisChartError(e instanceof Error ? e.message : 'Load chart failed')
-    } finally {
-      setAnalysisChartLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!analysisResult?.symbol) return
-    void loadAnalysisChartFromDb(analysisResult.symbol, analysisChartPeriod)
-  }, [analysisResult?.symbol, analysisChartPeriod, loadAnalysisChartFromDb])
-
-  const analysisChartBarsSorted = useMemo(() => {
-    if (analysisChartBars.length === 0) return []
-    return [...analysisChartBars].filter(b => b.time != null).sort((a, b) => (a.time ?? 0) - (b.time ?? 0))
-  }, [analysisChartBars])
 
   // Auto-recompute position result whenever inputs change without re-fetching bars
   useEffect(() => {
@@ -1043,24 +980,10 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
     closeAddOptionModal()
   }
 
-  async function handleAnalyze(item: WatchlistItem) {
+  function handleAnalyze(item: WatchlistItem) {
     const sym = symbolFromItem(item)
     if (!sym) return
-    setAnalysisLoadingSymbol(sym)
-    setAnalysisResult(null)
-    setAnalysisChartPeriod('1 D')
-    setAnalysisChartBars([])
-    setAnalysisChartError(null)
-    setAnalysisChartInfo(null)
-    setFetchMarketDataError(null)
-    try {
-      const stats = await fetchBarStats(sym)
-      setAnalysisResult({ symbol: sym, stats })
-    } catch {
-      setAnalysisResult({ symbol: sym, stats: { stock_day: 0, stock_min: {} } })
-    } finally {
-      setAnalysisLoadingSymbol(null)
-    }
+    setBarStatsInspector(sym.trim().toUpperCase())
   }
 
   const handleSizeCompute = useCallback(async (sym: string) => {
@@ -1162,82 +1085,9 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
     if (first) void handleSizeCompute(first)
   }, [primaryTab, sizingStockRows, selectedSizingSymbol, handleSizeCompute])
 
-  async function handleFetchMarketData() {
-    if (!analysisResult) return
-    const sym = analysisResult.symbol.trim().toUpperCase()
-    if (!sym) return
-    setFetchMarketDataError(null)
-    setAnalysisChartInfo(null)
-
-    const steps: { label: string; run: () => Promise<{ ok: boolean; error?: string }> }[] = [
-      {
-        label: 'Enqueue daily OHLC (Massive → PostgreSQL)…',
-        run: async () => {
-          const res = await postMassiveSync('feed_stocks_aggregate', {
-            mode: 'custom_bars',
-            sync_all_periods: true,
-            custom_bars_period_group: 'daily',
-            custom_bars_sync_mode: 'daily_smart',
-            start_ms: 0,
-            end_ms: 0,
-            ticker: sym,
-          })
-          return { ok: res.ok, error: res.error ?? res.message }
-        },
-      },
-      {
-        label: 'Enqueue intraday OHLC 1m / 5m / 1h (Massive → PostgreSQL)…',
-        run: async () => {
-          const ymd = (await findLastNyTradingDayForWatchlist()) ?? nyCalendarDateIso()
-          const w = presetNyRegularSessionForDate(ymd)
-          if (!w) {
-            return { ok: false, error: 'Could not resolve a NY regular-session window for Massive intraday sync.' }
-          }
-          const res = await postMassiveSync('feed_stocks_aggregate', {
-            mode: 'custom_bars',
-            start_ms: w.startMs,
-            end_ms: w.endMs,
-            sync_all_periods: true,
-            custom_bars_period_group: 'intraday',
-            custom_bars_sync_mode: 'window',
-            ticker: sym,
-          })
-          return { ok: res.ok, error: res.error ?? res.message }
-        },
-      },
-    ]
-
-    let lastError: string | null = null
-    for (const { label, run } of steps) {
-      setFetchMarketDataStep(label)
-      try {
-        const out = await run()
-        if (!out.ok) {
-          lastError = out.error || 'Massive sync enqueue failed'
-          setFetchMarketDataError(lastError)
-          break
-        }
-      } catch (e) {
-        lastError = e instanceof Error ? e.message : 'Request failed'
-        setFetchMarketDataError(lastError)
-        break
-      }
-    }
-    setFetchMarketDataStep(null)
-    if (!lastError) {
-      setAnalysisChartInfo(
-        'Massive stock OHLC jobs were enqueued (daily + last NY session intraday). '
-          + 'Celery writes to stock_day / stock_min; wait for jobs to finish, then use Reload chart.',
-      )
-      try {
-        const stats = await fetchBarStats(sym)
-        setAnalysisResult({ symbol: sym, stats })
-        void loadAnalysisChartFromDb(sym, analysisChartPeriod)
-      } catch {
-        /* keep existing stats */
-      }
-    }
-  }
+  useEffect(() => {
+    setBarStatsInspector(null)
+  }, [primaryTab])
 
   const renderStockRows = (items: WatchlistItem[], opts?: { showSizeBtn?: boolean; hideCategory?: boolean; hideOpt?: boolean }) =>
     items.map((item) => {
@@ -1259,11 +1109,11 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                 type="button"
                 className="wl2-sym-btn"
                 onClick={() => {
-                  void handleAnalyze(item)
+                  handleAnalyze(item)
                   if (opts?.showSizeBtn && sym) void handleSizeCompute(sym)
                 }}
                 disabled={
-                  analysisLoadingSymbol !== null
+                  barStatsLoadingSymbol !== null
                   || (Boolean(opts?.showSizeBtn) && sizeComputeLoading && isSelected)
                 }
                 title={
@@ -1278,7 +1128,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                 }
               >
                 <span className="wl2-sym">{watchlistItemLabel(item)}</span>
-                {(analysisLoadingSymbol === sym
+                {(barStatsLoadingSymbol === symU
                   || (Boolean(opts?.showSizeBtn) && isSelected && sizeComputeLoading))
                   ? <span className="wl2-sym-btn__wait" aria-hidden> ⏳</span>
                   : null}
@@ -1356,13 +1206,13 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               <button
                 type="button"
                 className="wl2-sym-btn"
-                onClick={() => void handleAnalyze(item)}
-                disabled={analysisLoadingSymbol !== null}
+                onClick={() => handleAnalyze(item)}
+                disabled={barStatsLoadingSymbol !== null}
                 title="Bar stats for underlying (PostgreSQL stock_day / stock_min)"
                 aria-label={`Bar stats for underlying ${und}`}
               >
                 <span className="wl2-sym">{item.symbol || watchlistItemLabel(item)}</span>
-                {analysisLoadingSymbol === und ? <span className="wl2-sym-btn__wait" aria-hidden> ⏳</span> : null}
+                {barStatsLoadingSymbol === und.trim().toUpperCase() ? <span className="wl2-sym-btn__wait" aria-hidden> ⏳</span> : null}
               </button>
               {held && <span className="wl2-badge wl2-badge--hold" title="Holding">H</span>}
             </span>
@@ -1407,144 +1257,6 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
     })
 
   const addCategoryForHeader = watchingCategoryId != null ? watchingCategoryId : undefined
-
-  const barStatsAnalysisSection =
-    analysisResult == null ? null : (
-      <section className="wl2-analysis" aria-labelledby="wl2-analysis-head">
-        <div className="wl2-analysis__header">
-          <h3 id="wl2-analysis-head" className="wl2-analysis__title">
-            {analysisResult.symbol}
-            <span className="wl2-analysis__sub">bar stats</span>
-          </h3>
-          <button
-            type="button"
-            className="wl2-btn wl2-btn--primary"
-            disabled={!!fetchMarketDataStep}
-            onClick={() => handleFetchMarketData()}
-          >
-            {fetchMarketDataStep || 'Fetch from Massive'}
-          </button>
-          <button
-            type="button"
-            className="wl2-act-icon"
-            onClick={() => {
-              setAnalysisResult(null)
-              setAnalysisChartBars([])
-              setAnalysisChartError(null)
-              setAnalysisChartInfo(null)
-            }}
-            title="Close"
-          >
-            ✕
-          </button>
-        </div>
-        {fetchMarketDataError && (
-          <span className="wl2-error wl2-error--inline">{fetchMarketDataError}</span>
-        )}
-        <div className="wl2-analysis__grid">
-          <div className="wl2-analysis__kpi">
-            <span className="wl2-analysis__kpi-label">stock_day</span>
-            <span className="wl2-analysis__kpi-val">{analysisResult.stats.stock_day.toLocaleString()}</span>
-          </div>
-          {analysisResult.stats.stock_min && Object.entries(analysisResult.stats.stock_min).map(([period, count]) => (
-            <div className="wl2-analysis__kpi" key={period}>
-              <span className="wl2-analysis__kpi-label">{period}</span>
-              <span className="wl2-analysis__kpi-val">{(count as number).toLocaleString()}</span>
-            </div>
-          ))}
-        </div>
-
-        <div className="wl2-analysis__chart-toolbar">
-          <div className="wl2-analysis__chart-tabs" role="tablist" aria-label="K-line from database">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={analysisChartPeriod === '1 D'}
-              className={`wl2-analysis__chart-tab${analysisChartPeriod === '1 D' ? ' wl2-analysis__chart-tab--active' : ''}`}
-              onClick={() => setAnalysisChartPeriod('1 D')}
-            >
-              Daily
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={analysisChartPeriod === '1 min'}
-              className={`wl2-analysis__chart-tab${analysisChartPeriod === '1 min' ? ' wl2-analysis__chart-tab--active' : ''}`}
-              onClick={() => setAnalysisChartPeriod('1 min')}
-            >
-              1 min
-            </button>
-          </div>
-          <button
-            type="button"
-            className="wl2-btn wl2-btn--ghost wl2-analysis__chart-reload"
-            disabled={analysisChartLoading || !!fetchMarketDataStep}
-            onClick={() => void loadAnalysisChartFromDb(analysisResult.symbol, analysisChartPeriod)}
-          >
-            {analysisChartLoading ? 'Loading…' : 'Reload chart'}
-          </button>
-        </div>
-        <div className="wl2-analysis__chart-toggles" aria-label="Chart layers">
-          <label className="wl2-analysis__toggle">
-            <input type="checkbox" checked={chartShowVolume} onChange={e => setChartShowVolume(e.target.checked)} />
-            Volume
-          </label>
-          <label className="wl2-analysis__toggle">
-            <input type="checkbox" checked={chartShowVwap} onChange={e => setChartShowVwap(e.target.checked)} />
-            VWAP
-          </label>
-          <label className="wl2-analysis__toggle">
-            <input type="checkbox" checked={chartShowMacd} onChange={e => setChartShowMacd(e.target.checked)} />
-            MACD
-          </label>
-          <label className="wl2-analysis__toggle">
-            <input type="checkbox" checked={chartShowBb} onChange={e => setChartShowBb(e.target.checked)} />
-            Bollinger
-          </label>
-          <label className="wl2-analysis__toggle">
-            <input type="checkbox" checked={chartShowRsi} onChange={e => setChartShowRsi(e.target.checked)} />
-            RSI
-          </label>
-          <label className="wl2-analysis__toggle">
-            <input type="checkbox" checked={chartShowSr} onChange={e => setChartShowSr(e.target.checked)} />
-            S/R
-          </label>
-        </div>
-        <p className="wl2-analysis__chart-hint section-hint">
-          Candles are read from PostgreSQL <code>stock_day</code> / <code>stock_min</code> via <code>GET /bars</code> (Massive and other sources may be present).{' '}
-          <strong>Fetch from Massive</strong> enqueues Celery <code>feed_stocks_aggregate</code> jobs (daily + intraday); after they complete, use <strong>Reload chart</strong> or switch Daily / 1 min.
-        </p>
-        {analysisChartError && (
-          <p className="msg-error" role="alert" style={{ marginTop: 'var(--space-2)' }}>{analysisChartError}</p>
-        )}
-        {analysisChartInfo && !analysisChartError && (
-          <p className="section-hint" role="status" style={{ marginTop: 'var(--space-2)' }}>{analysisChartInfo}</p>
-        )}
-        {analysisChartLoading && analysisChartBarsSorted.length === 0 && (
-          <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>Loading chart from database…</p>
-        )}
-        {analysisChartBarsSorted.length > 0 ? (
-          <div className="wl2-analysis__chart-wrap">
-            <BarsCandlestickChart
-              bars={analysisChartBarsSorted}
-              period={analysisChartPeriod}
-              showVolume={chartShowVolume}
-              showVwap={chartShowVwap}
-              showMacd={chartShowMacd}
-              showBollinger={chartShowBb}
-              showRsi={chartShowRsi}
-              showSr={chartShowSr}
-            />
-          </div>
-        ) : (
-          !analysisChartLoading && !analysisChartInfo && (
-            <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>
-              No bars in the database for this symbol and period. Use <strong>Fetch from Massive</strong>, wait for jobs to finish, then reload the chart.
-            </p>
-          )
-        )}
-      </section>
-    )
 
   return (
     <div className="card process-section watchlist-page stock-screener-page wl2">
@@ -1799,8 +1511,6 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
           <p className="wl2-tier-hint">
             <strong>Step 2.</strong> The table lists stocks tagged <strong>Sizing</strong>. Pick any stock symbol from your watchlist below, then <strong>Move to Sizing</strong>.
           </p>
-
-          {barStatsAnalysisSection}
 
           <section
             className="wl2-sizing-dash"
@@ -3015,7 +2725,15 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
         </>
       )}
 
-      {primaryTab !== 'sizing' && barStatsAnalysisSection}
+      <RightInspectorDrawer open={barStatsInspector != null} ariaLabel="Stock bar stats and chart">
+        {barStatsInspector != null && (
+          <StockBarStatsPanel
+            symbol={barStatsInspector}
+            onClose={() => setBarStatsInspector(null)}
+            onBarStatsLoading={onBarStatsLoading}
+          />
+        )}
+      </RightInspectorDrawer>
 
       {/* ── Add option modal ── */}
       {addOptionForSymbol != null && (

@@ -1777,6 +1777,10 @@ export default function App() {
               currentView={portfolioView}
               onViewChange={setPortfolioView}
               showViewTabs={false}
+              onOpenOptionDiscovery={() => {
+                setActiveTab('research')
+                setResearchView('options')
+              }}
             />
           )}
         </>

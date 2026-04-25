@@ -12,6 +12,7 @@ import {
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import { StrategyOpportunityCombobox } from '../components/StrategyOpportunityCombobox'
 import { DetailSidebar } from '../components/DetailSidebar'
+import { INSTANCE_DETAIL_SIDEBAR_WIDTH_PX } from '../constants/instanceDetailSidebar'
 import { StrategyInstanceDetailPage } from './StrategyInstanceDetailPage'
 import { fmtUsd, parseOptionContractKey } from '../utils/format'
 import { computeRiskProfile, type RiskPosition } from '../utils/riskProfile'
@@ -92,9 +93,6 @@ function computeSymbolGroupRollup(
 }
 
 const INSTANCE_LIST_METRICS_CHUNK = 5
-
-/** Desktop floating detail sidebar width; list reserve uses the same token (see App.css). */
-const INSTANCE_FLOATING_SIDEBAR_WIDTH_PX = 960
 
 type InstanceListMetrics =
   | {
@@ -989,7 +987,7 @@ export function StrategyInstancesPage({
 
   const activeSidebarWidth = isCompareMode
     ? Math.min(1880, typeof window !== 'undefined' ? window.innerWidth - 40 : 1880)
-    : INSTANCE_FLOATING_SIDEBAR_WIDTH_PX
+    : INSTANCE_DETAIL_SIDEBAR_WIDTH_PX
 
   const floatingSidebarStyle: CSSProperties | undefined =
     effectiveDetailId != null && !isNarrowViewport
