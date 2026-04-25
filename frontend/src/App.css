@@ -26841,6 +26841,50 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   color: var(--color-text-muted);
   font-size: var(--text-small, 0.875rem);
 }
+
+/* ==========================================================================
+   Instance K-line Chart Section
+   ========================================================================== */
+.instance-detail-kline-section {
+  margin-top: 0;
+}
+
+.instance-detail-kline-section .instance-detail-exec-tab--active {
+  background: rgba(99, 102, 241, 0.18);
+  color: #a5b4fc;
+}
+
+/* ==========================================================================
+   Instance Compare Split (horizontal side-by-side)
+   ========================================================================== */
+.instance-compare-split {
+  display: flex;
+  align-items: flex-start;
+  min-height: 100%;
+  gap: 0;
+}
+
+.instance-compare-pane {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--space-4, 1rem);
+}
+
+.instance-compare-divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--color-border, rgba(255,255,255,0.1));
+  flex-shrink: 0;
+}
+
+/* Compare button: highlighted when this instance is the active compare target */
+.btn.instance-compare-btn--active {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: #a5b4fc;
+}
+
 /* ==========================================================================
    IV & Greeks Page
    ========================================================================== */

@@ -19,6 +19,7 @@ import { InstanceStructureCard } from './strategy/instanceDetail/InstanceStructu
 import { InstancePnLStrip } from './strategy/instanceDetail/InstancePnLStrip'
 import { InstanceExecutionsPanel } from './strategy/instanceDetail/InstanceExecutionsPanel'
 import { computeInstanceExecDerivedNetPnl } from './strategy/instanceDetail/instanceDetailPnlMetrics'
+import { InstanceKlineSection } from './strategy/instanceDetail/InstanceKlineSection'
 
 export interface StrategyInstanceDetailPageProps {
   strategyInstanceId: number
@@ -308,6 +309,14 @@ export function StrategyInstanceDetailPage({
               />
             </div>
           </div>
+
+          {executionsFinalForInstance.length > 0 &&
+            executionsFinalForInstance.some(e => e.symbol) && (
+            <InstanceKlineSection
+              symbol={(executionsFinalForInstance.find(e => e.symbol)?.symbol ?? '').toUpperCase()}
+              executions={executionsFinalForInstance}
+            />
+          )}
 
           {riskProfile && (
             <section className="detail-block risk-profile-section instance-detail-risk">

@@ -289,6 +289,7 @@ export function StrategyInstancesPage({
   /** Position status from final-book executions (matches Status column). */
   const [instStatusFilter, setInstStatusFilter] = useState<'' | 'open' | 'closed'>('')
   const [selectedInstanceId, setSelectedInstanceId] = useState<number | null>(null)
+  const [compareInstanceId, setCompareInstanceId] = useState<number | null>(null)
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [createOpportunityId, setCreateOpportunityId] = useState<number | ''>('')
   const [createAccountId, setCreateAccountId] = useState('')
@@ -711,7 +712,12 @@ export function StrategyInstancesPage({
 
   const closeInstanceDetail = useCallback(() => {
     setSelectedInstanceId(null)
+    setCompareInstanceId(null)
     window.location.hash = '#/strategies/instances'
+  }, [])
+
+  const toggleCompare = useCallback((instanceId: number) => {
+    setCompareInstanceId(prev => prev === instanceId ? null : instanceId)
   }, [])
 
   const instanceListTableBody = useMemo(() => {
@@ -864,20 +870,20 @@ export function StrategyInstancesPage({
                         <circle cx="12" cy="12" r="3" />
                       </svg>
                     </button>
-                    <a
-                      href={`#/strategies/instances/${row.strategy_instance_id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn btn-icon-small"
-                      title="Open in new tab"
-                      aria-label="Open in new tab"
-                    >
-                      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <path d="M7 17L17 7" />
-                        <path d="M8 7h9v9" />
-                        <path d="M17 13v4H7V7h4" />
-                      </svg>
-                    </a>
+                    {effectiveDetailId != null && effectiveDetailId !== row.strategy_instance_id && (
+                      <button
+                        type="button"
+                        className={`btn btn-icon-small${compareInstanceId === row.strategy_instance_id ? ' instance-compare-btn--active' : ''}`}
+                        title={compareInstanceId === row.strategy_instance_id ? 'Remove from comparison' : 'Compare side-by-side with current instance'}
+                        aria-label={compareInstanceId === row.strategy_instance_id ? 'Remove from comparison' : 'Compare side-by-side'}
+                        onClick={() => toggleCompare(row.strategy_instance_id)}
+                      >
+                        <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <rect x="3" y="3" width="7" height="18" rx="1" />
+                          <rect x="14" y="3" width="7" height="18" rx="1" />
+                        </svg>
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="btn btn-icon-small btn-icon-danger"
@@ -911,6 +917,9 @@ export function StrategyInstancesPage({
     toggleSymbolGroup,
     openDeleteConfirm,
     openInstanceDetail,
+    effectiveDetailId,
+    compareInstanceId,
+    toggleCompare,
   ])
 
   const openCreateModal = () => {
@@ -973,10 +982,19 @@ export function StrategyInstancesPage({
     }
   }
 
+  const isCompareMode =
+    compareInstanceId != null &&
+    effectiveDetailId != null &&
+    compareInstanceId !== effectiveDetailId
+
+  const activeSidebarWidth = isCompareMode
+    ? Math.min(1880, typeof window !== 'undefined' ? window.innerWidth - 40 : 1880)
+    : INSTANCE_FLOATING_SIDEBAR_WIDTH_PX
+
   const floatingSidebarStyle: CSSProperties | undefined =
     effectiveDetailId != null && !isNarrowViewport
       ? {
-          ['--instances-floating-sidebar-width' as string]: `${INSTANCE_FLOATING_SIDEBAR_WIDTH_PX}px`,
+          ['--instances-floating-sidebar-width' as string]: `${activeSidebarWidth}px`,
           ['--instances-floating-sidebar-reserve' as string]: `calc(var(--instances-floating-sidebar-width) + 4px)`,
         }
       : undefined
@@ -1366,15 +1384,37 @@ export function StrategyInstancesPage({
               mode={isNarrowViewport ? 'modal' : 'docked'}
               open={effectiveDetailId != null}
               onClose={closeInstanceDetail}
-              title={`Instance #${effectiveDetailId}`}
+              title={isCompareMode
+                ? `Instance #${effectiveDetailId} vs #${compareInstanceId}`
+                : `Instance #${effectiveDetailId}`}
               destroyOnClose={false}
-              width={INSTANCE_FLOATING_SIDEBAR_WIDTH_PX}
+              width={activeSidebarWidth}
             >
-              <StrategyInstanceDetailPage
-                strategyInstanceId={effectiveDetailId}
-                status={status}
-                embedded
-              />
+              {isCompareMode && compareInstanceId != null ? (
+                <div className="instance-compare-split">
+                  <div className="instance-compare-pane">
+                    <StrategyInstanceDetailPage
+                      strategyInstanceId={effectiveDetailId}
+                      status={status}
+                      embedded
+                    />
+                  </div>
+                  <div className="instance-compare-divider" />
+                  <div className="instance-compare-pane">
+                    <StrategyInstanceDetailPage
+                      strategyInstanceId={compareInstanceId}
+                      status={status}
+                      embedded
+                    />
+                  </div>
+                </div>
+              ) : (
+                <StrategyInstanceDetailPage
+                  strategyInstanceId={effectiveDetailId}
+                  status={status}
+                  embedded
+                />
+              )}
             </DetailSidebar>
           </div>
         )}
