@@ -320,14 +320,22 @@ export function findOppositeLegAttributionSource(trades: Execution[], ex: Execut
   return null
 }
 
-/** Sum of stock slippage vs close (signed qty × (price − close)) for one OPT execution id. */
+/** Sum of stock slippage vs close for one OPT execution id (matches Python `_slippage_usd_from_link_entry`). */
 export function stockSlippageTotalForOptionExecution(
   optionAccountExecutionsId: number | null | undefined,
   linkByOptionId: Record<number, OptionStockLinkSummary> | undefined,
 ): number {
   if (optionAccountExecutionsId == null || !linkByOptionId) return 0
-  const t = linkByOptionId[optionAccountExecutionsId]?.slippage_total
-  return t != null && Number.isFinite(t) ? t : 0
+  const summary = linkByOptionId[optionAccountExecutionsId]
+  if (!summary) return 0
+  const t = summary.slippage_total
+  if (t != null && Number.isFinite(t)) return t
+  let total = 0
+  for (const d of summary.links ?? []) {
+    const s = d.slippage_vs_close
+    if (s != null && Number.isFinite(s)) total += s
+  }
+  return total
 }
 
 /**

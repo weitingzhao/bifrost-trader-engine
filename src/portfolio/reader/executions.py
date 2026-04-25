@@ -1238,7 +1238,7 @@ def get_performance_instance_summary_only(
             max_loss=max_loss_v,
             avg_win=avg_win_v,
             avg_loss=avg_loss_v,
-            profit_factor=pf,
+            profit_factor=profit_factor_n,
         )
     except Exception as e:
         logger.debug("get_performance_instance_summary_only failed: %s", e)

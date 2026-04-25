@@ -8,7 +8,7 @@ const NET_QTY_EPS = 1e-9
 
 export function buildOptExecutionGroups(sourceExecutions: Execution[]): OptExecutionGroup[] {
   const opt = sourceExecutions.filter(e => (e.sec_type ?? '').toUpperCase() === 'OPT')
-  const key = (e: Execution) => `${e.contract_key ?? ''}|${e.strike ?? 0}`
+  const key = (e: Execution) => `${(e.contract_key ?? '').trim()}|${Number.isFinite(Number(e.strike)) ? Number(e.strike) : 0}`
   const groups = new Map<string, Execution[]>()
   for (const e of opt) {
     const k = key(e)

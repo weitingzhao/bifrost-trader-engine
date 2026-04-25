@@ -1,5 +1,6 @@
 import type { Execution } from '../../../types'
 import { fmtExpiry, parseOptionContractKey } from '../../../utils/format'
+import type { RiskProfile } from '../../../utils/riskProfile'
 import { buildOptExecutionGroups } from '../../portfolio/buildOptExecutionGroups'
 
 /** Same epsilon as {@link buildOptExecutionGroups} net flat check. */
@@ -106,6 +107,45 @@ export function underlyingCostSellOptUsd(executions: Execution[]): number {
   return underlyingCostSellBreakdown(executions).reduce((s, r) => s + r.lineUsd, 0)
 }
 
+/**
+ * Underlying cost per calendar-day unit of **hold time used** — same divisor as annual return:
+ * {@link underlyingCostSellOptUsd} ÷ {@link holdDaysForAnnualization}(`report_date` span in days).
+ * Null when there is no `report_date` span, or underlying cost is zero.
+ */
+export function underlyingCostUsdPerDayFromExecutions(executions: Execution[]): number | null {
+  const spanDays = holdTimeDaysFromReportDateSpan(executions)
+  if (spanDays == null) return null
+  const total = underlyingCostSellOptUsd(executions)
+  if (total <= 0) return null
+  const daysUsed = holdDaysForAnnualization(spanDays)
+  if (!Number.isFinite(daysUsed) || daysUsed <= 0) return null
+  return total / daysUsed
+}
+
+export function maxRiskUsdFromProfile(
+  riskProfile: RiskProfile | null | undefined,
+  underlyingCostFallback: number,
+): { value: number; source: 'max_loss' | 'underlying' } {
+  if (riskProfile && riskProfile.max_loss != null && Number.isFinite(riskProfile.max_loss) && riskProfile.max_loss < 0) {
+    return { value: Math.abs(riskProfile.max_loss), source: 'max_loss' }
+  }
+  return { value: Math.max(0, Number(underlyingCostFallback) || 0), source: 'underlying' }
+}
+
+/**
+ * Net PnL per day of **hold time used** — same divisor as {@link underlyingCostUsdPerDayFromExecutions} and annual return:
+ * `netPnl ÷ holdDaysForAnnualization(report_date span)`.
+ */
+export function netPnlUsdPerDayFromNetAndExecutions(netPnl: number | null | undefined, executions: Execution[]): number | null {
+  const spanDays = holdTimeDaysFromReportDateSpan(executions)
+  if (spanDays == null) return null
+  const net = Number(netPnl)
+  if (!Number.isFinite(net)) return null
+  const daysUsed = holdDaysForAnnualization(spanDays)
+  if (!Number.isFinite(daysUsed) || daysUsed <= 0) return null
+  return net / daysUsed
+}
+
 /** Min / max `report_date` (YYYY-MM-DD) across executions; null when none. */
 export function reportDateStartEnd(executions: Execution[]): { start: string | null; end: string | null } {
   let min: string | null = null
@@ -122,33 +162,51 @@ export function reportDateStartEnd(executions: Execution[]): { start: string | n
 }
 
 /**
- * Same annual return % as Instance Detail PnL strip: net × (365.25 ÷ hold days used) ÷ underlying cost × 100.
+ * Annual return % for Instance Detail / list: **(Net PnL/day ÷ Cost/day) × (365.25 ÷ hold days used) × 100**, where
+ * both per-day amounts use the same **hold days used** = `max(report_date span days, 1)`.
+ * Algebraically identical to `net × (365.25 ÷ days) ÷ underlying × 100` (since Net/day ÷ Cost/day = net ÷ underlying).
  * Returns null when report span or underlying cost blocks the calculation.
  */
 export function annualReturnDetailFromNetAndExecutions(
   netPnl: number | null | undefined,
   executions: Execution[],
+  maxRiskUsd?: number | null,
 ): {
   annualReturnPct: number
   net: number
-  underlyingCostUsd: number
+  denominatorUsd: number
+  denominatorSource: 'max_risk' | 'underlying'
   daysUsedForAnnual: number
   factor: number
+  netPnlPerDayUsd: number
+  denominatorPerDayUsd: number
 } | null {
   const holdSpanDays = holdTimeDaysFromReportDateSpan(executions)
   if (holdSpanDays == null) return null
-  const underlyingCostUsd = underlyingCostSellOptUsd(executions)
-  if (underlyingCostUsd <= 0) return null
+  const maxRiskN = Number(maxRiskUsd)
+  const useMaxRisk = Number.isFinite(maxRiskN) && maxRiskN > 0
+  const denominatorUsd = useMaxRisk ? maxRiskN : underlyingCostSellOptUsd(executions)
+  if (denominatorUsd <= 0) return null
   const net = Number(netPnl)
   if (!Number.isFinite(net)) return null
   const daysUsedForAnnual = holdDaysForAnnualization(holdSpanDays)
+  const netPnlPerDayUsd = net / daysUsedForAnnual
+  const denominatorPerDayUsd = denominatorUsd / daysUsedForAnnual
   const factor = 365.25 / daysUsedForAnnual
-  let annualReturnPct = (net * factor) / underlyingCostUsd
+  let annualReturnPct = (netPnlPerDayUsd / denominatorPerDayUsd) * factor * 100
   if (!Number.isFinite(annualReturnPct)) annualReturnPct = 0
-  annualReturnPct *= 100
   if (annualReturnPct > 999) annualReturnPct = 999
   if (annualReturnPct < -999) annualReturnPct = -999
-  return { annualReturnPct, net, underlyingCostUsd, daysUsedForAnnual, factor }
+  return {
+    annualReturnPct,
+    net,
+    denominatorUsd,
+    denominatorSource: useMaxRisk ? 'max_risk' : 'underlying',
+    daysUsedForAnnual,
+    factor,
+    netPnlPerDayUsd,
+    denominatorPerDayUsd,
+  }
 }
 
 /** Calendar span (min→max Report date) in days; null if no execution has `report_date`. */
@@ -260,4 +318,22 @@ export function instanceListEndDateColumn(
     sortUtcMs,
     cellTitle: report.end != null ? 'Max report date in the performance window.' : undefined,
   }
+}
+
+/**
+ * Net PnL for one strategy instance from the performance-book execution slice (same as Instance Detail /
+ * Executions Group PnL sum): OPT groups from {@link buildOptExecutionGroups}, non-OPT adds DB
+ * `realized_pnl`, plus prorated option–stock link slippage.
+ */
+export function computeInstanceExecDerivedNetPnl(sliced: Execution[], linkedStockSlippage: number): number | null {
+  if (sliced.length === 0) return null
+  const groups = buildOptExecutionGroups(sliced)
+  let sum = groups.reduce((s, g) => s + g.realized_pnl, 0)
+  for (const e of sliced) {
+    if ((e.sec_type ?? '').toUpperCase() === 'OPT') continue
+    const rp = e.realized_pnl
+    if (rp != null && Number.isFinite(Number(rp))) sum += Number(rp)
+  }
+  const slip = Number.isFinite(linkedStockSlippage) ? linkedStockSlippage : 0
+  return sum + slip
 }

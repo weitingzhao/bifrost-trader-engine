@@ -91,8 +91,9 @@ export interface WinRateStructureRow {
   total_instances: number
   profit_trades: number
   loss_trades: number
+  /** Sum of execution-derived Net PnL for instances with strictly positive net (same rule for every structure). */
   total_profit: number | null
-  /** Sum of each instance's worst losing trade (performance summary max_loss), same scope as structure / all. */
+  /** Sum of execution-derived Net PnL for instances with strictly negative net only (same per-instance net as Instance Detail). */
   total_loss: number | null
   /** Win Rate UI: underlying cost on net-PnL-positive instances (strike×|qty|×100, sell OPT). */
   profit_investment: number | null
@@ -100,6 +101,10 @@ export interface WinRateStructureRow {
   loss_investment: number | null
   /** Win Rate UI: profit_investment + loss_investment. */
   total_investment: number | null
+  /** Sum of per-instance Max Risk denominator (prefers |risk max_loss|; fallback underlying cost). */
+  total_max_risk: number | null
+  /** Structure-level return % = total net PnL / total_max_risk × 100. */
+  structure_return_pct: number | null
   profit_avg_pct: number | null
   loss_avg_pct: number | null
   single_max_loss_pct: number | null

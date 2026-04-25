@@ -13,21 +13,23 @@ import {
   instanceOptionStockSlippageAdjustment,
   sliceExecutionForInstanceOptView,
 } from './portfolio/ledgerOptHelpers'
-import { buildOptExecutionGroups } from './portfolio/buildOptExecutionGroups'
 import { InstanceDetailHeader } from './strategy/instanceDetail/InstanceDetailHeader'
 import { InstanceOverviewCard } from './strategy/instanceDetail/InstanceOverviewCard'
 import { InstanceStructureCard } from './strategy/instanceDetail/InstanceStructureCard'
 import { InstancePnLStrip } from './strategy/instanceDetail/InstancePnLStrip'
 import { InstanceExecutionsPanel } from './strategy/instanceDetail/InstanceExecutionsPanel'
+import { computeInstanceExecDerivedNetPnl } from './strategy/instanceDetail/instanceDetailPnlMetrics'
 
 export interface StrategyInstanceDetailPageProps {
   strategyInstanceId: number
   status?: StatusResponse | null
+  embedded?: boolean
 }
 
 export function StrategyInstanceDetailPage({
   strategyInstanceId,
   status,
+  embedded = false,
 }: StrategyInstanceDetailPageProps) {
   const [instance, setInstance] = useState<StrategyInstance | null>(null)
   const [instanceLoading, setInstanceLoading] = useState(true)
@@ -176,18 +178,11 @@ export function StrategyInstanceDetailPage({
     [executionsFinal, strategyInstanceId, optionStockLinkByOptionId],
   )
 
-  /** Net PnL computed bottom-up from execution group PnLs (sell premium - buy cost), plus stock slippage attribution. */
-  const execDerivedNetPnl = useMemo(() => {
-    if (executionsFinalForInstance.length === 0) return null
-    const groups = buildOptExecutionGroups(executionsFinalForInstance)
-    let sum = groups.reduce((s, g) => s + g.realized_pnl, 0)
-    for (const e of executionsFinalForInstance) {
-      if ((e.sec_type ?? '').toUpperCase() === 'OPT') continue
-      const rp = e.realized_pnl
-      if (rp != null && Number.isFinite(Number(rp))) sum += Number(rp)
-    }
-    return sum + optionStockSlippageAdjustmentForInstance
-  }, [executionsFinalForInstance, optionStockSlippageAdjustmentForInstance])
+  /** Net PnL from execution slice + prorated option–stock slippage (authoritative vs broker summary). */
+  const execDerivedNetPnl = useMemo(
+    () => computeInstanceExecDerivedNetPnl(executionsFinalForInstance, optionStockSlippageAdjustmentForInstance),
+    [executionsFinalForInstance, optionStockSlippageAdjustmentForInstance],
+  )
 
   const executionsFinalSplitMetaByExecId = useMemo(() => {
     const m = new Map<number, { ratioLabel: string; tooltip: string }>()
@@ -278,14 +273,14 @@ export function StrategyInstanceDetailPage({
   }, [executionsFinalForInstance, structure, status?.portfolio?.accounts])
 
   return (
-    <div className="card process-section instance-detail-page">
+    <div className={`${embedded ? '' : 'card process-section '}instance-detail-page${embedded ? ' instance-detail-page-embedded' : ''}`}>
       {instanceLoading ? (
         <p>Loading instance…</p>
       ) : instance == null ? (
         <p className="error-message">{instanceError ?? 'Instance not found.'}</p>
       ) : (
         <>
-          <InstanceDetailHeader strategyInstanceId={strategyInstanceId} instance={instance} />
+          {!embedded && <InstanceDetailHeader strategyInstanceId={strategyInstanceId} instance={instance} />}
 
           {instanceError != null && <p className="error-message">{instanceError}</p>}
 
@@ -309,6 +304,7 @@ export function StrategyInstanceDetailPage({
                 optionStockSlippageAdjustment={optionStockSlippageAdjustmentForInstance}
                 linkedStockPnlRows={linkedStockPnlRows}
                 execDerivedNetPnl={execDerivedNetPnl}
+                riskProfile={riskProfile}
               />
             </div>
           </div>

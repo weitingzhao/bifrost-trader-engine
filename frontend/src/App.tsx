@@ -572,8 +572,8 @@ export default function App() {
     return tracked
   }, [])
 
-  const isDetailMode =
-    activeTab === 'strategy' && strategyView === 'instances' && urlStrategyInstanceId != null
+  /** Instance detail now renders as in-page sidebar; keep global shell/polling behavior unchanged. */
+  const isDetailMode = false
 
   useEffect(() => {
     loadStatus()

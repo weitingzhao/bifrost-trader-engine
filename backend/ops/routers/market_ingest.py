@@ -7,7 +7,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Request
 from fastapi.responses import JSONResponse
 
 from backend.ops.ib_operator_rpc import ib_operator_disconnect_all_sync
@@ -31,6 +31,57 @@ from backend.ops.routers.workers import _audit, _require_role
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["ops-market-ingest"])
+
+_ENSURE_START_STOP_TIMEOUT_SEC = 30
+_ENSURE_START_START_TIMEOUT_SEC = 45
+
+
+async def _ensure_start_background(
+    exc: Any,
+    unit: str,
+    sid: str,
+    rurl: Optional[str],
+    meta_key: str,
+    ops_profile: Optional[str],
+) -> None:
+    """Stop any running instance of `unit` then start fresh.
+
+    Runs as a FastAPI BackgroundTask so the HTTP response is returned immediately.
+    Stop step is best-effort; we proceed to start even if stop times out.
+    """
+    # Step 1: check if currently running and stop it
+    try:
+        if hasattr(exc, "systemctl_is_active"):
+            active = await exc.systemctl_is_active(unit)
+            if active == "active":
+                logger.info("ensure_start: %s is active — stopping before re-start", unit)
+                try:
+                    await exc._systemctl("stop", unit, timeout=_ENSURE_START_STOP_TIMEOUT_SEC)  # noqa: SLF001
+                    await asyncio.sleep(1)
+                except Exception as stop_err:
+                    logger.warning(
+                        "ensure_start: stop %s failed (%s); proceeding to start anyway", unit, stop_err
+                    )
+    except Exception as check_err:
+        logger.warning("ensure_start: is-active check failed for %s: %s", unit, check_err)
+
+    # Step 2: start
+    try:
+        await exc._systemctl("start", unit, timeout=_ENSURE_START_START_TIMEOUT_SEC)  # noqa: SLF001
+        logger.info("ensure_start: %s started successfully", unit)
+    except Exception as start_err:
+        logger.warning("ensure_start: start %s failed: %s", unit, start_err)
+        return
+
+    # Step 3: write Redis control lease
+    if rurl and meta_key and ops_profile:
+        try:
+            if sid == "trading_engine":
+                await asyncio.to_thread(write_trading_engine_ops_lease, rurl, meta_key, ops_profile)
+            else:
+                await asyncio.to_thread(write_control_env, rurl, meta_key, ops_profile)
+        except Exception as redis_err:
+            logger.warning("ensure_start: redis post-start update failed for %s: %s", unit, redis_err)
 
 
 def _executor(request: Request):
@@ -94,6 +145,7 @@ async def market_ingest_services(request: Request) -> Dict[str, Any]:
 @router.post("/ops/market-ingest/control")
 async def market_ingest_control(
     request: Request,
+    background_tasks: BackgroundTasks,
     body: MarketIngestControlRequest = Body(...),
 ) -> Any:
     from backend.ops.routers.workers import _role
@@ -151,12 +203,13 @@ async def market_ingest_control(
             )
 
     # Exclusive writer: no lease but Redis health still shows a fresh connected snapshot (other stack).
+    # RESET intentionally excluded — it is a force-restart that should succeed even when stale
+    # health data is present (e.g. previous run died without clearing its Redis health key).
     if (
         action
         in (
             MarketIngestAction.START,
             MarketIngestAction.RESTART,
-            MarketIngestAction.RESET,
         )
         and rurl
         and meta_key
@@ -186,6 +239,24 @@ async def market_ingest_control(
                 status_code=409,
                 content={"ok": False, "error": msg},
             )
+
+    # START: fire-and-forget — stop any running instance then start fresh in background.
+    # Returns immediately so nginx/proxy timeouts cannot block the browser.
+    if action == MarketIngestAction.START:
+        background_tasks.add_task(
+            _ensure_start_background, exc, unit, sid, rurl, meta_key, ops_profile
+        )
+        _audit(
+            request,
+            "market_ingest_start",
+            f"{body.service_id}:{unit}",
+            "queued",
+            detail="stop-if-running + start dispatched to background task",
+        )
+        return JSONResponse(
+            content={"ok": True, "queued": True, "service_id": body.service_id, "action": "start"},
+            headers={"X-Accel-Buffering": "no"},
+        )
 
     try:
         if action == MarketIngestAction.RESET:
@@ -222,6 +293,7 @@ async def market_ingest_control(
         return JSONResponse(
             status_code=500,
             content={"ok": False, "error": str(e)},
+            headers={"X-Accel-Buffering": "no"},
         )
 
     if rurl and meta_key:
@@ -239,7 +311,6 @@ async def market_ingest_control(
                 ops_profile
                 and action
                 in (
-                    MarketIngestAction.START,
                     MarketIngestAction.RESTART,
                     MarketIngestAction.RESET,
                 )
@@ -271,6 +342,7 @@ async def market_ingest_control(
                         f"{e}"
                     ),
                 },
+                headers={"X-Accel-Buffering": "no"},
             )
 
     _audit(
@@ -279,7 +351,10 @@ async def market_ingest_control(
         f"{body.service_id}:{unit}",
         "success",
     )
-    return {"ok": True, "service_id": body.service_id, "action": body.action.value, "result": result}
+    return JSONResponse(
+        content={"ok": True, "service_id": body.service_id, "action": body.action.value, "result": result},
+        headers={"X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/ops/market-ingest/clear-conflict-leases")

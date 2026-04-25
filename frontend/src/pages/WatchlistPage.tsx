@@ -1408,6 +1408,144 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
 
   const addCategoryForHeader = watchingCategoryId != null ? watchingCategoryId : undefined
 
+  const barStatsAnalysisSection =
+    analysisResult == null ? null : (
+      <section className="wl2-analysis" aria-labelledby="wl2-analysis-head">
+        <div className="wl2-analysis__header">
+          <h3 id="wl2-analysis-head" className="wl2-analysis__title">
+            {analysisResult.symbol}
+            <span className="wl2-analysis__sub">bar stats</span>
+          </h3>
+          <button
+            type="button"
+            className="wl2-btn wl2-btn--primary"
+            disabled={!!fetchMarketDataStep}
+            onClick={() => handleFetchMarketData()}
+          >
+            {fetchMarketDataStep || 'Fetch from Massive'}
+          </button>
+          <button
+            type="button"
+            className="wl2-act-icon"
+            onClick={() => {
+              setAnalysisResult(null)
+              setAnalysisChartBars([])
+              setAnalysisChartError(null)
+              setAnalysisChartInfo(null)
+            }}
+            title="Close"
+          >
+            ✕
+          </button>
+        </div>
+        {fetchMarketDataError && (
+          <span className="wl2-error wl2-error--inline">{fetchMarketDataError}</span>
+        )}
+        <div className="wl2-analysis__grid">
+          <div className="wl2-analysis__kpi">
+            <span className="wl2-analysis__kpi-label">stock_day</span>
+            <span className="wl2-analysis__kpi-val">{analysisResult.stats.stock_day.toLocaleString()}</span>
+          </div>
+          {analysisResult.stats.stock_min && Object.entries(analysisResult.stats.stock_min).map(([period, count]) => (
+            <div className="wl2-analysis__kpi" key={period}>
+              <span className="wl2-analysis__kpi-label">{period}</span>
+              <span className="wl2-analysis__kpi-val">{(count as number).toLocaleString()}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="wl2-analysis__chart-toolbar">
+          <div className="wl2-analysis__chart-tabs" role="tablist" aria-label="K-line from database">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={analysisChartPeriod === '1 D'}
+              className={`wl2-analysis__chart-tab${analysisChartPeriod === '1 D' ? ' wl2-analysis__chart-tab--active' : ''}`}
+              onClick={() => setAnalysisChartPeriod('1 D')}
+            >
+              Daily
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={analysisChartPeriod === '1 min'}
+              className={`wl2-analysis__chart-tab${analysisChartPeriod === '1 min' ? ' wl2-analysis__chart-tab--active' : ''}`}
+              onClick={() => setAnalysisChartPeriod('1 min')}
+            >
+              1 min
+            </button>
+          </div>
+          <button
+            type="button"
+            className="wl2-btn wl2-btn--ghost wl2-analysis__chart-reload"
+            disabled={analysisChartLoading || !!fetchMarketDataStep}
+            onClick={() => void loadAnalysisChartFromDb(analysisResult.symbol, analysisChartPeriod)}
+          >
+            {analysisChartLoading ? 'Loading…' : 'Reload chart'}
+          </button>
+        </div>
+        <div className="wl2-analysis__chart-toggles" aria-label="Chart layers">
+          <label className="wl2-analysis__toggle">
+            <input type="checkbox" checked={chartShowVolume} onChange={e => setChartShowVolume(e.target.checked)} />
+            Volume
+          </label>
+          <label className="wl2-analysis__toggle">
+            <input type="checkbox" checked={chartShowVwap} onChange={e => setChartShowVwap(e.target.checked)} />
+            VWAP
+          </label>
+          <label className="wl2-analysis__toggle">
+            <input type="checkbox" checked={chartShowMacd} onChange={e => setChartShowMacd(e.target.checked)} />
+            MACD
+          </label>
+          <label className="wl2-analysis__toggle">
+            <input type="checkbox" checked={chartShowBb} onChange={e => setChartShowBb(e.target.checked)} />
+            Bollinger
+          </label>
+          <label className="wl2-analysis__toggle">
+            <input type="checkbox" checked={chartShowRsi} onChange={e => setChartShowRsi(e.target.checked)} />
+            RSI
+          </label>
+          <label className="wl2-analysis__toggle">
+            <input type="checkbox" checked={chartShowSr} onChange={e => setChartShowSr(e.target.checked)} />
+            S/R
+          </label>
+        </div>
+        <p className="wl2-analysis__chart-hint section-hint">
+          Candles are read from PostgreSQL <code>stock_day</code> / <code>stock_min</code> via <code>GET /bars</code> (Massive and other sources may be present).{' '}
+          <strong>Fetch from Massive</strong> enqueues Celery <code>feed_stocks_aggregate</code> jobs (daily + intraday); after they complete, use <strong>Reload chart</strong> or switch Daily / 1 min.
+        </p>
+        {analysisChartError && (
+          <p className="msg-error" role="alert" style={{ marginTop: 'var(--space-2)' }}>{analysisChartError}</p>
+        )}
+        {analysisChartInfo && !analysisChartError && (
+          <p className="section-hint" role="status" style={{ marginTop: 'var(--space-2)' }}>{analysisChartInfo}</p>
+        )}
+        {analysisChartLoading && analysisChartBarsSorted.length === 0 && (
+          <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>Loading chart from database…</p>
+        )}
+        {analysisChartBarsSorted.length > 0 ? (
+          <div className="wl2-analysis__chart-wrap">
+            <BarsCandlestickChart
+              bars={analysisChartBarsSorted}
+              period={analysisChartPeriod}
+              showVolume={chartShowVolume}
+              showVwap={chartShowVwap}
+              showMacd={chartShowMacd}
+              showBollinger={chartShowBb}
+              showRsi={chartShowRsi}
+              showSr={chartShowSr}
+            />
+          </div>
+        ) : (
+          !analysisChartLoading && !analysisChartInfo && (
+            <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>
+              No bars in the database for this symbol and period. Use <strong>Fetch from Massive</strong>, wait for jobs to finish, then reload the chart.
+            </p>
+          )
+        )}
+      </section>
+    )
+
   return (
     <div className="card process-section watchlist-page stock-screener-page wl2">
       {/* ── Header bar ── */}
@@ -1662,11 +1800,10 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
             <strong>Step 2.</strong> The table lists stocks tagged <strong>Sizing</strong>. Pick any stock symbol from your watchlist below, then <strong>Move to Sizing</strong>.
           </p>
 
-          <div
-            className={`wl2-sizing-tab-reorder${selectedSizingSymbol ? ' wl2-sizing-tab-reorder--symbol-focus' : ''}`}
-          >
+          {barStatsAnalysisSection}
+
           <section
-            className="wl2-sizing-dash wl2-sizing-tab-reorder__portfolio"
+            className="wl2-sizing-dash"
             aria-labelledby="wl2-sizing-dash-portfolio-risk-power-head"
           >
             <div className="wl2-sizing-dash__title-row">
@@ -2195,9 +2332,8 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
 
           </section>
 
-          <div
-            className="wl2-sizing-tab-reorder__workflow wl2-sizing-workflow-split"
-          >
+          <div className="wl2-sizing-sheet-order-row">
+            <div className="wl2-sizing-sheet-order-row__sheet">
           <section className="wl2-sizing-dash wl2-sizing-dash--workflow-col">
             <div className="wl2-symbol-section" aria-labelledby="wl2-sizing-symbol-sheet-head">
             <h5 id="wl2-sizing-symbol-sheet-head" className="wl2-sizing-dash__subtitle wl2-sizing-dash__subtitle--workflow">
@@ -2420,145 +2556,13 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
             )}
             </div>
 
-            <div className="wl2-sizing-sheet-block" aria-labelledby="wl2-sizing-workflow-head">
-              <h4 id="wl2-sizing-workflow-head" className="wl2-sizing-dash__title">
-                Sizing sheet
-              </h4>
-
-              <div className="wl2-sizing-promote wl2-sizing-promote--inline">
-                <div className="wl2-promote-combobox wl2-promote-combobox--compact" ref={promoteComboboxRef}>
-                  <button
-                    type="button"
-                    className="wl2-promote-combobox__trigger"
-                    id="wl2-promote-combobox-trigger"
-                    aria-label="pick new symbol — choose a watchlist row to move to Sizing"
-                    aria-expanded={promotePickerOpen}
-                    aria-controls="wl2-promote-listbox"
-                    aria-haspopup="listbox"
-                    onClick={() => {
-                      setPromotePickerOpen(o => {
-                        const next = !o
-                        if (!next) setPromoteFilter('')
-                        return next
-                      })
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'Escape' && promotePickerOpen) {
-                        e.preventDefault()
-                        closePromotePicker()
-                      }
-                    }}
-                  >
-                    <span
-                      className={`wl2-promote-combobox__value${promoteSelectedItem ? '' : ' wl2-promote-combobox__value--placeholder'}`}
-                      title={
-                        promoteSelectedItem
-                          ? watchlistItemLabel(promoteSelectedItem)
-                          : 'pick new symbol'
-                      }
-                    >
-                      {promoteSelectedItem
-                        ? watchlistItemLabel(promoteSelectedItem)
-                        : 'pick new symbol'}
-                    </span>
-                    <span className="wl2-promote-combobox__chev" aria-hidden>
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </span>
-                  </button>
-                  {promotePickerOpen && (
-                    <ul id="wl2-promote-listbox" role="listbox" className="wl2-promote-combobox__menu" aria-labelledby="wl2-promote-combobox-trigger">
-                      <li className="wl2-promote-combobox__filter-li" role="presentation" onPointerDown={e => e.preventDefault()}>
-                        <input
-                          type="search"
-                          className="wl2-promote-combobox__filter"
-                          value={promoteFilter}
-                          onChange={e => setPromoteFilter(e.target.value)}
-                          placeholder="Filter symbols…"
-                          autoComplete="off"
-                          spellCheck={false}
-                          aria-label="Filter watchlist symbols"
-                          autoFocus
-                          onKeyDown={e => {
-                            if (e.key === 'Escape') {
-                              e.preventDefault()
-                              e.stopPropagation()
-                              closePromotePicker()
-                            }
-                          }}
-                        />
-                      </li>
-                      {promoteFilter.trim() === '' && stocksForPromoteToSizing.length > 0 && (
-                        <li
-                          role="option"
-                          aria-selected={promoteContractKey.trim() === ''}
-                          className={`wl2-promote-combobox__opt wl2-promote-combobox__opt--placeholder${promoteContractKey.trim() === '' ? ' wl2-promote-combobox__opt--active' : ''}`}
-                          onPointerDown={e => e.preventDefault()}
-                          onClick={() => {
-                            setPromoteContractKey('')
-                            closePromotePicker()
-                          }}
-                        >
-                          pick new symbol
-                        </li>
-                      )}
-                      {stocksForPromoteMenu.length === 0 ? (
-                        <li className="wl2-promote-combobox__opt wl2-promote-combobox__opt--nomatch" role="presentation">
-                          {promoteFilter.trim() ? 'No matches' : 'No symbols in your watchlist'}
-                        </li>
-                      ) : (
-                        stocksForPromoteMenu.map(item => {
-                          const key = item.contract_key.trim()
-                          const sel = promoteContractKey.trim() === key
-                          return (
-                            <li
-                              key={key}
-                              role="option"
-                              aria-selected={sel}
-                              className={`wl2-promote-combobox__opt${sel ? ' wl2-promote-combobox__opt--active' : ''}`}
-                              onPointerDown={e => e.preventDefault()}
-                              onClick={() => {
-                                setPromoteContractKey(key)
-                                closePromotePicker()
-                              }}
-                            >
-                              {watchlistItemLabel(item)}
-                            </li>
-                          )
-                        })
-                      )}
-                    </ul>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  className="wl2-btn wl2-btn--primary wl2-btn--icon"
-                  disabled={!promoteContractKey.trim() || sizingCategoryId == null || addPending}
-                  onClick={() => void handlePromoteToSizing()}
-                  title="Move to Sizing"
-                  aria-label="Move to Sizing"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                    <path
-                      d="M5 12h12M13 6l6 6-6 6"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-              </div>
-              {sizingCategoryId == null && (
-                <p className="wl2-tier-hint wl2-tier-hint--warn">The <strong>Sizing</strong> category is missing; you cannot promote rows yet.</p>
-              )}
-            </div>
           </section>
+            </div>
 
-          {/* ── Order sizing (selected symbol) below Sizing sheet ── */}
+            <div className="wl2-sizing-sheet-order-row__order">
+          {/* ── Order sizing (selected symbol) ── */}
           {selectedSizingSymbol && (
-            <div className="wl2-sizing-workflow-split__panel">
+            <div className="wl2-sizing-sheet-order-row__panel">
             <div className="wl2-sizing-panel">
               <div className="wl2-sizing-panel__head">
                 <h4 className="wl2-sizing-panel__title">Order sizing — {selectedSizingSymbol}</h4>
@@ -2825,6 +2829,141 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
           )}
           </div>
           </div>
+
+          <div className="wl2-sizing-sheet-block wl2-sizing-sheet-block--promote" aria-labelledby="wl2-sizing-workflow-head">
+            <h4 id="wl2-sizing-workflow-head" className="wl2-sizing-dash__title">
+              Sizing sheet
+            </h4>
+
+            <div className="wl2-sizing-promote wl2-sizing-promote--inline">
+              <div className="wl2-promote-combobox wl2-promote-combobox--compact" ref={promoteComboboxRef}>
+                <button
+                  type="button"
+                  className="wl2-promote-combobox__trigger"
+                  id="wl2-promote-combobox-trigger"
+                  aria-label="pick new symbol — choose a watchlist row to move to Sizing"
+                  aria-expanded={promotePickerOpen}
+                  aria-controls="wl2-promote-listbox"
+                  aria-haspopup="listbox"
+                  onClick={() => {
+                    setPromotePickerOpen(o => {
+                      const next = !o
+                      if (!next) setPromoteFilter('')
+                      return next
+                    })
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape' && promotePickerOpen) {
+                      e.preventDefault()
+                      closePromotePicker()
+                    }
+                  }}
+                >
+                  <span
+                    className={`wl2-promote-combobox__value${promoteSelectedItem ? '' : ' wl2-promote-combobox__value--placeholder'}`}
+                    title={
+                      promoteSelectedItem
+                        ? watchlistItemLabel(promoteSelectedItem)
+                        : 'pick new symbol'
+                    }
+                  >
+                    {promoteSelectedItem
+                      ? watchlistItemLabel(promoteSelectedItem)
+                      : 'pick new symbol'}
+                  </span>
+                  <span className="wl2-promote-combobox__chev" aria-hidden>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                </button>
+                {promotePickerOpen && (
+                  <ul id="wl2-promote-listbox" role="listbox" className="wl2-promote-combobox__menu" aria-labelledby="wl2-promote-combobox-trigger">
+                    <li className="wl2-promote-combobox__filter-li" role="presentation" onPointerDown={e => e.preventDefault()}>
+                      <input
+                        type="search"
+                        className="wl2-promote-combobox__filter"
+                        value={promoteFilter}
+                        onChange={e => setPromoteFilter(e.target.value)}
+                        placeholder="Filter symbols…"
+                        autoComplete="off"
+                        spellCheck={false}
+                        aria-label="Filter watchlist symbols"
+                        autoFocus
+                        onKeyDown={e => {
+                          if (e.key === 'Escape') {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            closePromotePicker()
+                          }
+                        }}
+                      />
+                    </li>
+                    {promoteFilter.trim() === '' && stocksForPromoteToSizing.length > 0 && (
+                      <li
+                        role="option"
+                        aria-selected={promoteContractKey.trim() === ''}
+                        className={`wl2-promote-combobox__opt wl2-promote-combobox__opt--placeholder${promoteContractKey.trim() === '' ? ' wl2-promote-combobox__opt--active' : ''}`}
+                        onPointerDown={e => e.preventDefault()}
+                        onClick={() => {
+                          setPromoteContractKey('')
+                          closePromotePicker()
+                        }}
+                      >
+                        pick new symbol
+                      </li>
+                    )}
+                    {stocksForPromoteMenu.length === 0 ? (
+                      <li className="wl2-promote-combobox__opt wl2-promote-combobox__opt--nomatch" role="presentation">
+                        {promoteFilter.trim() ? 'No matches' : 'No symbols in your watchlist'}
+                      </li>
+                    ) : (
+                      stocksForPromoteMenu.map(item => {
+                        const key = item.contract_key.trim()
+                        const sel = promoteContractKey.trim() === key
+                        return (
+                          <li
+                            key={key}
+                            role="option"
+                            aria-selected={sel}
+                            className={`wl2-promote-combobox__opt${sel ? ' wl2-promote-combobox__opt--active' : ''}`}
+                            onPointerDown={e => e.preventDefault()}
+                            onClick={() => {
+                              setPromoteContractKey(key)
+                              closePromotePicker()
+                            }}
+                          >
+                            {watchlistItemLabel(item)}
+                          </li>
+                        )
+                      })
+                    )}
+                  </ul>
+                )}
+              </div>
+              <button
+                type="button"
+                className="wl2-btn wl2-btn--primary wl2-btn--icon"
+                disabled={!promoteContractKey.trim() || sizingCategoryId == null || addPending}
+                onClick={() => void handlePromoteToSizing()}
+                title="Move to Sizing"
+                aria-label="Move to Sizing"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                  <path
+                    d="M5 12h12M13 6l6 6-6 6"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+            {sizingCategoryId == null && (
+              <p className="wl2-tier-hint wl2-tier-hint--warn">The <strong>Sizing</strong> category is missing; you cannot promote rows yet.</p>
+            )}
+          </div>
         </>
       ) : (
         <>
@@ -2876,143 +3015,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
         </>
       )}
 
-      {/* ── Analysis panel ── */}
-      {analysisResult && (
-        <section className="wl2-analysis" aria-labelledby="wl2-analysis-head">
-          <div className="wl2-analysis__header">
-            <h3 id="wl2-analysis-head" className="wl2-analysis__title">
-              {analysisResult.symbol}
-              <span className="wl2-analysis__sub">bar stats</span>
-            </h3>
-            <button
-              type="button"
-              className="wl2-btn wl2-btn--primary"
-              disabled={!!fetchMarketDataStep}
-              onClick={() => handleFetchMarketData()}
-            >
-              {fetchMarketDataStep || 'Fetch from Massive'}
-            </button>
-            <button
-              type="button"
-              className="wl2-act-icon"
-              onClick={() => {
-                setAnalysisResult(null)
-                setAnalysisChartBars([])
-                setAnalysisChartError(null)
-                setAnalysisChartInfo(null)
-              }}
-              title="Close"
-            >
-              ✕
-            </button>
-          </div>
-          {fetchMarketDataError && (
-            <span className="wl2-error wl2-error--inline">{fetchMarketDataError}</span>
-          )}
-          <div className="wl2-analysis__grid">
-            <div className="wl2-analysis__kpi">
-              <span className="wl2-analysis__kpi-label">stock_day</span>
-              <span className="wl2-analysis__kpi-val">{analysisResult.stats.stock_day.toLocaleString()}</span>
-            </div>
-            {analysisResult.stats.stock_min && Object.entries(analysisResult.stats.stock_min).map(([period, count]) => (
-              <div className="wl2-analysis__kpi" key={period}>
-                <span className="wl2-analysis__kpi-label">{period}</span>
-                <span className="wl2-analysis__kpi-val">{(count as number).toLocaleString()}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="wl2-analysis__chart-toolbar">
-            <div className="wl2-analysis__chart-tabs" role="tablist" aria-label="K-line from database">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={analysisChartPeriod === '1 D'}
-                className={`wl2-analysis__chart-tab${analysisChartPeriod === '1 D' ? ' wl2-analysis__chart-tab--active' : ''}`}
-                onClick={() => setAnalysisChartPeriod('1 D')}
-              >
-                Daily
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={analysisChartPeriod === '1 min'}
-                className={`wl2-analysis__chart-tab${analysisChartPeriod === '1 min' ? ' wl2-analysis__chart-tab--active' : ''}`}
-                onClick={() => setAnalysisChartPeriod('1 min')}
-              >
-                1 min
-              </button>
-            </div>
-            <button
-              type="button"
-              className="wl2-btn wl2-btn--ghost wl2-analysis__chart-reload"
-              disabled={analysisChartLoading || !!fetchMarketDataStep}
-              onClick={() => void loadAnalysisChartFromDb(analysisResult.symbol, analysisChartPeriod)}
-            >
-              {analysisChartLoading ? 'Loading…' : 'Reload chart'}
-            </button>
-          </div>
-          <div className="wl2-analysis__chart-toggles" aria-label="Chart layers">
-            <label className="wl2-analysis__toggle">
-              <input type="checkbox" checked={chartShowVolume} onChange={e => setChartShowVolume(e.target.checked)} />
-              Volume
-            </label>
-            <label className="wl2-analysis__toggle">
-              <input type="checkbox" checked={chartShowVwap} onChange={e => setChartShowVwap(e.target.checked)} />
-              VWAP
-            </label>
-            <label className="wl2-analysis__toggle">
-              <input type="checkbox" checked={chartShowMacd} onChange={e => setChartShowMacd(e.target.checked)} />
-              MACD
-            </label>
-            <label className="wl2-analysis__toggle">
-              <input type="checkbox" checked={chartShowBb} onChange={e => setChartShowBb(e.target.checked)} />
-              Bollinger
-            </label>
-            <label className="wl2-analysis__toggle">
-              <input type="checkbox" checked={chartShowRsi} onChange={e => setChartShowRsi(e.target.checked)} />
-              RSI
-            </label>
-            <label className="wl2-analysis__toggle">
-              <input type="checkbox" checked={chartShowSr} onChange={e => setChartShowSr(e.target.checked)} />
-              S/R
-            </label>
-          </div>
-          <p className="wl2-analysis__chart-hint section-hint">
-            Candles are read from PostgreSQL <code>stock_day</code> / <code>stock_min</code> via <code>GET /bars</code> (Massive and other sources may be present).{' '}
-            <strong>Fetch from Massive</strong> enqueues Celery <code>feed_stocks_aggregate</code> jobs (daily + intraday); after they complete, use <strong>Reload chart</strong> or switch Daily / 1 min.
-          </p>
-          {analysisChartError && (
-            <p className="msg-error" role="alert" style={{ marginTop: 'var(--space-2)' }}>{analysisChartError}</p>
-          )}
-          {analysisChartInfo && !analysisChartError && (
-            <p className="section-hint" role="status" style={{ marginTop: 'var(--space-2)' }}>{analysisChartInfo}</p>
-          )}
-          {analysisChartLoading && analysisChartBarsSorted.length === 0 && (
-            <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>Loading chart from database…</p>
-          )}
-          {analysisChartBarsSorted.length > 0 ? (
-            <div className="wl2-analysis__chart-wrap">
-              <BarsCandlestickChart
-                bars={analysisChartBarsSorted}
-                period={analysisChartPeriod}
-                showVolume={chartShowVolume}
-                showVwap={chartShowVwap}
-                showMacd={chartShowMacd}
-                showBollinger={chartShowBb}
-                showRsi={chartShowRsi}
-                showSr={chartShowSr}
-              />
-            </div>
-          ) : (
-            !analysisChartLoading && !analysisChartInfo && (
-              <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>
-                No bars in the database for this symbol and period. Use <strong>Fetch from Massive</strong>, wait for jobs to finish, then reload the chart.
-              </p>
-            )
-          )}
-        </section>
-      )}
+      {primaryTab !== 'sizing' && barStatsAnalysisSection}
 
       {/* ── Add option modal ── */}
       {addOptionForSymbol != null && (

@@ -26140,6 +26140,11 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   width: 1%;
   white-space: nowrap;
   text-align: right;
+  position: sticky;
+  right: 0;
+  z-index: 4;
+  background: var(--color-surface, var(--color-bg, #fff));
+  box-shadow: -6px 0 10px -6px rgba(0, 0, 0, 0.12);
 }
 
 .strategy-instances-table .strategy-instance-actions-inner {
@@ -26148,6 +26153,174 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   justify-content: flex-end;
   gap: 0.35rem;
   vertical-align: middle;
+}
+
+.detail-sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 240;
+  display: flex;
+  justify-content: flex-end;
+  align-items: stretch;
+  background: rgba(0, 0, 0, 0.42);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.detail-sidebar-backdrop.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.detail-sidebar-panel {
+  width: min(var(--detail-sidebar-width, 720px), 100vw);
+  max-width: 100%;
+  height: 100%;
+  background: var(--color-bg, var(--color-surface));
+  border-left: 1px solid var(--color-border);
+  box-shadow: -8px 0 28px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.2s ease;
+  outline: none;
+}
+
+.detail-sidebar-docked-root {
+  display: block;
+  height: 100%;
+}
+
+.detail-sidebar-panel.detail-sidebar-panel-docked {
+  width: min(var(--detail-sidebar-width, 720px), 100vw);
+  height: 100vh;
+  transform: none;
+  position: fixed;
+  top: 0;
+  right: 0;
+  border-left: 1px solid var(--color-border);
+  box-shadow: -8px 0 28px rgba(0, 0, 0, 0.2);
+  z-index: 220;
+}
+
+.detail-sidebar-panel.is-open {
+  transform: translateX(0);
+}
+
+.detail-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.8rem 0.95rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.detail-sidebar-title {
+  margin: 0;
+  font-size: var(--text-h3, 1.1rem);
+}
+
+.detail-sidebar-close-btn {
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 4px;
+}
+
+.detail-sidebar-close-btn:hover {
+  background: var(--color-surface-elevated, rgba(255, 255, 255, 0.06));
+  color: var(--color-text-main);
+}
+
+.detail-sidebar-close-btn:focus-visible {
+  outline: 2px solid var(--color-accent, #4a9);
+  outline-offset: 2px;
+}
+
+.detail-sidebar-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.75rem;
+}
+
+.strategy-instances-workspace {
+  margin-top: 1rem;
+  position: relative;
+}
+
+.strategy-instances-list-pane {
+  min-width: 0;
+}
+
+.strategy-instances-list-pane.with-floating-detail-sidebar {
+  /* Matches --instances-floating-sidebar-reserve on .strategy-instances-page (sidebar width + thin gutter). */
+  padding-right: var(--instances-floating-sidebar-reserve, calc(960px + 4px));
+}
+
+.strategy-instances-table-wrap {
+  margin-top: 0 !important;
+}
+
+.strategy-instances-inspector-pane {
+  min-width: 0;
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.strategy-instances-inspector-pane .detail-sidebar-docked-root,
+.strategy-instances-inspector-pane .detail-sidebar-panel {
+  pointer-events: auto;
+}
+
+.strategy-instances-table tr.is-selected td {
+  background: var(--color-surface-elevated, rgba(88, 142, 255, 0.1));
+}
+
+.strategy-instances-page .instance-detail-page.instance-detail-page-embedded {
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+}
+
+@media (max-width: 960px) {
+  .detail-sidebar-panel {
+    width: 100vw;
+    border-left: none;
+  }
+
+  .detail-sidebar-panel.detail-sidebar-panel-docked {
+    position: fixed;
+    width: 100%;
+    height: 100vh;
+    right: 0;
+    top: 0;
+    z-index: 220;
+    box-shadow: -8px 0 28px rgba(0, 0, 0, 0.2);
+  }
+
+  .detail-sidebar-content {
+    padding: 0.5rem;
+  }
+
+  .strategy-instances-list-pane.with-floating-detail-sidebar {
+    padding-right: 0;
+  }
 }
 
 .strategy-instances-table .instance-detail-overview-status-chip {
@@ -27626,30 +27799,45 @@ button.ledger-opt-link-stock-aggregate-icon:hover {
   background: color-mix(in srgb, var(--color-surface) 70%, transparent);
 }
 
-/* Sizing tab: when a symbol is selected, workflow (sheet + order) stacks above Portfolio risk power */
-.wl2-sizing-tab-reorder {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+/* Sizing tab: symbol sheet (3) + order sizing panel (9) on one row */
+.wl2-sizing-sheet-order-row {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 9fr);
+  gap: var(--space-3);
+  align-items: start;
+  margin-bottom: var(--space-4);
 }
 
-.wl2-sizing-tab-reorder__portfolio {
-  order: 1;
+@media (max-width: 960px) {
+  .wl2-sizing-sheet-order-row {
+    grid-template-columns: 1fr;
+  }
 }
 
-.wl2-sizing-tab-reorder__workflow {
-  order: 2;
+.wl2-sizing-sheet-order-row__sheet {
+  min-width: 0;
 }
 
-.wl2-sizing-tab-reorder--symbol-focus .wl2-sizing-tab-reorder__portfolio {
-  order: 2;
+.wl2-sizing-sheet-order-row__order {
+  min-width: 0;
 }
 
-.wl2-sizing-tab-reorder--symbol-focus .wl2-sizing-tab-reorder__workflow {
-  order: 1;
+.wl2-sizing-sheet-order-row__panel {
+  min-width: 0;
+  width: 100%;
 }
 
-/* Sizing workflow: symbol block → Sizing sheet → Order sizing, stacked vertically */
+.wl2-sizing-sheet-order-row__panel .wl2-sizing-panel {
+  margin-top: 0;
+}
+
+.wl2-sizing-sheet-block--promote {
+  margin-top: 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
+}
+
+/* Sizing workflow: legacy stacked split (still used where flex column is needed) */
 .wl2-sizing-workflow-split {
   display: flex;
   flex-direction: column;

@@ -468,6 +468,7 @@ export async function controlMarketIngest(
   action: MarketIngestAction,
 ): Promise<{
   ok: boolean
+  queued?: boolean
   service_id?: string
   action?: string
   result?: Record<string, unknown>
@@ -484,6 +485,7 @@ export async function controlMarketIngest(
   )
   const data = await parseJsonResponse<{
     ok?: boolean
+    queued?: boolean
     error?: string
     detail?: unknown
     service_id?: string
@@ -493,6 +495,7 @@ export async function controlMarketIngest(
   if (data.ok === true) {
     return data as {
       ok: boolean
+      queued?: boolean
       service_id?: string
       action?: string
       result?: Record<string, unknown>

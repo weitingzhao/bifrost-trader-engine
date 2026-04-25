@@ -10,6 +10,7 @@ from psycopg2.extras import RealDictCursor
 logger = logging.getLogger(__name__)
 
 _EXEC_READ_TABLE = "account_executions_final"
+_ALLOC_TABLE = "account_execution_instance_allocation"
 
 
 def list_instances(
@@ -50,7 +51,16 @@ def list_instances(
                        si.opened_at, si.label, si.notes, si.created_at, si.updated_at,
                        so.name AS strategy_opportunity_name,
                        ss.strategy_structure_id, ss.name AS strategy_structure_name,
-                       (SELECT COUNT(*) FROM {_EXEC_READ_TABLE} e WHERE e.strategy_instance_id = si.strategy_instance_id) AS executions_count
+                       (
+                           SELECT COUNT(DISTINCT e.account_executions_id)
+                           FROM {_EXEC_READ_TABLE} e
+                           WHERE e.strategy_instance_id = si.strategy_instance_id
+                              OR EXISTS (
+                                  SELECT 1 FROM {_ALLOC_TABLE} a
+                                  WHERE a.account_executions_id = e.account_executions_id
+                                    AND a.strategy_instance_id = si.strategy_instance_id
+                              )
+                       ) AS executions_count
                 FROM strategy_instance si
                 LEFT JOIN strategy_opportunity so ON si.strategy_opportunity_id = so.strategy_opportunity_id
                 LEFT JOIN strategy_structure ss ON so.strategy_structure_id = ss.strategy_structure_id

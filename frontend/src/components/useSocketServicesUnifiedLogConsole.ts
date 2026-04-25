@@ -71,6 +71,9 @@ export function useSocketServicesUnifiedLogConsole({
   const [liveWarning, setLiveWarning] = useState<string | null>(null)
   const [clearError, setClearError] = useState<string | null>(null)
   const [heightPx, setHeightPx] = useState(initialHeightPx)
+  // Incrementing this re-triggers the SSE init effect, tearing down stale subscriptions
+  // and re-fetching the tail after a clear so old SSE callbacks stop populating entries.
+  const [clearCount, setClearCount] = useState(0)
   const consoleRef = useRef<HTMLPreElement>(null)
   const idRef = useRef(0)
   const streamUnsubsRef = useRef<Array<() => void>>([])
@@ -195,7 +198,7 @@ export function useSocketServicesUnifiedLogConsole({
       })
       streamUnsubsRef.current = []
     }
-  }, [enabled, initialMaxLines])
+  }, [enabled, initialMaxLines, clearCount])
 
   useEffect(() => {
     const el = consoleRef.current
@@ -217,6 +220,8 @@ export function useSocketServicesUnifiedLogConsole({
 
   const clearAllStreams = useCallback(async () => {
     setClearError(null)
+    // Immediately wipe local display so the UI feels responsive.
+    setEntries([])
     const settled = await Promise.allSettled([
       clearMassiveWsLogs(),
       clearIbOperatorLogs(),
@@ -233,9 +238,11 @@ export function useSocketServicesUnifiedLogConsole({
       }
     })
     if (msgs.length) setClearError(msgs.join('; '))
-    setEntries([])
     setErrorDetail(null)
     setLiveWarning(null)
+    // Increment clearCount to close all active SSE subscriptions and re-fetch the tail.
+    // Without this, old EventSource callbacks keep appending lines into the cleared state.
+    setClearCount((c) => c + 1)
   }, [])
 
   const onResizeStart = useCallback(

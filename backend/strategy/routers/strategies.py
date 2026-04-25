@@ -348,7 +348,12 @@ def get_strategy_win_rate(
     since_ts: Optional[float] = Query(None, description="Filter: since Unix timestamp"),
     until_ts: Optional[float] = Query(None, description="Filter: until Unix timestamp"),
 ) -> Dict[str, Any]:
-    """Return per-structure win-rate rows and ``totals_all`` (all instances combined)."""
+    """Return per-structure win-rate rows and ``totals_all`` (all instances combined).
+
+    ``total_profit`` = sum of execution-derived Net PnL for instances with strictly positive net (same rule for every structure);
+    ``total_loss`` = sum of those nets for instances with net &lt; 0 only (same Net PnL as Instance Detail;
+    omitted when no such instance).
+    """
     reader = request.app.state.reader
     return reader.get_strategy_win_rate(since_ts=since_ts, until_ts=until_ts)
 

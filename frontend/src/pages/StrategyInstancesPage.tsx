@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import type { Execution, PerformanceSummary, StrategyInstance, StatusResponse } from '../types'
 import type { StrategyOpportunity } from '../api'
 import {
@@ -11,12 +11,15 @@ import {
 } from '../api'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import { StrategyOpportunityCombobox } from '../components/StrategyOpportunityCombobox'
+import { DetailSidebar } from '../components/DetailSidebar'
 import { StrategyInstanceDetailPage } from './StrategyInstanceDetailPage'
 import { fmtUsd, parseOptionContractKey } from '../utils/format'
+import { computeRiskProfile, type RiskPosition } from '../utils/riskProfile'
 import { fetchOptionStockLinkMapForExecutions } from './performance/fetchOptionStockLinkMap'
 import { instanceOptionStockSlippageAdjustment, sliceExecutionForInstanceOptView } from './portfolio/ledgerOptHelpers'
 import {
   annualReturnDetailFromNetAndExecutions,
+  computeInstanceExecDerivedNetPnl,
   computeInstancePositionStatus,
   formatHoldDaysRounded0,
   holdDaysForAnnualization,
@@ -42,8 +45,8 @@ function signedPnlClass(n: number | null | undefined): string {
 }
 
 /**
- * Group rollups: total adjusted Net PnL; sum of underlying (sell-side OPT); annual % =
- * totalNet × 365.25 / Σ(uᵢ × daysUsedᵢ) × 100 (same algebra as row-level annual, aggregated with Σ underlying).
+ * Group rollups: total execution-derived Net PnL; sum of underlying (sell-side OPT); annual % uses
+ * the same denominator basis as row-level annual (per-instance max risk fallback underlying).
  */
 function computeSymbolGroupRollup(
   rows: StrategyInstance[],
@@ -51,30 +54,30 @@ function computeSymbolGroupRollup(
 ): { totalNet: number | null; sumUnderlying: number | null; groupAnnualPct: number | null } {
   let totalNet = 0
   let sumU = 0
-  let sumUDays = 0
+  let sumDenDays = 0
   let anyNet = false
 
   for (const row of rows) {
     const m = metrics.get(row.strategy_instance_id)
     if (m == null || m.status !== 'ready') continue
-    const { summary, sliced, linkedStockSlippage } = m
-    if (summary?.net_pnl == null) continue
+    const { sliced, execDerivedNetPnl } = m
+    if (execDerivedNetPnl == null || !Number.isFinite(execDerivedNetPnl)) continue
     anyNet = true
-    const netAdj = Number(summary.net_pnl) + linkedStockSlippage
-    totalNet += netAdj
+    totalNet += execDerivedNetPnl
 
     const u = underlyingCostSellOptUsd(sliced)
     if (!Number.isFinite(u) || u <= 0) continue
+    const den = Number.isFinite(m.maxRiskUsd) && m.maxRiskUsd > 0 ? m.maxRiskUsd : u
     const hold = holdTimeDaysFromReportDateSpan(sliced)
     if (hold == null) continue
     const daysU = holdDaysForAnnualization(hold)
     sumU += u
-    sumUDays += u * daysU
+    sumDenDays += den * daysU
   }
 
   let groupAnnualPct: number | null = null
-  if (anyNet && sumU > 0 && sumUDays > 0) {
-    let pct = (totalNet * 365.25) / sumUDays * 100
+  if (anyNet && sumDenDays > 0) {
+    let pct = (totalNet * 365.25) / sumDenDays * 100
     if (!Number.isFinite(pct)) pct = 0
     if (pct > 999) pct = 999
     if (pct < -999) pct = -999
@@ -90,6 +93,9 @@ function computeSymbolGroupRollup(
 
 const INSTANCE_LIST_METRICS_CHUNK = 5
 
+/** Desktop floating detail sidebar width; list reserve uses the same token (see App.css). */
+const INSTANCE_FLOATING_SIDEBAR_WIDTH_PX = 960
+
 type InstanceListMetrics =
   | {
       status: 'ready'
@@ -97,11 +103,48 @@ type InstanceListMetrics =
       sliced: Execution[]
       /** Prorated option–stock link slippage (same as Instance Detail Net PnL add-on). */
       linkedStockSlippage: number
+      /** Execution-book Net PnL (OPT group premium ± commission + non-OPT realized + slippage). */
+      execDerivedNetPnl: number | null
+      /** Return denominator: prefer |risk max_loss|, fallback underlying cost. */
+      maxRiskUsd: number
     }
   | { status: 'error' }
 
+function computeInstanceMaxRiskUsd(sliced: Execution[], underlyingFallback: number): number {
+  const netByKey = new Map<string, { strike: number; right: 'C' | 'P'; qty: number; totalCost: number }>()
+  for (const e of sliced) {
+    if ((e.sec_type ?? '').toUpperCase() !== 'OPT') continue
+    const parsed = parseOptionContractKey(e.contract_key)
+    const right = parsed.right === 'C' || parsed.right === 'P' ? parsed.right : null
+    const strike = Number(parsed.strike) || 0
+    if (right == null || strike <= 0) continue
+    const key = `${strike}|${right}`
+    const side = (e.side ?? '').toUpperCase()
+    const qty = Math.abs(Number(e.quantity) || 0)
+    if (qty <= 0) continue
+    const price = Number(e.price) || 0
+    const signedQty = side === 'BUY' || side === 'BOT' || side === 'B' ? qty : -qty
+    const prev = netByKey.get(key) ?? { strike, right, qty: 0, totalCost: 0 }
+    prev.qty += signedQty
+    prev.totalCost += price * qty * (signedQty > 0 ? 1 : -1)
+    netByKey.set(key, prev)
+  }
+
+  const positions: RiskPosition[] = []
+  for (const v of netByKey.values()) {
+    if (Math.abs(v.qty) < 1e-9) continue
+    const avgCost = Math.abs(v.totalCost / v.qty)
+    positions.push({ strike: v.strike, right: v.right, qty: Math.round(v.qty), avg_cost: avgCost })
+  }
+  if (positions.length === 0) return underlyingFallback
+
+  const rp = computeRiskProfile(positions, 0, null)
+  if (rp.max_loss != null && Number.isFinite(rp.max_loss) && rp.max_loss < 0) return Math.abs(rp.max_loss)
+  return underlyingFallback
+}
+
 /** Sortable metric columns (within each symbol group only). */
-type InstancesSortColumn = 'start' | 'end' | 'net' | 'real' | 'comm' | 'hold' | 'und' | 'ann' | 'exec'
+type InstancesSortColumn = 'start' | 'end' | 'net' | 'comm' | 'hold' | 'und' | 'ann' | 'exec'
 type InstancesSortDir = 'asc' | 'desc'
 
 function getInstanceSortNumericValue(
@@ -124,12 +167,8 @@ function getInstanceSortNumericValue(
       return sortUtcMs != null && Number.isFinite(sortUtcMs) ? sortUtcMs : Number.NaN
     }
     case 'net': {
-      if (summary == null || summary.net_pnl == null) return Number.NaN
-      return Number(summary.net_pnl) + m.linkedStockSlippage
-    }
-    case 'real': {
-      if (summary == null || summary.total_realized_pnl == null) return Number.NaN
-      return Number(summary.total_realized_pnl) + m.linkedStockSlippage
+      if (m.execDerivedNetPnl == null || !Number.isFinite(m.execDerivedNetPnl)) return Number.NaN
+      return m.execDerivedNetPnl
     }
     case 'comm':
       return summary != null && summary.total_commission != null ? Number(summary.total_commission) : Number.NaN
@@ -142,9 +181,8 @@ function getInstanceSortNumericValue(
       return Number.isFinite(u) ? u : Number.NaN
     }
     case 'ann': {
-      if (summary == null || summary.net_pnl == null) return Number.NaN
-      const adjustedNet = Number(summary.net_pnl) + m.linkedStockSlippage
-      const a = annualReturnDetailFromNetAndExecutions(adjustedNet, sliced)
+      if (m.execDerivedNetPnl == null || !Number.isFinite(m.execDerivedNetPnl)) return Number.NaN
+      const a = annualReturnDetailFromNetAndExecutions(m.execDerivedNetPnl, sliced, m.maxRiskUsd)
       return a != null && Number.isFinite(a.annualReturnPct) ? a.annualReturnPct : Number.NaN
     }
     case 'exec': {
@@ -268,6 +306,9 @@ export function StrategyInstancesPage({
   const [collapsedSymbolGroups, setCollapsedSymbolGroups] = useState<Record<string, boolean>>({})
   /** Accordion: only one symbol group expanded at a time. Multi: several may stay open (same as Portfolio Open → Detail view). */
   const [symbolGroupAccordionMode, setSymbolGroupAccordionMode] = useState<boolean>(true)
+  const [isNarrowViewport, setIsNarrowViewport] = useState<boolean>(
+    () => (typeof window !== 'undefined' ? window.innerWidth <= 960 : false),
+  )
 
   /** Detail view is shown when URL has an instance id or user picked one in-page (e.g. after create). */
   const effectiveDetailId = urlStrategyInstanceId ?? selectedInstanceId
@@ -354,7 +395,10 @@ export function StrategyInstancesPage({
                 .filter((row): row is Execution => row != null)
               const linkMap = await fetchOptionStockLinkMapForExecutions(sliced)
               const linkedStockSlippage = instanceOptionStockSlippageAdjustment(raw, id, linkMap)
-              return [id, { status: 'ready', summary: perf.summary, sliced, linkedStockSlippage } as const]
+              const execDerivedNetPnl = computeInstanceExecDerivedNetPnl(sliced, linkedStockSlippage)
+              const underlying = underlyingCostSellOptUsd(sliced)
+              const maxRiskUsd = computeInstanceMaxRiskUsd(sliced, underlying)
+              return [id, { status: 'ready', summary: perf.summary, sliced, linkedStockSlippage, execDerivedNetPnl, maxRiskUsd } as const]
             } catch {
               return [id, { status: 'error' } as const]
             }
@@ -372,6 +416,12 @@ export function StrategyInstancesPage({
       cancelled = true
     }
   }, [items])
+
+  useEffect(() => {
+    const onResize = () => setIsNarrowViewport(window.innerWidth <= 960)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   const oppIdNum = opportunityIdFilter === '' ? null : Number(opportunityIdFilter)
   useEffect(() => {
@@ -571,34 +621,31 @@ export function StrategyInstancesPage({
   const renderMetricsTds = useCallback((instanceId: number) => {
     const m = instanceMetricsById.get(instanceId)
     if (m == null) {
-      return Array.from({ length: 9 }, (_, j) => (
+      return Array.from({ length: 8 }, (_, j) => (
         <td key={`m-${instanceId}-ph-${j}`} className="muted tabular-nums strategy-instance-metric-placeholder">
           …
         </td>
       ))
     }
     if (m.status === 'error') {
-      return Array.from({ length: 9 }, (_, j) => (
+      return Array.from({ length: 8 }, (_, j) => (
         <td key={`m-${instanceId}-err-${j}`} className="muted tabular-nums">
           —
         </td>
       ))
     }
-    const { summary, sliced, linkedStockSlippage } = m
+    const { summary, sliced, linkedStockSlippage, execDerivedNetPnl } = m
     const positionStatus = computeInstancePositionStatus(sliced)
     const { start } = reportDateStartEnd(sliced)
     const endCol = instanceListEndDateColumn(sliced, positionStatus)
     const holdSpanDays = holdTimeDaysFromReportDateSpan(sliced)
     const holdLabel = holdSpanDays != null ? formatHoldDaysRounded0(holdSpanDays) : '—'
     const underlying = underlyingCostSellOptUsd(sliced)
-    const netAdj =
-      summary != null && summary.net_pnl != null ? Number(summary.net_pnl) + linkedStockSlippage : null
-    const realAdj =
-      summary != null && summary.total_realized_pnl != null
-        ? Number(summary.total_realized_pnl) + linkedStockSlippage
-        : null
+    const netDisplay = execDerivedNetPnl
     const annual =
-      summary != null && netAdj != null ? annualReturnDetailFromNetAndExecutions(netAdj, sliced) : null
+      netDisplay != null && Number.isFinite(netDisplay)
+        ? annualReturnDetailFromNetAndExecutions(netDisplay, sliced, m.maxRiskUsd)
+        : null
     const linkSlipTitle =
       Math.abs(linkedStockSlippage) > 1e-9
         ? `Includes prorated option–stock link slippage (${fmtUsd(linkedStockSlippage)}).`
@@ -631,17 +678,10 @@ export function StrategyInstancesPage({
       </td>,
       <td
         key="np"
-        className={`tabular-nums instance-detail-pnl-value ${signedPnlClass(netAdj)}`}
+        className={`tabular-nums instance-detail-pnl-value ${signedPnlClass(netDisplay)}`}
         title={linkSlipTitle}
       >
-        {summary && netAdj != null ? fmtUsd(netAdj) : '—'}
-      </td>,
-      <td
-        key="tr"
-        className={`tabular-nums instance-detail-pnl-value ${signedPnlClass(realAdj)}`}
-        title={linkSlipTitle}
-      >
-        {summary && realAdj != null ? fmtUsd(realAdj) : '—'}
+        {netDisplay != null ? fmtUsd(netDisplay) : '—'}
       </td>,
       <td key="cm" className="tabular-nums instance-detail-pnl-value is-commission">
         {summary ? fmtUsd(summary.total_commission) : '—'}
@@ -664,18 +704,28 @@ export function StrategyInstancesPage({
     ]
   }, [instanceMetricsById])
 
+  const openInstanceDetail = useCallback((instanceId: number) => {
+    setSelectedInstanceId(instanceId)
+    window.location.hash = `#/strategies/instances/${instanceId}`
+  }, [])
+
+  const closeInstanceDetail = useCallback(() => {
+    setSelectedInstanceId(null)
+    window.location.hash = '#/strategies/instances'
+  }, [])
+
   const instanceListTableBody = useMemo(() => {
     if (items.length === 0) {
       return (
         <tr>
-          <td colSpan={14}>No strategy instances found.</td>
+          <td colSpan={13}>No strategy instances found.</td>
         </tr>
       )
     }
     if (filteredItems.length === 0) {
       return (
         <tr>
-          <td colSpan={14}>No instances match the current filters.</td>
+          <td colSpan={13}>No instances match the current filters.</td>
         </tr>
       )
     }
@@ -742,15 +792,9 @@ export function StrategyInstancesPage({
               <td
                 className={`tabular-nums instance-detail-pnl-value strategy-instance-group-summary-cell ${signedPnlClass(rollup.totalNet)}`}
                 style={{ background: 'var(--color-surface-elevated, rgba(255,255,255,0.03))' }}
-                title="Sum of adjusted Net PnL (includes option–stock link slippage) for instances with loaded metrics."
+                title="Sum of execution-derived Net PnL (same as Instance Detail) for instances with loaded metrics."
               >
                 {rollup.totalNet != null ? fmtUsd(rollup.totalNet) : '—'}
-              </td>
-              <td
-                className="tabular-nums muted strategy-instance-group-summary-cell"
-                style={{ background: 'var(--color-surface-elevated, rgba(255,255,255,0.03))' }}
-              >
-                —
               </td>
               <td
                 className="tabular-nums muted strategy-instance-group-summary-cell"
@@ -774,7 +818,7 @@ export function StrategyInstancesPage({
               <td
                 className={`tabular-nums instance-detail-pnl-value strategy-instance-group-summary-cell ${signedPnlClass(rollup.groupAnnualPct)}`}
                 style={{ background: 'var(--color-surface-elevated, rgba(255,255,255,0.03))' }}
-                title="Group annual return: total Net × 365.25 / Σ(underlying × hold days used) × 100 (same basis as row annual)."
+                title="Group annual return: total Net × 365.25 / Σ(denominator × hold days used) × 100, where denominator prefers |max loss| per instance and falls back to underlying."
               >
                 {rollup.groupAnnualPct != null && Number.isFinite(rollup.groupAnnualPct)
                   ? `${rollup.groupAnnualPct >= 0 ? '+' : ''}${rollup.groupAnnualPct.toFixed(1)}%`
@@ -795,7 +839,10 @@ export function StrategyInstancesPage({
           if (collapsed) return [headerRow]
           const dataRows = group.rows.map((row) => {
             return (
-              <tr key={row.strategy_instance_id}>
+              <tr
+                key={row.strategy_instance_id}
+                className={effectiveDetailId === row.strategy_instance_id ? 'is-selected' : undefined}
+              >
                 <td>{row.strategy_instance_id}</td>
                 <td className="strategy-instances-col-opp strategy-instances-cell-opp">
                   {row.strategy_opportunity_name ?? row.strategy_opportunity_id ?? '—'}
@@ -805,17 +852,30 @@ export function StrategyInstancesPage({
                 <td className="tabular-nums">{row.executions_count != null ? row.executions_count : '—'}</td>
                 <td className="strategy-instance-actions-cell">
                   <div className="strategy-instance-actions-inner">
+                    <button
+                      type="button"
+                      className="btn btn-icon-small"
+                      title="Open instance detail"
+                      aria-label="Open instance detail"
+                      onClick={() => openInstanceDetail(row.strategy_instance_id)}
+                    >
+                      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    </button>
                     <a
                       href={`#/strategies/instances/${row.strategy_instance_id}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="btn btn-icon-small"
-                      title="View instance"
-                      aria-label="View instance"
+                      title="Open in new tab"
+                      aria-label="Open in new tab"
                     >
                       <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                        <circle cx="12" cy="12" r="3" />
+                        <path d="M7 17L17 7" />
+                        <path d="M8 7h9v9" />
+                        <path d="M17 13v4H7V7h4" />
                       </svg>
                     </a>
                     <button
@@ -850,16 +910,8 @@ export function StrategyInstancesPage({
     renderMetricsTds,
     toggleSymbolGroup,
     openDeleteConfirm,
+    openInstanceDetail,
   ])
-
-  if (effectiveDetailId != null) {
-    return (
-      <StrategyInstanceDetailPage
-        strategyInstanceId={effectiveDetailId}
-        status={status}
-      />
-    )
-  }
 
   const openCreateModal = () => {
     const now = new Date()
@@ -921,8 +973,19 @@ export function StrategyInstancesPage({
     }
   }
 
+  const floatingSidebarStyle: CSSProperties | undefined =
+    effectiveDetailId != null && !isNarrowViewport
+      ? {
+          ['--instances-floating-sidebar-width' as string]: `${INSTANCE_FLOATING_SIDEBAR_WIDTH_PX}px`,
+          ['--instances-floating-sidebar-reserve' as string]: `calc(var(--instances-floating-sidebar-width) + 4px)`,
+        }
+      : undefined
+
   return (
-    <div className="card process-section">
+    <div
+      className={`card process-section strategy-instances-page${effectiveDetailId != null && !isNarrowViewport ? ' has-floating-detail-sidebar' : ''}`}
+      style={floatingSidebarStyle}
+    >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
         <SectionPageTitle
           menu="Strategy"
@@ -992,10 +1055,12 @@ export function StrategyInstancesPage({
         <p className="error-message" style={{ marginTop: '0.5rem' }}>{error}</p>
       )}
 
-      {loading ? (
-        <p style={{ marginTop: '1rem' }}>Loading…</p>
-      ) : (
-        <div className="table-wrapper" style={{ overflowX: 'auto', marginTop: '1rem' }}>
+      <div className="strategy-instances-workspace">
+        <div className={`strategy-instances-list-pane${effectiveDetailId != null && !isNarrowViewport ? ' with-floating-detail-sidebar' : ''}`}>
+          {loading ? (
+            <p style={{ marginTop: '1rem' }}>Loading…</p>
+          ) : (
+            <div className="table-wrapper strategy-instances-table-wrap" style={{ overflowX: 'auto', marginTop: '1rem' }}>
           {items.length > 0 && (
             <div className="ledger-strategy-tab-filters" style={{ marginBottom: '0.75rem' }}>
               <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by position status">
@@ -1210,7 +1275,7 @@ export function StrategyInstancesPage({
               </p>
             </div>
           )}
-          <table className="data-table strategy-instances-table">
+              <table className="data-table strategy-instances-table">
             <thead>
               <tr>
                 <th>ID</th>
@@ -1241,17 +1306,9 @@ export function StrategyInstancesPage({
                   sort={instancesSort}
                   onSort={toggleInstancesSort}
                 >
-                  <span title="Net PnL: performance summary plus prorated option–stock link slippage (aligned with Instance Detail).">
+                  <span title="Net PnL: execution book (OPT group premium ± commission + non-OPT realized + prorated option–stock slippage). Same as Instance Detail.">
                     Net PnL
                   </span>
-                </SortableInstancesTh>
-                <SortableInstancesTh
-                  column="real"
-                  className="strategy-instances-th-sort-num strategy-instances-th-long-header"
-                  sort={instancesSort}
-                  onSort={toggleInstancesSort}
-                >
-                  <span title="Realized PnL: summary realized plus prorated option–stock link slippage.">Realized</span>
                 </SortableInstancesTh>
                 <SortableInstancesTh
                   column="comm"
@@ -1283,7 +1340,7 @@ export function StrategyInstancesPage({
                   sort={instancesSort}
                   onSort={toggleInstancesSort}
                 >
-                  <abbr title="Annual return from adjusted Net PnL (same window as Instance Detail).">Ann.</abbr>
+                  <abbr title="Annual return from execution-derived Net PnL (same window as Instance Detail).">Ann.</abbr>
                 </SortableInstancesTh>
                 <SortableInstancesTh
                   column="exec"
@@ -1299,9 +1356,29 @@ export function StrategyInstancesPage({
             <tbody>
               {instanceListTableBody}
             </tbody>
-          </table>
+              </table>
+            </div>
+          )}
         </div>
-      )}
+        {effectiveDetailId != null && (
+          <div className="strategy-instances-inspector-pane">
+            <DetailSidebar
+              mode={isNarrowViewport ? 'modal' : 'docked'}
+              open={effectiveDetailId != null}
+              onClose={closeInstanceDetail}
+              title={`Instance #${effectiveDetailId}`}
+              destroyOnClose={false}
+              width={INSTANCE_FLOATING_SIDEBAR_WIDTH_PX}
+            >
+              <StrategyInstanceDetailPage
+                strategyInstanceId={effectiveDetailId}
+                status={status}
+                embedded
+              />
+            </DetailSidebar>
+          </div>
+        )}
+      </div>
 
       {confirmDelete.open && (
         <div

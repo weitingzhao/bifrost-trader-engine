@@ -2664,6 +2664,21 @@ button.dashboard-queue-summary-status-console-nav:focus-visible {
   box-shadow: 0 0 4px var(--color-red, #ef4444);
 }
 
+/* Fire-and-forget start: pulsing amber dot */
+@keyframes ingest-start-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px #fbbf24; }
+  50% { opacity: 0.4; box-shadow: 0 0 8px #fbbf24; }
+}
+.ingest-starting-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #fbbf24;
+  flex-shrink: 0;
+  animation: ingest-start-pulse 1.2s ease-in-out infinite;
+}
+
 .massive-api-doc-links {
   display: flex;
   gap: var(--space-3);

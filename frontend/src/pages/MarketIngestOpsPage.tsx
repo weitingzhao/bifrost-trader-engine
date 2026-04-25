@@ -569,6 +569,8 @@ function ServiceRow(props: {
   onRestart: () => void
   onReset: () => void
   showConnectionColumn: boolean
+  /** True while background start task is running (polling). */
+  isStarting?: boolean
 }) {
   const {
     svc,
@@ -584,16 +586,25 @@ function ServiceRow(props: {
     onRestart,
     onReset,
     showConnectionColumn,
+    isStarting = false,
   } = props
   const redisHealth = ingestRedisHealthLamp(svc.id, status)
-  const lamp = redisHealth.lamp
-  const statusTitle = redisHealth.title
+  const redisLamp = redisHealth.lamp
+  // When no Ops stack holds a control lease (Host = '—'), Redis health may be stale
+  // from a previous dead run. Demote green → red so stale data doesn't mask a dead service.
+  const hostUnclaimed = runtimeHostPill.pillVariant === 'other'
+  const lamp = hostUnclaimed && redisLamp === 'green' ? 'red' : redisLamp
+  const statusTitle =
+    hostUnclaimed && redisLamp === 'green'
+      ? `${redisHealth.title} — Host lease unclaimed (no Dev/Prod Ops start). Redis health may be stale from a previous run.`
+      : redisHealth.title
   const rawButtons = ingestActionButtonsForProcessState(svc.process_active)
   // When Redis health is green the service is definitely running regardless of
   // whether Ops/systemd can probe the unit (e.g. process started manually or
   // on a remote host).  Prefer Stop in that case so the button reflects reality.
-  const showStart = lamp === 'green' ? false : rawButtons.showStart
-  const showStop  = lamp === 'green' ? true  : rawButtons.showStop
+  // While isStarting (fire-and-forget dispatched), hide Start, keep Stop visible.
+  const showStart = isStarting ? false : lamp === 'green' ? false : rawButtons.showStart
+  const showStop  = isStarting ? true  : lamp === 'green' ? true  : rawButtons.showStop
   const showIbClientId = ibIngestClientIdShouldShow(svc.id, category, svc.process_active, status)
   const ibClientSlots = showIbClientId
     ? enrichIbClientSlotsWithProbe(svc.id, ibIngestClientIdSlots(svc.id, category, status), status)
@@ -604,6 +615,11 @@ function ServiceRow(props: {
     || ingestRedisTruthyConnected(ibOpForRow?.connected)
     || ingestRedisTruthyConnected(ibOpForRow?.host?.connected)
   const actionsDisabled = actionBlock !== 'none'
+  // Blocked by sibling: own lease is null (HOST = —) but a peer service holds a lease
+  // for the other stack, so the whole group is locked. HOST column alone is misleading
+  // without this context.
+  const blockedBySiblingLease =
+    actionBlock === 'remote_env' && !svc.redis_control_env
   // Massive WS: live last-message age counter
   const massive = status?.socket?.massive
   const liveMassiveMsgAgeS =
@@ -621,8 +637,17 @@ function ServiceRow(props: {
           <span aria-hidden>●</span>
         </span>
       </td>
-      <td title={runtimeHostTitle}>
+      <td title={blockedBySiblingLease ? `${runtimeHostTitle} — Sibling services in this group hold a lease for the other Ops stack, so this service is also locked. Stop those services first, or start everything from the other stack's Ops host.` : runtimeHostTitle}>
         <OpsHostEnvPillBadge pill={runtimeHostPill} />
+        {blockedBySiblingLease ? (
+          <span
+            aria-label="Locked by sibling service lease"
+            title="Sibling services hold a lease for the other Ops stack — this service has no own lease, but is locked for consistency. Stop all peer services first."
+            style={{ marginLeft: 4, fontSize: '0.75rem', color: '#fbbf24', verticalAlign: 'middle', cursor: 'help' }}
+          >
+            ⚠
+          </span>
+        ) : null}
       </td>
       <td className="massive-api-kv-label">
         <div style={{ fontWeight: 600 }}>{svc.label}</div>
@@ -771,6 +796,17 @@ function ServiceRow(props: {
       ) : null}
       <td>{logicalText}</td>
       <td>
+        {isStarting ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 'var(--space-2)' }}>
+            <span
+              className="ingest-starting-dot"
+              aria-hidden
+            />
+            <span style={{ fontSize: '0.8rem', color: '#fbbf24', fontWeight: 600 }}>
+              Starting…
+            </span>
+          </div>
+        ) : null}
         {!actionsDisabled ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center' }}>
             {showStart ? (
@@ -827,7 +863,16 @@ function ServiceRow(props: {
             </button>
           </div>
         ) : (
-          <span className="massive-api-doc-hint">{ingestActionBlockMessage(actionBlock)}</span>
+          <span
+            className="massive-api-doc-hint"
+            title={blockedBySiblingLease
+              ? 'This service has no own Ops lease (HOST = —), but a peer service in the same group is held by the other stack. All ingest services must be controlled from one Ops host. Stop the peer services first, then start everything from this Ops host.'
+              : undefined}
+          >
+            {blockedBySiblingLease
+              ? 'Peer service(s) held by other stack — stop them first.'
+              : ingestActionBlockMessage(actionBlock)}
+          </span>
         )}
       </td>
     </tr>
@@ -855,6 +900,8 @@ export function IngestServicesTable(props: {
   onStop: (svc: MarketIngestServiceRow) => void
   onRestart: (svc: MarketIngestServiceRow) => void
   onReset: (svc: MarketIngestServiceRow) => void
+  /** Set of service IDs currently being started via fire-and-forget background task. */
+  startingServiceIds?: ReadonlySet<string>
 }) {
   const {
     rows,
@@ -869,6 +916,7 @@ export function IngestServicesTable(props: {
     onStop,
     onRestart,
     onReset,
+    startingServiceIds,
   } = props
   if (rows.length === 0) {
     return <p className="massive-api-doc-hint">{emptyHint}</p>
@@ -958,6 +1006,7 @@ export function IngestServicesTable(props: {
                   onRestart={() => onRestart(svc)}
                   onReset={() => onReset(svc)}
                   showConnectionColumn={showConnectionColumn}
+                  isStarting={startingServiceIds?.has(svc.id) === true}
                 />
               )
             })}
@@ -982,6 +1031,9 @@ export function MarketIngestOpsPage({
   const [tokenInput, setTokenInput] = useState('')
   const [authPanelOpen, setAuthPanelOpen] = useState(false)
   const [confirmState, setConfirmState] = useState<ConfirmState>(INITIAL_CONFIRM)
+  const confirmSessionRef = useRef(0)
+  const [startingServiceIds, setStartingServiceIds] = useState<ReadonlySet<string>>(new Set())
+  const startPollTimersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
   const [opsHealth, setOpsHealth] = useState<Awaited<ReturnType<typeof fetchOpsHealth>> | null>(null)
   const [clearingConflict, setClearingConflict] = useState(false)
   const [clearConflictErr, setClearConflictErr] = useState<string | null>(null)
@@ -1171,6 +1223,7 @@ export function MarketIngestOpsPage({
   }
 
   const openConfirm = (title: string, message: string, fn: () => Promise<void>) => {
+    const sessionId = ++confirmSessionRef.current
     setConfirmState({
       open: true,
       title,
@@ -1181,12 +1234,14 @@ export function MarketIngestOpsPage({
         setConfirmState(prev => ({ ...prev, confirming: true, error: null }))
         try {
           await fn()
+          if (confirmSessionRef.current !== sessionId) return
           setConfirmState(INITIAL_CONFIRM)
           void (async () => {
             await refresh()
             await loadStatus()
           })()
         } catch (e) {
+          if (confirmSessionRef.current !== sessionId) return
           const msg = e instanceof Error ? e.message : String(e)
           setConfirmState(prev => ({ ...prev, confirming: false, error: msg }))
         }
@@ -1194,8 +1249,69 @@ export function MarketIngestOpsPage({
     })
   }
 
+  const cancelConfirm = () => {
+    const wasConfirming = confirmState.confirming
+    confirmSessionRef.current++
+    setConfirmState(INITIAL_CONFIRM)
+    if (wasConfirming) {
+      // Command may already be processing server-side — refresh to check actual status.
+      void (async () => {
+        await refresh()
+        await loadStatus()
+      })()
+    }
+  }
+
+  const beginStartPolling = useCallback((serviceId: string) => {
+    // Clear any existing polling for this service
+    const existing = startPollTimersRef.current.get(serviceId)
+    if (existing != null) clearInterval(existing)
+
+    setStartingServiceIds(prev => new Set([...prev, serviceId]))
+
+    // Poll every 4s — background task takes up to ~45s to connect
+    const intervalId = setInterval(() => {
+      void refresh()
+      void loadStatus()
+    }, 4000)
+    startPollTimersRef.current.set(serviceId, intervalId)
+
+    // Auto-stop polling after 70s regardless
+    setTimeout(() => {
+      const id = startPollTimersRef.current.get(serviceId)
+      if (id != null) clearInterval(id)
+      startPollTimersRef.current.delete(serviceId)
+      setStartingServiceIds(prev => {
+        const next = new Set(prev)
+        next.delete(serviceId)
+        return next
+      })
+    }, 70_000)
+  }, [refresh, loadStatus])
+
+  // Stop polling when the service becomes active
+  useEffect(() => {
+    if (startingServiceIds.size === 0) return
+    for (const svcId of startingServiceIds) {
+      const svc = services.find(s => s.id === svcId)
+      if (svc && svc.process_active === 'active') {
+        const id = startPollTimersRef.current.get(svcId)
+        if (id != null) clearInterval(id)
+        startPollTimersRef.current.delete(svcId)
+        setStartingServiceIds(prev => {
+          const next = new Set(prev)
+          next.delete(svcId)
+          return next
+        })
+      }
+    }
+  }, [services, startingServiceIds])
+
   const runControl = async (serviceId: string, action: MarketIngestAction) => {
-    await controlMarketIngest(serviceId, action)
+    const result = await controlMarketIngest(serviceId, action)
+    if (result.queued) {
+      beginStartPolling(serviceId)
+    }
   }
 
   const openServiceConfirm = (svc: MarketIngestServiceRow, action: Exclude<MarketIngestAction, 'reset'>, verb: string) => {
@@ -1227,10 +1343,8 @@ export function MarketIngestOpsPage({
     <div id="settings-ws-connector" className={cardClass}>
       <DraggableModal
         open={confirmState.open}
-        onBackdropClick={() => {
-          if (!confirmState.confirming) setConfirmState(INITIAL_CONFIRM)
-        }}
-        backdropLocked={confirmState.confirming}
+        onBackdropClick={cancelConfirm}
+        backdropLocked={false}
         title={confirmState.title}
         titleId="ws-connector-confirm-title"
         footer={
@@ -1238,8 +1352,7 @@ export function MarketIngestOpsPage({
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => setConfirmState(INITIAL_CONFIRM)}
-              disabled={confirmState.confirming}
+              onClick={cancelConfirm}
             >
               Cancel
             </button>
@@ -1249,12 +1362,20 @@ export function MarketIngestOpsPage({
               onClick={() => confirmState.action?.()}
               disabled={confirmState.confirming}
             >
-              {confirmState.confirming ? 'Executing…' : 'Confirm'}
+              {confirmState.confirming ? 'Sending…' : 'Confirm'}
             </button>
           </div>
         }
       >
         <p>{confirmState.message}</p>
+        {confirmState.confirming && !confirmState.error ? (
+          <p
+            className="settings-page-msg"
+            style={{ marginTop: 'var(--space-2)', opacity: 0.75, fontSize: '0.85em' }}
+          >
+            Command sent — Ops API is processing (IB services may take ~45s to connect). You can cancel and check status manually.
+          </p>
+        ) : null}
         {confirmState.error ? (
           <p
             className="settings-page-msg settings-page-msg--error"
@@ -1450,6 +1571,7 @@ export function MarketIngestOpsPage({
           onStop={svc => openServiceConfirm(svc, 'stop', 'Stop')}
           onRestart={svc => openServiceConfirm(svc, 'restart', 'Restart')}
           onReset={openResetConfirm}
+          startingServiceIds={startingServiceIds}
         />
       </section>
 
