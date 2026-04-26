@@ -12,10 +12,12 @@ from src.bifrost.redis_health_keys import (
 from backend.ops.market_ingest_control_env import (
     BIFROST_OPS_CONTROL_ENV_FIELD,
     BIFROST_OPS_CONTROL_HOST_FIELD,
+    BIFROST_OPS_CONTROL_UPDATED_AT_FIELD,
     clear_control_env,
     normalize_control_profile,
     read_control_env,
     read_control_host,
+    read_control_updated_at,
     write_control_env,
     write_trading_engine_ops_lease,
 )
@@ -41,6 +43,7 @@ def test_write_control_env_hset(mock_from_url: MagicMock, _mock_host: MagicMock)
     mapping = kwargs["mapping"]
     assert mapping[BIFROST_OPS_CONTROL_ENV_FIELD] == "dev"
     assert mapping[BIFROST_OPS_CONTROL_HOST_FIELD] == "test-host"
+    assert float(mapping[BIFROST_OPS_CONTROL_UPDATED_AT_FIELD]) > 0
 
 
 @patch("redis.from_url")
@@ -61,6 +64,7 @@ def test_clear_control_env_hdel(mock_from_url: MagicMock) -> None:
         "my:meta",
         BIFROST_OPS_CONTROL_ENV_FIELD,
         BIFROST_OPS_CONTROL_HOST_FIELD,
+        BIFROST_OPS_CONTROL_UPDATED_AT_FIELD,
     )
 
 
@@ -71,6 +75,15 @@ def test_read_control_host_hget(mock_from_url: MagicMock) -> None:
     mock_from_url.return_value = r
     assert read_control_host("redis://localhost:6379/0", "my:meta") == "srv01"
     r.hget.assert_called_once_with("my:meta", BIFROST_OPS_CONTROL_HOST_FIELD)
+
+
+@patch("redis.from_url")
+def test_read_control_updated_at_hget(mock_from_url: MagicMock) -> None:
+    r = MagicMock()
+    r.hget.return_value = "123.5"
+    mock_from_url.return_value = r
+    assert read_control_updated_at("redis://localhost:6379/0", "my:meta") == 123.5
+    r.hget.assert_called_once_with("my:meta", BIFROST_OPS_CONTROL_UPDATED_AT_FIELD)
 
 
 @patch("backend.ops.market_ingest_control_env.control_hostname", return_value="engine-box")
@@ -91,5 +104,6 @@ def test_write_trading_engine_ops_lease_sets_lease_active_updated(
     mapping = kwargs["mapping"]
     assert mapping[BIFROST_OPS_CONTROL_ENV_FIELD] == "prod"
     assert mapping[BIFROST_OPS_CONTROL_HOST_FIELD] == "engine-box"
+    assert float(mapping[BIFROST_OPS_CONTROL_UPDATED_AT_FIELD]) > 0
     assert mapping[ENGINE_OPS_ACTIVE_REDIS_FIELD] == "1"
     assert float(mapping["updated_at"]) > 0

@@ -571,6 +571,8 @@ function ServiceRow(props: {
   showConnectionColumn: boolean
   /** True while background start task is running (polling). */
   isStarting?: boolean
+  /** True while background stop task is running (polling). */
+  isStopping?: boolean
 }) {
   const {
     svc,
@@ -587,6 +589,7 @@ function ServiceRow(props: {
     onReset,
     showConnectionColumn,
     isStarting = false,
+    isStopping = false,
   } = props
   const redisHealth = ingestRedisHealthLamp(svc.id, status)
   const redisLamp = redisHealth.lamp
@@ -602,9 +605,9 @@ function ServiceRow(props: {
   // When Redis health is green the service is definitely running regardless of
   // whether Ops/systemd can probe the unit (e.g. process started manually or
   // on a remote host).  Prefer Stop in that case so the button reflects reality.
-  // While isStarting (fire-and-forget dispatched), hide Start, keep Stop visible.
-  const showStart = isStarting ? false : lamp === 'green' ? false : rawButtons.showStart
-  const showStop  = isStarting ? true  : lamp === 'green' ? true  : rawButtons.showStop
+  // While isStarting: hide Start, show Stop. While isStopping: hide both (action in flight).
+  const showStart = isStarting ? false : isStopping ? false : lamp === 'green' ? false : rawButtons.showStart
+  const showStop  = isStarting ? true  : isStopping ? false : lamp === 'green' ? true  : rawButtons.showStop
   const showIbClientId = ibIngestClientIdShouldShow(svc.id, category, svc.process_active, status)
   const ibClientSlots = showIbClientId
     ? enrichIbClientSlotsWithProbe(svc.id, ibIngestClientIdSlots(svc.id, category, status), status)
@@ -798,12 +801,17 @@ function ServiceRow(props: {
       <td>
         {isStarting ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 'var(--space-2)' }}>
-            <span
-              className="ingest-starting-dot"
-              aria-hidden
-            />
+            <span className="ingest-starting-dot" aria-hidden />
             <span style={{ fontSize: '0.8rem', color: '#fbbf24', fontWeight: 600 }}>
               Starting…
+            </span>
+          </div>
+        ) : null}
+        {isStopping ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 'var(--space-2)' }}>
+            <span className="ingest-starting-dot" aria-hidden />
+            <span style={{ fontSize: '0.8rem', color: '#fbbf24', fontWeight: 600 }}>
+              Stopping…
             </span>
           </div>
         ) : null}
@@ -902,6 +910,8 @@ export function IngestServicesTable(props: {
   onReset: (svc: MarketIngestServiceRow) => void
   /** Set of service IDs currently being started via fire-and-forget background task. */
   startingServiceIds?: ReadonlySet<string>
+  /** Set of service IDs currently being stopped via fire-and-forget background task. */
+  stoppingServiceIds?: ReadonlySet<string>
 }) {
   const {
     rows,
@@ -917,6 +927,7 @@ export function IngestServicesTable(props: {
     onRestart,
     onReset,
     startingServiceIds,
+    stoppingServiceIds,
   } = props
   if (rows.length === 0) {
     return <p className="massive-api-doc-hint">{emptyHint}</p>
@@ -944,7 +955,7 @@ export function IngestServicesTable(props: {
           <th style={{ width: 32 }}>Status</th>
           <th style={{ width: 80 }}>
             Host
-            <InfoTooltip text="Only one of Dev or Prod may run each service against the same Redis: bifrost_ops_control_env and bifrost_ops_control_host on the meta hash record which stack and host last started it from Ops. Starting elsewhere is rejected if the lease differs or if health still shows a fresh active writer. After Stop, Ops clears those fields and rewrites health to disconnected so Status updates." />
+            <InfoTooltip text="Only one of Dev or Prod may run each service against the same Redis: bifrost_ops_control_env and bifrost_ops_control_host on the bifrost:health hash record which stack and host last started it from Ops. Starting elsewhere is rejected if HOST differs or if health still shows a fresh active writer. After Stop, Ops clears those fields and rewrites health to disconnected so Status updates." />
           </th>
           <th className="massive-api-kv-label">Service</th>
           {showConnectionColumn ? (
@@ -1007,6 +1018,7 @@ export function IngestServicesTable(props: {
                   onReset={() => onReset(svc)}
                   showConnectionColumn={showConnectionColumn}
                   isStarting={startingServiceIds?.has(svc.id) === true}
+                  isStopping={stoppingServiceIds?.has(svc.id) === true}
                 />
               )
             })}
@@ -1034,6 +1046,8 @@ export function MarketIngestOpsPage({
   const confirmSessionRef = useRef(0)
   const [startingServiceIds, setStartingServiceIds] = useState<ReadonlySet<string>>(new Set())
   const startPollTimersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
+  const [stoppingServiceIds, setStoppingServiceIds] = useState<ReadonlySet<string>>(new Set())
+  const stopPollTimersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
   const [opsHealth, setOpsHealth] = useState<Awaited<ReturnType<typeof fetchOpsHealth>> | null>(null)
   const [clearingConflict, setClearingConflict] = useState(false)
   const [clearConflictErr, setClearConflictErr] = useState<string | null>(null)
@@ -1289,7 +1303,7 @@ export function MarketIngestOpsPage({
     }, 70_000)
   }, [refresh, loadStatus])
 
-  // Stop polling when the service becomes active
+  // Stop start-polling when the service becomes active
   useEffect(() => {
     if (startingServiceIds.size === 0) return
     for (const svcId of startingServiceIds) {
@@ -1307,10 +1321,58 @@ export function MarketIngestOpsPage({
     }
   }, [services, startingServiceIds])
 
+  const beginStopPolling = useCallback((serviceId: string) => {
+    const existing = stopPollTimersRef.current.get(serviceId)
+    if (existing != null) clearInterval(existing)
+
+    setStoppingServiceIds(prev => new Set([...prev, serviceId]))
+
+    // Poll every 4s — background stop takes up to ~60s
+    const intervalId = setInterval(() => {
+      void refresh()
+      void loadStatus()
+    }, 4000)
+    stopPollTimersRef.current.set(serviceId, intervalId)
+
+    // Auto-stop after 75s regardless
+    setTimeout(() => {
+      const id = stopPollTimersRef.current.get(serviceId)
+      if (id != null) clearInterval(id)
+      stopPollTimersRef.current.delete(serviceId)
+      setStoppingServiceIds(prev => {
+        const next = new Set(prev)
+        next.delete(serviceId)
+        return next
+      })
+    }, 75_000)
+  }, [refresh, loadStatus])
+
+  // Stop stop-polling when the service is no longer active
+  useEffect(() => {
+    if (stoppingServiceIds.size === 0) return
+    for (const svcId of stoppingServiceIds) {
+      const svc = services.find(s => s.id === svcId)
+      if (svc && svc.process_active !== 'active') {
+        const id = stopPollTimersRef.current.get(svcId)
+        if (id != null) clearInterval(id)
+        stopPollTimersRef.current.delete(svcId)
+        setStoppingServiceIds(prev => {
+          const next = new Set(prev)
+          next.delete(svcId)
+          return next
+        })
+      }
+    }
+  }, [services, stoppingServiceIds])
+
   const runControl = async (serviceId: string, action: MarketIngestAction) => {
     const result = await controlMarketIngest(serviceId, action)
     if (result.queued) {
-      beginStartPolling(serviceId)
+      if (action === 'stop') {
+        beginStopPolling(serviceId)
+      } else {
+        beginStartPolling(serviceId)
+      }
     }
   }
 
@@ -1572,6 +1634,7 @@ export function MarketIngestOpsPage({
           onRestart={svc => openServiceConfirm(svc, 'restart', 'Restart')}
           onReset={openResetConfirm}
           startingServiceIds={startingServiceIds}
+          stoppingServiceIds={stoppingServiceIds}
         />
       </section>
 

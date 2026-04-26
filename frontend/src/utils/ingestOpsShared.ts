@@ -48,13 +48,13 @@ export function runtimeControlHostDisplay(
     const keyHint = redisMetaKey ? `${redisMetaKey}` : 'ingest meta hash'
     return {
       pill,
-      title: `Ops control lease in Redis (${keyHint}): last start from ${pill.ariaLabel}.${hostSentence} Fields bifrost_ops_control_env, bifrost_ops_control_host.`,
+      title: `Ops control fields in Redis health (${keyHint}): last start from ${pill.ariaLabel}.${hostSentence} Fields bifrost_ops_control_env, bifrost_ops_control_host.`,
     }
   }
   return {
     pill: { shortLabel: '—', pillVariant: 'other', ariaLabel: 'Unclaimed' },
     title: redisMetaKey.trim()
-      ? `No Ops control lease in Redis yet (${redisMetaKey}). Starting from Ops (Dev or Prod) writes bifrost_ops_control_env and bifrost_ops_control_host.${hostSentence}`
+      ? `No Ops control fields in Redis health yet (${redisMetaKey}). Starting from Ops (Dev or Prod) writes bifrost_ops_control_env and bifrost_ops_control_host.${hostSentence}`
       : 'No redis_meta_key for this row; cross-stack lease is not tracked.',
   }
 }

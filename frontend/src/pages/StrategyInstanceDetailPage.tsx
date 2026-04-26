@@ -14,12 +14,11 @@ import {
   sliceExecutionForInstanceOptView,
 } from './portfolio/ledgerOptHelpers'
 import { InstanceDetailHeader } from './strategy/instanceDetail/InstanceDetailHeader'
-import { InstanceOverviewCard } from './strategy/instanceDetail/InstanceOverviewCard'
-import { InstanceStructureCard } from './strategy/instanceDetail/InstanceStructureCard'
+import { InstanceOverviewStructureCard } from './strategy/instanceDetail/InstanceOverviewStructureCard'
 import { InstancePnLStrip } from './strategy/instanceDetail/InstancePnLStrip'
 import { InstanceExecutionsPanel } from './strategy/instanceDetail/InstanceExecutionsPanel'
 import { computeInstanceExecDerivedNetPnl } from './strategy/instanceDetail/instanceDetailPnlMetrics'
-import { InstanceKlineSection } from './strategy/instanceDetail/InstanceKlineSection'
+import { InstanceKlineSection, type InstanceKlineNavRequest } from './strategy/instanceDetail/InstanceKlineSection'
 
 export interface StrategyInstanceDetailPageProps {
   strategyInstanceId: number
@@ -43,6 +42,7 @@ export function StrategyInstanceDetailPage({
   const [structure, setStructure] = useState<StrategyStructure | null>(null)
   const [structureLoading, setStructureLoading] = useState(false)
   const [structureError, setStructureError] = useState<string | null>(null)
+  const [klineNav, setKlineNav] = useState<InstanceKlineNavRequest>(null)
   /** Bulk option id → linked stock legs + slippage (same POST as Trade Ledger). */
   const [optionStockLinkByOptionId, setOptionStockLinkByOptionId] = useState<
     Record<number, OptionStockLinkSummary>
@@ -90,6 +90,10 @@ export function StrategyInstanceDetailPage({
       })
       .finally(() => setExecutionsLoading(false))
   }, [strategyInstanceId])
+
+  const clearKlineNav = useCallback(() => {
+    setKlineNav(null)
+  }, [])
 
   const loadStructure = useCallback((strategy_structure_id: number) => {
     setStructureLoading(true)
@@ -286,19 +290,17 @@ export function StrategyInstanceDetailPage({
           {instanceError != null && <p className="error-message">{instanceError}</p>}
 
           <div className="instance-detail-main-grid">
-            <InstanceOverviewCard
+            <InstanceOverviewStructureCard
               instance={instance}
               executionsForPosition={executionsFinalForInstance}
               executionsLoading={executionsLoading}
-            />
-            <InstanceStructureCard
-              instance={instance}
               structure={structure}
               structureLoading={structureLoading}
               structureError={structureError}
             />
             <div className="instance-detail-pnl-column">
               <InstancePnLStrip
+                strategyInstanceId={strategyInstanceId}
                 loading={performanceLoading}
                 performance={performance}
                 executionsForNotional={executionsFinalForInstance}
@@ -306,6 +308,8 @@ export function StrategyInstanceDetailPage({
                 linkedStockPnlRows={linkedStockPnlRows}
                 execDerivedNetPnl={execDerivedNetPnl}
                 riskProfile={riskProfile}
+                structureType={structure?.structure_type ?? null}
+                structureDisplayName={instance.strategy_structure_name ?? null}
               />
             </div>
           </div>
@@ -313,8 +317,11 @@ export function StrategyInstanceDetailPage({
           {executionsFinalForInstance.length > 0 &&
             executionsFinalForInstance.some(e => e.symbol) && (
             <InstanceKlineSection
+              strategyInstanceId={strategyInstanceId}
               symbol={(executionsFinalForInstance.find(e => e.symbol)?.symbol ?? '').toUpperCase()}
               executions={executionsFinalForInstance}
+              klineNav={klineNav}
+              onKlineNavApplied={clearKlineNav}
             />
           )}
 
@@ -341,15 +348,8 @@ export function StrategyInstanceDetailPage({
             splitMetaByExecId={executionsFinalSplitMetaByExecId}
             optionStockLinkByOptionId={optionStockLinkByOptionId}
             parentOptQtyByExecId={parentOptQtyByExecId}
+            onSelectOptionContractForKline={(key) => setKlineNav({ key, nonce: Date.now() })}
           />
-
-          <section className="detail-block placeholder-block instance-detail-future-card">
-            <h3 className="instance-detail-section-title">Coming soon</h3>
-            <ul>
-              <li>Backtest for this instance</li>
-              <li>Capital usage for this instance</li>
-            </ul>
-          </section>
         </>
       )}
     </div>

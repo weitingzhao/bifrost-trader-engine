@@ -12,6 +12,7 @@ import redis
 
 from src.app.config import get_effective_ib_config
 from src.bifrost.message_center import IbConnectionStatusTracker
+from src.bifrost.redis_health_keys import HEALTH_HASH_TTL_SEC
 from src.ib.connection_policy import operator_effective_health_refresh_sec
 from src.ib_operator.config import effective_ib_operator_settings
 from src.ib_operator.executor import IbOperatorExecutor
@@ -93,15 +94,12 @@ def _write_health_sync(
         h["next_service_heartbeat_in_s"] = max(0.0, lh + iv - now) if lh > 0 else iv
     mapping = operator_health_dict_to_redis_hash(h)
     try:
-        # Do not DELETE the hash: Ops stores bifrost_ops_control_env on bifrost:health:ws_ib_operator (same key)
-        # (Socket Services Host column). Replacing the key would drop the lease after
-        # the first health refresh.
-        #
-        # Do not EXPIRE this key: IB ingestor / Massive WS health hashes have no TTL. A short TTL here
-        # caused the whole key to vanish when writes paused; Ops then recreated a hash with only
-        # bifrost_ops_control_env, wiping host_connected and all other fields until restart.
+        # Do not DELETE the hash: prune_legacy_operator_health_hash_fields uses HDEL for old fields.
+        # Ops control fields (bifrost_ops_control_env/host) live on this health hash.
+        # HSET merges fields, so heartbeat refresh preserves HOST while updating liveness.
         r.hset(key, mapping=mapping)
         prune_legacy_operator_health_hash_fields(r, key)
+        r.expire(key, HEALTH_HASH_TTL_SEC)
     except Exception as e:
         logger.warning("write health key failed: %s", e)
     _publish_operator_status_messages(tracker, h)

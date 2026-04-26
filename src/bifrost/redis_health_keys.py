@@ -12,6 +12,25 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+# Health hash TTL: each service heartbeat (30 s) resets this; expiry means process is dead.
+# 6× heartbeat interval → safe margin for transient pauses.
+HEALTH_HASH_TTL_SEC = 180  # 3 minutes
+
+# Deprecated Ops control-lease keys. Socket Services now store Dev/Prod HOST fields directly
+# on their bifrost:health:* hashes because Prod Redis writes those nodes reliably.
+BIFROST_OPS_LEASE_PREFIX = "bifrost:ops:lease:"
+
+BIFROST_OPS_LEASE_MASSIVE_WS = BIFROST_OPS_LEASE_PREFIX + "massive_ws"
+BIFROST_OPS_LEASE_IB_INGESTOR = BIFROST_OPS_LEASE_PREFIX + "ib_ingestor"
+BIFROST_OPS_LEASE_IB_OPERATOR = BIFROST_OPS_LEASE_PREFIX + "ib_operator"
+BIFROST_OPS_LEASE_IB_ACCOUNT_AGENT = BIFROST_OPS_LEASE_PREFIX + "ib_account_agent"
+
+
+def ops_lease_key_for_service(service_id: str) -> str:
+    """Return the legacy Ops control-lease Redis key for a service_id."""
+    return BIFROST_OPS_LEASE_PREFIX + service_id.strip()
+
+
 # Canonical health hashes (Socket Services / GET /status ``socket`` + Ops ``redis_meta_key``).
 # IB hashes may include per-slot ``*_ib_probe_at``, ``*_ib_probe_ok``, ``*_ib_probe_interval_sec``
 # (Operator host/secondary; Account Agent host/secondary; Ingestor ``ib_probe_*``) for liveness UI.
@@ -26,7 +45,7 @@ BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON = "bifrost:health:daemon_account_sync"
 LEGACY_BIFROST_HEALTH_ACCOUNT_SYNC_DAEMON = "bifrost:health:account_sync_daemon"
 
 # Strategy Trading Daemon: health hash + Ops Dev/Prod lease fields (``bifrost_ops_control_*``,
-# ``engine_ops_active``) on the same key, same pattern as ``bifrost:health:ws_ib_operator``.
+# ``engine_ops_active``) on the same key — NOT migrated to separate lease key (different lifecycle).
 BIFROST_HEALTH_DAEMON_TRADING_ENGINE = "bifrost:health:daemon_strategy_trading"
 LEGACY_BIFROST_HEALTH_DAEMON_TRADING_ENGINE = "bifrost:health:daemon_trading_engine"
 # Previous key (YAML / Redis migration); normalized in ``market_ingest_config``.

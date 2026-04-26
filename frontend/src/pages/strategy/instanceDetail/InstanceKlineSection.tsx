@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Bar, Execution } from '../../../types'
-import { fetchBars, fetchOptionBars } from '../../../api'
-import { fmtExpiry } from '../../../utils/format'
+import { fetchBars, fetchOptionBars, fetchOptionSnapshot, postMassiveSync } from '../../../api'
+import { fmtExpiry, parseOptionContractKey } from '../../../utils/format'
+import { buildPolygonOptionsTicker } from '../../../utils/polygonOptionsTicker'
+import {
+  klineOptionTabKey,
+  normalizeOptionExpiryDigits,
+  normalizeOptionRightChar,
+} from './instanceKlineTabKey'
+
+export type InstanceKlineNavRequest = { key: string; nonce: number } | null
 
 // SVG layout constants (viewBox coordinates)
 const VW = 820
@@ -59,6 +67,31 @@ function triPath(cx: number, cy: number, size: number, up: boolean): string {
     : `M${cx},${cy + h * 0.67} L${cx - size * 0.5},${cy - h * 0.33} L${cx + size * 0.5},${cy - h * 0.33}Z`
 }
 
+/** Resolve expiry/strike/option_right from direct fields, falling back to contract_key parsing. */
+function resolveOptFields(e: Execution): { expiry: string; strike: number; option_right: string } | null {
+  let expiry = e.expiry
+  let strike = e.strike
+  let option_right = e.option_right
+
+  if ((!expiry || strike == null || !option_right) && e.contract_key) {
+    const parsed = parseOptionContractKey(e.contract_key)
+    if (!expiry && parsed.expiry !== '—') expiry = parsed.expiry
+    if (strike == null && parsed.strike !== '—') {
+      const s = parseFloat(parsed.strike)
+      if (!isNaN(s)) strike = s
+    }
+    if (!option_right && parsed.right !== '—') option_right = parsed.right
+  }
+
+  if (!expiry || strike == null || !option_right) return null
+  const expN = normalizeOptionExpiryDigits(expiry)
+  if (!expN) return null
+  const r = normalizeOptionRightChar(option_right)
+  const k = Number(strike)
+  if (!Number.isFinite(k)) return null
+  return { expiry: expN, strike: k, option_right: r }
+}
+
 function deriveTabs(executions: Execution[], symbol: string): KlineTab[] {
   const tabs: KlineTab[] = []
   const hasStock = executions.some(e => (e.sec_type ?? '').toUpperCase() === 'STK')
@@ -67,17 +100,19 @@ function deriveTabs(executions: Execution[], symbol: string): KlineTab[] {
   const seen = new Map<string, KlineTab>()
   for (const e of executions) {
     if ((e.sec_type ?? '').toUpperCase() !== 'OPT') continue
-    if (!e.expiry || e.strike == null || !e.option_right) continue
-    const key = `${e.expiry}|${e.strike}|${e.option_right}`
+    const fields = resolveOptFields(e)
+    if (!fields) continue
+    const { expiry, strike, option_right } = fields
+    const key = klineOptionTabKey(expiry, strike, option_right)
     if (!seen.has(key)) {
-      const rightLabel = (e.option_right ?? '').toUpperCase() === 'P' ? 'PUT' : 'CALL'
+      const rightLabel = option_right === 'P' ? 'PUT' : 'CALL'
       seen.set(key, {
         kind: 'option',
         symbol,
-        expiry: e.expiry,
-        strike: e.strike,
-        option_right: e.option_right,
-        label: `${rightLabel} $${e.strike} ${fmtExpiry(e.expiry)}`,
+        expiry,
+        strike,
+        option_right,
+        label: `${rightLabel} $${strike} ${fmtExpiry(expiry)}`,
       })
     }
   }
@@ -87,12 +122,13 @@ function deriveTabs(executions: Execution[], symbol: string): KlineTab[] {
 
 function execsForTab(tab: KlineTab, executions: Execution[]): Execution[] {
   if (tab.kind === 'stock') return executions.filter(e => (e.sec_type ?? '').toUpperCase() === 'STK')
-  return executions.filter(e =>
-    (e.sec_type ?? '').toUpperCase() === 'OPT' &&
-    e.expiry === tab.expiry &&
-    e.strike === tab.strike &&
-    e.option_right === tab.option_right,
-  )
+  const tabKey = klineOptionTabKey(tab.expiry, tab.strike, tab.option_right)
+  return executions.filter(e => {
+    if ((e.sec_type ?? '').toUpperCase() !== 'OPT') return false
+    const fields = resolveOptFields(e)
+    if (!fields) return false
+    return klineOptionTabKey(fields.expiry, fields.strike, fields.option_right) === tabKey
+  })
 }
 
 function buildMarkers(bars: Bar[], tabExecs: Execution[]): Marker[] {
@@ -124,9 +160,15 @@ function buildMarkers(bars: Bar[], tabExecs: Execution[]): Marker[] {
 export function InstanceKlineSection({
   symbol,
   executions,
+  strategyInstanceId,
+  klineNav = null,
+  onKlineNavApplied,
 }: {
   symbol: string
   executions: Execution[]
+  strategyInstanceId: number
+  klineNav?: InstanceKlineNavRequest
+  onKlineNavApplied?: () => void
 }) {
   const tabs = useMemo(() => deriveTabs(executions, symbol), [executions, symbol])
   const [tabIdx, setTabIdx] = useState(0)
@@ -135,7 +177,9 @@ export function InstanceKlineSection({
   const [error, setError] = useState<string | null>(null)
   const [tooltip, setTooltip] = useState<TooltipInfo | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+  const sectionRef = useRef<HTMLElement | null>(null)
   const cancelRef = useRef(0)
+  const snapshotAttemptedRef = useRef(new Set<string>())
 
   const selectedTab = tabs[tabIdx] ?? null
 
@@ -149,25 +193,50 @@ export function InstanceKlineSection({
       if (tab.kind === 'stock') {
         res = await fetchBars(tab.symbol, '1 D', 250)
       } else {
-        res = await fetchOptionBars({
-          symbol: tab.symbol,
-          expiry: tab.expiry,
-          strike: tab.strike,
-          option_right: tab.option_right,
-          period: '1 D',
-          limit: 250,
-          source: 'massive',
-        })
-        if (!res.bars.length) {
-          res = await fetchOptionBars({
+        const pullOptionBars = async () => {
+          let optionRes = await fetchOptionBars({
             symbol: tab.symbol,
             expiry: tab.expiry,
             strike: tab.strike,
             option_right: tab.option_right,
             period: '1 D',
             limit: 250,
-            source: 'ib',
+            source: 'massive',
           })
+          if (!optionRes.bars.length) {
+            optionRes = await fetchOptionBars({
+              symbol: tab.symbol,
+              expiry: tab.expiry,
+              strike: tab.strike,
+              option_right: tab.option_right,
+              period: '1 D',
+              limit: 250,
+              source: 'ib',
+            })
+          }
+          return optionRes
+        }
+
+        res = await pullOptionBars()
+        if (!res.bars.length) {
+          const key = klineOptionTabKey(tab.expiry, tab.strike, tab.option_right)
+          if (!snapshotAttemptedRef.current.has(key)) {
+            snapshotAttemptedRef.current.add(key)
+            // No historical bar yet: trigger Massive contract snapshot + IB snapshot once, then retry bars.
+            const optionContract = buildPolygonOptionsTicker(tab.symbol, tab.expiry, tab.strike, tab.option_right)
+            await postMassiveSync(
+              'feed_option_snapshots',
+              {
+                mode: 'contract',
+                underlying: tab.symbol,
+                option_contract: optionContract,
+                persist: true,
+              },
+              { priority: 'high' },
+            )
+            await fetchOptionSnapshot(tab.symbol, tab.expiry, [tab.strike])
+            res = await pullOptionBars()
+          }
         }
       }
       if (cancelRef.current !== token) return
@@ -186,8 +255,23 @@ export function InstanceKlineSection({
     void load(selectedTab)
   }, [selectedTab, load])
 
-  // Reset tab when tabs change (e.g. executions updated)
-  useEffect(() => { setTabIdx(0) }, [tabs.length])
+  useEffect(() => {
+    setTabIdx(0)
+  }, [strategyInstanceId])
+
+  useEffect(() => {
+    if (klineNav == null) return
+    const idx = tabs.findIndex(
+      (t) => t.kind === 'option' && klineOptionTabKey(t.expiry, t.strike, t.option_right) === klineNav.key,
+    )
+    if (idx >= 0) {
+      setTabIdx(idx)
+      window.requestAnimationFrame(() => {
+        sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      })
+    }
+    onKlineNavApplied?.()
+  }, [klineNav, tabs, onKlineNavApplied])
 
   const tabExecs = useMemo(
     () => (selectedTab ? execsForTab(selectedTab, executions) : []),
@@ -271,7 +355,7 @@ export function InstanceKlineSection({
   if (tabs.length === 0) return null
 
   return (
-    <section className="detail-block instance-detail-kline-section">
+    <section ref={sectionRef} className="detail-block instance-detail-kline-section">
       <h3 className="instance-detail-section-title">K-line Chart</h3>
 
       {/* Tab selector */}
@@ -377,7 +461,7 @@ export function InstanceKlineSection({
               return (
                 <g key={i}>
                   {/* Vertical dotted line from marker to bar */}
-                  <line x1={x} y1={cy + (isBuy ? -9 : 9)} x2={x} y2={mapY(isBuy ? bars[m.barIdx]?.low ?? m.price : bars[m.barIdx]?.high ?? m.price)}
+                  <line x1={x} y1={cy + (isBuy ? -9 : 9)} x2={x} y2={mapY(isBuy ? windowedBars[m.barIdx]?.low ?? m.price : windowedBars[m.barIdx]?.high ?? m.price)}
                     stroke={color} strokeWidth={0.8} strokeOpacity={0.4} strokeDasharray="2,2" />
                   <path d={triPath(x, cy, 9, isBuy)}
                     fill={color} fillOpacity={0.9}

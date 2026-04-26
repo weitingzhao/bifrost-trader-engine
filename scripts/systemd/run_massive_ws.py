@@ -34,7 +34,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(str(_PROJECT_ROOT))
 
-from src.bifrost.redis_health_keys import BIFROST_HEALTH_MASSIVE_WS
+from src.bifrost.redis_health_keys import BIFROST_HEALTH_MASSIVE_WS, HEALTH_HASH_TTL_SEC
 
 from backend.monitor.routers.deps import MASSIVE_WS_LOG_STREAM_KEY
 from src.core.logging_redis_stream import RedisStreamLogHandler
@@ -242,6 +242,7 @@ class RedisWriter:
             "msg_count": str(msg_count),
             "updated_at": str(time.time()),
         })
+        self._rds.expire(REDIS_META_STATUS, HEALTH_HASH_TTL_SEC)
 
     def set_subscriptions(self, channels: Set[str]) -> None:
         pipe = self._rds.pipeline()

@@ -6,6 +6,7 @@ import json
 import time
 from typing import Any, Dict, Set
 
+from src.bifrost.redis_health_keys import HEALTH_HASH_TTL_SEC
 from src.vendor.ib_ingestor.redis_keys import (
     IB_INGESTER_CHANNEL,
     IB_INGESTER_META_HEALTH,
@@ -59,6 +60,7 @@ class IbIngestorRedisWriter:
             "service_heartbeat_reconnect_in_progress": service_heartbeat_reconnect_in_progress or "",
         }
         self._rds.hset(IB_INGESTER_META_HEALTH, mapping=m)
+        self._rds.expire(IB_INGESTER_META_HEALTH, HEALTH_HASH_TTL_SEC)
 
     def set_subscriptions(self, contract_keys: Set[str]) -> None:
         pipe = self._rds.pipeline()

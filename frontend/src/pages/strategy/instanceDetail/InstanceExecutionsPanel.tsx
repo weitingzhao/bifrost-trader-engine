@@ -12,6 +12,7 @@ import {
 } from '../../portfolio/ledgerOptHelpers'
 import { ViewOptionStockLinksModal } from '../../portfolio/ViewOptionStockLinksModal'
 import { InstanceAllocationSplitIcon } from './InstanceAllocationSplitIcon'
+import { klineOptionTabKey } from './instanceKlineTabKey'
 
 export type ExecutionSourceTab = 'performance_book' | 'tws_raw'
 
@@ -41,6 +42,11 @@ function isBuySide(e: Execution): boolean {
 function isSellSide(e: Execution): boolean {
   const s = (e.side ?? '').toUpperCase()
   return s === 'SELL' || s === 'SLD' || s === 'S'
+}
+
+function executionDateDisplay(e: Execution, source: ExecutionSourceTab): string {
+  if (source === 'performance_book') return e.trade_date ?? '—'
+  return e.trade_date ?? (e.time != null ? fmtTsShort(e.time) : '—')
 }
 
 function FillCells({
@@ -102,7 +108,7 @@ function FillCells({
     <>
       <td className={colClass}>
         <div className="instance-detail-paired-fill-date">
-          <span>{e.trade_date ?? (e.time != null ? fmtTsShort(e.time) : '—')}</span>
+          <span>{executionDateDisplay(e, source)}</span>
           <span className="instance-detail-paired-fill-meta">
             {execId != null && (
               <span className="instance-detail-exec-id muted">#{execId}</span>
@@ -368,7 +374,7 @@ function ExecutionFillsTable({
                     </span>
                   ) : null}
                 </td>
-                <td>{e.trade_date ?? (e.time != null ? fmtTsShort(e.time) : '—')}</td>
+                <td>{executionDateDisplay(e, source)}</td>
                 {!isTwsRaw ? (
                   <>
                     <td>{e.report_date ?? '—'}</td>
@@ -408,6 +414,7 @@ export function InstanceExecutionsPanel({
   splitMetaByExecId,
   optionStockLinkByOptionId,
   parentOptQtyByExecId,
+  onSelectOptionContractForKline,
 }: {
   loading: boolean
   executionsFinal: Execution[]
@@ -415,6 +422,7 @@ export function InstanceExecutionsPanel({
   splitMetaByExecId: Map<number, { ratioLabel: string; tooltip: string }>
   optionStockLinkByOptionId: Record<number, OptionStockLinkSummary>
   parentOptQtyByExecId: Map<number, number>
+  onSelectOptionContractForKline?: (tabKey: string) => void
 }) {
   const [tab, setTab] = useState<ExecutionSourceTab>('performance_book')
   const [stockModal, setStockModal] = useState<{
@@ -619,7 +627,23 @@ export function InstanceExecutionsPanel({
                           </td>
                           <td className="instance-detail-match-center">
                             <div className="instance-detail-contract-title instance-detail-contract-title-with-stock">
-                              <span>{contractLabel(g)}</span>
+                              {onSelectOptionContractForKline != null ? (
+                                <button
+                                  type="button"
+                                  className="instance-detail-contract-kline-jump-btn"
+                                  title="Show K-line for this contract"
+                                  onClick={() => {
+                                    const ft = g.trades[0]
+                                    onSelectOptionContractForKline(
+                                      klineOptionTabKey(g.expiry, g.strike, (ft?.option_right ?? 'C').toString()),
+                                    )
+                                  }}
+                                >
+                                  {contractLabel(g)}
+                                </button>
+                              ) : (
+                                <span>{contractLabel(g)}</span>
+                              )}
                               {groupStockIcon}
                             </div>
                             <div className="instance-detail-net-line">

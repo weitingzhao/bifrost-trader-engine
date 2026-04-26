@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Request
@@ -18,6 +19,7 @@ from backend.ops.market_ingest_control_env import (
     normalize_control_profile,
     read_control_env,
     read_control_host,
+    read_control_updated_at,
     write_control_env,
     write_trading_engine_ops_lease,
 )
@@ -34,6 +36,16 @@ router = APIRouter(tags=["ops-market-ingest"])
 
 _ENSURE_START_STOP_TIMEOUT_SEC = 30
 _ENSURE_START_START_TIMEOUT_SEC = 45
+_RECENT_CONTROL_WRITE_GRACE_SEC = 120.0
+
+
+async def _ensure_stop_background(exc: Any, unit: str) -> None:
+    """Run ``systemctl stop`` in the background; Redis was already cleaned up by the HTTP handler."""
+    try:
+        await exc._systemctl("stop", unit, timeout=_ENSURE_START_STOP_TIMEOUT_SEC)  # noqa: SLF001
+        logger.info("ensure_stop: %s stopped", unit)
+    except Exception as stop_err:
+        logger.warning("ensure_stop: stop %s failed: %s", unit, stop_err)
 
 
 async def _ensure_start_background(
@@ -44,12 +56,12 @@ async def _ensure_start_background(
     meta_key: str,
     ops_profile: Optional[str],
 ) -> None:
-    """Stop any running instance of `unit` then start fresh.
+    """Stop any running instance of ``unit`` then start fresh.
 
-    Runs as a FastAPI BackgroundTask so the HTTP response is returned immediately.
-    Stop step is best-effort; we proceed to start even if stop times out.
+    Redis lease is written by the HTTP handler before this task is dispatched, so HOST updates
+    on the first frontend poll without waiting for systemctl to complete.
     """
-    # Step 1: check if currently running and stop it
+    # Step 1: stop if currently running (best-effort)
     try:
         if hasattr(exc, "systemctl_is_active"):
             active = await exc.systemctl_is_active(unit)
@@ -66,22 +78,21 @@ async def _ensure_start_background(
         logger.warning("ensure_start: is-active check failed for %s: %s", unit, check_err)
 
     # Step 2: start
+    start_ok = False
     try:
         await exc._systemctl("start", unit, timeout=_ENSURE_START_START_TIMEOUT_SEC)  # noqa: SLF001
         logger.info("ensure_start: %s started successfully", unit)
+        start_ok = True
     except Exception as start_err:
         logger.warning("ensure_start: start %s failed: %s", unit, start_err)
-        return
 
-    # Step 3: write Redis control lease
-    if rurl and meta_key and ops_profile:
+    # Step 3: trading_engine active marker is written after confirmed start.
+    # Socket-service Dev/Prod HOST was already written to its health hash in the HTTP handler.
+    if sid == "trading_engine" and start_ok and rurl and ops_profile and meta_key:
         try:
-            if sid == "trading_engine":
-                await asyncio.to_thread(write_trading_engine_ops_lease, rurl, meta_key, ops_profile)
-            else:
-                await asyncio.to_thread(write_control_env, rurl, meta_key, ops_profile)
+            await asyncio.to_thread(write_trading_engine_ops_lease, rurl, meta_key, ops_profile)
         except Exception as redis_err:
-            logger.warning("ensure_start: redis post-start update failed for %s: %s", unit, redis_err)
+            logger.warning("ensure_start: trading_engine lease write failed: %s", redis_err)
 
 
 def _executor(request: Request):
@@ -130,9 +141,38 @@ async def market_ingest_services(request: Request) -> Dict[str, Any]:
         meta_key = (row.get("redis_meta_key") or "").strip()
         redis_control_env: Optional[str] = None
         redis_control_host: Optional[str] = None
-        if rurl and meta_key:
-            redis_control_env = await asyncio.to_thread(read_control_env, rurl, meta_key)
-            redis_control_host = await asyncio.to_thread(read_control_host, rurl, meta_key)
+        redis_control_updated_at: Optional[float] = None
+        if rurl:
+            row_sid = (row.get("id") or "").strip()
+            # Dev/Prod HOST is stored on the service health hash so Prod can use the same
+            # Redis node it already updates (bifrost:health:*), avoiding bifrost:ops:lease:*.
+            lk = meta_key
+            if lk:
+                redis_control_env = await asyncio.to_thread(read_control_env, rurl, lk)
+                redis_control_host = await asyncio.to_thread(read_control_host, rurl, lk)
+                redis_control_updated_at = await asyncio.to_thread(read_control_updated_at, rurl, lk)
+            # Orphan detection: lease present but health gone → service died, clear stale lease.
+            # Requires meta_key to check health hash; skip if meta_key empty.
+            if redis_control_env is not None and row_sid != "trading_engine" and meta_key:
+                is_live = await asyncio.to_thread(
+                    ingest_redis_health_looks_live, rurl, meta_key, row_sid
+                )
+                control_age = (
+                    time.time() - redis_control_updated_at
+                    if redis_control_updated_at is not None
+                    else None
+                )
+                recent_control_write = (
+                    control_age is not None and control_age <= _RECENT_CONTROL_WRITE_GRACE_SEC
+                )
+                if not is_live and not recent_control_write:
+                    try:
+                        await asyncio.to_thread(clear_control_env, rurl, lk)
+                    except Exception as _ce:
+                        logger.debug("GET /services: clear orphaned lease %s: %s", row_sid, _ce)
+                    redis_control_env = None
+                    redis_control_host = None
+                    redis_control_updated_at = None
         out.append({
             **row,
             "process_active": active,
@@ -181,26 +221,46 @@ async def market_ingest_control(
     meta_key = (svc.get("redis_meta_key") or "").strip()
     rurl = meta_redis_url_from_ops_config(cfg)
     ops_profile = _effective_ops_control_profile(request)
+    # Dev/Prod HOST lives in each service health hash. Linux Prod has proven writes to
+    # bifrost:health:* work, while bifrost:ops:lease:* may be unavailable/filtered.
+    lease_key = meta_key
     claimed: Optional[str] = None
-    if rurl and meta_key:
-        claimed = await asyncio.to_thread(read_control_env, rurl, meta_key)
-    if rurl and meta_key and ops_profile:
-        if claimed and claimed != ops_profile:
-            msg = (
-                f"Ingest control is held by the {claimed.upper()} stack (Redis). "
-                "Stop the service from that Ops host first."
-            )
-            _audit(
-                request,
-                f"market_ingest_{body.action.value}",
-                f"{body.service_id}:{unit}",
-                "rejected",
-                detail=f"redis_control_env={claimed} ops_profile={ops_profile}",
-            )
-            return JSONResponse(
-                status_code=409,
-                content={"ok": False, "error": msg},
-            )
+    if rurl and lease_key:
+        claimed = await asyncio.to_thread(read_control_env, rurl, lease_key)
+    if ops_profile and claimed and claimed != ops_profile:
+        # Orphan detection: if meta_key available, check whether health is still live.
+        # If health hash is gone/stale the service died and the lease is orphaned → auto-clear.
+        if rurl and meta_key:
+            looks_live = await asyncio.to_thread(ingest_redis_health_looks_live, rurl, meta_key, sid)
+            if not looks_live:
+                logger.info(
+                    "market_ingest: clearing orphaned %s lease (health hash gone/stale) for %s",
+                    claimed,
+                    sid,
+                )
+                try:
+                    await asyncio.to_thread(clear_control_env, rurl, lease_key)
+                    claimed = None
+                except Exception as ce:
+                    logger.warning("market_ingest: failed to clear orphaned lease for %s: %s", sid, ce)
+
+    # 409 conflict: lease held by the other stack and service is still alive.
+    if ops_profile and claimed and claimed != ops_profile:
+        msg = (
+            f"Ingest control is held by the {claimed.upper()} stack (Redis). "
+            "Stop the service from that Ops host first."
+        )
+        _audit(
+            request,
+            f"market_ingest_{body.action.value}",
+            f"{body.service_id}:{unit}",
+            "rejected",
+            detail=f"redis_control_env={claimed} ops_profile={ops_profile}",
+        )
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error": msg},
+        )
 
     # Exclusive writer: no lease but Redis health still shows a fresh connected snapshot (other stack).
     # RESET intentionally excluded — it is a force-restart that should succeed even when stale
@@ -240,9 +300,15 @@ async def market_ingest_control(
                 content={"ok": False, "error": msg},
             )
 
-    # START: fire-and-forget — stop any running instance then start fresh in background.
-    # Returns immediately so nginx/proxy timeouts cannot block the browser.
+    # START: write Redis lease immediately so HOST column shows on first frontend poll,
+    # then dispatch systemctl start to background (avoids nginx proxy_read_timeout).
     if action == MarketIngestAction.START:
+        if sid != "trading_engine" and rurl and ops_profile:
+            _lk = lease_key
+            try:
+                await asyncio.to_thread(write_control_env, rurl, _lk, ops_profile)
+            except Exception as _le:
+                logger.warning("market_ingest start: pre-write lease failed for %s: %s", sid, _le)
         background_tasks.add_task(
             _ensure_start_background, exc, unit, sid, rurl, meta_key, ops_profile
         )
@@ -251,10 +317,34 @@ async def market_ingest_control(
             "market_ingest_start",
             f"{body.service_id}:{unit}",
             "queued",
-            detail="stop-if-running + start dispatched to background task",
+            detail="lease written; stop-if-running + start dispatched to background task",
         )
         return JSONResponse(
             content={"ok": True, "queued": True, "service_id": body.service_id, "action": "start"},
+            headers={"X-Accel-Buffering": "no"},
+        )
+
+    # STOP: clear Redis lease + health immediately so HOST clears on first frontend poll,
+    # then dispatch systemctl stop to background (avoids nginx proxy_read_timeout).
+    if action == MarketIngestAction.STOP:
+        if rurl:
+            try:
+                if ops_profile:
+                    await asyncio.to_thread(clear_control_env, rurl, lease_key)
+                if meta_key:
+                    await asyncio.to_thread(clear_ingest_health_after_stop, rurl, meta_key, sid)
+            except Exception as _ce:
+                logger.warning("market_ingest stop: pre-clear redis failed for %s: %s", sid, _ce)
+        background_tasks.add_task(_ensure_stop_background, exc, unit)
+        _audit(
+            request,
+            "market_ingest_stop",
+            f"{body.service_id}:{unit}",
+            "queued",
+            detail="redis cleared; systemctl stop dispatched to background task",
+        )
+        return JSONResponse(
+            content={"ok": True, "queued": True, "service_id": body.service_id, "action": "stop"},
             headers={"X-Accel-Buffering": "no"},
         )
 
@@ -298,16 +388,7 @@ async def market_ingest_control(
 
     if rurl and meta_key:
         try:
-            if action == MarketIngestAction.STOP:
-                if ops_profile:
-                    await asyncio.to_thread(clear_control_env, rurl, meta_key)
-                await asyncio.to_thread(
-                    clear_ingest_health_after_stop,
-                    rurl,
-                    meta_key,
-                    sid,
-                )
-            elif (
+            if (
                 ops_profile
                 and action
                 in (
@@ -318,7 +399,7 @@ async def market_ingest_control(
                 if sid == "trading_engine":
                     await asyncio.to_thread(write_trading_engine_ops_lease, rurl, meta_key, ops_profile)
                 else:
-                    await asyncio.to_thread(write_control_env, rurl, meta_key, ops_profile)
+                    await asyncio.to_thread(write_control_env, rurl, lease_key, ops_profile)
         except Exception as e:
             logger.warning(
                 "market_ingest redis post-action failed: %s %s %s",
@@ -362,7 +443,7 @@ async def market_ingest_clear_conflict_leases(request: Request) -> Any:
     """Clear all Redis control leases (bifrost_ops_control_env/host) across all configured services.
 
     Resolves the dev/prod stack conflict so either stack can regain control. Does not stop
-    any running processes — it only removes the Ops ownership lease from each service hash.
+    any running processes — it only removes the Ops ownership fields from each service health hash.
     Requires operator role.
     """
     from backend.ops.routers.workers import _role
@@ -381,15 +462,17 @@ async def market_ingest_clear_conflict_leases(request: Request) -> Any:
     cleared: List[str] = []
     errors: List[str] = []
     for row in rows:
+        row_sid = (row.get("id") or "").strip()
         meta_key = (row.get("redis_meta_key") or "").strip()
         if not meta_key:
             continue
+        lk = meta_key
         try:
-            await asyncio.to_thread(clear_control_env, rurl, meta_key)
-            cleared.append(row["id"])
+            await asyncio.to_thread(clear_control_env, rurl, lk)
+            cleared.append(row_sid)
         except Exception as e:
-            errors.append(f"{row['id']}: {e}")
-            logger.warning("clear_conflict_leases %s: %s", meta_key, e)
+            errors.append(f"{row_sid}: {e}")
+            logger.warning("clear_conflict_leases %s: %s", lk, e)
 
     _audit(request, "market_ingest_clear_conflict_leases", "*", "success" if not errors else "partial",
            detail=f"cleared={cleared} errors={errors}")

@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react'
+import { useId, useMemo, useState, type ReactNode } from 'react'
 import type { Execution, PerformanceResponse } from '../../../types'
 import { DraggableModal } from '../../../components/DraggableModal'
 import { fmtUsd } from '../../../utils/format'
@@ -6,32 +6,38 @@ import type { RiskProfile } from '../../../utils/riskProfile'
 import type { InstanceLinkedStockPnlRow } from '../../portfolio/ledgerOptHelpers'
 import {
   annualReturnDetailFromNetAndExecutions,
+  computeCapitalAtRiskWithDiagnostics,
+  computeInstancePositionStatus,
   formatHoldDaysRounded0,
   holdDaysForAnnualization,
-  holdTimeDaysFromReportDateSpan,
-  maxRiskUsdFromProfile,
+  holdSpanDaysForMetrics,
   netPnlUsdPerDayFromNetAndExecutions,
   underlyingCostSellBreakdown,
   underlyingCostSellOptUsd,
 } from './instanceDetailPnlMetrics'
+import { InstanceRiskCostExplainBody } from './InstanceRiskCostExplainBody'
+import { InstanceReturnExplainBody } from './InstanceReturnExplainBody'
+import { explainHighlightText } from './explainTextHighlight'
+import { getStructureTypeLabel } from '../strategyFormUtils'
 
 const HOLD_TIME_TOOLTIP =
-  'Hold time: maximum Report date minus minimum Report date across executions for this instance (Flex report_date). Displayed as whole calendar days (rounded).'
+  'Hold time: Open — min report_date to latest OPT expiry among open legs (calendar days, rounded). Closed — max minus min report_date.'
 
 const ANNUAL_RETURN_HINT =
-  'Annual return % = (Net PnL/day ÷ Cost/day) × (365.25 ÷ hold days used) × 100 — same as (net PnL × scale factor ÷ underlying cost) × 100 with scale factor = 365.25 ÷ hold days used.'
+  'Annual return % = (Net PnL/day ÷ Cost/day) × (365.25 ÷ hold days used) × 100 — hold days: open = min report_date → latest open-leg expiry; closed = report_date span.'
 
 const NET_PNL_PER_DAY_HINT =
-  'Net PnL per day of hold: Net PnL ÷ hold days used (max(report_date span in calendar days, 1)). Same divisor as Cost/day and Annual return.'
+  'Net PnL per day of hold: Net PnL ÷ hold days used (max(hold span calendar days, 1)). Same divisor as Cost/day and Annual return.'
 
 const UNDERLYING_PER_DAY_HINT =
-  'Cost per day of hold: Max risk denominator ÷ hold days used, where hold days used = max(report_date span in calendar days, 1).'
-
-const MAX_RISK_HINT =
-  'Max risk denominator used for return: prefer absolute Risk profile max loss (defined-risk), otherwise fallback to underlying cost.'
+  'Cost per day of hold: Capital at risk ÷ hold days used, where hold days used = max(report_date span in calendar days, 1).'
 
 const RETURN_PCT_HINT =
-  'Return % = Net PnL ÷ Max risk × 100.'
+  'Return % = Net PnL ÷ Capital at risk × 100.'
+
+function PnlExplainKpi({ children }: { children: ReactNode }) {
+  return <strong className="instance-detail-modal-explain-kpi">{children}</strong>
+}
 
 function signedPnlClass(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return 'is-neutral'
@@ -40,7 +46,29 @@ function signedPnlClass(n: number | null | undefined): string {
   return 'is-neutral'
 }
 
+function PnlBand({
+  title,
+  children,
+  titleExtra,
+}: {
+  title: string
+  children: ReactNode
+  /** Optional control next to the band title (e.g. help button). */
+  titleExtra?: ReactNode
+}) {
+  return (
+    <div className="instance-detail-pnl-band" role="group" aria-label={title}>
+      <div className="instance-detail-pnl-band-head">
+        <div className="instance-detail-pnl-band-title">{title}</div>
+        {titleExtra != null ? <span className="instance-detail-pnl-band-head-extra">{titleExtra}</span> : null}
+      </div>
+      <div className="instance-detail-pnl-band-metrics">{children}</div>
+    </div>
+  )
+}
+
 export function InstancePnLStrip({
+  strategyInstanceId,
   loading,
   performance,
   executionsForNotional,
@@ -48,7 +76,10 @@ export function InstancePnLStrip({
   linkedStockPnlRows = [],
   execDerivedNetPnl = null,
   riskProfile = null,
+  structureType = null,
+  structureDisplayName = null,
 }: {
+  strategyInstanceId: number
   loading: boolean
   performance: PerformanceResponse | null
   executionsForNotional: Execution[]
@@ -60,9 +91,17 @@ export function InstancePnLStrip({
   execDerivedNetPnl?: number | null
   /** Expiration risk profile; when defined, |max_loss| becomes the return denominator. */
   riskProfile?: RiskProfile | null
+  /** Structure type from the linked strategy structure (e.g. covered_call, cash_secured_put). */
+  structureType?: string | null
+  /** Human-readable structure name from the instance (e.g. "Covered Call 10% OTM"). */
+  structureDisplayName?: string | null
 }) {
   const metricsExplainTitleId = useId()
+  const riskCostExplainTitleId = useId()
+  const returnExplainTitleId = useId()
   const [metricsExplainOpen, setMetricsExplainOpen] = useState(false)
+  const [riskCostExplainOpen, setRiskCostExplainOpen] = useState(false)
+  const [returnExplainOpen, setReturnExplainOpen] = useState(false)
   const summary = performance?.summary
 
   const underlyingLines = useMemo(
@@ -75,7 +114,12 @@ export function InstancePnLStrip({
     [linkedStockPnlRows],
   )
 
-  const holdSpanDays = holdTimeDaysFromReportDateSpan(executionsForNotional)
+  const positionStatus = useMemo(() => computeInstancePositionStatus(executionsForNotional), [executionsForNotional])
+
+  const holdSpanDays = useMemo(
+    () => holdSpanDaysForMetrics(executionsForNotional, positionStatus),
+    [executionsForNotional, positionStatus],
+  )
   const holdInfo =
     holdSpanDays != null
       ? {
@@ -86,9 +130,16 @@ export function InstancePnLStrip({
       : null
 
   const underlyingCostUsd = underlyingCostSellOptUsd(executionsForNotional)
-  const maxRisk = useMemo(() => maxRiskUsdFromProfile(riskProfile, underlyingCostUsd), [riskProfile, underlyingCostUsd])
+  const riskCostDiagnostics = useMemo(
+    () => computeCapitalAtRiskWithDiagnostics(structureType, riskProfile, executionsForNotional),
+    [structureType, riskProfile, executionsForNotional],
+  )
+  const capitalAtRisk = riskCostDiagnostics.result
 
-  const holdDaysRoundedDisplay = holdSpanDays != null && Number.isFinite(holdSpanDays) ? Math.round(holdSpanDays) : null
+  const structureTypeDisplay = useMemo(() => getStructureTypeLabel(structureType), [structureType])
+
+  const holdDaysRoundedDisplay =
+    holdSpanDays != null && Number.isFinite(holdSpanDays) ? Math.round(holdSpanDays) : null
 
   /** Fallback when there are no sliced execution rows (broker summary + link slippage). */
   const summaryNetPnlFallback = useMemo(() => {
@@ -100,31 +151,31 @@ export function InstancePnLStrip({
 
   const netPnlPerDayUsd = useMemo(() => {
     if (displayNetPnl == null || !Number.isFinite(displayNetPnl)) return null
-    return netPnlUsdPerDayFromNetAndExecutions(displayNetPnl, executionsForNotional)
-  }, [displayNetPnl, executionsForNotional])
+    return netPnlUsdPerDayFromNetAndExecutions(displayNetPnl, executionsForNotional, positionStatus)
+  }, [displayNetPnl, executionsForNotional, positionStatus])
 
-  const maxRiskPerDayUsd = useMemo(() => {
+  const costPerDayUsd = useMemo(() => {
     if (holdInfo == null) return null
-    if (!Number.isFinite(maxRisk.value) || maxRisk.value <= 0) return null
-    return maxRisk.value / holdInfo.daysForAnnual
-  }, [maxRisk.value, holdInfo])
+    if (!Number.isFinite(capitalAtRisk.value) || capitalAtRisk.value <= 0) return null
+    return capitalAtRisk.value / holdInfo.daysForAnnual
+  }, [capitalAtRisk.value, holdInfo])
 
   const returnPct = useMemo(() => {
     if (displayNetPnl == null || !Number.isFinite(displayNetPnl)) return null
-    if (!Number.isFinite(maxRisk.value) || maxRisk.value <= 0) return null
-    let pct = (displayNetPnl / maxRisk.value) * 100
+    if (!Number.isFinite(capitalAtRisk.value) || capitalAtRisk.value <= 0) return null
+    let pct = (displayNetPnl / capitalAtRisk.value) * 100
     if (!Number.isFinite(pct)) return null
     if (pct > 999) pct = 999
     if (pct < -999) pct = -999
     return pct
-  }, [displayNetPnl, maxRisk.value])
+  }, [displayNetPnl, capitalAtRisk.value])
 
   const annualDetail = useMemo(
     () =>
       summary != null && displayNetPnl != null && Number.isFinite(displayNetPnl)
-        ? annualReturnDetailFromNetAndExecutions(displayNetPnl, executionsForNotional, maxRisk.value)
+        ? annualReturnDetailFromNetAndExecutions(displayNetPnl, executionsForNotional, capitalAtRisk.value, positionStatus)
         : null,
-    [summary, displayNetPnl, executionsForNotional, maxRisk.value],
+    [summary, displayNetPnl, executionsForNotional, capitalAtRisk.value, positionStatus],
   )
 
   const explainDisabled = loading || summary == null
@@ -132,13 +183,13 @@ export function InstancePnLStrip({
   return (
     <>
       <div className="instance-detail-pnl-section-head">
-        <h3 className="instance-detail-section-title">PnL (this instance)</h3>
+        <h3 className="instance-detail-section-title">PnL</h3>
         <button
           type="button"
           className="instance-detail-pnl-info-btn instance-detail-pnl-section-info-btn"
           disabled={explainDisabled}
           onClick={() => setMetricsExplainOpen(true)}
-          aria-label="How PnL metrics are calculated for this instance"
+          aria-label="How PnL metrics are calculated"
           title={explainDisabled ? undefined : 'Open calculation details for all metrics in this section'}
         >
           ⓘ
@@ -146,119 +197,189 @@ export function InstancePnLStrip({
       </div>
 
       {loading ? (
-        <div className="instance-detail-pnl-strip">
+        <div className="instance-detail-pnl-panel instance-detail-pnl-panel--muted">
           <span className="muted">Loading performance…</span>
         </div>
       ) : !summary ? (
-        <div className="instance-detail-pnl-strip">
+        <div className="instance-detail-pnl-panel instance-detail-pnl-panel--muted">
           <span className="muted">No performance data for this instance.</span>
         </div>
       ) : (
         <>
-          <div className="instance-detail-pnl-strip" role="group" aria-label="PnL this instance">
-            {/* Primary Net PnL: exec-derived when available (matches Group PnL sum in Executions table), else backend summary */}
-            <div className="instance-detail-pnl-metric">
-              <span
-                className="instance-detail-pnl-label"
-                title={
-                  execDerivedNetPnl != null
-                    ? 'Sum of per-contract Group PnL from the Executions table below (premium ± commission per fill + linked-stock slippage). Matches Trade Ledger / execution book.'
-                    : summaryNetPnlFallback != null
-                      ? 'No execution slice in the final book for this instance; showing performance summary net plus prorated option–stock link slippage when applicable.'
-                      : undefined
+          <div className="instance-detail-pnl-panel" role="region" aria-label="PnL metrics">
+            <div className="instance-detail-pnl-bands">
+              <PnlBand title="PnL & commission">
+                <div className="instance-detail-pnl-metric">
+                  <span
+                    className="instance-detail-pnl-label"
+                    title={
+                      execDerivedNetPnl != null
+                        ? 'Sum of per-contract Group PnL from the Executions table below (premium ± commission per fill + linked-stock slippage). Matches Trade Ledger / execution book.'
+                        : summaryNetPnlFallback != null
+                          ? 'No execution slice in the final book for this instance; showing performance summary net plus prorated option–stock link slippage when applicable.'
+                          : undefined
+                    }
+                  >
+                    Net PnL
+                  </span>
+                  <span className={`instance-detail-pnl-value ${signedPnlClass(displayNetPnl)}`}>{fmtUsd(displayNetPnl)}</span>
+                </div>
+                <div className="instance-detail-pnl-metric">
+                  <span className="instance-detail-pnl-label">Commission</span>
+                  <span className="instance-detail-pnl-value is-commission">{fmtUsd(summary.total_commission)}</span>
+                </div>
+                {netPnlPerDayUsd != null && holdInfo != null && (
+                  <div className="instance-detail-pnl-metric instance-detail-pnl-metric--secondary">
+                    <span className="instance-detail-pnl-label" title={NET_PNL_PER_DAY_HINT}>
+                      Net PnL / day
+                    </span>
+                    <span
+                      className={`instance-detail-pnl-value tabular-nums ${signedPnlClass(netPnlPerDayUsd)}`}
+                      title={NET_PNL_PER_DAY_HINT}
+                    >
+                      {fmtUsd(netPnlPerDayUsd)}
+                      <span className="instance-detail-pnl-source-tag">/day</span>
+                    </span>
+                  </div>
+                )}
+              </PnlBand>
+
+              <PnlBand
+                title="Risk & cost"
+                titleExtra={
+                  <button
+                    type="button"
+                    className="instance-detail-pnl-band-help-btn"
+                    onClick={() => setRiskCostExplainOpen(true)}
+                    aria-label="Open Risk and cost methodology for this instance"
+                  >
+                    ?
+                  </button>
                 }
               >
-                Net PnL
-              </span>
-              <span className={`instance-detail-pnl-value ${signedPnlClass(displayNetPnl)}`}>
-                {fmtUsd(displayNetPnl)}
-              </span>
+                <div className="instance-detail-pnl-metric">
+                  <span className="instance-detail-pnl-label" title={capitalAtRisk.methodHint}>
+                    Risk
+                  </span>
+                  <span className="instance-detail-pnl-value tabular-nums is-neutral" title={capitalAtRisk.methodHint}>
+                    {fmtUsd(capitalAtRisk.value)}
+                    <span className="instance-detail-pnl-source-tag instance-detail-pnl-source-tag--block">
+                      {capitalAtRisk.methodLabel}
+                    </span>
+                  </span>
+                </div>
+                {riskProfile != null && riskProfile.max_loss != null && Number.isFinite(riskProfile.max_loss) && (
+                  <div className="instance-detail-pnl-metric instance-detail-pnl-metric--secondary">
+                    <span className="instance-detail-pnl-label" title="Max loss at expiration from the risk profile (options + stock legs).">
+                      Max loss
+                    </span>
+                    <span className="instance-detail-pnl-value tabular-nums is-neutral">
+                      {fmtUsd(Math.abs(riskProfile.max_loss))}
+                      <span className="instance-detail-pnl-source-tag">at exp.</span>
+                    </span>
+                  </div>
+                )}
+                {underlyingCostUsd > 0 && capitalAtRisk.source !== 'underlying_notional' && (
+                  <div className="instance-detail-pnl-metric instance-detail-pnl-metric--secondary">
+                    <span className="instance-detail-pnl-label" title="Σ (strike × |qty| × 100) for sell-side OPT legs — underlying notional exposure.">
+                      Notional
+                    </span>
+                    <span className="instance-detail-pnl-value tabular-nums is-neutral">
+                      {fmtUsd(underlyingCostUsd)}
+                    </span>
+                  </div>
+                )}
+                {costPerDayUsd != null && holdInfo != null && (
+                  <div className="instance-detail-pnl-metric instance-detail-pnl-metric--secondary">
+                    <span className="instance-detail-pnl-label" title={UNDERLYING_PER_DAY_HINT}>
+                      Cost / day
+                    </span>
+                    <span className="instance-detail-pnl-value tabular-nums is-neutral" title={UNDERLYING_PER_DAY_HINT}>
+                      {fmtUsd(costPerDayUsd)}
+                      <span className="instance-detail-pnl-source-tag">/day</span>
+                    </span>
+                  </div>
+                )}
+              </PnlBand>
+
+              <PnlBand title="Times">
+                <div className="instance-detail-pnl-metric">
+                  <span className="instance-detail-pnl-label">Trades</span>
+                  <span className="instance-detail-pnl-value tabular-nums is-neutral">{summary.trade_count ?? 0}</span>
+                </div>
+                {holdInfo != null && (
+                  <div className="instance-detail-pnl-metric">
+                    <span className="instance-detail-pnl-label" title={holdInfo.tooltip}>
+                      Hold time
+                    </span>
+                    <span className="instance-detail-pnl-value tabular-nums is-neutral" title={holdInfo.tooltip}>
+                      {holdInfo.label}
+                    </span>
+                  </div>
+                )}
+              </PnlBand>
+
+              <PnlBand
+                title="Return"
+                titleExtra={
+                  <button
+                    type="button"
+                    className="instance-detail-pnl-band-help-btn"
+                    onClick={() => setReturnExplainOpen(true)}
+                    aria-label="How Return percent and annual return are calculated for this instance"
+                  >
+                    ?
+                  </button>
+                }
+              >
+                <div className="instance-detail-pnl-metric">
+                  <span className="instance-detail-pnl-label" title={RETURN_PCT_HINT}>
+                    Return %
+                  </span>
+                  <span
+                    className={`instance-detail-pnl-value tabular-nums ${
+                      returnPct != null ? signedPnlClass(returnPct) : 'is-neutral'
+                    }`}
+                  >
+                    {returnPct != null ? (
+                      <>
+                        {returnPct >= 0 ? '+' : ''}
+                        {returnPct.toFixed(1)}%
+                      </>
+                    ) : (
+                      '—'
+                    )}
+                  </span>
+                </div>
+                <div className="instance-detail-pnl-metric">
+                  <span className="instance-detail-pnl-label" title={ANNUAL_RETURN_HINT}>
+                    Annual return
+                  </span>
+                  <span
+                    className={`instance-detail-pnl-value tabular-nums ${
+                      annualDetail != null && Number.isFinite(annualDetail.annualReturnPct)
+                        ? signedPnlClass(annualDetail.annualReturnPct)
+                        : 'is-neutral'
+                    }`}
+                  >
+                    {annualDetail != null && Number.isFinite(annualDetail.annualReturnPct) ? (
+                      <>
+                        {annualDetail.annualReturnPct >= 0 ? '+' : ''}
+                        {annualDetail.annualReturnPct.toFixed(1)}%
+                      </>
+                    ) : (
+                      '—'
+                    )}
+                  </span>
+                </div>
+              </PnlBand>
             </div>
-            <div className="instance-detail-pnl-metric">
-              <span className="instance-detail-pnl-label">Commission</span>
-              <span className="instance-detail-pnl-value is-commission">{fmtUsd(summary.total_commission)}</span>
-            </div>
-            <div className="instance-detail-pnl-metric">
-              <span className="instance-detail-pnl-label">Trades</span>
-              <span className="instance-detail-pnl-value tabular-nums is-neutral">{summary.trade_count ?? 0}</span>
-            </div>
-
-            {holdInfo != null && (
-              <div className="instance-detail-pnl-metric">
-                <span className="instance-detail-pnl-label" title={holdInfo.tooltip}>
-                  Hold time
-                </span>
-                <span className="instance-detail-pnl-value tabular-nums is-neutral" title={holdInfo.tooltip}>
-                  {holdInfo.label}
-                </span>
-              </div>
-            )}
-
-            {netPnlPerDayUsd != null && holdInfo != null && (
-              <div className="instance-detail-pnl-metric instance-detail-pnl-metric--secondary">
-                <span className="instance-detail-pnl-label" title={NET_PNL_PER_DAY_HINT}>
-                  Net PnL / day
-                </span>
-                <span className={`instance-detail-pnl-value tabular-nums ${signedPnlClass(netPnlPerDayUsd)}`} title={NET_PNL_PER_DAY_HINT}>
-                  {fmtUsd(netPnlPerDayUsd)}
-                  <span className="instance-detail-pnl-source-tag">/day</span>
-                </span>
-              </div>
-            )}
-
-            <div className="instance-detail-pnl-metric">
-              <span className="instance-detail-pnl-label" title={MAX_RISK_HINT}>
-                Max risk
-              </span>
-              <span className="instance-detail-pnl-value tabular-nums is-neutral" title={MAX_RISK_HINT}>
-                {fmtUsd(maxRisk.value)}
-                <span className="instance-detail-pnl-source-tag">
-                  {maxRisk.source === 'max_loss' ? 'at exp.' : 'underlying'}
-                </span>
-              </span>
-            </div>
-
-            {maxRiskPerDayUsd != null && holdInfo != null && (
-              <div className="instance-detail-pnl-metric instance-detail-pnl-metric--secondary">
-                <span className="instance-detail-pnl-label" title={UNDERLYING_PER_DAY_HINT}>
-                  Cost / day
-                </span>
-                <span className="instance-detail-pnl-value tabular-nums is-neutral" title={UNDERLYING_PER_DAY_HINT}>
-                  {fmtUsd(maxRiskPerDayUsd)}
-                  <span className="instance-detail-pnl-source-tag">/day</span>
-                </span>
-              </div>
-            )}
-
-            {returnPct != null && (
-              <div className="instance-detail-pnl-metric">
-                <span className="instance-detail-pnl-label" title={RETURN_PCT_HINT}>
-                  Return
-                </span>
-                <span className={`instance-detail-pnl-value tabular-nums ${signedPnlClass(returnPct)}`}>
-                  {returnPct >= 0 ? '+' : ''}
-                  {returnPct.toFixed(1)}%
-                </span>
-              </div>
-            )}
-
-            {annualDetail != null && Number.isFinite(annualDetail.annualReturnPct) && (
-              <div className="instance-detail-pnl-metric">
-                <span className="instance-detail-pnl-label" title={ANNUAL_RETURN_HINT}>
-                  Annual return
-                </span>
-                <span className={`instance-detail-pnl-value tabular-nums ${signedPnlClass(annualDetail.annualReturnPct)}`}>
-                  {annualDetail.annualReturnPct >= 0 ? '+' : ''}
-                  {annualDetail.annualReturnPct.toFixed(1)}%
-                </span>
-              </div>
-            )}
           </div>
 
           <DraggableModal
             open={metricsExplainOpen}
             onBackdropClick={() => setMetricsExplainOpen(false)}
-            title="PnL (this instance) — calculations"
+            title="PnL — calculations"
             titleId={metricsExplainTitleId}
             maxWidth="min(560px, calc(100vw - 24px))"
             footer={
@@ -270,32 +391,36 @@ export function InstancePnLStrip({
             }
           >
             <p className="muted" style={{ marginBottom: 'var(--space-3)', borderLeft: '3px solid var(--color-border)', paddingLeft: '0.75rem' }}>
-              <strong>Net PnL ({fmtUsd(displayNetPnl)})</strong> — when fills exist in the final book for this instance:
-              for each OPT contract group, <code>Σ (premium × qty × 100 − commission)</code> per fill direction (buy subtracts,
-              sell adds), plus prorated linked-stock slippage when links exist (same layer as Trade Ledger). Non-OPT fills add
-              their DB <code>realized_pnl</code>. This matches the <strong>Group PnL</strong> column in the Executions section.
+              <PnlExplainKpi>Net PnL</PnlExplainKpi> (<PnlExplainKpi>{fmtUsd(displayNetPnl)}</PnlExplainKpi>) — when fills exist in the final book for this instance:
+              for each <PnlExplainKpi>OPT</PnlExplainKpi> contract group, <code>Σ (premium × qty × 100 − commission)</code> per fill direction (buy subtracts,
+              sell adds), plus prorated linked-stock slippage when links exist (same layer as <PnlExplainKpi>Trade Ledger</PnlExplainKpi>). Non-OPT fills add
+              their DB <code>realized_pnl</code>. This matches the <PnlExplainKpi>Group PnL</PnlExplainKpi> column in the Executions section.
               {execDerivedNetPnl == null && summaryNetPnlFallback != null ? (
                 <>
                   {' '}
-                  <em>Current row uses the performance-summary fallback because there is no execution slice.</em>
+                  <em>
+                    {explainHighlightText(
+                      'Current row uses the performance-summary fallback because there is no execution slice.',
+                    )}
+                  </em>
                 </>
               ) : null}
             </p>
             <p className="muted" style={{ marginBottom: 'var(--space-3)' }}>
-              <strong>Commission</strong> and <strong>trades</strong> come from the performance summary (allocation-weighted).
-              Hold time, <strong>Net PnL/day</strong> and <strong>cost/day</strong> (same hold-days-used divisor), underlying
-              cost, and <strong>annual return</strong> from (Net PnL/day ÷ Cost/day) × scale × 100 use{' '}
-              <strong>execution rows</strong> on this page (final book).
+              <PnlExplainKpi>Commission</PnlExplainKpi> and <PnlExplainKpi>trades</PnlExplainKpi> come from the <PnlExplainKpi>performance summary</PnlExplainKpi>{' '}
+              (allocation-weighted). <PnlExplainKpi>Hold time</PnlExplainKpi>, <PnlExplainKpi>Net PnL/day</PnlExplainKpi> and <PnlExplainKpi>Cost / day</PnlExplainKpi>{' '}
+              (same <PnlExplainKpi>hold days used</PnlExplainKpi> divisor), underlying cost, and <PnlExplainKpi>Annual return</PnlExplainKpi> from{' '}
+              <PnlExplainKpi>(Net PnL/day ÷ Cost/day) × scale × 100</PnlExplainKpi> use <PnlExplainKpi>execution rows</PnlExplainKpi> on this page (final book).
             </p>
 
             {linkedStockPnlRows.length > 0 && (
               <>
                 <h4 className="instance-detail-pnl-explain-sub">Linked stock slippage (this instance)</h4>
                 <p style={{ marginBottom: 'var(--space-2)' }}>
-                  From <code>POST /executions/option-stock-links/query</code> (same bulk load as Trade Ledger). Total stock
+                  From <code>POST /executions/option-stock-links/query</code> (same bulk load as <PnlExplainKpi>Trade Ledger</PnlExplainKpi>). Total stock
                   slippage vs Flex close for each option execution is multiplied by{' '}
                   <code>|instance qty| ÷ |parent execution qty|</code> when the row is split across instances. The{' '}
-                  <strong>Attributed</strong> column sums to the Net PnL add-on above.
+                  <PnlExplainKpi>Attributed</PnlExplainKpi> column sums to the <PnlExplainKpi>Net PnL</PnlExplainKpi> add-on above.
                 </p>
                 <div className="instance-detail-pnl-underlying-breakdown-wrap" style={{ marginBottom: 'var(--space-3)' }}>
                   <table className="table-operations instance-detail-pnl-underlying-table">
@@ -313,19 +438,25 @@ export function InstancePnLStrip({
                         <tr key={row.accountExecutionsId}>
                           <td>#{row.accountExecutionsId}</td>
                           <td className="tabular-nums">{row.linkCount}</td>
-                          <td className="tabular-nums">{fmtUsd(row.slippageFull)}</td>
-                          <td className="tabular-nums">{row.allocationRatio.toFixed(4)}</td>
-                          <td className="tabular-nums">{fmtUsd(row.slippageAttributed)}</td>
+                          <td className="tabular-nums">
+                            <PnlExplainKpi>{fmtUsd(row.slippageFull)}</PnlExplainKpi>
+                          </td>
+                          <td className="tabular-nums">
+                            <PnlExplainKpi>{row.allocationRatio.toFixed(4)}</PnlExplainKpi>
+                          </td>
+                          <td className="tabular-nums">
+                            <PnlExplainKpi>{fmtUsd(row.slippageAttributed)}</PnlExplainKpi>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
                       <tr>
                         <td colSpan={4}>
-                          <strong>Total attributed (→ Net PnL add-on)</strong>
+                          <PnlExplainKpi>Total attributed (→ Net PnL add-on)</PnlExplainKpi>
                         </td>
                         <td className="tabular-nums">
-                          <strong>{fmtUsd(linkedStockAttributedSum)}</strong>
+                          <PnlExplainKpi>{fmtUsd(linkedStockAttributedSum)}</PnlExplainKpi>
                         </td>
                       </tr>
                     </tfoot>
@@ -336,12 +467,12 @@ export function InstancePnLStrip({
 
             <h4 className="instance-detail-pnl-explain-sub">Underlying cost (this instance)</h4>
             <p style={{ marginBottom: 'var(--space-2)' }}>
-              For each <strong>OPT</strong> execution with sell side (SELL / SLD / S):{' '}
-              <code>line = strike × |qty| × 100</code>. Total underlying cost is the sum of those lines.
+              For each <PnlExplainKpi>OPT</PnlExplainKpi> execution with sell side (SELL / SLD / S):{' '}
+              <code>line = strike × |qty| × 100</code>. Total <PnlExplainKpi>underlying notional</PnlExplainKpi> cost is the sum of those lines.
             </p>
             {underlyingLines.length === 0 ? (
               <p className="muted" style={{ marginBottom: 'var(--space-3)' }}>
-                No sell-side OPT rows — underlying cost = {fmtUsd(0)}.
+                {explainHighlightText(`No sell-side OPT rows — underlying cost = ${fmtUsd(0)}.`)}
               </p>
             ) : (
               <div className="instance-detail-pnl-underlying-breakdown-wrap">
@@ -364,17 +495,19 @@ export function InstancePnLStrip({
                         <td>{row.side}</td>
                         <td className="tabular-nums">{row.strike}</td>
                         <td className="tabular-nums">{row.qty}</td>
-                        <td className="tabular-nums">{fmtUsd(row.lineUsd)}</td>
+                        <td className="tabular-nums">
+                          <PnlExplainKpi>{fmtUsd(row.lineUsd)}</PnlExplainKpi>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
                     <tr>
                       <td colSpan={4}>
-                        <strong>Total underlying cost</strong>
+                        <PnlExplainKpi>Total underlying cost</PnlExplainKpi>
                       </td>
                       <td className="tabular-nums">
-                        <strong>{fmtUsd(underlyingCostUsd)}</strong>
+                        <PnlExplainKpi>{fmtUsd(underlyingCostUsd)}</PnlExplainKpi>
                       </td>
                     </tr>
                   </tfoot>
@@ -383,38 +516,48 @@ export function InstancePnLStrip({
             )}
             {netPnlPerDayUsd != null && holdInfo != null && displayNetPnl != null && Number.isFinite(displayNetPnl) ? (
               <p style={{ marginBottom: 'var(--space-2)' }}>
-                <strong>Net PnL/day:</strong> {fmtUsd(displayNetPnl)} ÷ {holdInfo.daysForAnnual.toFixed(4)} hold days used ={' '}
-                <strong>
+                <PnlExplainKpi>Net PnL/day</PnlExplainKpi>: <PnlExplainKpi>{fmtUsd(displayNetPnl)}</PnlExplainKpi> ÷{' '}
+                <PnlExplainKpi>{holdInfo.daysForAnnual.toFixed(4)}</PnlExplainKpi> <PnlExplainKpi>hold days used</PnlExplainKpi> ={' '}
+                <PnlExplainKpi>
                   {fmtUsd(netPnlPerDayUsd)}
                   /day
-                </strong>
+                </PnlExplainKpi>
                 .
               </p>
             ) : null}
-            {maxRiskPerDayUsd != null && holdInfo != null ? (
+            <h4 className="instance-detail-pnl-explain-sub">Capital at risk (return denominator)</h4>
+            <p style={{ marginBottom: 'var(--space-2)' }}>
+              <PnlExplainKpi>{capitalAtRisk.methodLabel}</PnlExplainKpi> = <PnlExplainKpi>{fmtUsd(capitalAtRisk.value)}</PnlExplainKpi>
+            </p>
+            <p className="muted" style={{ marginBottom: 'var(--space-3)', borderLeft: '3px solid var(--color-border)', paddingLeft: '0.75rem' }}>
+              {explainHighlightText(capitalAtRisk.methodHint)}
+            </p>
+
+            {costPerDayUsd != null && holdInfo != null ? (
               <p style={{ marginBottom: 'var(--space-2)' }}>
-                <strong>Cost / day:</strong> {fmtUsd(maxRisk.value)} ÷ {holdInfo.daysForAnnual.toFixed(4)} hold days used
-                (<code>max(report_date span, 1)</code>, same as annual return divisor){' '}
-                {maxRisk.source === 'max_loss' ? '(from |max loss|)' : '(fallback to underlying cost)'} ={' '}
-                <strong>
-                  {fmtUsd(maxRiskPerDayUsd)}
+                <PnlExplainKpi>Cost / day</PnlExplainKpi>: <PnlExplainKpi>{fmtUsd(capitalAtRisk.value)}</PnlExplainKpi> ÷{' '}
+                <PnlExplainKpi>{holdInfo.daysForAnnual.toFixed(4)}</PnlExplainKpi> <PnlExplainKpi>hold days used</PnlExplainKpi> (
+                <code>max(report_date span, 1)</code>, same as <PnlExplainKpi>Annual return</PnlExplainKpi> divisor) ={' '}
+                <PnlExplainKpi>
+                  {fmtUsd(costPerDayUsd)}
                   /day
-                </strong>
+                </PnlExplainKpi>
                 .
               </p>
-            ) : maxRisk.value > 0 ? (
+            ) : capitalAtRisk.value > 0 ? (
               <p className="muted" style={{ marginBottom: 'var(--space-2)' }}>
-                Cost / day needs a <code>report_date</code> span on executions (hold time).
+                {explainHighlightText('Cost / day needs a report_date span on executions (hold time).')}
               </p>
             ) : null}
 
             {returnPct != null && (
               <p style={{ marginBottom: 'var(--space-2)' }}>
-                <strong>Return %:</strong> {fmtUsd(displayNetPnl)} ÷ {fmtUsd(maxRisk.value)} × 100 ={' '}
-                <strong>
+                <PnlExplainKpi>Return %</PnlExplainKpi>: <PnlExplainKpi>{fmtUsd(displayNetPnl)}</PnlExplainKpi> ÷{' '}
+                <PnlExplainKpi>{fmtUsd(capitalAtRisk.value)}</PnlExplainKpi> × 100 ={' '}
+                <PnlExplainKpi>
                   {returnPct >= 0 ? '+' : ''}
                   {returnPct.toFixed(1)}%
-                </strong>
+                </PnlExplainKpi>
                 .
               </p>
             )}
@@ -422,24 +565,35 @@ export function InstancePnLStrip({
             <h4 className="instance-detail-pnl-explain-sub">Hold time &amp; scale factor</h4>
             {holdInfo != null && holdSpanDays != null && holdDaysRoundedDisplay != null ? (
               <dl className="info-dl instance-detail-ann-lin-explain-dl">
-                <dt>Report date span</dt>
+                <dt>Hold span (calendar days)</dt>
                 <dd>
-                  Max − min <code>report_date</code>: <strong>{holdDaysRoundedDisplay}</strong> calendar days (rounded; same as
-                  Hold time label).
+                  {positionStatus === 'open' ? (
+                    <>
+                      <PnlExplainKpi>Open</PnlExplainKpi>: earliest <code>report_date</code> → latest OPT expiry among <PnlExplainKpi>open</PnlExplainKpi>{' '}
+                      legs ≈ <PnlExplainKpi>{holdDaysRoundedDisplay}</PnlExplainKpi> days (rounded; same as Hold time label).
+                    </>
+                  ) : (
+                    <>
+                      <PnlExplainKpi>Closed / no open legs</PnlExplainKpi>: max − min <code>report_date</code> ={' '}
+                      <PnlExplainKpi>{holdDaysRoundedDisplay}</PnlExplainKpi> calendar days (rounded).
+                    </>
+                  )}
                 </dd>
                 <dt>Hold days used (divisor)</dt>
                 <dd>
-                  <code>max(report span days, 1)</code> = <strong>{holdInfo.daysForAnnual.toFixed(4)}</strong>
+                  <code>max(hold span days, 1)</code> = <PnlExplainKpi>{holdInfo.daysForAnnual.toFixed(4)}</PnlExplainKpi>
                 </dd>
                 <dt>Scale factor</dt>
                 <dd>
                   <code>365.25 ÷ hold days used</code> ={' '}
-                  <strong>{(365.25 / holdInfo.daysForAnnual).toFixed(6)}</strong>
+                  <PnlExplainKpi>{(365.25 / holdInfo.daysForAnnual).toFixed(6)}</PnlExplainKpi>
                 </dd>
               </dl>
             ) : (
               <p className="muted" style={{ marginBottom: 'var(--space-3)' }}>
-                No <code>report_date</code> span — hold time and annual return cannot be computed.
+                {explainHighlightText(
+                  'No hold span (needs min report_date; open rows also need a parseable latest OPT expiry). Annual return cannot be computed.',
+                )}
               </p>
             )}
 
@@ -449,22 +603,26 @@ export function InstancePnLStrip({
               <dd>
                 <code>(Net PnL/day ÷ Cost/day) × (365.25 ÷ hold days used) × 100</code>
                 <span className="muted"> — same as </span>
-                <code>(net PnL × scale factor ÷ underlying cost) × 100</code>
+                <code>(net PnL × scale factor ÷ capital at risk) × 100</code>
                 <span className="muted"> with scale = 365.25 ÷ hold days used.</span>
               </dd>
               <dt>Net PnL (for annual %)</dt>
               <dd>
-                <strong>{fmtUsd(displayNetPnl)}</strong>
+                <PnlExplainKpi>{fmtUsd(displayNetPnl)}</PnlExplainKpi>
                 {execDerivedNetPnl != null ? (
                   <span className="muted"> — execution-derived (same as strip above)</span>
                 ) : summary != null ? (
                   <>
                     {' '}
                     <span className="muted">
-                      ({fmtUsd(Number(summary.net_pnl))} summary
-                      {optionStockSlippageAdjustment !== 0
-                        ? ` + ${fmtUsd(optionStockSlippageAdjustment)} linked stock`
-                        : ''}
+                      (
+                      <PnlExplainKpi>{fmtUsd(Number(summary.net_pnl))}</PnlExplainKpi> summary
+                      {optionStockSlippageAdjustment !== 0 ? (
+                        <>
+                          {' '}
+                          + <PnlExplainKpi>{fmtUsd(optionStockSlippageAdjustment)}</PnlExplainKpi> linked stock
+                        </>
+                      ) : null}
                       )
                     </span>
                   </>
@@ -484,18 +642,90 @@ export function InstancePnLStrip({
                       {annualDetail.denominatorUsd.toFixed(2)} × 100
                     </code>
                     <span className="muted">) ≈ </span>
-                    <strong>
+                    <PnlExplainKpi>
                       {annualDetail.annualReturnPct >= 0 ? '+' : ''}
                       {annualDetail.annualReturnPct.toFixed(1)}%
-                    </strong>
+                    </PnlExplainKpi>
                   </>
                 ) : (
                   <span className="muted">
-                    — (needs report dates, underlying cost &gt; 0, and valid net PnL)
+                    {explainHighlightText('— (needs report dates, underlying cost > 0, and valid Net PnL)')}
                   </span>
                 )}
               </dd>
             </dl>
+          </DraggableModal>
+
+          <DraggableModal
+            open={returnExplainOpen}
+            onBackdropClick={() => {}}
+            backdropLocked
+            title={`Return — Instance #${strategyInstanceId}`}
+            titleId={returnExplainTitleId}
+            maxWidth="min(820px, calc(100vw - 40px))"
+            panelClassName="instance-detail-risk-cost-explain-modal"
+            footer={
+              <div className="data-reset-modal-actions">
+                <button type="button" className="btn btn-primary" onClick={() => setReturnExplainOpen(false)}>
+                  Close
+                </button>
+              </div>
+            }
+          >
+            <InstanceReturnExplainBody
+              strategyInstanceId={strategyInstanceId}
+              structureDisplayName={structureDisplayName ?? null}
+              structureTypeRaw={structureType}
+              structureTypeDisplay={structureTypeDisplay}
+              capitalAtRisk={capitalAtRisk}
+              displayNetPnl={displayNetPnl}
+              returnPct={returnPct}
+              annualDetail={annualDetail}
+              costPerDayUsd={costPerDayUsd}
+              netPnlPerDayUsd={netPnlPerDayUsd}
+              holdDaysUsed={holdInfo?.daysForAnnual ?? null}
+              holdLabel={holdInfo?.label ?? null}
+              executionDerivedNetPnl={execDerivedNetPnl != null}
+            />
+          </DraggableModal>
+
+          <DraggableModal
+            open={riskCostExplainOpen}
+            onBackdropClick={() => {}}
+            backdropLocked
+            title={`Risk & cost — Instance #${strategyInstanceId}`}
+            titleId={riskCostExplainTitleId}
+            maxWidth="min(820px, calc(100vw - 40px))"
+            panelClassName="instance-detail-risk-cost-explain-modal"
+            footer={
+              <div className="data-reset-modal-actions">
+                <button type="button" className="btn btn-primary" onClick={() => setRiskCostExplainOpen(false)}>
+                  Close
+                </button>
+              </div>
+            }
+          >
+            <InstanceRiskCostExplainBody
+              strategyInstanceId={strategyInstanceId}
+              structureTypeRaw={structureType}
+              structureTypeDisplay={structureTypeDisplay}
+              riskCostDiagnostics={riskCostDiagnostics}
+              riskProfile={riskProfile}
+              underlyingCostUsd={underlyingCostUsd}
+              displayNetPnl={displayNetPnl}
+              returnPct={returnPct}
+              annualDetail={annualDetail}
+              costPerDayUsd={costPerDayUsd}
+              holdDaysUsed={holdInfo?.daysForAnnual ?? null}
+              holdLabel={holdInfo?.label ?? null}
+              tradeCount={summary.trade_count ?? 0}
+              commission={
+              summary.total_commission != null && Number.isFinite(Number(summary.total_commission))
+                ? Number(summary.total_commission)
+                : null
+            }
+              netPnlPerDayUsd={netPnlPerDayUsd}
+            />
           </DraggableModal>
         </>
       )}

@@ -7,6 +7,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
+from src.bifrost.redis_health_keys import HEALTH_HASH_TTL_SEC
 from src.vendor.ib_account_agent.redis_keys import (
     IB_ACCOUNT_AGENT_META_HEALTH,
     IB_ACCOUNT_NOTIFY_CHANNEL,
@@ -75,6 +76,7 @@ class IbAccountAgentRedisWriter:
             m["secondary_client_id"] = str(secondary_client_id)
         try:
             self._r.hset(IB_ACCOUNT_AGENT_META_HEALTH, mapping=m)
+            self._r.expire(IB_ACCOUNT_AGENT_META_HEALTH, HEALTH_HASH_TTL_SEC)
         except Exception as e:
             err = str(e).lower()
             # Recover if key was created with wrong type (string/stream) — HSET would fail.
@@ -82,6 +84,7 @@ class IbAccountAgentRedisWriter:
                 try:
                     self._r.delete(IB_ACCOUNT_AGENT_META_HEALTH)
                     self._r.hset(IB_ACCOUNT_AGENT_META_HEALTH, mapping=m)
+                    self._r.expire(IB_ACCOUNT_AGENT_META_HEALTH, HEALTH_HASH_TTL_SEC)
                 except Exception as e2:
                     logger.warning("account agent health hset after key delete failed: %s", e2)
             else:

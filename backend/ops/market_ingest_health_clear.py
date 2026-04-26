@@ -1,11 +1,13 @@
 """Redis health hash maintenance for Socket Services + trading_engine Ops meta (market-ingest).
 
 - After a successful Ops **stop**, rewrite canonical health fields to a disconnected snapshot so
-  Monitor GET /status updates without waiting for TTL or a graceful writer exit.
+  Monitor GET /status updates without waiting for TTL expiry or a graceful writer exit.
 - **trading_engine**: Health / Ops meta hash ``bifrost:health:daemon_strategy_trading`` uses ``engine_ops_active`` +
   ``updated_at`` for the same exclusive-start guard as Socket rows.
-- Before **start** when no ``bifrost_ops_control_env`` lease exists, detect a still-fresh connected
-  hash so only one Dev/Prod stack runs a writer against the same Redis.
+- Before **start** when no control lease exists, detect a still-fresh connected hash so only one
+  Dev/Prod stack runs a writer against the same Redis.
+- Socket Service health hashes carry a 3-minute TTL (reset by each heartbeat). Absence of the
+  hash means the process has been dead for ≥ 3 minutes → ``ingest_redis_health_looks_live`` returns False.
 """
 
 from __future__ import annotations
@@ -56,7 +58,11 @@ def _hgetall(r: Any, key: str) -> Dict[str, str]:
 
 
 def ingest_redis_health_looks_live(redis_url: str, meta_key: str, service_id: str) -> bool:
-    """True if Redis health hash looks like a recently updated *connected* writer (exclusive start guard)."""
+    """True if the health hash exists and looks like a recently updated *connected* writer.
+
+    With TTL on health hashes: absence of the key means the process has been dead for ≥ 3 min.
+    Falls back to ``updated_at`` staleness check so services without TTL also work correctly.
+    """
     key = (meta_key or "").strip()
     if not key:
         return False
@@ -70,13 +76,16 @@ def ingest_redis_health_looks_live(redis_url: str, meta_key: str, service_id: st
         logger.debug("ingest_redis_health_looks_live: %s", e)
         return False
     if not m:
+        # Hash absent: TTL expired → service has been dead for ≥ TTL seconds.
         return False
     now = time.time()
     updated = _parse_ts(m.get("updated_at"))
     if updated <= 0 or (now - updated) > _HEALTH_RECENT_MAX_S:
         return False
+    return _hash_looks_connected(m, (service_id or "").strip())
 
-    sid = (service_id or "").strip()
+
+def _hash_looks_connected(m: Dict[str, str], sid: str) -> bool:
     if sid == "massive_ws":
         return redis_hash_field_truthy(m, "connected")
     if sid in ("ib_ingestor", "ib_market"):
@@ -92,9 +101,7 @@ def ingest_redis_health_looks_live(redis_url: str, meta_key: str, service_id: st
             return True
         return redis_hash_field_truthy(m, "connected")
     if sid == "trading_engine":
-        if not redis_hash_field_truthy(m, ENGINE_OPS_ACTIVE_REDIS_FIELD):
-            return False
-        return True
+        return redis_hash_field_truthy(m, ENGINE_OPS_ACTIVE_REDIS_FIELD)
     if sid == "account_sync_daemon":
         return redis_hash_field_truthy(m, "alive")
     return False

@@ -14,7 +14,7 @@ import { StrategyOpportunityCombobox } from '../components/StrategyOpportunityCo
 import { DetailSidebar } from '../components/DetailSidebar'
 import { INSTANCE_DETAIL_SIDEBAR_WIDTH_PX } from '../constants/instanceDetailSidebar'
 import { StrategyInstanceDetailPage } from './StrategyInstanceDetailPage'
-import { fmtUsd, parseOptionContractKey } from '../utils/format'
+import { fmtUsd, fmtUsd0, parseOptionContractKey } from '../utils/format'
 import { computeRiskProfile, type RiskPosition } from '../utils/riskProfile'
 import { fetchOptionStockLinkMapForExecutions } from './performance/fetchOptionStockLinkMap'
 import { instanceOptionStockSlippageAdjustment, sliceExecutionForInstanceOptView } from './portfolio/ledgerOptHelpers'
@@ -22,10 +22,10 @@ import {
   annualReturnDetailFromNetAndExecutions,
   computeInstanceExecDerivedNetPnl,
   computeInstancePositionStatus,
-  formatHoldDaysRounded0,
   holdDaysForAnnualization,
-  holdTimeDaysFromReportDateSpan,
+  holdSpanDaysForMetrics,
   instanceListEndDateColumn,
+  netPnlUsdPerDayFromNetAndExecutions,
   reportDateStartEnd,
   underlyingCostSellOptUsd,
 } from './strategy/instanceDetail/instanceDetailPnlMetrics'
@@ -43,6 +43,109 @@ function signedPnlClass(n: number | null | undefined): string {
   if (n > 1e-9) return 'is-positive'
   if (n < -1e-9) return 'is-negative'
   return 'is-neutral'
+}
+
+/** Parse `YYYY-MM-DD` or `YYYY-MM` (end → last day of month). */
+function parseYmdPartsForList(s: string | null | undefined): { y: number; m: number; d: number } | null {
+  if (s == null || typeof s !== 'string') return null
+  const t = s.trim()
+  const full = t.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (full) {
+    const y = parseInt(full[1], 10)
+    const m = parseInt(full[2], 10)
+    const d = parseInt(full[3], 10)
+    if (![y, m, d].every(Number.isFinite)) return null
+    if (m < 1 || m > 12 || d < 1 || d > 31) return null
+    return { y, m, d }
+  }
+  const mon = t.match(/^(\d{4})-(\d{2})$/)
+  if (mon) {
+    const y = parseInt(mon[1], 10)
+    const m = parseInt(mon[2], 10)
+    if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return null
+    const last = new Date(y, m, 0).getDate()
+    return { y, m, d: last }
+  }
+  return null
+}
+
+function mdDotStart(m: number, d: number): string {
+  return `${String(m).padStart(2, '0')}.${String(d).padStart(2, '0')}`
+}
+
+/** End segment: `5.15` (month without leading zero, day padded). */
+function mdDotEnd(m: number, d: number): string {
+  return `${m}.${String(d).padStart(2, '0')}`
+}
+
+function structureHue(name: string): number {
+  let h = 0
+  for (let i = 0; i < name.length; i += 1) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  return h % 360
+}
+
+function structureColorStyle(name: string, active: boolean): CSSProperties {
+  const hue = structureHue(name)
+  if (active) {
+    return {
+      borderColor: `hsl(${hue} 78% 52%)`,
+      background: `hsl(${hue} 85% 20% / 0.42)`,
+      color: `hsl(${hue} 96% 78%)`,
+      boxShadow: `inset 0 0 0 1px hsl(${hue} 80% 56% / 0.28)`,
+    }
+  }
+  return {
+    borderColor: 'transparent',
+    background: 'transparent',
+    color: `hsl(${hue} 70% 70%)`,
+    boxShadow: 'none',
+  }
+}
+
+/**
+ * Compact period cell, e.g. `2026 (04.17~5.15) 28d` — year, (MM.DD~M.DD) window, hold days.
+ */
+function formatInstanceListPeriodCell(
+  startYmd: string | null | undefined,
+  endDisplay: string | null | undefined,
+  holdSpanDays: number | null | undefined,
+  endCellTitle: string | undefined,
+): { yearLabel: string; rangeLabel: string; dayLabel: string | null; title: string | undefined } {
+  const startP = startYmd != null ? parseYmdPartsForList(String(startYmd).slice(0, 10)) : null
+  const endP = endDisplay != null ? parseYmdPartsForList(String(endDisplay).trim()) : null
+
+  const holdInclusiveDays =
+    holdSpanDays != null && Number.isFinite(holdSpanDays) ? holdDaysForAnnualization(holdSpanDays) : null
+
+  if (startP == null && endP == null) {
+    return {
+      yearLabel: '—',
+      rangeLabel: '(—~—)',
+      dayLabel: holdInclusiveDays != null ? `${holdInclusiveDays}d` : null,
+      title: undefined,
+    }
+  }
+
+  let yearLabel: string
+  if (startP && endP) yearLabel = startP.y === endP.y ? String(startP.y) : `${startP.y}~${endP.y}`
+  else if (startP) yearLabel = String(startP.y)
+  else yearLabel = String(endP!.y)
+
+  const startSeg = startP ? mdDotStart(startP.m, startP.d) : '—'
+  const endSeg = endP ? mdDotEnd(endP.m, endP.d) : '—'
+  const rangeLabel = `(${startSeg}~${endSeg})`
+
+  const bits: string[] = []
+  if (startYmd) bits.push(`Start ${String(startYmd).slice(0, 10)}`)
+  if (endDisplay) bits.push(`End ${endDisplay}`)
+  if (endCellTitle) bits.push(endCellTitle)
+  const title = bits.length > 0 ? bits.join(' · ') : undefined
+  return {
+    yearLabel,
+    rangeLabel,
+    dayLabel: holdInclusiveDays != null ? `${holdInclusiveDays}d` : null,
+    title,
+  }
 }
 
 /**
@@ -69,7 +172,8 @@ function computeSymbolGroupRollup(
     const u = underlyingCostSellOptUsd(sliced)
     if (!Number.isFinite(u) || u <= 0) continue
     const den = Number.isFinite(m.maxRiskUsd) && m.maxRiskUsd > 0 ? m.maxRiskUsd : u
-    const hold = holdTimeDaysFromReportDateSpan(sliced)
+    const ps = computeInstancePositionStatus(sliced)
+    const hold = holdSpanDaysForMetrics(sliced, ps)
     if (hold == null) continue
     const daysU = holdDaysForAnnualization(hold)
     sumU += u
@@ -142,7 +246,18 @@ function computeInstanceMaxRiskUsd(sliced: Execution[], underlyingFallback: numb
 }
 
 /** Sortable metric columns (within each symbol group only). */
-type InstancesSortColumn = 'start' | 'end' | 'net' | 'comm' | 'hold' | 'und' | 'ann' | 'exec'
+type InstancesSortColumn =
+  | 'start'
+  | 'end'
+  | 'hold'
+  | 'net'
+  | 'comm'
+  | 'und'
+  | 'cday'
+  | 'npd'
+  | 'ret'
+  | 'ann'
+  | 'exec'
 type InstancesSortDir = 'asc' | 'desc'
 
 function getInstanceSortNumericValue(
@@ -171,16 +286,42 @@ function getInstanceSortNumericValue(
     case 'comm':
       return summary != null && summary.total_commission != null ? Number(summary.total_commission) : Number.NaN
     case 'hold': {
-      const d = holdTimeDaysFromReportDateSpan(sliced)
+      const ps = computeInstancePositionStatus(sliced)
+      const d = holdSpanDaysForMetrics(sliced, ps)
       return d != null && Number.isFinite(d) ? d : Number.NaN
     }
     case 'und': {
       const u = underlyingCostSellOptUsd(sliced)
       return Number.isFinite(u) ? u : Number.NaN
     }
+    case 'cday': {
+      const ps = computeInstancePositionStatus(sliced)
+      const hold = holdSpanDaysForMetrics(sliced, ps)
+      if (hold == null || !Number.isFinite(hold)) return Number.NaN
+      const u = underlyingCostSellOptUsd(sliced)
+      const den = Number.isFinite(m.maxRiskUsd) && m.maxRiskUsd > 0 ? m.maxRiskUsd : u
+      if (!Number.isFinite(den) || den <= 0) return Number.NaN
+      return den / holdDaysForAnnualization(hold)
+    }
+    case 'npd': {
+      if (m.execDerivedNetPnl == null || !Number.isFinite(m.execDerivedNetPnl)) return Number.NaN
+      const ps = computeInstancePositionStatus(sliced)
+      const v = netPnlUsdPerDayFromNetAndExecutions(m.execDerivedNetPnl, sliced, ps)
+      return v != null && Number.isFinite(v) ? v : Number.NaN
+    }
+    case 'ret': {
+      if (m.execDerivedNetPnl == null || !Number.isFinite(m.execDerivedNetPnl)) return Number.NaN
+      const u = underlyingCostSellOptUsd(sliced)
+      const den = Number.isFinite(m.maxRiskUsd) && m.maxRiskUsd > 0 ? m.maxRiskUsd : u
+      if (!Number.isFinite(den) || den <= 0) return Number.NaN
+      const pct = (m.execDerivedNetPnl / den) * 100
+      if (!Number.isFinite(pct)) return Number.NaN
+      return Math.min(999, Math.max(-999, pct))
+    }
     case 'ann': {
       if (m.execDerivedNetPnl == null || !Number.isFinite(m.execDerivedNetPnl)) return Number.NaN
-      const a = annualReturnDetailFromNetAndExecutions(m.execDerivedNetPnl, sliced, m.maxRiskUsd)
+      const ps = computeInstancePositionStatus(sliced)
+      const a = annualReturnDetailFromNetAndExecutions(m.execDerivedNetPnl, sliced, m.maxRiskUsd, ps)
       return a != null && Number.isFinite(a.annualReturnPct) ? a.annualReturnPct : Number.NaN
     }
     case 'exec': {
@@ -217,17 +358,21 @@ function SortableInstancesTh({
   children,
   sort,
   onSort,
+  rowSpan,
 }: {
   column: InstancesSortColumn
   className?: string
   children: ReactNode
   sort: { column: InstancesSortColumn; dir: InstancesSortDir } | null
   onSort: (c: InstancesSortColumn) => void
+  /** Two-row header: parent cells use rowspan 2. */
+  rowSpan?: number
 }) {
   const active = sort?.column === column
   const dir = sort?.dir
   return (
     <th
+      rowSpan={rowSpan}
       className={[className, active ? 'strategy-instances-th-sort-active' : ''].filter(Boolean).join(' ')}
       aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
     >
@@ -251,6 +396,39 @@ function SortableInstancesTh({
 
 /** One-shot intent from Win Rate (or similar): apply Structure bubble filter when token changes. */
 export type InstancesStructureFilterIntent = { token: number; structureName: string }
+type InstancesSinceFilter = '' | '1m' | 'q' | 'half' | '1y' | 'ytd'
+
+function ymdUtcDaysAgoMonths(months: number): string {
+  const d = new Date()
+  const utc = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12, 0, 0))
+  utc.setUTCMonth(utc.getUTCMonth() - months)
+  const y = utc.getUTCFullYear()
+  const m = String(utc.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(utc.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function ymdUtcYtdStart(): string {
+  const d = new Date()
+  return `${d.getUTCFullYear()}-01-01`
+}
+
+function ymdUtcToday(): string {
+  const d = new Date()
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function sinceFilterThresholdYmd(v: InstancesSinceFilter): string | null {
+  if (v === '1m') return ymdUtcDaysAgoMonths(1)
+  if (v === 'q') return ymdUtcDaysAgoMonths(3)
+  if (v === 'half') return ymdUtcDaysAgoMonths(6)
+  if (v === '1y') return ymdUtcDaysAgoMonths(12)
+  if (v === 'ytd') return ymdUtcYtdStart()
+  return null
+}
 
 export interface StrategyInstancesPageProps {
   status: StatusResponse | null
@@ -284,6 +462,7 @@ export function StrategyInstancesPage({
   const [instSymbolFilter, setInstSymbolFilter] = useState<string>('')
   const [instRightFilter, setInstRightFilter] = useState<'' | 'C' | 'P'>('')
   const [instExpiryFilter, setInstExpiryFilter] = useState<string>('')
+  const [instSinceFilter, setInstSinceFilter] = useState<InstancesSinceFilter>('q')
   /** Position status from final-book executions (matches Status column). */
   const [instStatusFilter, setInstStatusFilter] = useState<'' | 'open' | 'closed'>('')
   const [selectedInstanceId, setSelectedInstanceId] = useState<number | null>(null)
@@ -530,6 +709,18 @@ export function StrategyInstancesPage({
         return instStatusFilter === 'open' ? ps === 'open' : ps === 'closed'
       })
     }
+    if (instSinceFilter) {
+      const threshold = sinceFilterThresholdYmd(instSinceFilter)
+      if (threshold != null) {
+        list = list.filter((row) => {
+          const m = instanceMetricsById.get(row.strategy_instance_id)
+          if (m == null || m.status !== 'ready') return false
+          const start = reportDateStartEnd(m.sliced).start
+          if (start == null) return false
+          return start >= threshold
+        })
+      }
+    }
     return list
   }, [
     items,
@@ -537,6 +728,7 @@ export function StrategyInstancesPage({
     instSymbolFilter,
     instRightFilter,
     instExpiryFilter,
+    instSinceFilter,
     instStatusFilter,
     getScopeSymbol,
     instancePositionMeta,
@@ -558,6 +750,13 @@ export function StrategyInstancesPage({
     }
     return groups
   }, [filteredItems, getScopeSymbol])
+
+  const sinceRangeText = useMemo(() => {
+    if (!instSinceFilter) return null
+    const start = sinceFilterThresholdYmd(instSinceFilter)
+    if (start == null) return null
+    return `${start} ~ ${ymdUtcToday()}`
+  }, [instSinceFilter])
 
   const [instancesSort, setInstancesSort] = useState<{ column: InstancesSortColumn; dir: InstancesSortDir } | null>(null)
 
@@ -620,14 +819,14 @@ export function StrategyInstancesPage({
   const renderMetricsTds = useCallback((instanceId: number) => {
     const m = instanceMetricsById.get(instanceId)
     if (m == null) {
-      return Array.from({ length: 8 }, (_, j) => (
+      return Array.from({ length: 9 }, (_, j) => (
         <td key={`m-${instanceId}-ph-${j}`} className="muted tabular-nums strategy-instance-metric-placeholder">
           …
         </td>
       ))
     }
     if (m.status === 'error') {
-      return Array.from({ length: 8 }, (_, j) => (
+      return Array.from({ length: 9 }, (_, j) => (
         <td key={`m-${instanceId}-err-${j}`} className="muted tabular-nums">
           —
         </td>
@@ -637,13 +836,31 @@ export function StrategyInstancesPage({
     const positionStatus = computeInstancePositionStatus(sliced)
     const { start } = reportDateStartEnd(sliced)
     const endCol = instanceListEndDateColumn(sliced, positionStatus)
-    const holdSpanDays = holdTimeDaysFromReportDateSpan(sliced)
-    const holdLabel = holdSpanDays != null ? formatHoldDaysRounded0(holdSpanDays) : '—'
+    const holdSpanDays = holdSpanDaysForMetrics(sliced, positionStatus)
+    const periodCell = formatInstanceListPeriodCell(start, endCol.display, holdSpanDays, endCol.cellTitle)
     const underlying = underlyingCostSellOptUsd(sliced)
+    const den =
+      Number.isFinite(m.maxRiskUsd) && m.maxRiskUsd > 0 ? m.maxRiskUsd : Number.isFinite(underlying) ? underlying : 0
+    const daysUsed = holdSpanDays != null && Number.isFinite(holdSpanDays) ? holdDaysForAnnualization(holdSpanDays) : null
+    const costPerDay =
+      den > 0 && daysUsed != null && Number.isFinite(daysUsed) && daysUsed > 0 ? den / daysUsed : null
     const netDisplay = execDerivedNetPnl
+    const npd =
+      netDisplay != null && Number.isFinite(netDisplay)
+        ? netPnlUsdPerDayFromNetAndExecutions(netDisplay, sliced, positionStatus)
+        : null
+    let returnPct: number | null = null
+    if (netDisplay != null && Number.isFinite(netDisplay) && den > 0) {
+      let pct = (netDisplay / den) * 100
+      if (Number.isFinite(pct)) {
+        if (pct > 999) pct = 999
+        if (pct < -999) pct = -999
+        returnPct = pct
+      }
+    }
     const annual =
       netDisplay != null && Number.isFinite(netDisplay)
-        ? annualReturnDetailFromNetAndExecutions(netDisplay, sliced, m.maxRiskUsd)
+        ? annualReturnDetailFromNetAndExecutions(netDisplay, sliced, m.maxRiskUsd, positionStatus)
         : null
     const linkSlipTitle =
       Math.abs(linkedStockSlippage) > 1e-9
@@ -669,11 +886,10 @@ export function StrategyInstancesPage({
 
     return [
       <td key="st">{statusChip}</td>,
-      <td key="sd" className="tabular-nums strategy-instances-col-start">
-        {start ?? '—'}
-      </td>,
-      <td key="ed" className="tabular-nums strategy-instances-col-end" title={endCol.cellTitle}>
-        {endCol.display ?? '—'}
+      <td key="win" className="tabular-nums strategy-instances-col-period" title={periodCell.title}>
+        <span className="strategy-instances-period-year">{periodCell.yearLabel}</span>{' '}
+        <span>{periodCell.rangeLabel}</span>{' '}
+        {periodCell.dayLabel != null ? <strong className="strategy-instances-period-days">{periodCell.dayLabel}</strong> : null}
       </td>,
       <td
         key="np"
@@ -682,14 +898,18 @@ export function StrategyInstancesPage({
       >
         {netDisplay != null ? fmtUsd(netDisplay) : '—'}
       </td>,
-      <td key="cm" className="tabular-nums instance-detail-pnl-value is-commission">
-        {summary ? fmtUsd(summary.total_commission) : '—'}
+      <td
+        key="npd"
+        className={`tabular-nums strategy-instances-signed ${npd != null ? signedPnlClass(npd) : 'is-neutral'}`}
+        title={linkSlipTitle}
+      >
+        {npd != null && Number.isFinite(npd) ? fmtUsd(npd) : '—'}
       </td>,
-      <td key="ht" className="tabular-nums">
-        {holdLabel}
+      <td key="uc" className="tabular-nums" title="Sell-side OPT Σ(strike×|qty|×100); rounded to $0.">
+        {fmtUsd0(underlying)}
       </td>,
-      <td key="uc" className="tabular-nums">
-        {fmtUsd(underlying)}
+      <td key="cd" className="tabular-nums" title="Capital at risk ÷ hold days used (same denominator as Instance detail). Rounded to $0.">
+        {costPerDay != null && Number.isFinite(costPerDay) ? `${fmtUsd0(costPerDay)}/d` : '—'}
       </td>,
       <td
         key="ar"
@@ -699,6 +919,18 @@ export function StrategyInstancesPage({
         {annual != null && Number.isFinite(annual.annualReturnPct)
           ? `${annual.annualReturnPct >= 0 ? '+' : ''}${annual.annualReturnPct.toFixed(1)}%`
           : '—'}
+      </td>,
+      <td
+        key="ret"
+        className={`tabular-nums strategy-instances-signed ${returnPct != null ? signedPnlClass(returnPct) : 'is-neutral'}`}
+        title={linkSlipTitle}
+      >
+        {returnPct != null && Number.isFinite(returnPct)
+          ? `${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(1)}%`
+          : '—'}
+      </td>,
+      <td key="cm" className="tabular-nums instance-detail-pnl-value is-commission">
+        {summary ? fmtUsd(summary.total_commission) : '—'}
       </td>,
     ]
   }, [instanceMetricsById])
@@ -741,7 +973,7 @@ export function StrategyInstancesPage({
           const headerRow = (
             <tr key={`group-${group.key}`} className="strategy-instance-symbol-group-row strategy-instance-symbol-group-summary-row">
               <td
-                colSpan={4}
+                colSpan={2}
                 style={{
                   fontWeight: 600,
                   background: 'var(--color-surface-elevated, rgba(255,255,255,0.03))',
@@ -788,7 +1020,7 @@ export function StrategyInstancesPage({
                 —
               </td>
               <td
-                className="tabular-nums muted strategy-instance-group-summary-cell"
+                className="tabular-nums muted strategy-instance-group-summary-cell strategy-instances-col-period"
                 style={{ background: 'var(--color-surface-elevated, rgba(255,255,255,0.03))' }}
               >
                 —
@@ -807,26 +1039,32 @@ export function StrategyInstancesPage({
                 —
               </td>
               <td
+                className={`tabular-nums instance-detail-pnl-value strategy-instance-group-summary-cell ${rollup.sumUnderlying != null ? '' : 'is-neutral'}`}
+                style={{ background: 'var(--color-surface-elevated, rgba(255,255,255,0.03))' }}
+                title="Sum of per-instance underlying cost (sell-side OPT); rounded to $0."
+              >
+                {rollup.sumUnderlying != null ? fmtUsd0(rollup.sumUnderlying) : '—'}
+              </td>
+              <td
                 className="tabular-nums muted strategy-instance-group-summary-cell"
                 style={{ background: 'var(--color-surface-elevated, rgba(255,255,255,0.03))' }}
               >
                 —
               </td>
               <td
-                className={`tabular-nums instance-detail-pnl-value strategy-instance-group-summary-cell ${rollup.sumUnderlying != null ? '' : 'is-neutral'}`}
-                style={{ background: 'var(--color-surface-elevated, rgba(255,255,255,0.03))' }}
-                title="Sum of per-instance underlying cost (sell-side OPT)."
-              >
-                {rollup.sumUnderlying != null ? fmtUsd(rollup.sumUnderlying) : '—'}
-              </td>
-              <td
                 className={`tabular-nums instance-detail-pnl-value strategy-instance-group-summary-cell ${signedPnlClass(rollup.groupAnnualPct)}`}
                 style={{ background: 'var(--color-surface-elevated, rgba(255,255,255,0.03))' }}
-                title="Group annual return: total Net × 365.25 / Σ(denominator × hold days used) × 100, where denominator prefers |max loss| per instance and falls back to underlying."
+                title="Group annual return: total Net × 365.25 / Σ(denominator × hold days) × 100. Per row: denominator prefers |max loss| else underlying; hold days = open → min report_date to latest open-leg expiry, else report_date span."
               >
                 {rollup.groupAnnualPct != null && Number.isFinite(rollup.groupAnnualPct)
                   ? `${rollup.groupAnnualPct >= 0 ? '+' : ''}${rollup.groupAnnualPct.toFixed(1)}%`
                   : '—'}
+              </td>
+              <td
+                className="tabular-nums muted strategy-instance-group-summary-cell"
+                style={{ background: 'var(--color-surface-elevated, rgba(255,255,255,0.03))' }}
+              >
+                —
               </td>
               <td
                 className="tabular-nums muted strategy-instance-group-summary-cell"
@@ -849,9 +1087,17 @@ export function StrategyInstancesPage({
               >
                 <td>{row.strategy_instance_id}</td>
                 <td className="strategy-instances-col-opp strategy-instances-cell-opp">
-                  {row.strategy_opportunity_name ?? row.strategy_opportunity_id ?? '—'}
+                  <div>{row.strategy_opportunity_name ?? row.strategy_opportunity_id ?? '—'}</div>
+                  {row.strategy_structure_name ? (
+                    <span
+                      className="strategy-instances-structure-chip"
+                      style={structureColorStyle(row.strategy_structure_name, false)}
+                      title={`Structure: ${row.strategy_structure_name}`}
+                    >
+                      {row.strategy_structure_name}
+                    </span>
+                  ) : null}
                 </td>
-                <td>{row.account_id}</td>
                 {renderMetricsTds(row.strategy_instance_id)}
                 <td className="tabular-nums">{row.executions_count != null ? row.executions_count : '—'}</td>
                 <td className="strategy-instance-actions-cell">
@@ -1121,6 +1367,7 @@ export function StrategyInstancesPage({
                         key={s}
                         type="button"
                         className={`replay-bubble-switch-btn ${instStructureFilter === s ? 'active' : ''}`}
+                        style={structureColorStyle(s, instStructureFilter === s)}
                         onClick={() => setInstStructureFilter(prev => prev === s ? '' : s)}
                       >
                         {s}
@@ -1181,6 +1428,58 @@ export function StrategyInstancesPage({
                   </div>
                 </div>
               )}
+              <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by period start date">
+                <span className="ledger-strategy-filter-label">Since</span>
+                <div className="ledger-strategy-filter-bubbles">
+                  <button
+                    type="button"
+                    className={`replay-bubble-switch-btn ${instSinceFilter === '' ? 'active' : ''}`}
+                    onClick={() => setInstSinceFilter('')}
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    className={`replay-bubble-switch-btn ${instSinceFilter === '1m' ? 'active' : ''}`}
+                    onClick={() => setInstSinceFilter(prev => prev === '1m' ? '' : '1m')}
+                  >
+                    1 month
+                  </button>
+                  <button
+                    type="button"
+                    className={`replay-bubble-switch-btn ${instSinceFilter === 'q' ? 'active' : ''}`}
+                    onClick={() => setInstSinceFilter(prev => prev === 'q' ? '' : 'q')}
+                  >
+                    Quarter
+                  </button>
+                  <button
+                    type="button"
+                    className={`replay-bubble-switch-btn ${instSinceFilter === 'half' ? 'active' : ''}`}
+                    onClick={() => setInstSinceFilter(prev => prev === 'half' ? '' : 'half')}
+                  >
+                    Half year
+                  </button>
+                  <button
+                    type="button"
+                    className={`replay-bubble-switch-btn ${instSinceFilter === '1y' ? 'active' : ''}`}
+                    onClick={() => setInstSinceFilter(prev => prev === '1y' ? '' : '1y')}
+                  >
+                    1 year
+                  </button>
+                  <button
+                    type="button"
+                    className={`replay-bubble-switch-btn ${instSinceFilter === 'ytd' ? 'active' : ''}`}
+                    onClick={() => setInstSinceFilter(prev => prev === 'ytd' ? '' : 'ytd')}
+                  >
+                    YTD
+                  </button>
+                </div>
+                {sinceRangeText != null && (
+                  <span className="section-hint" style={{ marginLeft: '0.5rem' }}>
+                    {sinceRangeText}
+                  </span>
+                )}
+              </div>
               {instanceFilterOptions.expiryMonths.length > 1 && (
                 <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by expiry month">
                   <span className="ledger-strategy-filter-label">Expiry</span>
@@ -1206,7 +1505,7 @@ export function StrategyInstancesPage({
                   </div>
                 </div>
               )}
-              {(instStructureFilter || instSymbolFilter || instRightFilter || instExpiryFilter || instStatusFilter) && (
+              {(instStructureFilter || instSymbolFilter || instRightFilter || instSinceFilter || instExpiryFilter || instStatusFilter) && (
                 <div className="ledger-strategy-filter-meta">
                   <span>Showing {filteredItems.length} of {items.length} instances</span>
                   <button
@@ -1216,6 +1515,7 @@ export function StrategyInstancesPage({
                       setInstStructureFilter('')
                       setInstSymbolFilter('')
                       setInstRightFilter('')
+                      setInstSinceFilter('')
                       setInstExpiryFilter('')
                       setInstStatusFilter('')
                     }}
@@ -1293,41 +1593,33 @@ export function StrategyInstancesPage({
           )}
               <table className="data-table strategy-instances-table">
             <thead>
-              <tr>
-                <th>ID</th>
-                <th className="strategy-instances-col-opp">Opportunity</th>
-                <th>Account</th>
-                <th>Status</th>
+              <tr className="strategy-instances-head-tier1">
+                <th rowSpan={2}>ID</th>
+                <th rowSpan={2} className="strategy-instances-col-opp">Opportunity</th>
+                <th rowSpan={2}>Status</th>
                 <SortableInstancesTh
                   column="start"
-                  className="strategy-instances-col-start strategy-instances-th-long-header"
+                  rowSpan={2}
+                  className="strategy-instances-col-period strategy-instances-th-long-header"
                   sort={instancesSort}
                   onSort={toggleInstancesSort}
                 >
-                  <span title="Min report date in the performance window.">Start Date</span>
-                </SortableInstancesTh>
-                <SortableInstancesTh
-                  column="end"
-                  className="strategy-instances-col-end strategy-instances-th-long-header"
-                  sort={instancesSort}
-                  onSort={toggleInstancesSort}
-                >
-                  <span title="Open: latest option expiry among open legs. Otherwise: max report date in the window.">
-                    End Date
+                  <span title="Window: min report date → end (open: latest open-leg expiry; closed: max report date). Hold = calendar days for metrics. Sort by start date.">
+                    Period
                   </span>
                 </SortableInstancesTh>
-                <SortableInstancesTh
-                  column="net"
-                  className="strategy-instances-th-sort-num strategy-instances-th-long-header"
-                  sort={instancesSort}
-                  onSort={toggleInstancesSort}
-                >
-                  <span title="Net PnL: execution book (OPT group premium ± commission + non-OPT realized + prorated option–stock slippage). Same as Instance Detail.">
-                    Net PnL
-                  </span>
-                </SortableInstancesTh>
+                <th colSpan={2} className="strategy-instances-th-group" scope="colgroup">
+                  Net PnL
+                </th>
+                <th colSpan={2} className="strategy-instances-th-group" scope="colgroup">
+                  Underlying Cost
+                </th>
+                <th colSpan={2} className="strategy-instances-th-group" scope="colgroup">
+                  Return %
+                </th>
                 <SortableInstancesTh
                   column="comm"
+                  rowSpan={2}
                   className="strategy-instances-th-sort-num"
                   sort={instancesSort}
                   onSort={toggleInstancesSort}
@@ -1335,38 +1627,65 @@ export function StrategyInstancesPage({
                   <abbr title="Commission">Comm.</abbr>
                 </SortableInstancesTh>
                 <SortableInstancesTh
-                  column="hold"
-                  className="strategy-instances-th-sort-num"
-                  sort={instancesSort}
-                  onSort={toggleInstancesSort}
-                >
-                  <abbr title="Hold time">Hold</abbr>
-                </SortableInstancesTh>
-                <SortableInstancesTh
-                  column="und"
-                  className="strategy-instances-th-sort-num strategy-instances-th-long-header"
-                  sort={instancesSort}
-                  onSort={toggleInstancesSort}
-                >
-                  <span title="Underlying cost (sell-side OPT attribution).">Underlying cost</span>
-                </SortableInstancesTh>
-                <SortableInstancesTh
-                  column="ann"
-                  className="strategy-instances-th-sort-num"
-                  sort={instancesSort}
-                  onSort={toggleInstancesSort}
-                >
-                  <abbr title="Annual return from execution-derived Net PnL (same window as Instance Detail).">Ann.</abbr>
-                </SortableInstancesTh>
-                <SortableInstancesTh
                   column="exec"
+                  rowSpan={2}
                   className="strategy-instances-th-sort-num"
                   sort={instancesSort}
                   onSort={toggleInstancesSort}
                 >
                   <abbr title="Executions count">Exec</abbr>
                 </SortableInstancesTh>
-                <th className="strategy-instances-col-actions">Actions</th>
+                <th rowSpan={2} className="strategy-instances-col-actions">Actions</th>
+              </tr>
+              <tr className="strategy-instances-head-tier2">
+                <SortableInstancesTh
+                  column="net"
+                  className="strategy-instances-th-sort-num strategy-instances-th-sub"
+                  sort={instancesSort}
+                  onSort={toggleInstancesSort}
+                >
+                  <span title="Execution book Net PnL (same as Instance Detail).">PnL</span>
+                </SortableInstancesTh>
+                <SortableInstancesTh
+                  column="npd"
+                  className="strategy-instances-th-sort-num strategy-instances-th-sub"
+                  sort={instancesSort}
+                  onSort={toggleInstancesSort}
+                >
+                  <span title="Net PnL per calendar day (same basis as Instance detail strip).">/ day</span>
+                </SortableInstancesTh>
+                <SortableInstancesTh
+                  column="und"
+                  className="strategy-instances-th-sort-num strategy-instances-th-sub"
+                  sort={instancesSort}
+                  onSort={toggleInstancesSort}
+                >
+                  <span title="Sell-side OPT underlying cost; rounded to $0.">Cost</span>
+                </SortableInstancesTh>
+                <SortableInstancesTh
+                  column="cday"
+                  className="strategy-instances-th-sort-num strategy-instances-th-sub"
+                  sort={instancesSort}
+                  onSort={toggleInstancesSort}
+                >
+                  <span title="Capital at risk ÷ hold days used for annualization.">/ day</span>
+                </SortableInstancesTh>
+                <SortableInstancesTh
+                  column="ann"
+                  className="strategy-instances-th-sort-num strategy-instances-th-sub"
+                  sort={instancesSort}
+                  onSort={toggleInstancesSort}
+                >
+                  <span title="Annual return from execution-derived Net PnL; hold days match Period column.">Annual %</span>
+                </SortableInstancesTh>
+                <SortableInstancesTh
+                  column="ret"
+                  className="strategy-instances-th-sort-num strategy-instances-th-sub"
+                  sort={instancesSort}
+                  onSort={toggleInstancesSort}
+                >
+                  <abbr title="Net PnL ÷ capital at risk × 100.">%</abbr>
+                </SortableInstancesTh>
               </tr>
             </thead>
             <tbody>
