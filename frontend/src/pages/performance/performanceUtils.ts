@@ -192,11 +192,12 @@ export function filterRelevantOptPairsForDay(
 }
 
 export function getTimeRangeDates(
-  timeRange: 'quarter' | 'year' | '3year',
+  timeRange: 'quarter' | 'halfyear' | 'year' | '3year',
   calendarMonth: string,
 ): { sinceStr: string; untilStr: string } {
   const [y, m] = calendarMonth.split('-').map(Number)
-  const monthsBack = timeRange === 'quarter' ? 2 : timeRange === 'year' ? 11 : 35
+  const monthsBack =
+    timeRange === 'quarter' ? 2 : timeRange === 'halfyear' ? 5 : timeRange === 'year' ? 11 : 35
   const startDate = new Date(y, m - 1 - monthsBack, 1)
   const endDate = new Date(y, m, 0)
   const sinceStr = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-01`

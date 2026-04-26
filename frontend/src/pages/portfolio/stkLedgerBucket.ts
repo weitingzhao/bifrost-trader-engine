@@ -94,6 +94,51 @@ export function sumStkUnrealizedPnlForBucket(
   return any ? sum : null
 }
 
+/** Sum current STK position market value from GET /status for one bucket. Uses |market value| as base. */
+export function sumStkPositionMarketValueForBucket(
+  status: StatusResponse | null,
+  bucket: StkLedgerBucket,
+): number | null {
+  if (!status?.portfolio?.accounts) return null
+  let sumAbsMv = 0
+  let any = false
+  for (const acc of status.portfolio.accounts) {
+    const accountId = (acc.account_id ?? '').trim()
+    const positions =
+      (acc as {
+        positions?: Array<{
+          secType?: string
+          sec_type?: string
+          contract_key?: string
+          category?: string
+          market_value?: number | null
+          position?: number | null
+          price?: number | null
+        }>
+      }).positions ?? []
+    for (const p of positions) {
+      const stRaw = (p.secType ?? p.sec_type ?? '').toString().trim().toUpperCase()
+      if (stRaw !== 'STK') continue
+      const ck = (p.contract_key ?? '').trim()
+      if (!accountId || !ck) continue
+      const catRaw = p.category
+      const cat = typeof catRaw === 'string' && catRaw.trim() ? catRaw.trim() : '—'
+      const b = bucketFromCategoryString(cat)
+      if (b !== bucket) continue
+      const mvRaw = p.market_value
+      const mv =
+        mvRaw != null && Number.isFinite(Number(mvRaw))
+          ? Number(mvRaw)
+          : (Number(p.position) || 0) * (Number(p.price) || 0)
+      if (Number.isFinite(mv) && Math.abs(mv) > 0) {
+        sumAbsMv += Math.abs(mv)
+        any = true
+      }
+    }
+  }
+  return any ? sumAbsMv : null
+}
+
 function bucketFromCategoryString(c: string): StkLedgerBucket {
   if (isLedgerFixedIncomeCategory(c)) return 'fixed_income'
   if (isLedgerCashLikeCategory(c)) return 'cash_like'

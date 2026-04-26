@@ -14018,6 +14018,508 @@ th {
   margin-left: var(--space-3);
 }
 
+.performance-page .performance-growth-card {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: rgba(8, 13, 24, 0.58);
+}
+
+.performance-page .performance-growth-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-1);
+  padding: 0 var(--space-1);
+}
+
+.performance-page .performance-growth-card-header h3 {
+  margin: 0;
+  font-size: var(--text-body);
+  color: var(--color-text-main);
+}
+
+.performance-page .performance-growth-card-header p {
+  margin: 2px 0 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.performance-page .performance-growth-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.performance-page .performance-growth-card-title-row h3 {
+  margin: 0;
+}
+
+.performance-page .performance-growth-card-title-row .info-tooltip-icon {
+  font-size: 0.8rem;
+  opacity: 0.88;
+}
+
+.performance-page .performance-growth-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.performance-page .performance-growth-unit-toggle {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.performance-page .performance-growth-unit-toggle button {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.performance-page .performance-growth-unit-toggle button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.performance-page .performance-growth-unit-toggle button.active {
+  background: rgba(163, 230, 53, 0.18);
+  color: rgb(163, 230, 53);
+}
+
+.performance-page .performance-growth-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.performance-page .performance-growth-kpis span {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 78px;
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.performance-page .performance-growth-kpis strong {
+  font-size: var(--text-body);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.performance-page .performance-growth-body {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.performance-page .performance-growth-main-charts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: var(--space-2);
+  align-items: stretch;
+}
+
+.performance-page .performance-growth-chart-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.performance-page .performance-growth-chart-hit-surface {
+  cursor: crosshair;
+}
+
+.performance-page .performance-growth-hover-xline {
+  stroke: rgba(226, 232, 240, 0.45);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.performance-page .performance-growth-hover-dot {
+  fill: rgb(255, 255, 255);
+  stroke: rgba(15, 23, 42, 0.85);
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+}
+
+.performance-page .performance-growth-chart-tooltip {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+  width: clamp(220px, 30vw, 280px);
+  max-width: calc(100% - 16px);
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  transform: translate(-50%, calc(-100% - 8px));
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: rgba(241, 245, 249, 0.95);
+}
+
+.performance-page .performance-growth-chart-tooltip[data-anchor='left'] {
+  transform: translate(8px, calc(-100% - 8px));
+}
+
+.performance-page .performance-growth-chart-tooltip[data-anchor='right'] {
+  transform: translate(calc(-100% - 8px), calc(-100% - 8px));
+}
+
+.performance-page .performance-growth-chart-tooltip-date {
+  font-weight: 700;
+  font-size: 0.75rem;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+  color: rgba(248, 250, 252, 0.98);
+}
+
+.performance-page .performance-growth-chart-tooltip-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.performance-page .performance-growth-chart-tooltip-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  font-variant-numeric: tabular-nums;
+  align-items: baseline;
+}
+
+.performance-page .performance-growth-chart-tooltip-label {
+  color: rgba(148, 163, 184, 0.95);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.performance-page .performance-growth-chart-tooltip-value {
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+  font-feature-settings: 'tnum';
+}
+
+.performance-page .performance-growth-chart-tooltip-row-total {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.performance-page .performance-growth-chart-tooltip-row-total .performance-growth-chart-tooltip-label {
+  color: rgba(248, 250, 252, 0.92);
+}
+
+.performance-page .performance-growth-chart-tooltip-row-net {
+  opacity: 0.88;
+  font-size: 0.68rem;
+}
+
+.performance-page .performance-growth-chart-tooltip-row-unreal .performance-growth-chart-tooltip-label {
+  color: rgba(190, 242, 100, 0.85);
+}
+
+.performance-page .performance-growth-chart-tooltip-row-unreal-total {
+  border-top: 1px dashed rgba(190, 242, 100, 0.35);
+  margin-top: 2px;
+  padding-top: 3px;
+}
+
+.performance-page .performance-growth-fi-bar-panel {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  width: clamp(200px, 34vw, 300px);
+  min-width: 200px;
+  height: 220px;
+  align-self: flex-start;
+  border-left: 1px solid rgba(148, 163, 184, 0.15);
+  padding-left: var(--space-2);
+}
+
+.performance-page .performance-fi-bar-panel-head {
+  flex: 0 0 auto;
+  padding-bottom: 4px;
+}
+
+.performance-page .performance-fi-bar-panel-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.performance-page .performance-fi-bar-panel-kicker {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-main);
+}
+
+.performance-page .performance-fi-bar-panel-title-row .info-tooltip-icon {
+  font-size: 0.72rem;
+  opacity: 0.85;
+}
+
+.performance-page .performance-growth-fi-notional-chart {
+  display: block;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.performance-page .performance-fi-notional-yaxis {
+  fill: rgba(148, 163, 184, 0.92);
+  font-size: 0.64rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.performance-page .performance-fi-notional-bar-caption {
+  font-size: 0.88rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  paint-order: stroke fill;
+  stroke: rgba(15, 23, 42, 0.96);
+  stroke-width: 3.25px;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.performance-page .performance-growth-fi-notional-chart--ann .performance-fi-notional-bar-caption {
+  font-size: 0.82rem;
+}
+
+.performance-page .performance-fi-notional-bar-caption-pos {
+  fill: rgb(255, 251, 235);
+}
+
+.performance-page .performance-fi-notional-bar-caption-neg {
+  fill: rgb(255, 237, 213);
+}
+
+.performance-page .performance-fi-notional-bar-caption-zero {
+  fill: rgb(241, 245, 249);
+}
+
+.performance-page .performance-fi-notional-zero {
+  stroke: rgba(148, 163, 184, 0.35);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.performance-page .performance-fi-notional-bar {
+  stroke-width: 0.35;
+  vector-effect: non-scaling-stroke;
+}
+
+.performance-page .performance-fi-notional-bar-pos {
+  fill: rgba(251, 191, 36, 0.88);
+  stroke: rgba(217, 119, 6, 0.65);
+}
+
+.performance-page .performance-fi-notional-bar-neg {
+  fill: rgba(248, 113, 113, 0.72);
+  stroke: rgba(185, 28, 28, 0.45);
+}
+
+.performance-page .performance-fi-notional-bar-zero {
+  fill: rgba(148, 163, 184, 0.35);
+  stroke: rgba(148, 163, 184, 0.4);
+}
+
+.performance-page .performance-fi-notional-xlabel {
+  fill: rgba(226, 232, 240, 0.88);
+  font-size: 0.68rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.performance-page .performance-growth-chart {
+  display: block;
+  width: 100%;
+  height: 220px;
+  overflow: visible;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Alternating vertical bands by calendar month (behind grid/series). */
+.performance-page .performance-growth-month-band {
+  fill: rgba(148, 163, 184, 0.035);
+}
+.performance-page .performance-growth-month-band-alt {
+  fill: rgba(148, 163, 184, 0.09);
+}
+
+.performance-page .performance-growth-grid {
+  stroke: rgba(148, 163, 184, 0.12);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.performance-page .performance-growth-zero-line {
+  stroke: rgba(148, 163, 184, 0.38);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Match Fixed income chart axis: rem-based, higher contrast (readable at 100% zoom). */
+.performance-page .performance-growth-ylabel {
+  fill: rgba(148, 163, 184, 0.94);
+  font-size: 0.64rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.performance-page .performance-growth-xlabel {
+  fill: rgba(226, 232, 240, 0.9);
+  font-size: 0.68rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.performance-page .performance-growth-line {
+  fill: none;
+  stroke: rgb(255, 255, 255);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.performance-page .performance-growth-line-total {
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.18));
+}
+
+.performance-page .performance-growth-line-options-unreal {
+  stroke-dasharray: 4 3;
+  opacity: 0.92;
+}
+
+.performance-page .performance-growth-legend-side {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: var(--space-1) 0;
+  min-width: 132px;
+}
+
+.performance-page .performance-growth-legend--equity-left {
+  box-sizing: border-box;
+  border-right: 1px solid rgba(148, 163, 184, 0.15);
+  padding-right: 14px;
+  margin-right: 4px;
+  min-width: 176px;
+  max-width: 220px;
+}
+
+.performance-page .performance-growth-legend-hint {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-main);
+  margin-bottom: 4px;
+}
+
+.performance-page .performance-growth-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.9);
+  cursor: pointer;
+  margin: 0;
+}
+
+.performance-page .performance-growth-legend-row-off {
+  opacity: 0.55;
+}
+
+.performance-page .performance-growth-layer-checkbox {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--color-accent, rgb(56, 189, 248));
+  cursor: pointer;
+}
+
+.performance-page .performance-growth-legend-row-total {
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--color-border);
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+
+.performance-page .performance-growth-legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 3px;
+  border-radius: 1.5px;
+  flex-shrink: 0;
+}
+
+.performance-page .performance-growth-legend-row-total .performance-growth-legend-swatch {
+  height: 4px;
+}
+
+.performance-page .performance-growth-legend-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.performance-page .performance-growth-legend-value {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 0.76rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+  color: rgba(248, 250, 252, 0.95);
+}
+
+.performance-page .performance-growth-legend-row-total .performance-growth-legend-value {
+  font-size: 0.8rem;
+  color: var(--color-text-main);
+}
+
 .performance-page .performance-filter-legend {
   font-size: var(--text-caption);
   color: var(--color-text-muted);

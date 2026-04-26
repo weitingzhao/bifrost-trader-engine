@@ -320,6 +320,9 @@ class MassiveWsIngest:
         self._msg_count = 0
         self._current_symbols: Set[str] = set()
         self._current_channels: str = ""
+        from src.bifrost.ops_lease import ops_profile_from_config, maintain_service_ops_lease
+        self._ops_profile = ops_profile_from_config(cfg)
+        self._maintain_ops_lease = lambda: maintain_service_ops_lease(self._rds, "massive_ws", self._ops_profile)
 
     async def run(self) -> None:
         loop = asyncio.get_event_loop()
@@ -406,6 +409,7 @@ class MassiveWsIngest:
                 logger.info("Subscribed: %s", channels[:200])
                 self._redis_writer.set_subscriptions(set(channels.split(",")))
                 self._redis_writer.update_status(True, time.time(), self._reconnects, self._msg_count)
+                self._maintain_ops_lease()
                 self._reconnects = 0
 
                 # Consume with watchlist refresh
@@ -510,6 +514,7 @@ class MassiveWsIngest:
             except asyncio.TimeoutError:
                 pass
 
+            self._maintain_ops_lease()
             new_symbols = _watchlist_option_symbols(self._cfg)
             if not new_symbols or new_symbols == self._current_symbols:
                 continue

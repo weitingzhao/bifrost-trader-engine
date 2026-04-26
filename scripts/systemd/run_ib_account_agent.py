@@ -184,8 +184,11 @@ class IbAccountAgentApp:
     def __init__(self, cfg: dict) -> None:
         self._cfg = cfg
         self._rds = _redis_client(cfg)
+        from src.bifrost.ops_lease import ops_profile_from_config, maintain_service_ops_lease
         from src.vendor.ib_account_agent.writer import IbAccountAgentRedisWriter
 
+        self._ops_profile = ops_profile_from_config(cfg)
+        self._maintain_ops_lease = lambda: maintain_service_ops_lease(self._rds, "ib_account_agent", self._ops_profile)
         self._writer = IbAccountAgentRedisWriter(self._rds)
         self._status_tracker = IbConnectionStatusTracker(self._rds, service="ib_account_agent")
         self._stop = asyncio.Event()
@@ -497,6 +500,7 @@ class IbAccountAgentApp:
 
             if now - self._last_service_heartbeat_at >= self._service_heartbeat_interval_sec:
                 self._last_service_heartbeat_at = now
+                self._maintain_ops_lease()
                 need_host = not bool(getattr(primary, "_connected_state", False))
                 need_sec = secondary is not None and not bool(
                     getattr(secondary, "_connected_state", False)

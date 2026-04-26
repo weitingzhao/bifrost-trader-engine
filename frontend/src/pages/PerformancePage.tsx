@@ -19,7 +19,7 @@ import {
   realizedPnlFifoMatchPlusStock,
   scaledLedgerOptDetailRowPnl,
 } from './portfolio/ledgerOptHelpers'
-import { fmtChicagoTime, fmtPnl, fmtPnlCalendar, fmtUsd } from '../utils/format'
+import { fmtChicagoTime, fmtPnl, fmtPnlCalendar, fmtUsd, fmtUsdCompact } from '../utils/format'
 import {
   filterExecutionsByUnixRange,
   loadPerformanceDayPnLBulk,
@@ -33,6 +33,7 @@ import {
 import {
   buildPositionCategoryByAccountContract,
   getStkLedgerBucketForExecution,
+  sumStkPositionMarketValueForBucket,
   serializePositionCategoryKey,
   type StkLedgerBucket,
 } from './portfolio/stkLedgerBucket'
@@ -81,7 +82,7 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
   const [data, setData] = useState<PerformanceResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [timeRange, setTimeRange] = useState<'quarter' | 'year' | '3year'>('quarter')
+  const [timeRange, setTimeRange] = useState<'quarter' | 'halfyear' | 'year' | '3year'>('quarter')
   const [calendarMonth, setCalendarMonth] = useState<string>(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -543,6 +544,369 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
 
   const summary = data?.summary
 
+  const [growthUnit, setGrowthUnit] = useState<'pct' | 'usd'>('usd')
+  type GrowthLayer = 'options' | 'stocks' | 'fixed_income' | 'cash_like'
+  const GROWTH_LAYERS: { key: GrowthLayer; label: string; color: string; colorFill: string }[] = [
+    { key: 'options', label: 'Options', color: 'rgb(163,230,53)', colorFill: 'rgba(163,230,53,0.28)' },
+    { key: 'stocks', label: 'Stocks', color: 'rgb(56,189,248)', colorFill: 'rgba(56,189,248,0.22)' },
+    { key: 'fixed_income', label: 'Fix-In', color: 'rgb(251,191,36)', colorFill: 'rgba(251,191,36,0.18)' },
+    { key: 'cash_like', label: 'Cash-like', color: 'rgb(167,139,250)', colorFill: 'rgba(167,139,250,0.18)' },
+  ]
+  const [growthLayersVisible, setGrowthLayersVisible] = useState<Record<GrowthLayer, boolean>>({
+    options: true,
+    stocks: false,
+    fixed_income: true,
+    cash_like: false,
+  })
+  const [growthHoverIdx, setGrowthHoverIdx] = useState<number | null>(null)
+  const [growthTipPos, setGrowthTipPos] = useState<{ left: number; top: number; anchor: 'left' | 'center' | 'right' } | null>(null)
+  const growthChartWrapRef = useRef<HTMLDivElement>(null)
+  const portfolioGrowthChart = useMemo(() => {
+    if (!byDayRangeData) return null
+    const capitalBaseRaw = data?.transaction?.capital_base ?? data?.transaction?.start_equity ?? data?.unrealized?.current_equity ?? null
+    const capitalBase = Number(capitalBaseRaw)
+    const hasCapitalBase = Number.isFinite(capitalBase) && capitalBase > 0
+    const isPct = growthUnit === 'pct' && hasCapitalBase
+
+    const optMap = byDayRangeData.opt
+    const stocksMap = byDayRangeData.stocks
+    const fiMap = byDayRangeData.fixed_income
+    const fiNotionalMap = byDayRangeData.stkBucketNotional.fixed_income
+    const cashMap = byDayRangeData.cash_like
+    const allDates = [...new Set([
+      ...Object.keys(optMap), ...Object.keys(stocksMap),
+      ...Object.keys(fiMap), ...Object.keys(fiNotionalMap), ...Object.keys(cashMap),
+    ])].sort()
+    if (allDates.length === 0) return null
+
+    /** Fixed income: cumulative signed STK notional (N); % view is N÷capital base (same N as FI bars; bars show monthly N annualized to %). */
+    const vis = growthLayersVisible
+    const conv = (v: number) => (isPct ? (100 * v) / capitalBase : v)
+
+    let cumStk = 0, cumFi = 0, cumCash = 0, cumOpt = 0
+    let currentOptUMonth = ''
+    let optUMonthStartRealizedRaw = 0
+    let optUMonthDeltaRaw = 0
+    const points = allDates.map((dateStr) => {
+      cumOpt += optMap[dateStr]?.realized ?? 0
+      cumStk += stocksMap[dateStr]?.realized ?? 0
+      cumFi += fiNotionalMap[dateStr] ?? 0
+      cumCash += cashMap[dateStr]?.realized ?? 0
+      const mk = dateStr.slice(0, 7)
+      const uNowRaw = optMap[dateStr]?.unrealized ?? 0
+      if (mk !== currentOptUMonth) {
+        currentOptUMonth = mk
+        optUMonthStartRealizedRaw = cumOpt
+        optUMonthDeltaRaw = 0
+      } else {
+        optUMonthDeltaRaw += uNowRaw
+      }
+      const optUnrealUsdMonthAnchored = optUMonthStartRealizedRaw + optUMonthDeltaRaw
+      const totalRaw = cumOpt + cumStk + cumFi + cumCash
+      const totalRawVisible =
+        (vis.options ? cumOpt : 0) +
+        (vis.stocks ? cumStk : 0) +
+        (vis.fixed_income ? cumFi : 0) +
+        (vis.cash_like ? cumCash : 0)
+      return {
+        dateStr,
+        dateLabel: (() => {
+          const [yy, mm, dd] = dateStr.split('-').map(Number)
+          return new Date(yy, mm - 1, dd).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        })(),
+        total: conv(totalRaw),
+        totalVisible: conv(totalRawVisible),
+        options: conv(cumOpt),
+        optionsUnrealMonthStart: conv(optUMonthStartRealizedRaw),
+        optionsUnrealMonthDelta: conv(optUMonthDeltaRaw),
+        optionsUnrealMonthAnchored: conv(optUnrealUsdMonthAnchored),
+        stocks: conv(cumStk),
+        fixed_income: conv(cumFi),
+        cash_like: conv(cumCash),
+        totalRaw,
+        totalRawVisible,
+      }
+    })
+
+    const W = 720, H = 220, PL = 6, PR = 6, PT = 14, PB = 28
+    const chartW = W - PL - PR, chartH = H - PT - PB
+
+    const valsForScale: number[] = []
+    for (const p of points) {
+      if (vis.options) {
+        valsForScale.push(p.options)
+        valsForScale.push(p.optionsUnrealMonthAnchored)
+      }
+      if (vis.stocks) valsForScale.push(p.stocks)
+      if (vis.fixed_income) valsForScale.push(p.fixed_income)
+      if (vis.cash_like) valsForScale.push(p.cash_like)
+      valsForScale.push(p.totalVisible)
+    }
+    const allValues = valsForScale
+    let minY = Math.min(0, ...allValues)
+    let maxY = Math.max(0, ...allValues)
+    if (Math.abs(maxY - minY) < 1e-9) { maxY += 1; minY -= 1 }
+    const yPad = (maxY - minY) * 0.1
+    minY -= yPad; maxY += yPad
+
+    const xScale = (i: number) => PL + (i / Math.max(1, points.length - 1)) * chartW
+    const yScale = (v: number) => PT + chartH - ((v - minY) / (maxY - minY)) * chartH
+
+    const makePath = (vals: number[]) =>
+      vals.map((v, i) => `${i === 0 ? 'M' : 'L'}${xScale(i).toFixed(1)},${yScale(v).toFixed(1)}`).join(' ')
+    const makeArea = (vals: number[]) => {
+      const top = vals.map((v, i) => `${i === 0 ? 'M' : 'L'}${xScale(i).toFixed(1)},${yScale(v).toFixed(1)}`).join(' ')
+      const base = `L${xScale(vals.length - 1).toFixed(1)},${yScale(0).toFixed(1)} L${xScale(0).toFixed(1)},${yScale(0).toFixed(1)} Z`
+      return `${top} ${base}`
+    }
+
+    const totalPath = makePath(points.map((p) => p.totalVisible))
+    const totalArea = makeArea(points.map((p) => p.totalVisible))
+    const layerAreas = GROWTH_LAYERS.map((l) => ({ ...l, area: makeArea(points.map((p) => p[l.key])), path: makePath(points.map((p) => p[l.key])) }))
+    const optionsUnrealPath = vis.options ? makePath(points.map((p) => p.optionsUnrealMonthAnchored)) : ''
+
+    const gridCount = 5
+    const gridLines = Array.from({ length: gridCount }, (_, i) => {
+      const v = minY + ((maxY - minY) * (i + 1)) / (gridCount + 1)
+      return { y: yScale(v), label: isPct ? `${v.toFixed(1)}%` : fmtUsd(v) }
+    })
+
+    const xTickCount = Math.min(points.length, 8)
+    const xTickStep = Math.max(1, Math.floor(points.length / xTickCount))
+    const xTicks = points
+      .filter((_, i) => i % xTickStep === 0 || i === points.length - 1)
+      .map((p) => ({ x: xScale(points.indexOf(p)), label: p.dateLabel }))
+
+    const zeroY = minY <= 0 && maxY >= 0 ? yScale(0) : null
+    const last = points[points.length - 1]!
+    const first = points[0]!
+
+    const nPts = points.length
+    const monthBands: { x1: number; x2: number; alt: boolean }[] = []
+    if (nPts > 0) {
+      let seg0 = 0
+      let altBand = false
+      const pushSeg = (i0: number, i1: number) => {
+        const x1 = i0 === 0 ? PL : (xScale(i0 - 1) + xScale(i0)) / 2
+        const x2 = i1 === nPts - 1 ? W - PR : (xScale(i1) + xScale(i1 + 1)) / 2
+        if (x2 > x1 + 0.25) monthBands.push({ x1, x2, alt: altBand })
+        altBand = !altBand
+      }
+      for (let i = 1; i < nPts; i++) {
+        if (points[i]!.dateStr.slice(0, 7) !== points[seg0]!.dateStr.slice(0, 7)) {
+          pushSeg(seg0, i - 1)
+          seg0 = i
+        }
+      }
+      pushSeg(seg0, nPts - 1)
+    }
+
+    const growthChartHit = points.map((p, i) => ({
+      cx: xScale(i),
+      cyTotal: yScale(p.totalVisible),
+      cyOptUnreal: yScale(p.optionsUnrealMonthAnchored),
+    }))
+
+    return {
+      W, H, PL, PR, PT, PB, chartW, chartH,
+      totalPath, totalArea, layerAreas, gridLines, xTicks, zeroY,
+      first, last, hasCapitalBase, isPct, points,
+      monthBands,
+      optionsUnrealPath,
+      growthChartHit,
+    }
+  }, [data, byDayRangeData, growthUnit, growthLayersVisible])
+
+  const clearGrowthChartHover = useCallback(() => {
+    setGrowthHoverIdx(null)
+    setGrowthTipPos(null)
+  }, [])
+
+  const onGrowthChartPointer = useCallback(
+    (e: React.PointerEvent<SVGRectElement>) => {
+      const chart = portfolioGrowthChart
+      if (!chart) return
+      if (e.type === 'pointerleave' || e.type === 'pointercancel') {
+        clearGrowthChartHover()
+        return
+      }
+      const wrap = growthChartWrapRef.current
+      if (!wrap) return
+      const svg = e.currentTarget.ownerSVGElement
+      if (!svg) return
+      const svgRect = svg.getBoundingClientRect()
+      const wrapRect = wrap.getBoundingClientRect()
+      const vbW = chart.W
+      const vbH = chart.H
+      const ctm = svg.getScreenCTM()
+      if (!ctm) return
+      const inv = ctm.inverse()
+      const svgPt = svg.createSVGPoint()
+      svgPt.x = e.clientX
+      svgPt.y = e.clientY
+      const local = svgPt.matrixTransform(inv)
+      const xSvg = local.x
+      const plotL = chart.PL
+      const plotR = chart.W - chart.PR
+      if (xSvg < plotL || xSvg > plotR) {
+        clearGrowthChartHover()
+        return
+      }
+      const n = chart.points.length
+      if (n === 0) return
+      let idx = 0
+      let best = Number.POSITIVE_INFINITY
+      for (let i = 0; i < chart.growthChartHit.length; i++) {
+        const d = Math.abs(chart.growthChartHit[i]!.cx - xSvg)
+        if (d < best) {
+          best = d
+          idx = i
+        }
+      }
+      const hit = chart.growthChartHit[idx]
+      if (!hit) return
+      setGrowthHoverIdx(idx)
+      const xPx = svgRect.left - wrapRect.left + (hit.cx / vbW) * svgRect.width
+      const yPx = svgRect.top - wrapRect.top + (hit.cyTotal / vbH) * svgRect.height
+      const margin = 8
+      const tipW = 260
+      const tipHalf = tipW / 2
+      let anchor: 'left' | 'center' | 'right' = 'center'
+      let left = xPx
+      if (xPx + tipHalf + margin > wrapRect.width) {
+        anchor = 'right'
+        left = Math.max(margin + tipW, xPx)
+      } else if (xPx - tipHalf - margin < 0) {
+        anchor = 'left'
+        left = Math.min(wrapRect.width - margin - tipW, xPx)
+      }
+      setGrowthTipPos({ left, top: yPx, anchor })
+    },
+    [portfolioGrowthChart, clearGrowthChartHover],
+  )
+
+  useEffect(() => {
+    clearGrowthChartHover()
+  }, [portfolioGrowthChart, clearGrowthChartHover])
+
+  /** FI: monthly signed notional; shares growthUnit — $ = month N, % = annualized (N÷FI position value)×365/d. */
+  const fiMonthlyNotionalChart = useMemo(() => {
+    if (!byDayRangeData) return null
+    const fiPositionValueBaseRaw = sumStkPositionMarketValueForBucket(status, 'fixed_income')
+    const fiPositionValueBase = Number(fiPositionValueBaseRaw)
+    const hasFiPositionValueBase = Number.isFinite(fiPositionValueBase) && fiPositionValueBase > 0
+    const { sinceStr, untilStr } = getTimeRangeDates(timeRange, calendarMonth)
+    const monthKeys = listMonthKeysInRange(sinceStr, untilStr)
+    if (monthKeys.length === 0) return null
+    const daily = byDayRangeData.stkBucketNotional.fixed_income
+    const totals = new Map<string, number>(monthKeys.map((k) => [k, 0]))
+    for (const [dateStr, raw] of Object.entries(daily)) {
+      const mk = dateStr.slice(0, 7)
+      if (!totals.has(mk)) continue
+      totals.set(mk, (totals.get(mk) ?? 0) + (Number(raw) || 0))
+    }
+    const rows = monthKeys.map((monthKey) => {
+      const [y, m] = monthKey.split('-').map(Number)
+      const label = new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+      const monthlyNotional = totals.get(monthKey) ?? 0
+      const daysInMonth = new Date(y, m, 0).getDate()
+      const monthlyRatio = hasFiPositionValueBase && fiPositionValueBase > 0 ? monthlyNotional / fiPositionValueBase : 0
+      const annualizedRatio =
+        hasFiPositionValueBase && fiPositionValueBase > 0 && daysInMonth > 0 ? monthlyRatio * (365 / daysInMonth) : 0
+      return { monthKey, label, monthlyNotional, monthlyRatio, annualizedRatio, daysInMonth }
+    })
+    const useRatio = hasFiPositionValueBase
+    const fiAnnMode = useRatio && growthUnit === 'pct'
+    const vals = !useRatio
+      ? rows.map((r) => r.monthlyNotional)
+      : fiAnnMode
+        ? rows.map((r) => r.annualizedRatio)
+        : rows.map((r) => r.monthlyNotional)
+    let minY = Math.min(0, ...vals)
+    let maxY = Math.max(0, ...vals)
+    if (Math.abs(maxY - minY) < 1e-9) {
+      maxY = 1
+      minY = -1
+    }
+    const pad = (maxY - minY) * 0.08
+    minY -= pad
+    maxY += pad
+    const n = rows.length
+    const W = Math.max(176, Math.min(328, 40 + n * 12))
+    const H = 186
+    const axisGutter = 32
+    const plotX0 = axisGutter + 2
+    const PR = 6
+    const PB = 26
+    const plotTop = 6
+    const plotBottom = H - PB
+    const chartW = W - plotX0 - PR
+    const chartH = plotBottom - plotTop
+    const yScale = (v: number) => plotBottom - ((v - minY) / (maxY - minY)) * chartH
+    const zeroY = yScale(0)
+    const slot = chartW / Math.max(1, n)
+    const barW = Math.max(2, Math.min(20, slot * 0.58))
+    const xLabelStep = Math.max(1, Math.ceil(n / 5))
+    const plotVal = (r: (typeof rows)[0]) =>
+      !useRatio ? r.monthlyNotional : fiAnnMode ? r.annualizedRatio : r.monthlyNotional
+    const bars = rows.map((r, i) => {
+      const v = plotVal(r)
+      const cx = plotX0 + (i + 0.5) * slot
+      const x = cx - barW / 2
+      const t = yScale(Math.max(0, v))
+      const b = yScale(Math.min(0, v))
+      const h = Math.max(v === 0 ? 0 : 1, Math.abs(b - t))
+      const yRect = Math.min(t, b)
+      const valueLine = !useRatio
+        ? fmtUsd(r.monthlyNotional)
+        : fiAnnMode
+          ? `${(100 * r.annualizedRatio).toFixed(2)}%`
+          : fmtUsd(r.monthlyNotional)
+      const valueX = cx
+      let labelY: number
+      if (v === 0) labelY = Math.max(plotTop + 4, zeroY - 6)
+      else if (v > 0) labelY = Math.max(plotTop + 4, yRect - 5)
+      else labelY = Math.min(plotBottom - 10, yRect + h + 6)
+      return {
+        key: r.monthKey,
+        x,
+        y: yRect,
+        w: barW,
+        h,
+        label: r.label,
+        monthlyNotional: r.monthlyNotional,
+        monthlyRatio: r.monthlyRatio,
+        annualizedRatio: r.annualizedRatio,
+        valueLine,
+        valueX,
+        labelY,
+        showXLabel: i % xLabelStep === 0 || i === n - 1,
+        tone: v > 0 ? 'pos' : v < 0 ? 'neg' : 'zero' as const,
+      }
+    })
+    const yTopLabel = !useRatio || !fiAnnMode ? fmtUsdCompact(maxY) : `${(100 * maxY).toFixed(2)}%`
+    const yBotLabel = !useRatio || !fiAnnMode ? fmtUsdCompact(minY) : `${(100 * minY).toFixed(2)}%`
+    return {
+      W,
+      H,
+      plotX0,
+      axisGutter,
+      PR,
+      PB,
+      plotTop,
+      plotBottom,
+      bars,
+      zeroY,
+      yTopLabel,
+      yBotLabel,
+      chartW,
+      chartH,
+      useRatio,
+      fiAnnMode,
+      fiPositionValueBase,
+    }
+  }, [byDayRangeData, timeRange, calendarMonth, growthUnit, status])
+
   return (
     <div className="app-page-stack performance-page">
       <section className="card performance-summary-section" aria-label="Performance">
@@ -573,6 +937,18 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                     aria-label="Quarter"
                   />
                   <span className="performance-time-range-pill-label">Quarter</span>
+                </label>
+                <label className={`performance-time-range-pill ${timeRange === 'halfyear' ? 'active' : ''}`}>
+                  <input
+                    type="radio"
+                    name="timeRange"
+                    value="halfyear"
+                    checked={timeRange === 'halfyear'}
+                    onChange={() => setTimeRange('halfyear')}
+                    className="performance-time-range-pill-input"
+                    aria-label="Half year"
+                  />
+                  <span className="performance-time-range-pill-label">Half year</span>
                 </label>
                 <label className={`performance-time-range-pill ${timeRange === 'year' ? 'active' : ''}`}>
                   <input
@@ -713,6 +1089,338 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
             })()}
           </div>
         </div>
+        {portfolioGrowthChart && (
+          <section className="performance-growth-card" aria-label="Portfolio equity growth">
+            <div className="performance-growth-card-header">
+              <div>
+                <div className="performance-growth-card-title-row">
+                  <h3>Portfolio Equity Growth</h3>
+                  <InfoTooltip
+                    text={
+                      'USD: Options, Stocks, and Cash-like use cumulative realized PnL in US dollars. Fixed Income uses cumulative signed notional (N as return) in US dollars. The % / $ toggle also switches the FI bar chart: in $, bars use that month’s total signed notional. The white Total line and the Total figure sum only the asset classes whose boxes are checked. Net PnL is always the full portfolio (all four). — %: same as USD but scaled to % of capital base; FI bars use annualized % when % is selected. Options: the dashed line in the same color is end-of-day unrealized, replotted each calendar month so its value on the first day of that month in the range equals cumulative Options realized on that day; within the month it moves by Δ unrealized vs that anchor (same daily U as the calendar, month-localized).'
+                    }
+                  />
+                </div>
+              </div>
+              <div className="performance-growth-controls">
+                <div className="performance-growth-unit-toggle" role="group" aria-label="Growth chart and Fixed income bar units">
+                  <button className={growthUnit === 'pct' ? 'active' : ''} onClick={() => setGrowthUnit('pct')} disabled={!portfolioGrowthChart.hasCapitalBase}>%</button>
+                  <button className={growthUnit === 'usd' ? 'active' : ''} onClick={() => setGrowthUnit('usd')}>$</button>
+                </div>
+                <div className="performance-growth-kpis">
+                  <span>
+                    Total
+                    <strong className={portfolioGrowthChart.last.totalRawVisible >= 0 ? 'tone-positive' : 'tone-negative'}>
+                      {portfolioGrowthChart.isPct ? `${portfolioGrowthChart.last.totalVisible.toFixed(2)}%` : fmtPnl(portfolioGrowthChart.last.totalRawVisible)}
+                    </strong>
+                  </span>
+                  <span>
+                    Net PnL
+                    <strong className={portfolioGrowthChart.last.totalRaw >= 0 ? 'tone-positive' : 'tone-negative'}>
+                      {fmtPnl(portfolioGrowthChart.last.totalRaw)}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="performance-growth-body">
+              <div className="performance-growth-legend-side performance-growth-legend--equity-left" aria-label="Equity growth legend">
+                <span className="performance-growth-legend-hint">PnL by asset class</span>
+                {GROWTH_LAYERS.map((l) => {
+                  const lastPt = portfolioGrowthChart.last
+                  const val = lastPt[l.key]
+                  const on = growthLayersVisible[l.key]
+                  return (
+                    <label
+                      key={l.key}
+                      className={`performance-growth-legend-row${on ? '' : ' performance-growth-legend-row-off'}`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="performance-growth-layer-checkbox"
+                        checked={on}
+                        onChange={() =>
+                          setGrowthLayersVisible((v) => ({ ...v, [l.key]: !v[l.key] }))
+                        }
+                        aria-label={`Plot ${l.label}`}
+                      />
+                      <span className="performance-growth-legend-swatch" style={{ background: l.color }} />
+                      <span className="performance-growth-legend-label" style={{ color: l.color }}>{l.label}</span>
+                      <span className="performance-growth-legend-value" style={{ color: l.color }}>
+                        {portfolioGrowthChart.isPct
+                          ? `${val.toFixed(2)}%`
+                          : l.key === 'fixed_income'
+                            ? fmtUsd(val)
+                            : fmtPnl(val)}
+                      </span>
+                    </label>
+                  )
+                })}
+                <div className="performance-growth-legend-row performance-growth-legend-row-total">
+                  <span className="performance-growth-legend-swatch" style={{ background: 'rgb(255,255,255)' }} />
+                  <span className="performance-growth-legend-label">Total</span>
+                  <span className="performance-growth-legend-value">
+                    {portfolioGrowthChart.isPct ? `${portfolioGrowthChart.last.totalVisible.toFixed(2)}%` : fmtPnl(portfolioGrowthChart.last.totalRawVisible)}
+                  </span>
+                </div>
+              </div>
+              <div className="performance-growth-main-charts">
+                <div className="performance-growth-chart-wrap" ref={growthChartWrapRef}>
+                  <svg
+                    className="performance-growth-chart"
+                    viewBox={`0 0 ${portfolioGrowthChart.W} ${portfolioGrowthChart.H}`}
+                    preserveAspectRatio="none"
+                    role="img"
+                    aria-label={`Portfolio equity growth from ${portfolioGrowthChart.first.dateLabel} to ${portfolioGrowthChart.last.dateLabel}`}
+                  >
+                    <g className="performance-growth-month-bands" aria-hidden="true">
+                      {portfolioGrowthChart.monthBands.map((b, i) => (
+                        <rect
+                          key={i}
+                          className={
+                            b.alt
+                              ? 'performance-growth-month-band performance-growth-month-band-alt'
+                              : 'performance-growth-month-band'
+                          }
+                          x={b.x1}
+                          y={portfolioGrowthChart.PT}
+                          width={Math.max(0, b.x2 - b.x1)}
+                          height={portfolioGrowthChart.chartH}
+                        />
+                      ))}
+                    </g>
+                    {portfolioGrowthChart.gridLines.map((gl, i) => (
+                      <Fragment key={i}>
+                        <line className="performance-growth-grid" x1={portfolioGrowthChart.PL} x2={portfolioGrowthChart.W - portfolioGrowthChart.PR} y1={gl.y} y2={gl.y} />
+                        <text className="performance-growth-ylabel" x={portfolioGrowthChart.PL + 4} y={gl.y - 4} textAnchor="start" dominantBaseline="auto">{gl.label}</text>
+                      </Fragment>
+                    ))}
+                    {portfolioGrowthChart.zeroY != null && (
+                      <line className="performance-growth-zero-line" x1={portfolioGrowthChart.PL} x2={portfolioGrowthChart.W - portfolioGrowthChart.PR} y1={portfolioGrowthChart.zeroY} y2={portfolioGrowthChart.zeroY} />
+                    )}
+                    {portfolioGrowthChart.xTicks.map((t, i) => (
+                      <text key={i} className="performance-growth-xlabel" x={t.x} y={portfolioGrowthChart.H - 4} textAnchor="middle">{t.label}</text>
+                    ))}
+                    {portfolioGrowthChart.layerAreas
+                      .filter((l) => growthLayersVisible[l.key])
+                      .map((l) => (
+                        <path key={`fill-${l.key}`} d={l.area} fill={l.colorFill} />
+                      ))}
+                    {portfolioGrowthChart.layerAreas
+                      .filter((l) => growthLayersVisible[l.key])
+                      .map((l) => (
+                        <path key={`stroke-${l.key}`} d={l.path} fill="none" stroke={l.color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+                      ))}
+                    {growthLayersVisible.options && portfolioGrowthChart.optionsUnrealPath && (
+                      <path
+                        className="performance-growth-line-options-unreal"
+                        d={portfolioGrowthChart.optionsUnrealPath}
+                        fill="none"
+                        stroke={GROWTH_LAYERS[0]!.color}
+                        strokeWidth="1.5"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    )}
+                    <path className="performance-growth-line performance-growth-line-total" d={portfolioGrowthChart.totalPath} />
+                    <rect
+                      className="performance-growth-chart-hit-surface"
+                      x={0}
+                      y={0}
+                      width={portfolioGrowthChart.W}
+                      height={portfolioGrowthChart.H}
+                      fill="transparent"
+                      onPointerMove={onGrowthChartPointer}
+                      onPointerLeave={onGrowthChartPointer}
+                      onPointerCancel={onGrowthChartPointer}
+                    />
+                    {growthHoverIdx != null && portfolioGrowthChart.growthChartHit[growthHoverIdx] && (() => {
+                      const h = portfolioGrowthChart.growthChartHit[growthHoverIdx]!
+                      const yb = portfolioGrowthChart.H - portfolioGrowthChart.PB
+                      return (
+                        <g className="performance-growth-hover-marker" pointerEvents="none">
+                          <line
+                            className="performance-growth-hover-xline"
+                            x1={h.cx}
+                            x2={h.cx}
+                            y1={portfolioGrowthChart.PT}
+                            y2={yb}
+                          />
+                          <circle
+                            className="performance-growth-hover-dot"
+                            cx={h.cx}
+                            cy={h.cyTotal}
+                            r={4}
+                          />
+                        </g>
+                      )
+                    })()}
+                  </svg>
+                  {growthHoverIdx != null &&
+                    growthTipPos != null &&
+                    portfolioGrowthChart.points[growthHoverIdx] &&
+                    (() => {
+                      const pt = portfolioGrowthChart.points[growthHoverIdx]!
+                      const pct = portfolioGrowthChart.isPct
+                      const fmtLayer = (key: GrowthLayer, v: number) =>
+                        pct
+                          ? `${v.toFixed(2)}%`
+                          : key === 'fixed_income'
+                            ? fmtUsd(v)
+                            : fmtPnl(v)
+                      const dateLong = (() => {
+                        const [yy, mm, dd] = pt.dateStr.split('-').map(Number)
+                        return new Date(yy, mm - 1, dd).toLocaleDateString('en-US', {
+                          weekday: 'short',
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })
+                      })()
+                      return (
+                        <div
+                          className="performance-growth-chart-tooltip"
+                          style={{ left: growthTipPos.left, top: growthTipPos.top }}
+                          data-anchor={growthTipPos.anchor}
+                          role="tooltip"
+                        >
+                          <div className="performance-growth-chart-tooltip-date">{dateLong}</div>
+                          <div className="performance-growth-chart-tooltip-rows">
+                            {GROWTH_LAYERS.filter((l) => growthLayersVisible[l.key]).map((l) => (
+                              <div key={l.key} className="performance-growth-chart-tooltip-row">
+                                <span className="performance-growth-chart-tooltip-label">{l.label}</span>
+                                <span className="performance-growth-chart-tooltip-value">{fmtLayer(l.key, pt[l.key])}</span>
+                              </div>
+                            ))}
+                            {growthLayersVisible.options && (
+                              <div className="performance-growth-chart-tooltip-row performance-growth-chart-tooltip-row-unreal">
+                                <span className="performance-growth-chart-tooltip-label">U start (R0)</span>
+                                <span className="performance-growth-chart-tooltip-value">
+                                  {pct ? `${pt.optionsUnrealMonthStart.toFixed(2)}%` : fmtPnl(pt.optionsUnrealMonthStart)}
+                                </span>
+                              </div>
+                            )}
+                            {growthLayersVisible.options && (
+                              <div className="performance-growth-chart-tooltip-row performance-growth-chart-tooltip-row-unreal">
+                                <span className="performance-growth-chart-tooltip-label">U extra (sum in month)</span>
+                                <span className="performance-growth-chart-tooltip-value">
+                                  {pct ? `${pt.optionsUnrealMonthDelta.toFixed(2)}%` : fmtPnl(pt.optionsUnrealMonthDelta)}
+                                </span>
+                              </div>
+                            )}
+                            {growthLayersVisible.options && (
+                              <div className="performance-growth-chart-tooltip-row performance-growth-chart-tooltip-row-unreal performance-growth-chart-tooltip-row-unreal-total">
+                                <span className="performance-growth-chart-tooltip-label">U total (dashed)</span>
+                                <span className="performance-growth-chart-tooltip-value">
+                                  {pct ? `${pt.optionsUnrealMonthAnchored.toFixed(2)}%` : fmtPnl(pt.optionsUnrealMonthAnchored)}
+                                </span>
+                              </div>
+                            )}
+                            <div className="performance-growth-chart-tooltip-row performance-growth-chart-tooltip-row-total">
+                              <span className="performance-growth-chart-tooltip-label">Total</span>
+                              <span className="performance-growth-chart-tooltip-value">
+                                {pct ? `${pt.totalVisible.toFixed(2)}%` : fmtPnl(pt.totalRawVisible)}
+                              </span>
+                            </div>
+                            <div className="performance-growth-chart-tooltip-row performance-growth-chart-tooltip-row-net">
+                              <span className="performance-growth-chart-tooltip-label">Net (all four)</span>
+                              <span className="performance-growth-chart-tooltip-value">{fmtPnl(pt.totalRaw)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })()}
+                </div>
+                {fiMonthlyNotionalChart && (
+                  <div className="performance-growth-fi-bar-panel" aria-label="Fixed income notional by month">
+                    <div className="performance-fi-bar-panel-head">
+                      <div className="performance-fi-bar-panel-title-row">
+                        <span className="performance-fi-bar-panel-kicker">Fixed income</span>
+                        <InfoTooltip
+                          text={
+                            fiMonthlyNotionalChart.useRatio
+                              ? 'Uses the same % / $ control as Portfolio Equity Growth (top right). $: bar height and labels are that month’s total signed STK notional in the Fixed income bucket (same N as the gold line). %: bar height and labels use ann. ratio = (month N ÷ current Fixed income position value) × (365 ÷ days in month).'
+                              : 'Bar height and caption: monthly total signed STK notional (US$) in the Fixed income bucket. Load/current Fixed income STK positions to enable ann. % mode for this panel.'
+                          }
+                        />
+                      </div>
+                    </div>
+                    <svg
+                      className={`performance-growth-fi-notional-chart performance-growth-fi-notional-chart--${fiMonthlyNotionalChart.fiAnnMode ? 'ann' : 'usd'}`}
+                      viewBox={`0 0 ${fiMonthlyNotionalChart.W} ${fiMonthlyNotionalChart.H}`}
+                      preserveAspectRatio="xMidYMid meet"
+                      role="img"
+                      aria-label={
+                        fiMonthlyNotionalChart.useRatio
+                          ? 'Fixed income monthly notional versus capital base, annualized percentage and dollar notional'
+                          : 'Fixed income monthly signed notional in US dollars'
+                      }
+                    >
+                      <text
+                        className="performance-fi-notional-yaxis performance-fi-notional-yaxis-top"
+                        x={4}
+                        y={fiMonthlyNotionalChart.plotTop + 8}
+                        textAnchor="start"
+                        dominantBaseline="auto"
+                      >
+                        {fiMonthlyNotionalChart.yTopLabel}
+                      </text>
+                      <text
+                        className="performance-fi-notional-yaxis performance-fi-notional-yaxis-bot"
+                        x={4}
+                        y={fiMonthlyNotionalChart.plotBottom - 4}
+                        textAnchor="start"
+                        dominantBaseline="auto"
+                      >
+                        {fiMonthlyNotionalChart.yBotLabel}
+                      </text>
+                      <line
+                        className="performance-fi-notional-zero"
+                        x1={fiMonthlyNotionalChart.plotX0}
+                        x2={fiMonthlyNotionalChart.W - fiMonthlyNotionalChart.PR}
+                        y1={fiMonthlyNotionalChart.zeroY}
+                        y2={fiMonthlyNotionalChart.zeroY}
+                      />
+                      {fiMonthlyNotionalChart.bars.map((b) => (
+                        <g key={b.key}>
+                          {b.h > 0 && (
+                            <rect
+                              className={`performance-fi-notional-bar performance-fi-notional-bar-${b.tone}`}
+                              x={b.x}
+                              y={b.y}
+                              width={b.w}
+                              height={b.h}
+                              rx={1}
+                            >
+                              <title>
+                                {fiMonthlyNotionalChart.useRatio
+                                  ? `${b.label}: ${(100 * b.annualizedRatio).toFixed(2)}%`
+                                  : `${b.label}: ${fmtUsd(b.monthlyNotional)}`}
+                              </title>
+                            </rect>
+                          )}
+                          <text
+                            className={`performance-fi-notional-bar-caption performance-fi-notional-bar-caption-${b.tone}`}
+                            x={b.valueX}
+                            y={b.labelY}
+                            textAnchor="middle"
+                            dominantBaseline="auto"
+                          >
+                            {b.valueLine}
+                          </text>
+                          {b.showXLabel && (
+                            <text className="performance-fi-notional-xlabel" x={b.x + b.w / 2} y={fiMonthlyNotionalChart.H - 6} textAnchor="middle">
+                              {b.label}
+                            </text>
+                          )}
+                        </g>
+                      ))}
+                    </svg>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
         {byDayRangeLoading ? (
           <p className="section-hint">Loading…</p>
         ) : !byDayRangeData ? (
