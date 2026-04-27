@@ -320,9 +320,43 @@ class MassiveWsIngest:
         self._msg_count = 0
         self._current_symbols: Set[str] = set()
         self._current_channels: str = ""
-        from src.bifrost.ops_lease import ops_profile_from_config, maintain_service_ops_lease
+        from src.bifrost.ops_lease import ops_profile_from_config
         self._ops_profile = ops_profile_from_config(cfg)
-        self._maintain_ops_lease = lambda: maintain_service_ops_lease(self._rds, "massive_ws", self._ops_profile)
+
+    def _heartbeat_ops_lease(self) -> None:
+        """Restore/refresh bifrost_ops_control_env on the health hash each heartbeat.
+
+        Writes to REDIS_META_STATUS (the health hash) — the key that GET /services actually reads.
+        Also refreshes bifrost_ops_control_updated_at so the orphan-detection grace period
+        (120 s) never expires while the service is running (heartbeat fires every 60 s).
+        """
+        if not self._ops_profile:
+            return
+        try:
+            from backend.ops.market_ingest_control_env import (
+                BIFROST_OPS_CONTROL_ENV_FIELD,
+                BIFROST_OPS_CONTROL_HOST_FIELD,
+                BIFROST_OPS_CONTROL_UPDATED_AT_FIELD,
+                control_hostname,
+            )
+            existing = self._rds.hget(REDIS_META_STATUS, BIFROST_OPS_CONTROL_ENV_FIELD)
+            now = time.time()
+            if not existing:
+                hostname = control_hostname()
+                self._rds.hset(REDIS_META_STATUS, mapping={
+                    BIFROST_OPS_CONTROL_ENV_FIELD: self._ops_profile,
+                    BIFROST_OPS_CONTROL_HOST_FIELD: hostname,
+                    BIFROST_OPS_CONTROL_UPDATED_AT_FIELD: str(now),
+                })
+                logger.info(
+                    "ops_lease: restored bifrost_ops_control_env on %s → %s @ %s",
+                    REDIS_META_STATUS, self._ops_profile, hostname,
+                )
+            else:
+                # Refresh updated_at to keep the orphan-detection grace period alive.
+                self._rds.hset(REDIS_META_STATUS, BIFROST_OPS_CONTROL_UPDATED_AT_FIELD, str(now))
+        except Exception as e:
+            logger.debug("_heartbeat_ops_lease: %s", e)
 
     async def run(self) -> None:
         loop = asyncio.get_event_loop()
@@ -409,7 +443,7 @@ class MassiveWsIngest:
                 logger.info("Subscribed: %s", channels[:200])
                 self._redis_writer.set_subscriptions(set(channels.split(",")))
                 self._redis_writer.update_status(True, time.time(), self._reconnects, self._msg_count)
-                self._maintain_ops_lease()
+                self._heartbeat_ops_lease()
                 self._reconnects = 0
 
                 # Consume with watchlist refresh
@@ -514,7 +548,7 @@ class MassiveWsIngest:
             except asyncio.TimeoutError:
                 pass
 
-            self._maintain_ops_lease()
+            self._heartbeat_ops_lease()
             new_symbols = _watchlist_option_symbols(self._cfg)
             if not new_symbols or new_symbols == self._current_symbols:
                 continue

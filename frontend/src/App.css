@@ -7785,6 +7785,101 @@ th {
   flex-wrap: wrap;
 }
 
+/* Positions → Open positions: filters, accounts, detail mode, sub-tabs on one compact row */
+.positions-open-controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.55rem;
+  margin-bottom: var(--space-2);
+  min-width: 0;
+}
+
+.positions-open-controls-row .positions-open-filters {
+  gap: 0.3rem;
+}
+
+.positions-open-controls-row .positions-open-detail-rg {
+  gap: 0.28rem;
+}
+
+.positions-open-controls-row .positions-open-acct-bubbles {
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+}
+
+/* Open positions — HOST / Secondary: press feedback; long-press on selected shows “deselect” hint */
+.positions-open-acct-bubbles .coverage-asset-pie-bubble-btn {
+  transition:
+    transform 0.12s ease,
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    outline 0.12s ease;
+}
+
+.positions-open-acct-bubbles .coverage-asset-pie-bubble-btn:active {
+  transform: scale(0.96);
+}
+
+/* Shown after ~400ms hold on an already-selected account bubble (JS toggles class). */
+.positions-open-acct-bubbles .coverage-asset-pie-bubble-btn.hold-deselect-hint {
+  outline: 2px dashed color-mix(in oklab, var(--color-danger, #ef4444) 78%, transparent);
+  outline-offset: 2px;
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--color-danger, #ef4444) 32%, transparent),
+    0 1px 2px rgba(0, 0, 0, 0.35);
+  animation: positions-open-acct-hold-pulse 0.85s ease-in-out infinite;
+}
+
+@keyframes positions-open-acct-hold-pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.12);
+  }
+}
+
+.positions-open-controls-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 1.55rem;
+  background: var(--color-border, #2a313c);
+  flex-shrink: 0;
+  margin: 0 0.05rem;
+}
+
+.positions-open-controls-row .positions-open-tabs-merged {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex: 1 1 12rem;
+  min-width: 0;
+  gap: 0;
+}
+
+.positions-open-controls-row
+  .positions-open-tabs-merged.replay-ledger-tab-matrix--open-positions
+  .replay-ledger-tab-button-row.replay-portfolio-tabs.system-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.12rem 0.28rem;
+  width: auto;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 0;
+  grid-template-columns: unset;
+  box-sizing: border-box;
+  align-items: center;
+}
+
+.positions-open-controls-row .positions-open-tabs-merged .system-tab {
+  padding: 0.18rem 0.48rem;
+  font-size: 0.76rem;
+}
+
 /* Data page: Apple-style toggle switch (Is test) */
 .watchlist-toggle-switch {
   position: relative;
@@ -13756,6 +13851,18 @@ th {
   width: 5rem;
 }
 
+/* Open positions toolbar: wider symbol + expiry only (no “Exp” label) */
+.positions-open-filters .positions-open-filter-symbol {
+  width: 8.25rem;
+  max-width: 10rem;
+  min-width: 6.5rem;
+}
+
+.positions-open-filters .positions-open-filter-expiry {
+  width: 7.5rem;
+  max-width: 9rem;
+}
+
 .replay-filter-sep {
   margin: 0 var(--space-1);
   color: var(--color-text-muted);
@@ -18938,6 +19045,26 @@ th:has(> .coverage-pool-th-held-amt) {
   width: 100%;
 }
 
+/* Coverage summary — Asset mix: filters + donut + legend one row */
+.coverage-asset-mix-inline-row {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) 140px minmax(0, 1fr);
+  align-items: start;
+  gap: 0.45rem 0.65rem;
+  min-width: 0;
+}
+
+.coverage-asset-mix-filters-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.16rem;
+  min-width: 0;
+}
+
+.coverage-asset-mix-filters-col .coverage-asset-pie-chart-toggle-row {
+  gap: 0.1rem;
+}
+
 .coverage-asset-pie-bp-label {
   font-size: 0.74rem;
   font-weight: 600;
@@ -19070,6 +19197,26 @@ th:has(> .coverage-pool-th-held-amt) {
   min-width: 0;
 }
 
+/** Asset mix (Account column): legend rows in two columns to save vertical space. */
+.coverage-asset-pie-legend.coverage-asset-pie-legend--asset-mix-two-col {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.2rem 0.65rem;
+  align-items: start;
+}
+
+.coverage-asset-pie-legend-mix-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.coverage-asset-pie-legend--asset-mix-two-col > .coverage-asset-pie-legend-divider--mix-full,
+.coverage-asset-pie-legend--asset-mix-two-col > .coverage-asset-pie-legend-sum--mix-full {
+  grid-column: 1 / -1;
+}
+
 .coverage-asset-pie-legend-item {
   display: grid;
   grid-template-columns: 10px 1fr auto auto;
@@ -19081,6 +19228,26 @@ th:has(> .coverage-pool-th-held-amt) {
 .coverage-asset-pie-legend-item.coverage-asset-pie-legend-sum {
   grid-template-columns: 1fr auto;
   padding-top: 0.15rem;
+}
+
+/** Label + single value (no dot / pct / value quad); avoids wrong grid auto-placement vs 4-col template. */
+.coverage-asset-pie-legend-item.coverage-asset-pie-legend-item--label-value {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0.35rem 0.55rem;
+  min-width: 0;
+}
+
+.coverage-asset-pie-legend-item.coverage-asset-pie-legend-item--label-value .coverage-asset-pie-legend-label {
+  white-space: normal;
+  line-height: 1.25;
+}
+
+.coverage-asset-pie-legend-item.coverage-asset-pie-legend-item--label-value .coverage-asset-pie-legend-pct {
+  min-width: 0;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .coverage-asset-pie-legend-item--bp-excluded .coverage-asset-pie-legend-pct {
@@ -19176,6 +19343,88 @@ th:has(> .coverage-pool-th-held-amt) {
   gap: 1rem;
   flex-wrap: wrap;
   margin-bottom: 1.25rem;
+}
+
+/** Account 4/12 + Underlying 4/12 + Option 4/12 (full row). */
+.pos-comp-charts-row.pos-comp-charts-row--12 {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 0.75rem;
+  /* Equal-height columns so the three chart cards share one bottom edge */
+  align-items: stretch;
+  flex-wrap: unset;
+}
+
+.pos-comp-charts-row--12 > .pos-comp-chart-col,
+.pos-comp-charts-row--12 > .coverage-asset-pie-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  align-self: stretch;
+}
+
+.pos-comp-charts-row--12 > .coverage-asset-pie-section:not(.coverage-charts-cell) {
+  margin-bottom: 0;
+}
+
+/* Donut stack is always the 2nd direct child (after toolbar/header); last child may be a hint <p> */
+.pos-comp-charts-row--12 > .coverage-asset-pie-section > div:nth-child(2) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.pos-comp-chart-col--span-4 {
+  grid-column: span 4;
+  min-width: 0;
+}
+
+.pos-comp-chart-col .coverage-charts-section.pos-comp-coverage-charts {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
+
+.pos-comp-charts-row--12 .pos-comp-chart-col .coverage-charts-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-content: start;
+}
+
+.pos-comp-coverage-charts {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Account column: label left, account filter chips flush right on full toolbar width */
+.pos-comp-coverage-charts .coverage-charts-toolbar--account-mix {
+  width: 100%;
+  box-sizing: border-box;
+  justify-content: flex-start;
+}
+
+.pos-comp-coverage-charts .coverage-charts-toolbar--account-mix .coverage-section-account-filter {
+  margin-left: auto;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+/* Asset mix two-col legend: avoid paint overlap; clip long abbreviated $ */
+.pos-comp-coverage-charts .coverage-asset-pie-legend-mix-col {
+  isolation: isolate;
+  position: relative;
+  z-index: 0;
+}
+
+.pos-comp-coverage-charts .coverage-asset-pie-legend--asset-mix-two-col .coverage-asset-pie-legend-value {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Active type-filter clear chip */

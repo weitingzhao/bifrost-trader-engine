@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Execution, IbAccountSnapshot, IbPositionRow, PositionInstanceAttribution, RealtimeQuote, StatusResponse } from '../types'
 import { deleteExecution, fetchQuotes, subscribeQuotes, updateExecution } from '../api'
 import { fetchPositionAttribution } from '../api/trading/executions'
@@ -664,22 +664,28 @@ const DONUT_SYMBOL_COLORS = [
   '#f97316', '#4ade80', '#ec4899', '#84cc16', '#14b8a6',
 ]
 
-const OPTION_CATEGORY_COLORS: Record<string, string> = {
-  Call: '#22c55e',
-  Put: '#a855f7',
-  'Underlying Stock': '#38bdf8',
+/** Option → Category ring: blue / orange / emerald (higher hue separation than teal / slate / lime on dark UI). */
+const OPTION_STOCK_MIX_COLORS: Record<string, string> = {
+  'Backing Pool': '#60a5fa',
+  'Other Stock': '#fb923c',
+  'Cash-like': '#34d399',
 }
 
-interface DonutSegment { label: string; value: number; color: string }
+type OptionDetailFootnote =
+  | { kind: 'stock'; costFmt: string; mvFmt: string; tone: 'profit' | 'loss' | 'flat' }
+  | { kind: 'text'; text: string; tone: 'profit' | 'loss' | 'flat' }
+
+interface DonutSegment {
+  label: string
+  value: number
+  color: string
+  /** Option Detail: underlying stock cost / MV (colored) or margin line. */
+  optionDetailFoot?: OptionDetailFootnote
+}
 type UnderlyingCategoryFilter = 'Stocks' | 'Fixed Income' | 'Cash-like'
-interface PerfCandle {
-  day: string
-  open: number
-  high: number
-  low: number
-  close: number
-}
 
+/** Option → Category ring: backing vs residual optionable stock vs cash-like STK. */
+type OptionStockMixCategory = 'Backing Pool' | 'Other Stock' | 'Cash-like'
 const UNDERLYING_CATEGORY_ORDER: UnderlyingCategoryFilter[] = ['Stocks', 'Fixed Income', 'Cash-like']
 const UNDERLYING_CATEGORY_COLORS: Record<UnderlyingCategoryFilter, string> = {
   Stocks: '#38bdf8',
@@ -693,39 +699,132 @@ function fmtMvAbbrev(v: number): string {
   return `$${Math.round(v)}`
 }
 
-function buildPerfCandlesFromExecutions(executions: Execution[], limit = 24): PerfCandle[] {
-  const byDay = new Map<string, { ts: number; prices: number[] }>()
-  for (const ex of executions) {
-    const secType = (ex.sec_type ?? '').toUpperCase()
-    if (secType !== 'OPT' && secType !== 'STK') continue
-    const ts = Number(ex.time ?? 0)
-    const price = Number(ex.price ?? 0)
-    if (!Number.isFinite(ts) || ts <= 0) continue
-    if (!Number.isFinite(price) || price <= 0) continue
-    const d = new Date(ts * 1000)
-    const day = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
-    if (!byDay.has(day)) byDay.set(day, { ts, prices: [price] })
-    else {
-      const bucket = byDay.get(day)!
-      bucket.prices.push(price)
-      if (ts < bucket.ts) bucket.ts = ts
+/** Open Positions account bubbles: row visible when it matches a selected HOST / Secondary (multi-select). */
+function openPosAccountMatchesFilter(
+  accId: string,
+  pick: { host: boolean; secondary: boolean },
+  streamHostId: string,
+  streamSecondaryRaw: string,
+): boolean {
+  const trimmed = (accId ?? '').trim()
+  const hostId = streamHostId.trim()
+  const secId =
+    streamSecondaryRaw.trim() && streamSecondaryRaw.trim() !== hostId
+      ? streamSecondaryRaw.trim()
+      : ''
+  if (!hostId && !secId) return true
+  const hOn = pick.host
+  const sOn = pick.secondary
+  if (!hOn && !sOn) return false
+  const isHost = !!hostId && trimmed === hostId
+  const isSec = !!secId && trimmed === secId
+  if (isHost) return hOn
+  if (isSec) return sOn
+  return hOn && sOn
+}
+
+/** Off-track synthetic rows: same rule as former "All" — show when both configured accounts are selected. */
+function openPosShowOffTrack(
+  pick: { host: boolean; secondary: boolean },
+  streamHostId: string,
+  streamSecondaryRaw: string,
+): boolean {
+  const hostId = streamHostId.trim()
+  const secId =
+    streamSecondaryRaw.trim() && streamSecondaryRaw.trim() !== hostId
+      ? streamSecondaryRaw.trim()
+      : ''
+  if (!hostId && !secId) return true
+  if (!pick.host && !pick.secondary) return false
+  if (hostId && !secId) return pick.host
+  if (!hostId && secId) return pick.secondary
+  return pick.host && pick.secondary
+}
+
+/** Stable key for (symbol, account) across live rows and coverage rows. */
+function liveStockRowCovKey(row: { symbol?: string; account_id?: string }): string {
+  return `${(row.symbol ?? '').toUpperCase().trim()}\x1f${(row.account_id ?? '').trim()}`
+}
+
+/** Same contract key as Option Detail donut / legend rows. */
+function buildOptionContractLabel(pos: IbPositionRow): string {
+  const qty = Number(pos.position)
+  if (!Number.isFinite(qty) || qty === 0) return ''
+  const right = (pos.right ?? '').toUpperCase()
+  const side = qty > 0 ? 'L' : 'S'
+  const rightLbl = right === 'C' ? 'C' : right === 'P' ? 'P' : 'O'
+  const strike = pos.strike != null && Number.isFinite(pos.strike) ? String(pos.strike) : '?'
+  const expiry = (pos.expiry ?? '').trim() || '—'
+  const symbol = (pos.symbol ?? getContractLabelParts(pos.contract_key ?? '').symbol ?? '?').toUpperCase()
+  return `${symbol} ${rightLbl}${strike} ${expiry} ${side}`
+}
+
+function readPositionUnrealizedPnl(pos: IbPositionRow): number | null {
+  const rec = pos as unknown as Record<string, unknown>
+  const raw = rec.unrealized_pnl ?? rec.unrealizedPNL ?? null
+  const v = Number(raw)
+  return Number.isFinite(v) ? v : null
+}
+
+function pnlToneFromSigned(v: number | null): 'profit' | 'loss' | 'flat' {
+  if (v == null || !Number.isFinite(v)) return 'flat'
+  if (v > 0) return 'profit'
+  if (v < 0) return 'loss'
+  return 'flat'
+}
+
+function pnlClassForTone(tone: 'profit' | 'loss' | 'flat'): string {
+  if (tone === 'profit') return 'pnl-positive'
+  if (tone === 'loss') return 'pnl-negative'
+  return ''
+}
+
+/**
+ * Same-account underlying: stock cost + market value (tones from STK unrealized PnL, else MV − cost);
+ * else short-put margin line (tone from OPT unrealized PnL).
+ */
+function optionUnderlyingFootnote(
+  pos: IbPositionRow,
+  stockRows: IbPositionRow[],
+  resolvePrice: (p: IbPositionRow) => number | null,
+): OptionDetailFootnote {
+  const symbol = (pos.symbol ?? getContractLabelParts(pos.contract_key ?? '').symbol ?? '').trim().toUpperCase()
+  const optQty = Number(pos.position)
+  const right = (pos.right ?? '').toUpperCase().slice(0, 1)
+  const strike = pos.strike != null && Number.isFinite(Number(pos.strike)) ? Number(pos.strike) : null
+  const optPnl = readPositionUnrealizedPnl(pos)
+
+  const stk = stockRows.find(
+    p =>
+      (p.secType ?? '').toUpperCase() === 'STK' &&
+      (p.symbol ?? '').trim().toUpperCase() === symbol &&
+      Number(p.position) !== 0,
+  )
+  if (stk) {
+    const sq = Number(stk.position)
+    const ac = stk.avgCost != null ? Number(stk.avgCost) : NaN
+    const px = resolvePrice(stk)
+    const costUsd =
+      Number.isFinite(sq) && sq !== 0 && Number.isFinite(ac) && ac > 0 ? Math.abs(sq) * ac : null
+    const mvUsd =
+      px != null && Number.isFinite(px) && px > 0 && Number.isFinite(sq) && sq !== 0 ? Math.abs(sq) * px : null
+    const costFmt = costUsd != null ? fmtUsd(costUsd) : '—'
+    const mvFmt = mvUsd != null ? fmtUsd(mvUsd) : '—'
+    const stkPnl = readPositionUnrealizedPnl(stk)
+    let tone = pnlToneFromSigned(stkPnl)
+    if (tone === 'flat' && costUsd != null && mvUsd != null) {
+      tone = pnlToneFromSigned(mvUsd - costUsd)
     }
+    return { kind: 'stock', costFmt, mvFmt, tone }
   }
-  const candles = [...byDay.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([day, bucket]) => {
-      const prices = bucket.prices
-      const open = prices[0] ?? 0
-      const close = prices[prices.length - 1] ?? open
-      let high = -Infinity
-      let low = Infinity
-      for (const p of prices) {
-        if (p > high) high = p
-        if (p < low) low = p
-      }
-      return { day, open, high, low, close }
-    })
-  return candles.slice(Math.max(0, candles.length - limit))
+  if (optQty < 0 && right === 'P' && strike != null && strike > 0) {
+    const marginUsd = strike * Math.abs(optQty) * 100
+    return { kind: 'text', text: `Margin (est.) ${fmtUsd(marginUsd)}`, tone: pnlToneFromSigned(optPnl) }
+  }
+  if (optQty < 0 && right === 'C') {
+    return { kind: 'text', text: 'Margin (naked est.) —', tone: pnlToneFromSigned(optPnl) }
+  }
+  return { kind: 'stock', costFmt: '—', mvFmt: '—', tone: 'flat' }
 }
 
 function PositionDonutChart({
@@ -737,6 +836,9 @@ function PositionDonutChart({
   showLegend = true,
   embedded = false,
   showActiveChip = true,
+  showTitle = true,
+  chartCenter,
+  centerValueMode = 'usd',
 }: {
   title: string
   segments: DonutSegment[]
@@ -746,6 +848,11 @@ function PositionDonutChart({
   showLegend?: boolean
   embedded?: boolean
   showActiveChip?: boolean
+  showTitle?: boolean
+  /** When set, ring center shows these lines instead of total / active slice. */
+  chartCenter?: { main: string; sub: string; valueClass?: string } | null
+  /** When no chartCenter: show ring total / selection as % or abbreviated $ (Option charts follow % / $ toggle). */
+  centerValueMode?: 'pct' | 'usd'
 }) {
   const active = segments.filter(s => s.value > 0)
   const total  = active.reduce((acc, s) => acc + s.value, 0)
@@ -753,25 +860,50 @@ function PositionDonutChart({
   const circ = 2 * Math.PI * rMid
 
   let ringOff = 0
-  const arcs = active.map(seg => {
-    const arcLen     = (seg.value / total) * circ
-    const dashoffset = -ringOff
-    ringOff += arcLen
-    return { ...seg, arcLen, dashoffset, pct: (seg.value / total) * 100 }
-  })
+  const arcs =
+    total > 0
+      ? active.map(seg => {
+          const arcLen = (seg.value / total) * circ
+          const dashoffset = -ringOff
+          ringOff += arcLen
+          return { ...seg, arcLen, dashoffset, pct: (seg.value / total) * 100 }
+        })
+      : []
 
   const activeSegValue = activeLabel ? (active.find(s => s.label === activeLabel)?.value ?? null) : null
-  const centerMain = activeSegValue != null ? fmtMvAbbrev(activeSegValue) : total > 0 ? fmtMvAbbrev(total) : '—'
-  const centerSub  = activeLabel ? (activeLabel.length > 10 ? activeLabel.slice(0, 9) + '…' : activeLabel) : 'Total'
+  const centerSubDefault =
+    activeLabel != null
+      ? activeLabel.length > 10
+        ? activeLabel.slice(0, 9) + '…'
+        : activeLabel
+      : 'Total'
+  const centerMain =
+    chartCenter != null
+      ? chartCenter.main
+      : centerValueMode === 'pct'
+        ? total > 0
+          ? activeSegValue != null
+            ? `${((activeSegValue / total) * 100).toFixed(1)}%`
+            : '100.0%'
+          : '—'
+        : activeSegValue != null
+          ? fmtMvAbbrev(activeSegValue)
+          : total > 0
+            ? fmtMvAbbrev(total)
+            : '—'
+  const centerSub = chartCenter != null ? chartCenter.sub : centerSubDefault
+  const centerMainClass =
+    chartCenter?.valueClass ?? 'coverage-asset-pie-center-val coverage-asset-pie-center-val--basis'
 
   return (
     <div
       className={embedded ? 'pos-comp-embedded-donut' : 'coverage-asset-pie-section'}
       style={embedded ? { flex: '1 1 190px', minWidth: '180px' } : { flex: '1 1 270px', maxWidth: '480px' }}
     >
-      <div className="coverage-asset-pie-header">
-        <span className="coverage-asset-pie-title">{title}</span>
-        {activeLabel && showActiveChip && (
+      {showTitle ? (
+        <div className="coverage-asset-pie-header">
+          <span className="coverage-asset-pie-title">{title}</span>
+          {activeLabel && showActiveChip && (
           <button
             type="button"
             style={{
@@ -786,7 +918,8 @@ function PositionDonutChart({
             {activeLabel} ×
           </button>
         )}
-      </div>
+        </div>
+      ) : null}
       {active.length === 0 ? (
         <p className="section-hint" style={{ margin: 0 }}>No position data</p>
       ) : (
@@ -799,21 +932,26 @@ function PositionDonutChart({
               aria-label={`${title} ring chart`}
             >
               <circle cx={cx} cy={cy} r={rMid} fill="none" className="coverage-asset-pie-ring-track" strokeWidth={ringStroke} />
-              {arcs.map((arc, i) => {
+              {arcs.map(arc => {
                 const isActive = arc.label === activeLabel
                 const isDimmed = activeLabel != null && !isActive
                 return (
                   <circle
-                    key={i}
+                    key={`ring-${arc.label}`}
                     cx={cx} cy={cy} r={rMid}
                     fill="none"
                     stroke={arc.color}
                     strokeWidth={isActive ? ringStroke + 4 : ringStroke}
                     strokeLinecap="butt"
-                    strokeDasharray={`${arc.arcLen} ${circ}`}
-                    strokeDashoffset={arc.dashoffset}
                     transform={`rotate(-90 ${cx} ${cy})`}
-                    style={{ cursor: interactive ? 'pointer' : 'default', opacity: isDimmed ? 0.22 : 1, transition: 'opacity 0.18s, stroke-width 0.18s' }}
+                    style={{
+                      cursor: interactive ? 'pointer' : 'default',
+                      opacity: isDimmed ? 0.22 : 1,
+                      strokeDasharray: `${arc.arcLen} ${circ}`,
+                      strokeDashoffset: arc.dashoffset,
+                      transition:
+                        'stroke-dasharray 0.36s cubic-bezier(0.4, 0, 0.2, 1), stroke-dashoffset 0.36s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.18s ease, stroke-width 0.18s ease',
+                    }}
                     onClick={() => interactive && onSegmentClick(isActive ? null : arc.label)}
                   />
                 )
@@ -821,7 +959,7 @@ function PositionDonutChart({
               <text
                 x={cx}
                 y={cy - 4}
-                className="coverage-asset-pie-center-val coverage-asset-pie-center-val--basis"
+                className={centerMainClass}
                 textAnchor="middle"
                 dominantBaseline="auto"
                 style={embedded ? { fontSize: '0.98rem' } : undefined}
@@ -996,11 +1134,44 @@ export function PositionsPage({
 
   const [openFilterSymbol, setOpenFilterSymbol] = useState('')
   const [openFilterExpiryStart, setOpenFilterExpiryStart] = useState('')
-  const [openFilterAccountId, setOpenFilterAccountId] = useState<string>('all')
+  /** Open positions: which configured IB accounts to include (multi-select; no "All"). */
+  const [openFilterAccounts, setOpenFilterAccounts] = useState<{ host: boolean; secondary: boolean }>({
+    host: true,
+    secondary: true,
+  })
+  /** After ~420ms hold on selected HOST/Secondary bubble: “deselect” visual hint (cancel on pointer up). */
+  const acctBubbleHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [acctBubbleHoldHint, setAcctBubbleHoldHint] = useState<'host' | 'secondary' | null>(null)
+  const finishAcctBubbleHold = useCallback(() => {
+    if (acctBubbleHoldTimerRef.current) {
+      clearTimeout(acctBubbleHoldTimerRef.current)
+      acctBubbleHoldTimerRef.current = null
+    }
+    setAcctBubbleHoldHint(null)
+  }, [])
+  const onAcctBubblePointerDown = useCallback(
+    (which: 'host' | 'secondary', currentlyActive: boolean) => {
+      finishAcctBubbleHold()
+      if (!currentlyActive) return
+      acctBubbleHoldTimerRef.current = setTimeout(() => setAcctBubbleHoldHint(which), 420)
+    },
+    [finishAcctBubbleHold],
+  )
+  useEffect(
+    () => () => {
+      if (acctBubbleHoldTimerRef.current) clearTimeout(acctBubbleHoldTimerRef.current)
+    },
+    [],
+  )
   const [openTab, setOpenTab] = useState<OpenPositionsTab>('instance')
   const [chartTypeFilter, setChartTypeFilter] = useState<string | null>(null)
   const [activeCategoryWeightFilter, setActiveCategoryWeightFilter] = useState<UnderlyingCategoryFilter | null>(null)
   const [optionDetailActiveLabel, setOptionDetailActiveLabel] = useState<string | null>(null)
+  const [optionStockMixFilter, setOptionStockMixFilter] = useState<OptionStockMixCategory | null>(null)
+  /** Option Detail + Category ring legends: show slice as % of ring or as abbreviated $. */
+  const [optionRingLegendMode, setOptionRingLegendMode] = useState<'pct' | 'usd'>('pct')
+  /** Account Asset mix: legend columns and donut center — % of chart basis vs full $. */
+  const [coverageAssetMixLegendMode, setCoverageAssetMixLegendMode] = useState<'pct' | 'usd'>('pct')
   const [underlyingCategoryFilter, setUnderlyingCategoryFilter] = useState<Record<UnderlyingCategoryFilter, boolean>>({
     Stocks: true,
     'Fixed Income': false,
@@ -1344,9 +1515,11 @@ export function PositionsPage({
 
   const livePositions = useMemo((): LivePositionRow[] => {
     const accounts = status?.portfolio?.accounts ?? []
+    const hostId = (status?.config?.ib_client?.account?.event_host ?? '').toString().trim()
+    const secRaw = (status?.config?.ib_client?.account?.event_secondary ?? '').toString().trim()
     let rows = accounts.flatMap(account => {
       const accId = (account.account_id ?? '').trim()
-      if (openFilterAccountId !== 'all' && accId !== openFilterAccountId) return []
+      if (!openPosAccountMatchesFilter(accId, openFilterAccounts, hostId, secRaw)) return []
       return (account.positions ?? [])
         .filter(position => {
           const qty = Number(position.position)
@@ -1381,7 +1554,14 @@ export function PositionsPage({
       return (a.account_id ?? '').localeCompare(b.account_id ?? '')
     })
     return rows
-  }, [openFilterAccountId, openFilterExpiryStart, openFilterSymbol, status?.portfolio?.accounts])
+  }, [
+    openFilterAccounts,
+    openFilterExpiryStart,
+    openFilterSymbol,
+    status?.portfolio?.accounts,
+    status?.config?.ib_client?.account?.event_host,
+    status?.config?.ib_client?.account?.event_secondary,
+  ])
 
   const liveOptionPositions = useMemo(() => {
     const rows = livePositions.filter(p => (p.secType ?? '').toUpperCase() === 'OPT')
@@ -1491,6 +1671,8 @@ export function PositionsPage({
   }, [liveOptionPositions])
 
   const instanceGroups = useMemo((): InstancePositionGroup[] => {
+    const hostId = (status?.config?.ib_client?.account?.event_host ?? '').toString().trim()
+    const secRaw = (status?.config?.ib_client?.account?.event_secondary ?? '').toString().trim()
     const byInstance = new Map<string, { id: number | null; label: string | null; oppName: string | null; openedAt: number | null; positions: OpenOptionPosition[] }>()
 
     const addToInstance = (instId: number | null, instLabel: string | null, oppName: string | null, openedAt: number | null, pos: OpenOptionPosition) => {
@@ -1505,7 +1687,7 @@ export function PositionsPage({
       if ((a.sec_type ?? '').toUpperCase() !== 'OPT') continue
       const acct = (a.account_id ?? '').trim()
       const ck = (a.contract_key ?? '').trim()
-      if (openFilterAccountId !== 'all' && acct !== openFilterAccountId) continue
+      if (!openPosAccountMatchesFilter(acct, openFilterAccounts, hostId, secRaw)) continue
       const sym = openFilterSymbol.trim().toUpperCase()
       if (sym && (a.symbol ?? '').toUpperCase() !== sym) continue
       const expFilter = openFilterExpiryStart.trim()
@@ -1573,7 +1755,7 @@ export function PositionsPage({
       })
     }
 
-    if (openFilterAccountId === 'all') {
+    if (openPosShowOffTrack(openFilterAccounts, hostId, secRaw)) {
       const offTrackGroups = buildOptExecutionGroups(openOffTrackBaseExecutions)
         .filter(g => g.status === 'unrealized')
       for (const group of offTrackGroups) {
@@ -1623,10 +1805,22 @@ export function PositionsPage({
       return (a.strategy_instance_label ?? '').localeCompare(b.strategy_instance_label ?? '')
     })
     return result
-  }, [attributions, openFilterAccountId, openFilterSymbol, openFilterExpiryStart, liveOptionPositions, livePositionMap, openOffTrackBaseExecutions])
+  }, [
+    attributions,
+    openFilterAccounts,
+    openFilterSymbol,
+    openFilterExpiryStart,
+    liveOptionPositions,
+    livePositionMap,
+    openOffTrackBaseExecutions,
+    status?.config?.ib_client?.account?.event_host,
+    status?.config?.ib_client?.account?.event_secondary,
+  ])
 
   /** Options tab: one row per actual holding (IB snapshot + off-track), not per attribution / instance slice. */
   const optionsTabPositions = useMemo((): OpenOptionPosition[] => {
+    const hostId = (status?.config?.ib_client?.account?.event_host ?? '').toString().trim()
+    const secRaw = (status?.config?.ib_client?.account?.event_secondary ?? '').toString().trim()
     const rows: OpenOptionPosition[] = []
     for (const pos of liveOptionPositions) {
       const acct = (pos.account_id ?? '').trim()
@@ -1674,7 +1868,7 @@ export function PositionsPage({
         attribution_type,
       })
     }
-    if (openFilterAccountId === 'all') {
+    if (openPosShowOffTrack(openFilterAccounts, hostId, secRaw)) {
       const offTrackGroups = buildOptExecutionGroups(openOffTrackBaseExecutions).filter(g => g.status === 'unrealized')
       for (const group of offTrackGroups) {
         const pnl = group.sell_premium - group.buy_cost
@@ -1696,7 +1890,14 @@ export function PositionsPage({
       }
     }
     return rows
-  }, [liveOptionPositions, attributions, openFilterAccountId, openOffTrackBaseExecutions])
+  }, [
+    liveOptionPositions,
+    attributions,
+    openFilterAccounts,
+    openOffTrackBaseExecutions,
+    status?.config?.ib_client?.account?.event_host,
+    status?.config?.ib_client?.account?.event_secondary,
+  ])
 
   const getPositionTime = (p: OpenOptionPosition): number | null => {
     if (p.kind === 'live' && p.position) {
@@ -1793,13 +1994,6 @@ export function PositionsPage({
       return Math.abs(Number(pos.avgCost))
     return null
   }, [quotesMap])
-
-  const resolvePositionUnrealizedPnl = useCallback((pos: IbPositionRow): number | null => {
-    const rec = pos as unknown as Record<string, unknown>
-    const raw = rec.unrealized_pnl ?? rec.unrealizedPNL ?? null
-    const v = Number(raw)
-    return Number.isFinite(v) ? v : null
-  }, [])
 
   const resolveUnderlyingCategory = useCallback((pos: IbPositionRow): UnderlyingCategoryFilter => {
     const raw = String(pos.category ?? '').trim()
@@ -1942,8 +2136,16 @@ export function PositionsPage({
 
   const optionDetailSegments = useMemo((): DonutSegment[] => {
     const accounts = status?.portfolio?.accounts ?? []
-    const byContract = new Map<string, number>()
+    const stkByAccount = new Map<string, IbPositionRow[]>()
     for (const account of accounts) {
+      const accId = (account.account_id ?? '').trim()
+      const stks = (account.positions ?? []).filter(p => (p.secType ?? '').toUpperCase() === 'STK')
+      stkByAccount.set(accId, stks)
+    }
+    const byContract = new Map<string, { mv: number; foot: OptionDetailFootnote | null }>()
+    for (const account of accounts) {
+      const accId = (account.account_id ?? '').trim()
+      const stocks = stkByAccount.get(accId) ?? []
       for (const pos of account.positions ?? []) {
         const qty = Number(pos.position)
         if (!Number.isFinite(qty) || qty === 0) continue
@@ -1951,103 +2153,25 @@ export function PositionsPage({
         if (price == null) continue
         const secType = (pos.secType ?? '').toUpperCase()
         if (secType !== 'OPT') continue
-        const right = (pos.right ?? '').toUpperCase()
-        const side = qty > 0 ? 'L' : 'S'
-        const rightLbl = right === 'C' ? 'C' : right === 'P' ? 'P' : 'O'
-        const strike = pos.strike != null && Number.isFinite(pos.strike) ? String(pos.strike) : '?'
-        const expiry = (pos.expiry ?? '').trim() || '—'
-        const symbol = (pos.symbol ?? getContractLabelParts(pos.contract_key ?? '').symbol ?? '?').toUpperCase()
-        const contractLabel = `${symbol} ${rightLbl}${strike} ${expiry} ${side}`
+        const contractLabel = buildOptionContractLabel(pos)
+        if (!contractLabel) continue
         const mv = Math.abs(qty) * price * 100
-        byContract.set(contractLabel, (byContract.get(contractLabel) ?? 0) + mv)
+        const foot = optionUnderlyingFootnote(pos, stocks, resolveDonutPrice)
+        const prev = byContract.get(contractLabel) ?? { mv: 0, foot: null }
+        prev.mv += mv
+        prev.foot = foot
+        byContract.set(contractLabel, prev)
       }
     }
     return [...byContract.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([label, value], i) => ({
+      .sort((a, b) => b[1].mv - a[1].mv)
+      .map(([label, bucket], i) => ({
         label,
-        value,
+        value: bucket.mv,
         color: DONUT_SYMBOL_COLORS[i % DONUT_SYMBOL_COLORS.length],
+        optionDetailFoot: bucket.foot ?? undefined,
       }))
   }, [status?.portfolio?.accounts, resolveDonutPrice])
-
-  const optionCategorySegments = useMemo((): DonutSegment[] => {
-    const accounts = status?.portfolio?.accounts ?? []
-    const byType = new Map<string, number>([
-      ['Call', 0],
-      ['Put', 0],
-      ['Underlying Stock', 0],
-    ])
-    for (const account of accounts) {
-      for (const pos of account.positions ?? []) {
-        const qty = Number(pos.position)
-        if (!Number.isFinite(qty) || qty === 0) continue
-        const price = resolveDonutPrice(pos)
-        if (price == null) continue
-        const secType = (pos.secType ?? '').toUpperCase()
-        const mv = Math.abs(qty) * price * (secType === 'OPT' ? 100 : 1)
-        if (secType === 'OPT') {
-          const right = (pos.right ?? '').toUpperCase()
-          const key = right === 'C' ? 'Call' : 'Put'
-          byType.set(key, (byType.get(key) ?? 0) + mv)
-        } else {
-          byType.set('Underlying Stock', (byType.get('Underlying Stock') ?? 0) + mv)
-        }
-      }
-    }
-    return ['Call', 'Put', 'Underlying Stock']
-      .filter(t => (byType.get(t) ?? 0) > 0)
-      .map(t => ({ label: t, value: byType.get(t)!, color: OPTION_CATEGORY_COLORS[t] }))
-  }, [status?.portfolio?.accounts, resolveDonutPrice])
-
-  const positionTypeSummary = useMemo(() => {
-    const accounts = status?.portfolio?.accounts ?? []
-    let optionMv = 0
-    let stockMv = 0
-    let totalPnl = 0
-    let weightedOptionDays = 0
-    for (const account of accounts) {
-      for (const pos of account.positions ?? []) {
-        const qty = Number(pos.position)
-        if (!Number.isFinite(qty) || qty === 0) continue
-        const price = resolveDonutPrice(pos)
-        if (price == null) continue
-        const secType = (pos.secType ?? '').toUpperCase()
-        const mv = Math.abs(qty) * price * (secType === 'OPT' ? 100 : 1)
-        if (secType === 'OPT') {
-          optionMv += mv
-          const dte = daysUntilExpiry(pos.expiry ?? '')
-          if (dte != null && Number.isFinite(dte) && dte > 0) weightedOptionDays += mv * dte
-        } else {
-          stockMv += mv
-        }
-        totalPnl += resolvePositionUnrealizedPnl(pos) ?? 0
-      }
-    }
-    const totalMv = optionMv + stockMv
-    const optionPct = totalMv > 0 ? (optionMv / totalMv) * 100 : 0
-    const stockPct = totalMv > 0 ? (stockMv / totalMv) * 100 : 0
-    const avgDays = optionMv > 0 ? weightedOptionDays / optionMv : 365
-    const annualFactor = avgDays > 0 ? 365 / avgDays : 0
-    const projectedAnnualReturnPct = totalMv > 0 ? (totalPnl / totalMv) * annualFactor * 100 : 0
-    return { optionPct, stockPct, projectedAnnualReturnPct }
-  }, [status?.portfolio?.accounts, resolveDonutPrice, resolvePositionUnrealizedPnl])
-
-  const performancePanelData = useMemo(() => {
-    const candles = buildPerfCandlesFromExecutions(executionsCanonical ?? [], 26)
-    let optionUnrealized = 0
-    let stockUnrealized = 0
-    const accounts = status?.portfolio?.accounts ?? []
-    for (const account of accounts) {
-      for (const pos of account.positions ?? []) {
-        const pnl = resolvePositionUnrealizedPnl(pos) ?? 0
-        const secType = (pos.secType ?? '').toUpperCase()
-        if (secType === 'OPT') optionUnrealized += pnl
-        else stockUnrealized += pnl
-      }
-    }
-    return { candles, optionUnrealized, stockUnrealized, totalUnrealized: optionUnrealized + stockUnrealized }
-  }, [executionsCanonical, resolvePositionUnrealizedPnl, status?.portfolio?.accounts])
 
   const { fixedIncomeStockPositions, cashLikeStockPositions, coreStockPositions } = useMemo(() => {
     const fixedIncomeStockPositions: LivePositionRow[] = []
@@ -2560,31 +2684,164 @@ export function PositionsPage({
     }, 0)
   }, [optionUnderlyingPoolItems, stockCoverageSectionAccount])
 
-  const streamHostAccountId = (status?.config?.ib_client?.account?.event_host ?? '').toString().trim()
-  const streamSecondaryAccountId = (status?.config?.ib_client?.account?.event_secondary ?? '').toString().trim()
+  /**
+   * Option "Category" donut + header: Backing Pool (watchlist-backed shares MV), other optionable
+   * stock MV excl. fixed income & cash-like (residual after backing), and cash-like STK MV.
+   * Uses the same account scope as the Account asset mix column (stockCoverageSectionAccount).
+   */
+  const optionStockMix = useMemo(() => {
+    const acct = stockCoverageSectionAccount
+    const matchAcct = (accountId: string) => acct === 'all' || (accountId ?? '').trim() === acct
 
-  /** Open Positions account filter: All vs IB Host / Secondary only (Settings → IB Connection). */
-  const openFilterAccountTabs = useMemo(() => {
-    const tabs: { accountId: string; displayLabel: string }[] = []
-    if (streamHostAccountId) {
-      tabs.push({ accountId: streamHostAccountId, displayLabel: `IB Host ${streamHostAccountId}` })
+    let cashLikeMv = 0
+    for (const p of liveStockPositions) {
+      if ((p.secType ?? '').toUpperCase() !== 'STK') continue
+      if (!matchAcct((p.account_id ?? '').trim())) continue
+      const cat = String(p.category ?? '').trim()
+      if (!isLedgerCashLikeCategory(cat)) continue
+      const q = Number(p.position)
+      const px = p.price != null ? Number(p.price) : NaN
+      if (!Number.isFinite(q) || q === 0 || !Number.isFinite(px) || px <= 0) continue
+      cashLikeMv += Math.abs(q) * px
     }
-    if (streamSecondaryAccountId && streamSecondaryAccountId !== streamHostAccountId) {
-      tabs.push({
-        accountId: streamSecondaryAccountId,
-        displayLabel: `IB Secondary ${streamSecondaryAccountId}`,
-      })
+
+    let backingMv = 0
+    for (const ci of watchlistOptionableCoverageItems) {
+      if (!matchAcct((ci.account_id ?? '').trim())) continue
+      const rw = ci.required_watchlist_shares ?? 0
+      const backedShares = Math.min(Math.max(0, ci.held_shares), rw)
+      const price = ci.live_last_price
+      if (price == null || !Number.isFinite(price) || backedShares <= 0 || !Number.isFinite(backedShares)) continue
+      backingMv += backedShares * price
     }
-    return tabs
-  }, [streamHostAccountId, streamSecondaryAccountId])
+
+    let coreOptionableMv = 0
+    for (const p of liveStockPositions) {
+      if ((p.secType ?? '').toUpperCase() !== 'STK') continue
+      if (!matchAcct((p.account_id ?? '').trim())) continue
+      const cat = String(p.category ?? '').trim()
+      if (isLedgerFixedIncomeCategory(cat)) continue
+      if (isLedgerCashLikeCategory(cat)) continue
+      if (p.optionable === false) continue
+      const q = Number(p.position)
+      const px = p.price != null ? Number(p.price) : NaN
+      if (!Number.isFinite(q) || q === 0 || !Number.isFinite(px) || px <= 0) continue
+      coreOptionableMv += Math.abs(q) * px
+    }
+
+    const otherMv = Math.max(0, coreOptionableMv - backingMv)
+    const totalMv = backingMv + otherMv + cashLikeMv
+    const pct = (v: number) => (totalMv > 0 ? (v / totalMv) * 100 : 0)
+
+    const segments: DonutSegment[] = [
+      { label: 'Backing Pool', value: backingMv, color: OPTION_STOCK_MIX_COLORS['Backing Pool'] },
+      { label: 'Other Stock', value: otherMv, color: OPTION_STOCK_MIX_COLORS['Other Stock'] },
+      { label: 'Cash-like', value: cashLikeMv, color: OPTION_STOCK_MIX_COLORS['Cash-like'] },
+    ].filter(s => s.value > 0)
+
+    return {
+      segments,
+      backingPct: pct(backingMv),
+      otherPct: pct(otherMv),
+      cashLikePct: pct(cashLikeMv),
+    }
+  }, [liveStockPositions, watchlistOptionableCoverageItems, stockCoverageSectionAccount])
+
+  /** Row keys for Option Category → Stocks tab filter (same account scope as the ring). */
+  const optionStockMixFilterKeys = useMemo(() => {
+    const acct = stockCoverageSectionAccount
+    const matchAcct = (accountId: string) => acct === 'all' || (accountId ?? '').trim() === acct
+
+    const watchByKey = new Map<string, StockCoverageItem>()
+    for (const ci of watchlistOptionableCoverageItems) {
+      if (!matchAcct((ci.account_id ?? '').trim())) continue
+      watchByKey.set(liveStockRowCovKey(ci), ci)
+    }
+
+    const backingKeys = new Set<string>()
+    for (const ci of watchlistOptionableCoverageItems) {
+      if (!matchAcct((ci.account_id ?? '').trim())) continue
+      const rw = ci.required_watchlist_shares ?? 0
+      const backed = Math.min(Math.max(0, ci.held_shares), rw)
+      if (backed > 1e-9) backingKeys.add(liveStockRowCovKey(ci))
+    }
+
+    const otherKeys = new Set<string>()
+    for (const p of liveStockPositions) {
+      if ((p.secType ?? '').toUpperCase() !== 'STK') continue
+      if (!matchAcct((p.account_id ?? '').trim())) continue
+      const cat = String(p.category ?? '').trim()
+      if (isLedgerFixedIncomeCategory(cat) || isLedgerCashLikeCategory(cat)) continue
+      if (p.optionable === false) continue
+      const q = Number(p.position)
+      const px = p.price != null ? Number(p.price) : NaN
+      if (!Number.isFinite(q) || q === 0 || !Number.isFinite(px) || px <= 0) continue
+      const key = liveStockRowCovKey(p)
+      const rowMv = Math.abs(q) * px
+      const ci = watchByKey.get(key)
+      const rw = ci?.required_watchlist_shares ?? 0
+      const backedShares = ci ? Math.min(Math.max(0, ci.held_shares), rw) : 0
+      const price = ci?.live_last_price
+      const backingMv =
+        price != null && Number.isFinite(price) && backedShares > 0 && Number.isFinite(backedShares)
+          ? backedShares * price
+          : 0
+      if (rowMv - backingMv > 1e-3) otherKeys.add(key)
+    }
+
+    return { backingKeys, otherKeys }
+  }, [liveStockPositions, watchlistOptionableCoverageItems, stockCoverageSectionAccount])
+
+  const handleOptionStockMixSelect = useCallback((label: string | null) => {
+    if (label == null) {
+      setOptionStockMixFilter(null)
+      return
+    }
+    const next = label as OptionStockMixCategory
+    if (next !== 'Backing Pool' && next !== 'Other Stock' && next !== 'Cash-like') {
+      setOptionStockMixFilter(null)
+      return
+    }
+    if (optionStockMixFilter === next) {
+      setOptionStockMixFilter(null)
+      return
+    }
+    setOptionStockMixFilter(next)
+    if (next === 'Cash-like') {
+      setOpenTab('cash_like')
+    } else {
+      setOpenTab('stocks')
+    }
+  }, [optionStockMixFilter])
 
   useEffect(() => {
-    if (openFilterAccountId === 'all') return
-    const ok =
-      (streamHostAccountId && openFilterAccountId === streamHostAccountId) ||
-      (streamSecondaryAccountId && openFilterAccountId === streamSecondaryAccountId)
-    if (!ok) setOpenFilterAccountId('all')
-  }, [openFilterAccountId, streamHostAccountId, streamSecondaryAccountId])
+    setOptionStockMixFilter(null)
+  }, [stockCoverageSectionAccount])
+
+  const coreStockPositionsFiltered = useMemo(() => {
+    if (!optionStockMixFilter || optionStockMixFilter === 'Cash-like') return coreStockPositions
+    if (optionStockMixFilter === 'Backing Pool') {
+      return coreStockPositions.filter(p => optionStockMixFilterKeys.backingKeys.has(liveStockRowCovKey(p)))
+    }
+    if (optionStockMixFilter === 'Other Stock') {
+      return coreStockPositions.filter(p => optionStockMixFilterKeys.otherKeys.has(liveStockRowCovKey(p)))
+    }
+    return coreStockPositions
+  }, [coreStockPositions, optionStockMixFilter, optionStockMixFilterKeys])
+
+  const stocksTabEmptyHint = useMemo(() => {
+    if (
+      (optionStockMixFilter === 'Backing Pool' || optionStockMixFilter === 'Other Stock') &&
+      coreStockPositionsFiltered.length === 0 &&
+      coreStockPositions.length > 0
+    ) {
+      return `No positions match "${optionStockMixFilter}" for the selected chart account. Clear the category filter on the Option chart.`
+    }
+    return 'No open stock positions under the current filters.'
+  }, [optionStockMixFilter, coreStockPositionsFiltered.length, coreStockPositions.length])
+
+  const streamHostAccountId = (status?.config?.ib_client?.account?.event_host ?? '').toString().trim()
+  const streamSecondaryAccountId = (status?.config?.ib_client?.account?.event_secondary ?? '').toString().trim()
 
   const hostSecondaryAccountCashBp = useMemo(() => {
     const list = status?.portfolio?.accounts ?? []
@@ -2648,31 +2905,6 @@ export function PositionsPage({
   /** Fixed income / cash-like STK positions: exclude from ring denominator when false (values still in legend). */
   const [coverageAssetPieIncludeFi, setCoverageAssetPieIncludeFi] = useState(false)
   const [coverageAssetPieIncludeCashLike, setCoverageAssetPieIncludeCashLike] = useState(true)
-
-  const backingPoolChartData = useMemo(() => {
-    const matchAcct = (acct: string) =>
-      stockCoverageSectionAccount === 'all' || acct === stockCoverageSectionAccount
-
-    const totalStockMV = stockCoverageItems
-      .filter(ci => matchAcct(ci.account_id))
-      .reduce((s, ci) => {
-        const mv = coverageRowMarketValueTotal(ci)
-        return mv != null ? s + mv : s
-      }, 0)
-
-    const backingMV = watchlistOptionableCoverageItems
-      .filter(ci => matchAcct(ci.account_id))
-      .reduce((s, ci) => {
-        const rw = ci.required_watchlist_shares ?? 0
-        const backedShares = Math.min(Math.max(0, ci.held_shares), rw)
-        const price = ci.live_last_price
-        if (price == null || !Number.isFinite(price) || !Number.isFinite(backedShares)) return s
-        return s + backedShares * price
-      }, 0)
-
-    const pct = totalStockMV > 0 ? Math.min(1, Math.max(0, backingMV / totalStockMV)) : 0
-    return { backingMV, totalStockMV, otherMV: totalStockMV - backingMV, pct }
-  }, [stockCoverageItems, watchlistOptionableCoverageItems, stockCoverageSectionAccount])
 
   const coverageAssetPieData = useMemo(() => {
     const accounts = status?.portfolio?.accounts ?? []
@@ -3285,16 +3517,6 @@ export function PositionsPage({
     )
   }
 
-  const openPositionsTabHint = (tab: OpenPositionsTab): string => {
-    if (tab === 'instance') {
-      return `Grouped by strategy (opportunity). Detail view ${openAccordionMode ? 'Accordion' : 'Multi'}: ${openAccordionMode ? 'only one strategy row expanded at a time' : 'several strategy rows may stay open'}.`
-    }
-    if (tab === 'options') {
-      return `By contract; expand for executions. Same Detail view mode (${openAccordionMode ? 'Accordion' : 'Multi'}) controls how many contract rows show execution detail.`
-    }
-    return 'Open positions from account snapshots (Live only). Tag stock fills with strategy from Ledger / Executions if needed.'
-  }
-
   const renderLiveStockBucketPanel = (
     panelId: string,
     tabButtonId: string,
@@ -3336,6 +3558,401 @@ export function PositionsPage({
     </div>
   )
 
+  const renderAccountCoverageCharts = () => (
+    <div className="coverage-charts-section pos-comp-coverage-charts">
+      <div className="coverage-charts-toolbar coverage-charts-toolbar--account-mix">
+        <span className="coverage-charts-toolbar-label">Account</span>
+        <div
+          className="coverage-section-account-filter"
+          role="group"
+          aria-label="Account filter for asset mix chart"
+        >
+          {[
+            { id: 'all', label: 'All' },
+            ...(streamHostAccountId ? [{ id: streamHostAccountId, label: streamHostAccountId }] : []),
+            ...(streamSecondaryAccountId && streamSecondaryAccountId !== streamHostAccountId
+              ? [{ id: streamSecondaryAccountId, label: streamSecondaryAccountId }]
+              : []),
+          ].map(opt => (
+            <button
+              key={opt.id}
+              type="button"
+              className={`coverage-asset-pie-acct-btn${stockCoverageSectionAccount === opt.id ? ' active' : ''}`}
+              onClick={() => setStockCoverageSectionAccount(opt.id)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="coverage-charts-grid">
+    {(() => {
+      const {
+        coreStockMV,
+        fixedIncomeMV,
+        cashLikeMV,
+        cash,
+        bp,
+        denom,
+        pStock,
+        pFixedIncome,
+        pCashLike,
+        pCash,
+        pBp,
+        netLiq,
+        includeBpInChart,
+        includeFiInChart,
+        includeCashLikeInChart,
+        simpleCenterPct,
+      } = coverageAssetPieData
+      /** Match `PositionDonutChart` ring (same as Underlying category donuts), not legacy thick stroke. */
+      const cx = 66
+      const cy = 66
+      const rMid = 46
+      const ringStroke = 14
+      const circ = 2 * Math.PI * rMid
+      let ringOff = 0
+      const ringSeg = (frac: number, className: string, key: string) => {
+        const len = Math.max(0, frac) * circ
+        if (len < 0.5) return null
+        const el = (
+          <circle
+            key={key}
+            cx={cx}
+            cy={cy}
+            r={rMid}
+            fill="none"
+            className={className}
+            strokeWidth={ringStroke}
+            strokeLinecap="butt"
+            strokeDasharray={`${len} ${circ}`}
+            strokeDashoffset={-ringOff}
+            transform={`rotate(-90 ${cx} ${cy})`}
+          />
+        )
+        ringOff += len
+        return el
+      }
+      let centerMain = '—'
+      let centerSub = ''
+      let centerValClass = 'coverage-asset-pie-center-val coverage-asset-pie-center-val--basis'
+      if (denom > 0) {
+        if (simpleCenterPct) {
+          if (coverageAssetMixLegendMode === 'usd') {
+            centerMain = fmtUsd(denom)
+            centerSub = netLiq != null ? `Net liq. ${fmtMvAbbrev(netLiq)}` : 'Stock + cash basis'
+            centerValClass = 'coverage-asset-pie-center-val coverage-asset-pie-center-val--basis'
+          } else {
+            centerMain = `${(pStock * 100).toFixed(1)} · ${(pCash * 100).toFixed(1)}`
+            centerSub = '% of sum'
+            centerValClass = 'coverage-asset-pie-center-val coverage-asset-pie-center-val--triplet'
+          }
+        } else if (coverageAssetMixLegendMode === 'usd') {
+          centerMain = fmtUsd(denom)
+          centerSub = netLiq != null ? `Net liq. ${fmtMvAbbrev(netLiq)}` : 'Chart basis'
+          centerValClass = 'coverage-asset-pie-center-val coverage-asset-pie-center-val--basis'
+        } else {
+          centerMain = '100.0%'
+          centerSub =
+            netLiq != null
+              ? `Basis ${fmtMvAbbrev(denom)} · Net liq. ${fmtMvAbbrev(netLiq)}`
+              : `Chart basis ${fmtMvAbbrev(denom)}`
+          centerValClass = 'coverage-asset-pie-center-val coverage-asset-pie-center-val--basis'
+        }
+      } else if (netLiq != null) {
+        centerMain = fmtUsd(netLiq)
+        centerSub = 'Net liq.'
+        centerValClass = 'coverage-asset-pie-center-val coverage-asset-pie-center-val--netliq'
+      }
+      const ringAriaParts = [
+        'Stock (core equities)',
+        includeFiInChart ? 'Fixed income' : null,
+        includeCashLikeInChart ? 'Cash-like' : null,
+        'Net cash',
+        includeBpInChart ? 'Buying power' : null,
+      ].filter(Boolean)
+      return (
+        <div className="coverage-charts-cell coverage-asset-pie-section">
+          <div
+            className="coverage-asset-pie-header"
+            style={{ flexWrap: 'wrap', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}
+          >
+            <span className="coverage-asset-pie-title">Asset mix</span>
+            <InfoTooltip text="Stock = market value of non-option positions classified as core equities (same as Stocks tab; excludes ledger Fixed income and Cash-like). Fixed income / Cash-like use position category labels. Net cash = IB TotalCashValue. Buying power = IB BuyingPower. Include/Exclude changes the ring and chart basis (center main in $ mode). The sub line shows IB net liquidation for reference when known. % / $ toggles legend columns like Option charts." />
+            <div
+              className="coverage-asset-pie-bubble-switch"
+              style={{ marginLeft: 'auto', flexShrink: 0 }}
+              role="group"
+              aria-label="Asset mix: percent of chart basis or dollars in legend; donut center follows mode when the ring uses full basis"
+            >
+              <button
+                type="button"
+                className={`coverage-asset-pie-bubble-btn${coverageAssetMixLegendMode === 'pct' ? ' active' : ''}`}
+                aria-pressed={coverageAssetMixLegendMode === 'pct'}
+                onClick={() => setCoverageAssetMixLegendMode('pct')}
+              >
+                %
+              </button>
+              <button
+                type="button"
+                className={`coverage-asset-pie-bubble-btn${coverageAssetMixLegendMode === 'usd' ? ' active' : ''}`}
+                aria-pressed={coverageAssetMixLegendMode === 'usd'}
+                onClick={() => setCoverageAssetMixLegendMode('usd')}
+              >
+                $
+              </button>
+            </div>
+          </div>
+          <div className="coverage-asset-pie-body">
+            <div className="coverage-asset-pie-chart-block">
+              <svg
+                width={132}
+                height={132}
+                viewBox="0 0 132 132"
+                className="coverage-asset-pie-svg"
+                role="img"
+                aria-label={`Ring chart: ${ringAriaParts.join(', ')} as shares of their sum`}
+              >
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={rMid}
+                  fill="none"
+                  className="coverage-asset-pie-ring-track"
+                  strokeWidth={ringStroke}
+                />
+                {denom > 0 ? (
+                  <>
+                    {ringSeg(pStock, 'coverage-asset-pie-ring-seg-stock', 'seg-stock')}
+                    {includeFiInChart
+                      ? ringSeg(pFixedIncome, 'coverage-asset-pie-ring-seg-fi', 'seg-fi')
+                      : null}
+                    {includeCashLikeInChart
+                      ? ringSeg(pCashLike, 'coverage-asset-pie-ring-seg-cashlike', 'seg-cashlike')
+                      : null}
+                    {ringSeg(pCash, 'coverage-asset-pie-ring-seg-cash', 'seg-cash')}
+                    {includeBpInChart
+                      ? ringSeg(pBp, 'coverage-asset-pie-ring-seg-bp', 'seg-bp')
+                      : null}
+                  </>
+                ) : null}
+                <text
+                  x={cx}
+                  y={cy - 4}
+                  className={centerValClass}
+                  textAnchor="middle"
+                  dominantBaseline="auto"
+                  style={{ fontSize: '0.98rem', fill: 'var(--color-text-main, #e4e9ef)' }}
+                >
+                  {centerMain}
+                </text>
+                <text
+                  x={cx}
+                  y={cy + 11}
+                  className="coverage-asset-pie-center-sub"
+                  textAnchor="middle"
+                  dominantBaseline="auto"
+                  style={{ fontSize: '0.74rem', fill: 'var(--color-text-dim, #5c6572)' }}
+                >
+                  {centerSub}
+                </text>
+              </svg>
+              <div className="coverage-asset-pie-bp-side">
+                <div className="coverage-asset-pie-chart-toggle-row">
+                  <span className="coverage-asset-pie-bp-label">Fixed income in chart</span>
+                  <div
+                    className="coverage-asset-pie-bubble-switch"
+                    role="group"
+                    aria-label="Include fixed income in ring denominator"
+                  >
+                    <button
+                      type="button"
+                      className={`coverage-asset-pie-bubble-btn${!coverageAssetPieIncludeFi ? ' active' : ''}`}
+                      aria-pressed={!coverageAssetPieIncludeFi}
+                      onClick={() => setCoverageAssetPieIncludeFi(false)}
+                    >
+                      Exclude
+                    </button>
+                    <button
+                      type="button"
+                      className={`coverage-asset-pie-bubble-btn${coverageAssetPieIncludeFi ? ' active' : ''}`}
+                      aria-pressed={coverageAssetPieIncludeFi}
+                      onClick={() => setCoverageAssetPieIncludeFi(true)}
+                    >
+                      Include
+                    </button>
+                  </div>
+                </div>
+                <div className="coverage-asset-pie-chart-toggle-row">
+                  <span className="coverage-asset-pie-bp-label">Cash-like in chart</span>
+                  <div
+                    className="coverage-asset-pie-bubble-switch"
+                    role="group"
+                    aria-label="Include cash-like in ring denominator"
+                  >
+                    <button
+                      type="button"
+                      className={`coverage-asset-pie-bubble-btn${!coverageAssetPieIncludeCashLike ? ' active' : ''}`}
+                      aria-pressed={!coverageAssetPieIncludeCashLike}
+                      onClick={() => setCoverageAssetPieIncludeCashLike(false)}
+                    >
+                      Exclude
+                    </button>
+                    <button
+                      type="button"
+                      className={`coverage-asset-pie-bubble-btn${coverageAssetPieIncludeCashLike ? ' active' : ''}`}
+                      aria-pressed={coverageAssetPieIncludeCashLike}
+                      onClick={() => setCoverageAssetPieIncludeCashLike(true)}
+                    >
+                      Include
+                    </button>
+                  </div>
+                </div>
+                <div className="coverage-asset-pie-chart-toggle-row">
+                  <span className="coverage-asset-pie-bp-label">Buying power in chart</span>
+                  <div
+                    className="coverage-asset-pie-bubble-switch"
+                    role="group"
+                    aria-label="Include buying power in ring denominator"
+                  >
+                    <button
+                      type="button"
+                      className={`coverage-asset-pie-bubble-btn${!coverageAssetPieIncludeBp ? ' active' : ''}`}
+                      aria-pressed={!coverageAssetPieIncludeBp}
+                      onClick={() => setCoverageAssetPieIncludeBp(false)}
+                    >
+                      Exclude
+                    </button>
+                    <button
+                      type="button"
+                      className={`coverage-asset-pie-bubble-btn${coverageAssetPieIncludeBp ? ' active' : ''}`}
+                      aria-pressed={coverageAssetPieIncludeBp}
+                      onClick={() => setCoverageAssetPieIncludeBp(true)}
+                    >
+                      Include
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="coverage-asset-pie-legend coverage-asset-pie-legend--asset-mix-two-col">
+              <div className="coverage-asset-pie-legend-mix-col">
+                <div className="coverage-asset-pie-legend-item">
+                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--stock" />
+                  <span className="coverage-asset-pie-legend-label">Stock</span>
+                  <span className="coverage-asset-pie-legend-pct">
+                    {coverageAssetMixLegendMode === 'pct' ? (denom > 0 ? `${(pStock * 100).toFixed(1)}%` : '—') : '—'}
+                  </span>
+                  <span className="coverage-asset-pie-legend-value" title={fmtUsd(coreStockMV)}>
+                    {coverageAssetMixLegendMode === 'pct' ? fmtMvAbbrev(coreStockMV) : fmtUsd(coreStockMV)}
+                  </span>
+                </div>
+                <div
+                  className={`coverage-asset-pie-legend-item${!includeFiInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
+                  title={
+                    !includeFiInChart
+                      ? 'Fixed income MV is listed; not included in ring denominator.'
+                      : undefined
+                  }
+                >
+                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--fi" />
+                  <span className="coverage-asset-pie-legend-label">Fixed income</span>
+                  <span className="coverage-asset-pie-legend-pct">
+                    {coverageAssetMixLegendMode === 'pct'
+                      ? includeFiInChart && denom > 0
+                        ? `${(pFixedIncome * 100).toFixed(1)}%`
+                        : '—'
+                      : '—'}
+                  </span>
+                  <span className="coverage-asset-pie-legend-value" title={fmtUsd(fixedIncomeMV)}>
+                    {coverageAssetMixLegendMode === 'pct' ? fmtMvAbbrev(fixedIncomeMV) : fmtUsd(fixedIncomeMV)}
+                  </span>
+                </div>
+                <div
+                  className={`coverage-asset-pie-legend-item${!includeBpInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
+                  title={
+                    !includeBpInChart
+                      ? 'Buying power is listed for reference; not included in ring denominator.'
+                      : undefined
+                  }
+                >
+                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--bp" />
+                  <span className="coverage-asset-pie-legend-label">Buying power</span>
+                  <span className="coverage-asset-pie-legend-pct">
+                    {coverageAssetMixLegendMode === 'pct'
+                      ? includeBpInChart && denom > 0
+                        ? `${(pBp * 100).toFixed(1)}%`
+                        : '—'
+                      : '—'}
+                  </span>
+                  <span
+                    className="coverage-asset-pie-legend-value"
+                    title={bp != null && Number.isFinite(bp) ? fmtUsd(bp) : undefined}
+                  >
+                    {bp != null && Number.isFinite(bp) ? fmtUsd(bp) : '—'}
+                  </span>
+                </div>
+              </div>
+              <div className="coverage-asset-pie-legend-mix-col">
+                <div
+                  className={`coverage-asset-pie-legend-item${!includeCashLikeInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
+                  title={
+                    !includeCashLikeInChart
+                      ? 'Cash-like MV is listed; not included in ring denominator.'
+                      : undefined
+                  }
+                >
+                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--cashlike" />
+                  <span className="coverage-asset-pie-legend-label">Cash-like</span>
+                  <span className="coverage-asset-pie-legend-pct">
+                    {coverageAssetMixLegendMode === 'pct'
+                      ? includeCashLikeInChart && denom > 0
+                        ? `${(pCashLike * 100).toFixed(1)}%`
+                        : '—'
+                      : '—'}
+                  </span>
+                  <span className="coverage-asset-pie-legend-value" title={fmtUsd(cashLikeMV)}>
+                    {coverageAssetMixLegendMode === 'pct' ? fmtMvAbbrev(cashLikeMV) : fmtUsd(cashLikeMV)}
+                  </span>
+                </div>
+                <div className="coverage-asset-pie-legend-item">
+                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--cash" />
+                  <span className="coverage-asset-pie-legend-label">Net cash</span>
+                  <span className="coverage-asset-pie-legend-pct">
+                    {coverageAssetMixLegendMode === 'pct' ? (denom > 0 ? `${(pCash * 100).toFixed(1)}%` : '—') : '—'}
+                  </span>
+                  <span
+                    className="coverage-asset-pie-legend-value"
+                    title={cash != null && Number.isFinite(cash) ? fmtUsd(cash) : undefined}
+                  >
+                    {cash != null && Number.isFinite(cash)
+                      ? coverageAssetMixLegendMode === 'pct'
+                        ? fmtMvAbbrev(cash)
+                        : fmtUsd(cash)
+                      : '—'}
+                  </span>
+                </div>
+              </div>
+              {denom > 0 && (
+                <div className="coverage-asset-pie-legend-divider coverage-asset-pie-legend-divider--mix-full" aria-hidden />
+              )}
+              {denom > 0 && (
+                <div className="coverage-asset-pie-legend-item coverage-asset-pie-legend-sum coverage-asset-pie-legend-sum--mix-full">
+                  <span className="coverage-asset-pie-legend-label">Sum (chart basis)</span>
+                  <span className="coverage-asset-pie-legend-value" title={fmtUsd(denom)}>
+                    {coverageAssetMixLegendMode === 'pct' ? fmtMvAbbrev(denom) : fmtUsd(denom)}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )
+    })()}
+      </div>
+    </div>
+  )
+
   return (
     <div className="card process-section replay-page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -3348,12 +3965,12 @@ export function PositionsPage({
         />
       </div>
 
-      {(symbolDonutSegments.length > 0 || optionDetailSegments.length > 0 || optionCategorySegments.length > 0) && (
-        <div
-          className="pos-comp-charts-row"
-          style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.75rem', alignItems: 'start' }}
-        >
-          <div className="coverage-asset-pie-section" style={{ minWidth: 0, maxWidth: 'none' }}>
+      {(symbolDonutSegments.length > 0 || optionDetailSegments.length > 0 || optionStockMix.segments.length > 0) && (
+        <div className="pos-comp-charts-row pos-comp-charts-row--12">
+          <div className="pos-comp-chart-col pos-comp-chart-col--span-4">
+            {renderAccountCoverageCharts()}
+          </div>
+          <div className="coverage-asset-pie-section pos-comp-chart-col pos-comp-chart-col--span-4" style={{ minWidth: 0, maxWidth: 'none' }}>
             <div
               className="coverage-asset-pie-chart-toggle-row"
               style={{ marginBottom: '0.45rem', gap: '0.35rem', flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}
@@ -3492,41 +4109,101 @@ export function PositionsPage({
               </p>
             )}
           </div>
-          <div className="coverage-asset-pie-section" style={{ minWidth: 0, maxWidth: 'none' }}>
-            <div className="coverage-asset-pie-header">
-              <span className="coverage-asset-pie-title">Option</span>
+          <div className="coverage-asset-pie-section pos-comp-chart-col pos-comp-chart-col--span-4" style={{ minWidth: 0, maxWidth: 'none' }}>
+            <div
+              className="coverage-asset-pie-header"
+              style={{ flexWrap: 'nowrap', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}
+            >
+              <span className="coverage-asset-pie-title" style={{ flexShrink: 0 }}>
+                Option
+              </span>
+              <div
+                className="coverage-asset-pie-bubble-switch"
+                style={{ flexShrink: 0 }}
+                role="group"
+                aria-label="Option ring legend: percent or dollars"
+              >
+                <button
+                  type="button"
+                  className={`coverage-asset-pie-bubble-btn${optionRingLegendMode === 'pct' ? ' active' : ''}`}
+                  aria-pressed={optionRingLegendMode === 'pct'}
+                  onClick={() => setOptionRingLegendMode('pct')}
+                >
+                  %
+                </button>
+                <button
+                  type="button"
+                  className={`coverage-asset-pie-bubble-btn${optionRingLegendMode === 'usd' ? ' active' : ''}`}
+                  aria-pressed={optionRingLegendMode === 'usd'}
+                  onClick={() => setOptionRingLegendMode('usd')}
+                >
+                  $
+                </button>
+              </div>
               <div
                 style={{
                   marginLeft: 'auto',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'flex-end',
-                  gap: '0.12rem',
                   minWidth: 0,
-                  maxWidth: '100%',
+                  flex: '1 1 0%',
+                  display: 'flex',
+                  flexDirection: 'row',
+                  flexWrap: 'nowrap',
+                  alignItems: 'baseline',
+                  justifyContent: 'flex-end',
+                  gap: '0.3rem',
+                  fontSize: '0.68rem',
+                  lineHeight: 1.2,
+                  color: 'var(--color-text-muted)',
                   textAlign: 'right',
                 }}
               >
-                <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '0.25rem 0.4rem', fontSize: '0.72rem', lineHeight: 1.25, color: 'var(--color-text-muted)' }}>
-                  <span>Option / Underlying Stock</span>
-                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-main)', fontWeight: 600 }}>
-                    {positionTypeSummary.optionPct.toFixed(1)}% / {positionTypeSummary.stockPct.toFixed(1)}%
-                  </span>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '0.25rem 0.4rem', fontSize: '0.72rem', lineHeight: 1.25, color: 'var(--color-text-muted)' }}>
-                  <span>Projected annual return</span>
-                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-main)', fontWeight: 600 }}>
-                    {positionTypeSummary.projectedAnnualReturnPct >= 0 ? '+' : ''}{positionTypeSummary.projectedAnnualReturnPct.toFixed(1)}%
-                  </span>
-                </div>
+                <span
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    flex: '0 1 auto',
+                    minWidth: 0,
+                  }}
+                  title="Backing Pool / Other Stock / Cash-like"
+                >
+                  Backing / Other / Cash-like
+                </span>
+                <span
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    color: 'var(--color-text-main)',
+                    fontWeight: 600,
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0,
+                  }}
+                >
+                  {optionRingLegendMode === 'pct' ? (
+                    <>
+                      {optionStockMix.backingPct.toFixed(1)}% / {optionStockMix.otherPct.toFixed(1)}% /{' '}
+                      {optionStockMix.cashLikePct.toFixed(1)}%
+                    </>
+                  ) : (
+                    <>
+                      {fmtMvAbbrev(optionStockMix.segments.find(s => s.label === 'Backing Pool')?.value ?? 0)} /{' '}
+                      {fmtMvAbbrev(optionStockMix.segments.find(s => s.label === 'Other Stock')?.value ?? 0)} /{' '}
+                      {fmtMvAbbrev(optionStockMix.segments.find(s => s.label === 'Cash-like')?.value ?? 0)}
+                    </>
+                  )}
+                </span>
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '140px minmax(0, 1fr)', alignItems: 'center', gap: '0.6rem' }}>
               <PositionDonutChart
                 title="Detail"
+                centerValueMode={optionRingLegendMode}
                 segments={optionDetailSegments}
                 activeLabel={optionDetailActiveLabel}
                 onSegmentClick={label => {
+                  if (label == null) {
+                    setOptionDetailActiveLabel(null)
+                    return
+                  }
                   if (label === optionDetailActiveLabel) {
                     setOptionDetailActiveLabel(null)
                     return
@@ -3536,6 +4213,7 @@ export function PositionsPage({
                 }}
                 showLegend={false}
                 embedded
+                showActiveChip={false}
               />
               <div className="coverage-asset-pie-legend" style={{ minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', gap: '0.25rem 0.4rem' }}>
                 {optionDetailSegments.map(seg => {
@@ -3545,12 +4223,15 @@ export function PositionsPage({
                   return (
                     <div
                       key={`opt-detail-${seg.label}`}
-                      className="coverage-asset-pie-legend-item"
                       style={{
                         cursor: 'pointer',
                         borderRadius: 4,
                         padding: '0.06rem 0.25rem',
                         background: isActive ? `color-mix(in oklab, ${seg.color} 14%, transparent)` : 'transparent',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.06rem',
+                        minWidth: 0,
                       }}
                       onClick={() => {
                         if (optionDetailActiveLabel === seg.label) setOptionDetailActiveLabel(null)
@@ -3561,10 +4242,40 @@ export function PositionsPage({
                       }}
                       title={`Filter by ${seg.label}`}
                     >
-                      <span className="coverage-asset-pie-dot" style={{ background: seg.color }} />
-                      <span className="coverage-asset-pie-legend-label">{seg.label}</span>
-                      <span className="coverage-asset-pie-legend-pct">{pct.toFixed(1)}%</span>
-                      <span className="coverage-asset-pie-legend-value">{fmtMvAbbrev(seg.value)}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                        <span className="coverage-asset-pie-dot" style={{ background: seg.color, flexShrink: 0 }} />
+                        <span className="coverage-asset-pie-legend-label" style={{ wordBreak: 'break-word' }}>{seg.label}</span>
+                        {optionRingLegendMode === 'pct' ? (
+                          <span className="coverage-asset-pie-legend-pct">{pct.toFixed(1)}%</span>
+                        ) : (
+                          <span className="coverage-asset-pie-legend-value">{fmtMvAbbrev(seg.value)}</span>
+                        )}
+                      </div>
+                      {seg.optionDetailFoot ? (
+                        <div style={{ fontSize: '0.68rem', lineHeight: 1.25, paddingLeft: '1.1rem' }}>
+                          {seg.optionDetailFoot.kind === 'stock' ? (
+                            <>
+                              <span className="replay-muted">Stock cost </span>
+                              <span className={`tabular-nums ${pnlClassForTone(seg.optionDetailFoot.tone)}`}>
+                                {seg.optionDetailFoot.costFmt}
+                              </span>
+                              <span className="replay-muted"> · Market value </span>
+                              <span className={`tabular-nums ${pnlClassForTone(seg.optionDetailFoot.tone)}`}>
+                                {seg.optionDetailFoot.mvFmt}
+                              </span>
+                            </>
+                          ) : seg.optionDetailFoot.text.startsWith('Margin (est.) ') ? (
+                            <>
+                              <span className="replay-muted">Margin (est.) </span>
+                              <span className={`tabular-nums ${pnlClassForTone(seg.optionDetailFoot.tone)}`}>
+                                {seg.optionDetailFoot.text.slice('Margin (est.) '.length)}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="replay-muted">{seg.optionDetailFoot.text}</span>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                   )
                 })}
@@ -3573,155 +4284,129 @@ export function PositionsPage({
             <div style={{ display: 'grid', gridTemplateColumns: '140px minmax(0, 1fr)', alignItems: 'center', gap: '0.6rem', marginTop: '0.2rem' }}>
               <PositionDonutChart
                 title="Category"
-                segments={optionCategorySegments}
-                activeLabel={null}
-                onSegmentClick={() => {}}
-                interactive={false}
+                centerValueMode={optionRingLegendMode}
+                segments={optionStockMix.segments}
+                activeLabel={optionStockMixFilter}
+                onSegmentClick={handleOptionStockMixSelect}
+                interactive
                 showLegend={false}
                 embedded
+                showActiveChip={false}
               />
               <div className="coverage-asset-pie-legend" style={{ minWidth: 0, flexDirection: 'column', gap: '0.22rem' }}>
-                {optionCategorySegments.map(seg => {
-                  const total = optionCategorySegments.reduce((acc, s) => acc + s.value, 0)
+                {optionStockMix.segments.map(seg => {
+                  const total = optionStockMix.segments.reduce((acc, s) => acc + s.value, 0)
                   const pct = total > 0 ? (seg.value / total) * 100 : 0
+                  const isActive = optionStockMixFilter === seg.label
                   return (
-                    <div key={`opt-cat-${seg.label}`} className="coverage-asset-pie-legend-item" style={{ padding: '0.06rem 0.25rem' }}>
+                    <div
+                      key={`opt-cat-${seg.label}`}
+                      className="coverage-asset-pie-legend-item"
+                      style={{
+                        padding: '0.06rem 0.25rem',
+                        cursor: 'pointer',
+                        borderRadius: 4,
+                        background: isActive ? `color-mix(in oklab, ${seg.color} 14%, transparent)` : 'transparent',
+                        transition: 'background 0.15s ease',
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      title={`Filter open positions: ${seg.label}`}
+                      onClick={() => handleOptionStockMixSelect(isActive ? null : seg.label)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          handleOptionStockMixSelect(isActive ? null : seg.label)
+                        }
+                      }}
+                    >
                       <span className="coverage-asset-pie-dot" style={{ background: seg.color }} />
                       <span className="coverage-asset-pie-legend-label">{seg.label}</span>
-                      <span className="coverage-asset-pie-legend-pct">{pct.toFixed(1)}%</span>
-                      <span className="coverage-asset-pie-legend-value">{fmtMvAbbrev(seg.value)}</span>
+                      {optionRingLegendMode === 'pct' ? (
+                        <span className="coverage-asset-pie-legend-pct">{pct.toFixed(1)}%</span>
+                      ) : (
+                        <span className="coverage-asset-pie-legend-value">{fmtMvAbbrev(seg.value)}</span>
+                      )}
                     </div>
                   )
                 })}
               </div>
             </div>
           </div>
-          <div className="coverage-asset-pie-section" style={{ minWidth: 0, maxWidth: 'none' }}>
-            <div className="coverage-asset-pie-header">
-              <span className="coverage-asset-pie-title">Stock & Option Performance</span>
-            </div>
-            <div className="coverage-asset-pie-legend" style={{ marginBottom: '0.3rem', flexDirection: 'row', flexWrap: 'wrap', gap: '0.3rem 0.45rem' }}>
-              <div className="coverage-asset-pie-legend-item" style={{ padding: '0.06rem 0.25rem' }}>
-                <span className="coverage-asset-pie-legend-label">Option UN PNL</span>
-                <span className={`coverage-asset-pie-legend-pct ${performancePanelData.optionUnrealized >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-                  {fmtUsd(performancePanelData.optionUnrealized)}
-                </span>
-              </div>
-              <div className="coverage-asset-pie-legend-item" style={{ padding: '0.06rem 0.25rem' }}>
-                <span className="coverage-asset-pie-legend-label">Stock UN PNL</span>
-                <span className={`coverage-asset-pie-legend-pct ${performancePanelData.stockUnrealized >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-                  {fmtUsd(performancePanelData.stockUnrealized)}
-                </span>
-              </div>
-              <div className="coverage-asset-pie-legend-item" style={{ padding: '0.06rem 0.25rem' }}>
-                <span className="coverage-asset-pie-legend-label">Total UN PNL</span>
-                <span className={`coverage-asset-pie-legend-pct ${performancePanelData.totalUnrealized >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-                  {fmtUsd(performancePanelData.totalUnrealized)}
-                </span>
-              </div>
-            </div>
-            <div style={{ border: '1px solid var(--color-border)', borderRadius: 8, padding: '0.3rem 0.35rem', background: 'var(--color-surface-elevated)' }}>
-              {performancePanelData.candles.length === 0 ? (
-                <p className="section-hint" style={{ margin: 0 }}>No execution data for K-line yet.</p>
-              ) : (
-                <svg viewBox="0 0 360 170" width="100%" height="170" role="img" aria-label="Stock and Option performance K-line chart">
-                  {(() => {
-                    const candles = performancePanelData.candles
-                    const padL = 14, padR = 10, padT = 8, padB = 22
-                    const w = 360 - padL - padR
-                    const h = 170 - padT - padB
-                    let minP = Infinity, maxP = -Infinity
-                    for (const c of candles) {
-                      if (c.low < minP) minP = c.low
-                      if (c.high > maxP) maxP = c.high
-                    }
-                    const span = Math.max(1e-6, maxP - minP)
-                    const step = w / Math.max(1, candles.length)
-                    const xOf = (i: number) => padL + step * i + step * 0.5
-                    const yOf = (p: number) => padT + (maxP - p) / span * h
-                    const bodyW = Math.max(3, Math.min(10, step * 0.58))
-                    return (
-                      <>
-                        <line x1={padL} y1={padT + h} x2={padL + w} y2={padT + h} stroke="var(--color-border)" strokeWidth="1" />
-                        {candles.map((c, i) => {
-                          const x = xOf(i)
-                          const yHigh = yOf(c.high)
-                          const yLow = yOf(c.low)
-                          const yOpen = yOf(c.open)
-                          const yClose = yOf(c.close)
-                          const up = c.close >= c.open
-                          const fill = up ? '#22c55e' : '#ef4444'
-                          const yTop = Math.min(yOpen, yClose)
-                          const bh = Math.max(1.2, Math.abs(yOpen - yClose))
-                          return (
-                            <g key={`${c.day}-${i}`}>
-                              <line x1={x} y1={yHigh} x2={x} y2={yLow} stroke={fill} strokeWidth="1.2" opacity="0.95" />
-                              <rect x={x - bodyW / 2} y={yTop} width={bodyW} height={bh} fill={fill} opacity="0.88" rx="0.8" />
-                            </g>
-                          )
-                        })}
-                      </>
-                    )
-                  })()}
-                </svg>
-              )}
-            </div>
-          </div>
         </div>
       )}
 
       <section className="replay-section replay-section-trade-records" aria-label="Open positions">
-          <div className="replay-toolbar">
-            <div className="replay-fetch-range-group" aria-label="Position filters">
+          <div className="positions-open-controls-row">
+            <div className="replay-fetch-range-group positions-open-filters" aria-label="Position filters">
               <input
                 type="text"
                 placeholder="Symbol"
                 value={openFilterSymbol}
                 onChange={e => setOpenFilterSymbol(e.target.value)}
-                className="replay-filter-input replay-filter-input-symbol"
+                className="replay-filter-input replay-filter-input-symbol positions-open-filter-symbol"
               />
-              <label className="replay-filter-label-month">
-                <span className="replay-filter-label">Exp</span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="YYYYMMDD"
-                  value={openFilterExpiryStart}
-                  onChange={e => setOpenFilterExpiryStart(e.target.value.replace(/\D/g, '').slice(0, 8))}
-                  className="replay-filter-input replay-filter-date"
-                  title="Option expiry: YYYYMMDD digits; shorter prefix also matches (e.g. 202503)"
-                  maxLength={8}
-                  aria-label="Filter by option expiry YYYYMMDD"
-                />
-              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="YYYYMMDD"
+                value={openFilterExpiryStart}
+                onChange={e => setOpenFilterExpiryStart(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                className="replay-filter-input replay-filter-date positions-open-filter-expiry"
+                title="Option expiry: YYYYMMDD digits; shorter prefix also matches (e.g. 202503)"
+                maxLength={8}
+                aria-label="Filter by option expiry YYYYMMDD"
+              />
             </div>
-            <div className="ib-accounts-tabs ib-accounts-tabs--open-filter">
-              <button
-                type="button"
-                className={`ib-accounts-tab ${openFilterAccountId === 'all' ? 'active' : ''}`}
-                onClick={() => setOpenFilterAccountId('all')}
-                title="All accounts"
+            {(streamHostAccountId ||
+              (streamSecondaryAccountId && streamSecondaryAccountId !== streamHostAccountId)) && (
+              <div
+                className="coverage-asset-pie-bubble-switch positions-open-acct-bubbles"
+                role="group"
+                aria-label="Filter open positions by account (multi-select)"
               >
-                All
-              </button>
-              {openFilterAccountTabs.map(({ accountId, displayLabel }) => (
-                <button
-                  key={accountId}
-                  type="button"
-                  className={`ib-accounts-tab ${openFilterAccountId === accountId ? 'active' : ''}`}
-                  onClick={() => setOpenFilterAccountId(accountId)}
-                  title={displayLabel}
-                >
-                  {displayLabel}
-                </button>
-              ))}
-            </div>
+                {streamHostAccountId ? (
+                  <button
+                    type="button"
+                    className={`coverage-asset-pie-bubble-btn${openFilterAccounts.host ? ' active' : ''}${
+                      acctBubbleHoldHint === 'host' ? ' hold-deselect-hint' : ''
+                    }`}
+                    aria-pressed={openFilterAccounts.host}
+                    title={`Host account ${streamHostAccountId}. Long-press when on: deselect hint.`}
+                    onPointerDown={() => onAcctBubblePointerDown('host', openFilterAccounts.host)}
+                    onPointerUp={finishAcctBubbleHold}
+                    onPointerLeave={finishAcctBubbleHold}
+                    onPointerCancel={finishAcctBubbleHold}
+                    onClick={() => setOpenFilterAccounts(s => ({ ...s, host: !s.host }))}
+                  >
+                    HOST
+                  </button>
+                ) : null}
+                {streamSecondaryAccountId && streamSecondaryAccountId !== streamHostAccountId ? (
+                  <button
+                    type="button"
+                    className={`coverage-asset-pie-bubble-btn${openFilterAccounts.secondary ? ' active' : ''}${
+                      acctBubbleHoldHint === 'secondary' ? ' hold-deselect-hint' : ''
+                    }`}
+                    aria-pressed={openFilterAccounts.secondary}
+                    title={`Secondary account ${streamSecondaryAccountId}. Long-press when on: deselect hint.`}
+                    onPointerDown={() => onAcctBubblePointerDown('secondary', openFilterAccounts.secondary)}
+                    onPointerUp={finishAcctBubbleHold}
+                    onPointerLeave={finishAcctBubbleHold}
+                    onPointerCancel={finishAcctBubbleHold}
+                    onClick={() => setOpenFilterAccounts(s => ({ ...s, secondary: !s.secondary }))}
+                  >
+                    Secondary
+                  </button>
+                ) : null}
+              </div>
+            )}
             <div
-              className="replay-fetch-range-group"
+              className="replay-fetch-range-group positions-open-detail-rg"
               role="radiogroup"
               aria-label="Detail view: accordion for Strategy rows and option execution rows"
             >
-              <span className="replay-fetch-days-label">Detail view</span>
+              <span className="replay-fetch-days-label">Detail</span>
               <label className="replay-fetch-radio">
                 <input type="radio" name="open-detail-view" value="accordion" checked={openAccordionMode} onChange={() => setOpenAccordionMode(true)} />
                 <span>Accordion</span>
@@ -3731,100 +4416,94 @@ export function PositionsPage({
                 <span>Multi</span>
               </label>
             </div>
+            {optionsTabPositions.length > 0 || liveStockPositions.length > 0 ? (
+              <>
+                <span className="positions-open-controls-sep" aria-hidden />
+                <div className="replay-ledger-tab-matrix replay-ledger-tab-matrix--aligned replay-ledger-tab-matrix--open-positions positions-open-tabs-merged">
+                  <div
+                    className="system-tabs replay-portfolio-tabs replay-ledger-tab-button-row"
+                    role="tablist"
+                    aria-label="Open positions: Strategy, Options, Stocks, Fixed income, Cash-like"
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      id="open-tab-strategy"
+                      aria-selected={openTab === 'instance'}
+                      aria-controls="open-panel-strategy"
+                      className={`system-tab ${openTab === 'instance' ? 'active' : ''}`}
+                      onClick={() => setOpenTab('instance')}
+                      disabled={!hasInstances}
+                    >
+                      Strategy
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      id="open-tab-options"
+                      aria-selected={openTab === 'options'}
+                      aria-controls="open-panel-options"
+                      className={`system-tab replay-ledger-tab-at-instruments ${openTab === 'options' ? 'active' : ''}`}
+                      onClick={() => setOpenTab('options')}
+                      disabled={!hasOpenOptions}
+                    >
+                      Options
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      id="open-tab-stocks"
+                      aria-selected={openTab === 'stocks'}
+                      aria-controls="open-panel-stocks"
+                      className={`system-tab ${openTab === 'stocks' ? 'active' : ''}`}
+                      onClick={() => setOpenTab('stocks')}
+                      disabled={!hasCoreStocks}
+                    >
+                      Stocks
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      id="open-tab-fixed-income"
+                      aria-selected={openTab === 'fixed_income'}
+                      aria-controls="open-panel-fixed-income"
+                      className={`system-tab ${openTab === 'fixed_income' ? 'active' : ''}`}
+                      onClick={() => setOpenTab('fixed_income')}
+                      disabled={!hasFixedIncomeStocks}
+                    >
+                      Fixed income
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      id="open-tab-cash-like"
+                      aria-selected={openTab === 'cash_like'}
+                      aria-controls="open-panel-cash-like"
+                      className={`system-tab ${openTab === 'cash_like' ? 'active' : ''}`}
+                      onClick={() => setOpenTab('cash_like')}
+                      disabled={!hasCashLikeStocks}
+                    >
+                      Cash-like
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : null}
           </div>
           {optionsTabPositions.length === 0 && liveStockPositions.length === 0 ? (
             <p className="section-hint">No open positions under the current filters. Position data comes from account snapshots in `Accounts`, while Off-Track options are inferred from execution history.</p>
           ) : (
             <div className="replay-portfolio-block">
-              <div className="replay-portfolio-header">
-                <div className="replay-portfolio-tabs-wrap">
-                  <div className="replay-ledger-tab-matrix replay-ledger-tab-matrix--aligned replay-ledger-tab-matrix--open-positions">
-                    <div className="replay-ledger-tab-matrix-labels" aria-hidden="true">
-                      <span className="replay-ledger-tab-group-caption replay-ledger-tab-group-caption--positions-attr">
-                        Attribution
-                      </span>
-                      <span className="replay-ledger-tab-group-caption replay-ledger-tab-group-caption--positions-inst">
-                        Instruments
-                      </span>
-                    </div>
-                    <div
-                      className="system-tabs replay-portfolio-tabs replay-ledger-tab-button-row"
-                      role="tablist"
-                      aria-label="Open positions: attribution and instruments"
-                    >
-                      <button
-                        type="button"
-                        role="tab"
-                        id="open-tab-strategy"
-                        aria-selected={openTab === 'instance'}
-                        aria-controls="open-panel-strategy"
-                        className={`system-tab ${openTab === 'instance' ? 'active' : ''}`}
-                        onClick={() => setOpenTab('instance')}
-                        disabled={!hasInstances}
-                      >
-                        Strategy
-                      </button>
-                      <button
-                        type="button"
-                        role="tab"
-                        id="open-tab-options"
-                        aria-selected={openTab === 'options'}
-                        aria-controls="open-panel-options"
-                        className={`system-tab replay-ledger-tab-at-instruments ${openTab === 'options' ? 'active' : ''}`}
-                        onClick={() => setOpenTab('options')}
-                        disabled={!hasOpenOptions}
-                      >
-                        Options
-                      </button>
-                      <button
-                        type="button"
-                        role="tab"
-                        id="open-tab-stocks"
-                        aria-selected={openTab === 'stocks'}
-                        aria-controls="open-panel-stocks"
-                        className={`system-tab ${openTab === 'stocks' ? 'active' : ''}`}
-                        onClick={() => setOpenTab('stocks')}
-                        disabled={!hasCoreStocks}
-                      >
-                        Stocks
-                      </button>
-                      <button
-                        type="button"
-                        role="tab"
-                        id="open-tab-fixed-income"
-                        aria-selected={openTab === 'fixed_income'}
-                        aria-controls="open-panel-fixed-income"
-                        className={`system-tab ${openTab === 'fixed_income' ? 'active' : ''}`}
-                        onClick={() => setOpenTab('fixed_income')}
-                        disabled={!hasFixedIncomeStocks}
-                      >
-                        Fixed income
-                      </button>
-                      <button
-                        type="button"
-                        role="tab"
-                        id="open-tab-cash-like"
-                        aria-selected={openTab === 'cash_like'}
-                        aria-controls="open-panel-cash-like"
-                        className={`system-tab ${openTab === 'cash_like' ? 'active' : ''}`}
-                        onClick={() => setOpenTab('cash_like')}
-                        disabled={!hasCashLikeStocks}
-                      >
-                        Cash-like
-                      </button>
-                    </div>
-                  </div>
-                  <p className="section-hint replay-portfolio-tab-hint">
-                    {openPositionsTabHint(openTab)}
-                  </p>
-                  {chartTypeFilter && (
+              {chartTypeFilter ? (
+                <div className="replay-portfolio-header">
+                  <div className="replay-portfolio-tabs-wrap">
                     <button type="button" className="pos-comp-filter-chip" onClick={() => setChartTypeFilter(null)}>
                       <svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="2.2" style={{ flexShrink: 0 }}><path d="M9 3 3 9M3 3l6 6"/></svg>
                       Type: {chartTypeFilter}
                     </button>
-                  )}
+                  </div>
                 </div>
-              </div>
+              ) : null}
               {openTab === 'instance' ? (
                 <div
                   id="open-panel-strategy"
@@ -4509,423 +5188,8 @@ export function PositionsPage({
                       <div className="coverage-summary-intro">
                         <h6 className="replay-sub instance-sheet-sub-heading coverage-summary-heading-row">
                           Coverage summary
-                          <InfoTooltip text="Asset mix and Backing pool coverage charts share the account filter in the charts block. Position pool tables below use the same filter. Optionable symbols only; Independent Holdings are not listed in pools. Underlying pool = stock left after opportunity hedges." />
+                          <InfoTooltip text="The Account (asset mix) filter in the top composition row applies here too. Position pool tables below use the same filter. Optionable symbols only; Independent Holdings are not listed in pools. Underlying pool = stock left after opportunity hedges." />
                         </h6>
-                      </div>
-                      <div className="coverage-charts-section">
-                        <div className="coverage-charts-toolbar">
-                          <span className="coverage-charts-toolbar-label">Account</span>
-                          <div
-                            className="coverage-section-account-filter"
-                            role="group"
-                            aria-label="Account filter for asset mix and backing pool coverage"
-                          >
-                            {[
-                              { id: 'all', label: 'All' },
-                              ...(streamHostAccountId ? [{ id: streamHostAccountId, label: streamHostAccountId }] : []),
-                              ...(streamSecondaryAccountId && streamSecondaryAccountId !== streamHostAccountId
-                                ? [{ id: streamSecondaryAccountId, label: streamSecondaryAccountId }]
-                                : []),
-                            ].map(opt => (
-                              <button
-                                key={opt.id}
-                                type="button"
-                                className={`coverage-asset-pie-acct-btn${stockCoverageSectionAccount === opt.id ? ' active' : ''}`}
-                                onClick={() => setStockCoverageSectionAccount(opt.id)}
-                              >
-                                {opt.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="coverage-charts-grid">
-                      {(() => {
-                        const {
-                          coreStockMV,
-                          fixedIncomeMV,
-                          cashLikeMV,
-                          cash,
-                          bp,
-                          denom,
-                          pStock,
-                          pFixedIncome,
-                          pCashLike,
-                          pCash,
-                          pBp,
-                          netLiq,
-                          includeBpInChart,
-                          includeFiInChart,
-                          includeCashLikeInChart,
-                          simpleCenterPct,
-                        } = coverageAssetPieData
-                        const cx = 66
-                        const cy = 66
-                        const rO = 56
-                        const rI = 36
-                        const rMid = (rO + rI) / 2
-                        const ringStroke = rO - rI
-                        const circ = 2 * Math.PI * rMid
-                        let ringOff = 0
-                        const ringSeg = (frac: number, className: string, key: string) => {
-                          const len = Math.max(0, frac) * circ
-                          if (len < 0.5) return null
-                          const el = (
-                            <circle
-                              key={key}
-                              cx={cx}
-                              cy={cy}
-                              r={rMid}
-                              fill="none"
-                              className={className}
-                              strokeWidth={ringStroke}
-                              strokeLinecap="butt"
-                              strokeDasharray={`${len} ${circ}`}
-                              strokeDashoffset={-ringOff}
-                              transform={`rotate(-90 ${cx} ${cy})`}
-                            />
-                          )
-                          ringOff += len
-                          return el
-                        }
-                        const centerMain =
-                          netLiq != null
-                            ? fmtUsd(netLiq)
-                            : denom > 0
-                              ? simpleCenterPct
-                                ? `${(pStock * 100).toFixed(1)} · ${(pCash * 100).toFixed(1)}`
-                                : fmtUsd(denom)
-                              : '—'
-                        const centerSub =
-                          netLiq != null
-                            ? 'Net liq.'
-                            : denom > 0
-                              ? simpleCenterPct
-                                ? '% of sum'
-                                : 'Chart basis'
-                              : ''
-                        const ringAriaParts = [
-                          'Stock (core equities)',
-                          includeFiInChart ? 'Fixed income' : null,
-                          includeCashLikeInChart ? 'Cash-like' : null,
-                          'Net cash',
-                          includeBpInChart ? 'Buying power' : null,
-                        ].filter(Boolean)
-                        return (
-                          <div className="coverage-charts-cell coverage-asset-pie-section">
-                            <div className="coverage-asset-pie-header">
-                              <span className="coverage-asset-pie-title">Asset mix</span>
-                              <InfoTooltip text="Stock = market value of non-option positions classified as core equities (same as Stocks tab; excludes ledger Fixed income and Cash-like). Fixed income / Cash-like use position category labels. Net cash = IB TotalCashValue. Buying power = IB BuyingPower. Use Include to add a slice to the ring denominator; excluded categories stay in the legend. Center shows net liquidation when available; otherwise stock vs net cash percentages when only those two are in the ring, else the chart-basis total." />
-                            </div>
-                            <div className="coverage-asset-pie-body">
-                              <div className="coverage-asset-pie-chart-block">
-                                <svg
-                                  width={132}
-                                  height={132}
-                                  viewBox="0 0 132 132"
-                                  className="coverage-asset-pie-svg"
-                                  role="img"
-                                  aria-label={`Ring chart: ${ringAriaParts.join(', ')} as shares of their sum`}
-                                >
-                                  <circle
-                                    cx={cx}
-                                    cy={cy}
-                                    r={rMid}
-                                    fill="none"
-                                    className="coverage-asset-pie-ring-track"
-                                    strokeWidth={ringStroke}
-                                  />
-                                  {denom > 0 ? (
-                                    <>
-                                      {ringSeg(pStock, 'coverage-asset-pie-ring-seg-stock', 'seg-stock')}
-                                      {includeFiInChart
-                                        ? ringSeg(pFixedIncome, 'coverage-asset-pie-ring-seg-fi', 'seg-fi')
-                                        : null}
-                                      {includeCashLikeInChart
-                                        ? ringSeg(pCashLike, 'coverage-asset-pie-ring-seg-cashlike', 'seg-cashlike')
-                                        : null}
-                                      {ringSeg(pCash, 'coverage-asset-pie-ring-seg-cash', 'seg-cash')}
-                                      {includeBpInChart
-                                        ? ringSeg(pBp, 'coverage-asset-pie-ring-seg-bp', 'seg-bp')
-                                        : null}
-                                    </>
-                                  ) : null}
-                                  <text
-                                    x={cx}
-                                    y={cy - 4}
-                                    className={`coverage-asset-pie-center-val${
-                                      netLiq != null
-                                        ? ' coverage-asset-pie-center-val--netliq'
-                                        : simpleCenterPct
-                                          ? ''
-                                          : ' coverage-asset-pie-center-val--basis'
-                                    }`}
-                                    textAnchor="middle"
-                                    dominantBaseline="auto"
-                                  >
-                                    {centerMain}
-                                  </text>
-                                  <text
-                                    x={cx}
-                                    y={cy + 11}
-                                    className="coverage-asset-pie-center-sub"
-                                    textAnchor="middle"
-                                    dominantBaseline="auto"
-                                  >
-                                    {centerSub}
-                                  </text>
-                                </svg>
-                                <div className="coverage-asset-pie-bp-side">
-                                  <div className="coverage-asset-pie-chart-toggle-row">
-                                    <span className="coverage-asset-pie-bp-label">Fixed income in chart</span>
-                                    <div
-                                      className="coverage-asset-pie-bubble-switch"
-                                      role="group"
-                                      aria-label="Include fixed income in ring denominator"
-                                    >
-                                      <button
-                                        type="button"
-                                        className={`coverage-asset-pie-bubble-btn${!coverageAssetPieIncludeFi ? ' active' : ''}`}
-                                        aria-pressed={!coverageAssetPieIncludeFi}
-                                        onClick={() => setCoverageAssetPieIncludeFi(false)}
-                                      >
-                                        Exclude
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className={`coverage-asset-pie-bubble-btn${coverageAssetPieIncludeFi ? ' active' : ''}`}
-                                        aria-pressed={coverageAssetPieIncludeFi}
-                                        onClick={() => setCoverageAssetPieIncludeFi(true)}
-                                      >
-                                        Include
-                                      </button>
-                                    </div>
-                                  </div>
-                                  <div className="coverage-asset-pie-chart-toggle-row">
-                                    <span className="coverage-asset-pie-bp-label">Cash-like in chart</span>
-                                    <div
-                                      className="coverage-asset-pie-bubble-switch"
-                                      role="group"
-                                      aria-label="Include cash-like in ring denominator"
-                                    >
-                                      <button
-                                        type="button"
-                                        className={`coverage-asset-pie-bubble-btn${!coverageAssetPieIncludeCashLike ? ' active' : ''}`}
-                                        aria-pressed={!coverageAssetPieIncludeCashLike}
-                                        onClick={() => setCoverageAssetPieIncludeCashLike(false)}
-                                      >
-                                        Exclude
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className={`coverage-asset-pie-bubble-btn${coverageAssetPieIncludeCashLike ? ' active' : ''}`}
-                                        aria-pressed={coverageAssetPieIncludeCashLike}
-                                        onClick={() => setCoverageAssetPieIncludeCashLike(true)}
-                                      >
-                                        Include
-                                      </button>
-                                    </div>
-                                  </div>
-                                  <div className="coverage-asset-pie-chart-toggle-row">
-                                    <span className="coverage-asset-pie-bp-label">Buying power in chart</span>
-                                    <div
-                                      className="coverage-asset-pie-bubble-switch"
-                                      role="group"
-                                      aria-label="Include buying power in ring denominator"
-                                    >
-                                      <button
-                                        type="button"
-                                        className={`coverage-asset-pie-bubble-btn${!coverageAssetPieIncludeBp ? ' active' : ''}`}
-                                        aria-pressed={!coverageAssetPieIncludeBp}
-                                        onClick={() => setCoverageAssetPieIncludeBp(false)}
-                                      >
-                                        Exclude
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className={`coverage-asset-pie-bubble-btn${coverageAssetPieIncludeBp ? ' active' : ''}`}
-                                        aria-pressed={coverageAssetPieIncludeBp}
-                                        onClick={() => setCoverageAssetPieIncludeBp(true)}
-                                      >
-                                        Include
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="coverage-asset-pie-legend">
-                                <div className="coverage-asset-pie-legend-item">
-                                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--stock" />
-                                  <span className="coverage-asset-pie-legend-label">Stock</span>
-                                  <span className="coverage-asset-pie-legend-pct">
-                                    {denom > 0 ? `${(pStock * 100).toFixed(1)}%` : '—'}
-                                  </span>
-                                  <span className="coverage-asset-pie-legend-value">{fmtUsd(coreStockMV)}</span>
-                                </div>
-                                <div
-                                  className={`coverage-asset-pie-legend-item${!includeFiInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
-                                  title={
-                                    !includeFiInChart
-                                      ? 'Fixed income MV is listed; not included in ring denominator.'
-                                      : undefined
-                                  }
-                                >
-                                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--fi" />
-                                  <span className="coverage-asset-pie-legend-label">Fixed income</span>
-                                  <span className="coverage-asset-pie-legend-pct">
-                                    {includeFiInChart && denom > 0 ? `${(pFixedIncome * 100).toFixed(1)}%` : '—'}
-                                  </span>
-                                  <span className="coverage-asset-pie-legend-value">{fmtUsd(fixedIncomeMV)}</span>
-                                </div>
-                                <div
-                                  className={`coverage-asset-pie-legend-item${!includeCashLikeInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
-                                  title={
-                                    !includeCashLikeInChart
-                                      ? 'Cash-like MV is listed; not included in ring denominator.'
-                                      : undefined
-                                  }
-                                >
-                                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--cashlike" />
-                                  <span className="coverage-asset-pie-legend-label">Cash-like</span>
-                                  <span className="coverage-asset-pie-legend-pct">
-                                    {includeCashLikeInChart && denom > 0 ? `${(pCashLike * 100).toFixed(1)}%` : '—'}
-                                  </span>
-                                  <span className="coverage-asset-pie-legend-value">{fmtUsd(cashLikeMV)}</span>
-                                </div>
-                                <div className="coverage-asset-pie-legend-item">
-                                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--cash" />
-                                  <span className="coverage-asset-pie-legend-label">Net cash</span>
-                                  <span className="coverage-asset-pie-legend-pct">
-                                    {denom > 0 ? `${(pCash * 100).toFixed(1)}%` : '—'}
-                                  </span>
-                                  <span className="coverage-asset-pie-legend-value">{fmtUsd(cash)}</span>
-                                </div>
-                                <div
-                                  className={`coverage-asset-pie-legend-item${!includeBpInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
-                                  title={
-                                    !includeBpInChart
-                                      ? 'Buying power is listed for reference; not included in ring denominator.'
-                                      : undefined
-                                  }
-                                >
-                                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--bp" />
-                                  <span className="coverage-asset-pie-legend-label">Buying power</span>
-                                  <span className="coverage-asset-pie-legend-pct">
-                                    {includeBpInChart && denom > 0 ? `${(pBp * 100).toFixed(1)}%` : '—'}
-                                  </span>
-                                  <span className="coverage-asset-pie-legend-value">{fmtUsd(bp)}</span>
-                                </div>
-                                {denom > 0 && (
-                                  <div className="coverage-asset-pie-legend-divider" aria-hidden />
-                                )}
-                                {denom > 0 && (
-                                  <div className="coverage-asset-pie-legend-item coverage-asset-pie-legend-sum">
-                                    <span className="coverage-asset-pie-legend-label">Sum (chart basis)</span>
-                                    <span className="coverage-asset-pie-legend-value">{fmtUsd(denom)}</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      })()}
-                      {(() => {
-                        const { backingMV, totalStockMV, otherMV, pct } = backingPoolChartData
-                        const cx = 66
-                        const cy = 66
-                        const rO = 56
-                        const rI = 36
-                        const pctLabel = (pct * 100).toFixed(1) + '%'
-                        const toXY = (frac: number, r: number) => {
-                          const a = frac * 2 * Math.PI - Math.PI / 2
-                          return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) }
-                        }
-                        const buildArc = (startFrac: number, endFrac: number, r1: number, r2: number) => {
-                          if (endFrac - startFrac >= 0.9999) {
-                            return `M ${cx} ${cy - r1} A ${r1} ${r1} 0 1 1 ${cx - 0.001} ${cy - r1} Z`
-                          }
-                          if (endFrac - startFrac <= 0.0001) return ''
-                          const s1 = toXY(startFrac, r1)
-                          const e1 = toXY(endFrac, r1)
-                          const s2 = toXY(endFrac, r2)
-                          const e2 = toXY(startFrac, r2)
-                          const lg = endFrac - startFrac > 0.5 ? 1 : 0
-                          return [
-                            `M ${s1.x.toFixed(3)} ${s1.y.toFixed(3)}`,
-                            `A ${r1} ${r1} 0 ${lg} 1 ${e1.x.toFixed(3)} ${e1.y.toFixed(3)}`,
-                            `L ${s2.x.toFixed(3)} ${s2.y.toFixed(3)}`,
-                            `A ${r2} ${r2} 0 ${lg} 0 ${e2.x.toFixed(3)} ${e2.y.toFixed(3)}`,
-                            'Z',
-                          ].join(' ')
-                        }
-                        const backingArc = buildArc(0, pct, rO, rI)
-                        const otherArc = buildArc(pct, 1, rO, rI)
-                        return (
-                          <div className="coverage-charts-cell backing-pool-chart-section backing-pool-chart-section--in-charts-grid">
-                            <div className="backing-pool-chart-header">
-                              <span className="backing-pool-chart-title">Backing Pool Coverage</span>
-                              <InfoTooltip text="Backing pool market value vs total stock coverage (optionable rows) for the account selected in this charts section." />
-                            </div>
-                            <div className="backing-pool-chart-body">
-                              <svg
-                                width={132}
-                                height={132}
-                                viewBox="0 0 132 132"
-                                className="backing-pool-chart-svg"
-                                role="img"
-                                aria-label={`Backing pool ${pctLabel} of total stock coverage`}
-                              >
-                                {totalStockMV > 0 ? (
-                                  <>
-                                    {otherArc ? <path d={otherArc} className="backing-pool-arc-other" /> : null}
-                                    {backingArc ? <path d={backingArc} className="backing-pool-arc-backing" /> : null}
-                                  </>
-                                ) : (
-                                  <circle cx={cx} cy={cy} r={rO} className="backing-pool-arc-other" />
-                                )}
-                                <circle cx={cx} cy={cy} r={rI} className="backing-pool-arc-hole" />
-                                <text
-                                  x={cx}
-                                  y={cy - 7}
-                                  className="backing-pool-chart-pct-text"
-                                  textAnchor="middle"
-                                  dominantBaseline="auto"
-                                >
-                                  {totalStockMV > 0 ? pctLabel : '—'}
-                                </text>
-                                <text
-                                  x={cx}
-                                  y={cy + 10}
-                                  className="backing-pool-chart-sub-text"
-                                  textAnchor="middle"
-                                  dominantBaseline="auto"
-                                >
-                                  of total
-                                </text>
-                              </svg>
-                              <div className="backing-pool-chart-legend">
-                                <div className="backing-pool-chart-legend-item">
-                                  <span className="backing-pool-chart-legend-dot backing-pool-chart-legend-dot--backing" />
-                                  <span className="backing-pool-chart-legend-label">Backing Pool</span>
-                                  <span className="backing-pool-chart-legend-value">{fmtUsd(backingMV)}</span>
-                                </div>
-                                <div className="backing-pool-chart-legend-item">
-                                  <span className="backing-pool-chart-legend-dot backing-pool-chart-legend-dot--other" />
-                                  <span className="backing-pool-chart-legend-label">Other stock</span>
-                                  <span className="backing-pool-chart-legend-value">{fmtUsd(otherMV)}</span>
-                                </div>
-                                <div className="backing-pool-chart-legend-divider" />
-                                <div className="backing-pool-chart-legend-item">
-                                  <span className="backing-pool-chart-legend-label backing-pool-chart-legend-total">
-                                    Total stock
-                                  </span>
-                                  <span className="backing-pool-chart-legend-value">{fmtUsd(totalStockMV)}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      })()}
-                        </div>
                       </div>
                       <div className="coverage-pools-row">
                           <div className="coverage-pool-panel">
@@ -5028,7 +5292,7 @@ export function PositionsPage({
                     <div className="coverage-summary-section coverage-summary-section--placeholder">
                       <h6 className="replay-sub instance-sheet-sub-heading coverage-summary-heading-row">
                         Coverage summary
-                        <InfoTooltip text="Option underlying pool, backing pool, and charts appear when instances match filters. Underlying pool = stock left after opportunity hedges." />
+                        <InfoTooltip text="Option underlying pool and backing pool tables appear when instances match filters. Underlying pool = stock left after opportunity hedges." />
                       </h6>
                       <p className="section-hint coverage-summary-placeholder-text">
                         This section is computed from the instance table above. With no instances matching the current filters, there is nothing to show here—so the pools are hidden, not missing. Clear or widen filters to bring instances back and see Option underlying / backing pools.
@@ -5379,9 +5643,9 @@ export function PositionsPage({
                   'open-panel-stocks',
                   'open-tab-stocks',
                   'Stock positions',
-                  coreStockPositions,
+                  coreStockPositionsFiltered,
                   'stk',
-                  'No open stock positions under the current filters.',
+                  stocksTabEmptyHint,
                   openStockInspector,
                 )
               ) : openTab === 'fixed_income' ? (
