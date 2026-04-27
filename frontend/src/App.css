@@ -19170,6 +19170,34 @@ th:has(> .coverage-pool-th-held-amt) {
   margin: 0.1rem 0;
 }
 
+/* Position composition charts row (Positions page) */
+.pos-comp-charts-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+/* Active type-filter clear chip */
+.pos-comp-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.55rem 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--color-accent-bright, #7dd3fc) 45%, var(--color-border, #2a313c));
+  background: color-mix(in oklab, var(--color-accent-bright, #7dd3fc) 10%, transparent);
+  color: var(--color-accent-bright, #7dd3fc);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s;
+}
+.pos-comp-filter-chip:hover {
+  background: color-mix(in oklab, var(--color-accent-bright, #7dd3fc) 18%, transparent);
+}
+
 .coverage-available-held-amt-cell {
   text-align: center;
   vertical-align: middle;

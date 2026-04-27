@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { Execution, IbAccountSnapshot, PositionInstanceAttribution, RealtimeQuote, StatusResponse } from '../types'
+import type { Execution, IbAccountSnapshot, IbPositionRow, PositionInstanceAttribution, RealtimeQuote, StatusResponse } from '../types'
 import { deleteExecution, fetchQuotes, subscribeQuotes, updateExecution } from '../api'
 import { fetchPositionAttribution } from '../api/trading/executions'
 import { fetchOpportunities, fetchStructures } from '../api/strategy/strategies'
@@ -657,6 +657,226 @@ function LinkStrategyIconButton({ onClick, title }: { onClick: () => void; title
   )
 }
 
+// ── Position Composition Donut Charts ────────────────────────────────────────
+
+const DONUT_SYMBOL_COLORS = [
+  '#38bdf8', '#76b900', '#fbbf24', '#ef4444', '#a855f7',
+  '#f97316', '#4ade80', '#ec4899', '#84cc16', '#14b8a6',
+]
+
+const OPTION_CATEGORY_COLORS: Record<string, string> = {
+  Call: '#22c55e',
+  Put: '#a855f7',
+  'Underlying Stock': '#38bdf8',
+}
+
+interface DonutSegment { label: string; value: number; color: string }
+type UnderlyingCategoryFilter = 'Stocks' | 'Fixed Income' | 'Cash-like'
+interface PerfCandle {
+  day: string
+  open: number
+  high: number
+  low: number
+  close: number
+}
+
+const UNDERLYING_CATEGORY_ORDER: UnderlyingCategoryFilter[] = ['Stocks', 'Fixed Income', 'Cash-like']
+const UNDERLYING_CATEGORY_COLORS: Record<UnderlyingCategoryFilter, string> = {
+  Stocks: '#38bdf8',
+  'Fixed Income': '#fbbf24',
+  'Cash-like': '#4ade80',
+}
+
+function fmtMvAbbrev(v: number): string {
+  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
+  if (v >= 1_000)     return `$${(v / 1_000).toFixed(0)}K`
+  return `$${Math.round(v)}`
+}
+
+function buildPerfCandlesFromExecutions(executions: Execution[], limit = 24): PerfCandle[] {
+  const byDay = new Map<string, { ts: number; prices: number[] }>()
+  for (const ex of executions) {
+    const secType = (ex.sec_type ?? '').toUpperCase()
+    if (secType !== 'OPT' && secType !== 'STK') continue
+    const ts = Number(ex.time ?? 0)
+    const price = Number(ex.price ?? 0)
+    if (!Number.isFinite(ts) || ts <= 0) continue
+    if (!Number.isFinite(price) || price <= 0) continue
+    const d = new Date(ts * 1000)
+    const day = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+    if (!byDay.has(day)) byDay.set(day, { ts, prices: [price] })
+    else {
+      const bucket = byDay.get(day)!
+      bucket.prices.push(price)
+      if (ts < bucket.ts) bucket.ts = ts
+    }
+  }
+  const candles = [...byDay.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([day, bucket]) => {
+      const prices = bucket.prices
+      const open = prices[0] ?? 0
+      const close = prices[prices.length - 1] ?? open
+      let high = -Infinity
+      let low = Infinity
+      for (const p of prices) {
+        if (p > high) high = p
+        if (p < low) low = p
+      }
+      return { day, open, high, low, close }
+    })
+  return candles.slice(Math.max(0, candles.length - limit))
+}
+
+function PositionDonutChart({
+  title,
+  segments,
+  activeLabel,
+  onSegmentClick,
+  interactive = true,
+  showLegend = true,
+  embedded = false,
+  showActiveChip = true,
+}: {
+  title: string
+  segments: DonutSegment[]
+  activeLabel: string | null
+  onSegmentClick: (label: string | null) => void
+  interactive?: boolean
+  showLegend?: boolean
+  embedded?: boolean
+  showActiveChip?: boolean
+}) {
+  const active = segments.filter(s => s.value > 0)
+  const total  = active.reduce((acc, s) => acc + s.value, 0)
+  const cx = 66, cy = 66, rMid = 46, ringStroke = 14
+  const circ = 2 * Math.PI * rMid
+
+  let ringOff = 0
+  const arcs = active.map(seg => {
+    const arcLen     = (seg.value / total) * circ
+    const dashoffset = -ringOff
+    ringOff += arcLen
+    return { ...seg, arcLen, dashoffset, pct: (seg.value / total) * 100 }
+  })
+
+  const activeSegValue = activeLabel ? (active.find(s => s.label === activeLabel)?.value ?? null) : null
+  const centerMain = activeSegValue != null ? fmtMvAbbrev(activeSegValue) : total > 0 ? fmtMvAbbrev(total) : '—'
+  const centerSub  = activeLabel ? (activeLabel.length > 10 ? activeLabel.slice(0, 9) + '…' : activeLabel) : 'Total'
+
+  return (
+    <div
+      className={embedded ? 'pos-comp-embedded-donut' : 'coverage-asset-pie-section'}
+      style={embedded ? { flex: '1 1 190px', minWidth: '180px' } : { flex: '1 1 270px', maxWidth: '480px' }}
+    >
+      <div className="coverage-asset-pie-header">
+        <span className="coverage-asset-pie-title">{title}</span>
+        {activeLabel && showActiveChip && (
+          <button
+            type="button"
+            style={{
+              marginLeft: 'auto', padding: '0.12rem 0.45rem',
+              border: '1px solid var(--color-border)', borderRadius: '999px',
+              background: 'transparent', color: 'var(--color-text-muted)',
+              fontSize: '0.68rem', cursor: 'pointer', lineHeight: 1.4,
+            }}
+            onClick={() => onSegmentClick(null)}
+            title="Clear filter"
+          >
+            {activeLabel} ×
+          </button>
+        )}
+      </div>
+      {active.length === 0 ? (
+        <p className="section-hint" style={{ margin: 0 }}>No position data</p>
+      ) : (
+        <div className="coverage-asset-pie-body">
+          <div className="coverage-asset-pie-chart-block">
+            <svg
+              width={embedded ? 128 : 132} height={embedded ? 128 : 132} viewBox="0 0 132 132"
+              className="coverage-asset-pie-svg"
+              role="img"
+              aria-label={`${title} ring chart`}
+            >
+              <circle cx={cx} cy={cy} r={rMid} fill="none" className="coverage-asset-pie-ring-track" strokeWidth={ringStroke} />
+              {arcs.map((arc, i) => {
+                const isActive = arc.label === activeLabel
+                const isDimmed = activeLabel != null && !isActive
+                return (
+                  <circle
+                    key={i}
+                    cx={cx} cy={cy} r={rMid}
+                    fill="none"
+                    stroke={arc.color}
+                    strokeWidth={isActive ? ringStroke + 4 : ringStroke}
+                    strokeLinecap="butt"
+                    strokeDasharray={`${arc.arcLen} ${circ}`}
+                    strokeDashoffset={arc.dashoffset}
+                    transform={`rotate(-90 ${cx} ${cy})`}
+                    style={{ cursor: interactive ? 'pointer' : 'default', opacity: isDimmed ? 0.22 : 1, transition: 'opacity 0.18s, stroke-width 0.18s' }}
+                    onClick={() => interactive && onSegmentClick(isActive ? null : arc.label)}
+                  />
+                )
+              })}
+              <text
+                x={cx}
+                y={cy - 4}
+                className="coverage-asset-pie-center-val coverage-asset-pie-center-val--basis"
+                textAnchor="middle"
+                dominantBaseline="auto"
+                style={embedded ? { fontSize: '0.98rem' } : undefined}
+              >
+                {centerMain}
+              </text>
+              <text
+                x={cx}
+                y={cy + 11}
+                className="coverage-asset-pie-center-sub"
+                textAnchor="middle"
+                dominantBaseline="auto"
+                style={embedded ? { fontSize: '0.74rem' } : undefined}
+              >
+                {centerSub}
+              </text>
+            </svg>
+          </div>
+          {showLegend && (
+            <div className="coverage-asset-pie-legend">
+              {arcs.map((arc, i) => {
+                const isActive = arc.label === activeLabel
+                const isDimmed = activeLabel != null && !isActive
+                return (
+                  <div
+                    key={i}
+                    className="coverage-asset-pie-legend-item"
+                    style={{
+                      cursor: interactive ? 'pointer' : 'default',
+                      opacity: isDimmed ? 0.38 : 1,
+                      borderRadius: 4,
+                      padding: '0.08rem 0.3rem',
+                      background: isActive ? `color-mix(in oklab, ${arc.color} 14%, transparent)` : 'transparent',
+                      transition: 'opacity 0.18s, background 0.15s',
+                    }}
+                    onClick={() => interactive && onSegmentClick(isActive ? null : arc.label)}
+                    title={interactive ? `Click to filter: ${arc.label}` : arc.label}
+                  >
+                    <span className="coverage-asset-pie-dot" style={{ background: arc.color }} />
+                    <span className="coverage-asset-pie-legend-label">{arc.label}</span>
+                    <span className="coverage-asset-pie-legend-pct">{arc.pct.toFixed(1)}%</span>
+                    <span className="coverage-asset-pie-legend-value">{fmtMvAbbrev(arc.value)}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface PositionsPageProps {
   status: StatusResponse | null
   currentView?: PortfolioView
@@ -778,6 +998,14 @@ export function PositionsPage({
   const [openFilterExpiryStart, setOpenFilterExpiryStart] = useState('')
   const [openFilterAccountId, setOpenFilterAccountId] = useState<string>('all')
   const [openTab, setOpenTab] = useState<OpenPositionsTab>('instance')
+  const [chartTypeFilter, setChartTypeFilter] = useState<string | null>(null)
+  const [activeCategoryWeightFilter, setActiveCategoryWeightFilter] = useState<UnderlyingCategoryFilter | null>(null)
+  const [optionDetailActiveLabel, setOptionDetailActiveLabel] = useState<string | null>(null)
+  const [underlyingCategoryFilter, setUnderlyingCategoryFilter] = useState<Record<UnderlyingCategoryFilter, boolean>>({
+    Stocks: true,
+    'Fixed Income': false,
+    'Cash-like': false,
+  })
   const [stockInspector, setStockInspector] = useState<{
     symbol: string
     accountId: string
@@ -900,6 +1128,7 @@ export function PositionsPage({
       finalRows: Execution[],
       twsRows: Execution[],
       includeAttrColumn: boolean,
+      includeAccountColumn: boolean = true,
     ) => {
       const crossBookMatch =
         book === 'final' ? findMatchingTwsForFinal(ex, twsRows) : findMatchingFinalForTws(ex, finalRows)
@@ -1020,7 +1249,7 @@ export function PositionsPage({
           <td>{eComm ? fmtUsd(eComm) : '—'}</td>
           <td className="replay-muted" />
           {includeAttrColumn ? <td className="replay-muted" /> : null}
-          <td className="replay-muted positions-opt-account-cell">{ex.account_id ?? '—'}</td>
+          {includeAccountColumn ? <td className="replay-muted positions-opt-account-cell">{ex.account_id ?? '—'}</td> : null}
           <StrategyAttributionCells ex={ex} onOpenStrategyInstance={openStrategyInspector} />
           <td className="replay-opt-actions-cell">
             <span className="replay-exec-row-actions">
@@ -1154,10 +1383,19 @@ export function PositionsPage({
     return rows
   }, [openFilterAccountId, openFilterExpiryStart, openFilterSymbol, status?.portfolio?.accounts])
 
-  const liveOptionPositions = useMemo(
-    () => livePositions.filter(position => (position.secType ?? '').toUpperCase() === 'OPT'),
-    [livePositions],
-  )
+  const liveOptionPositions = useMemo(() => {
+    const rows = livePositions.filter(p => (p.secType ?? '').toUpperCase() === 'OPT')
+    if (!chartTypeFilter) return rows
+    return rows.filter(p => {
+      const qty   = Number(p.position)
+      const right = (p.right ?? '').toUpperCase()
+      if (chartTypeFilter === 'Long Call')  return qty > 0 && right === 'C'
+      if (chartTypeFilter === 'Short Call') return qty < 0 && right === 'C'
+      if (chartTypeFilter === 'Long Put')   return qty > 0 && right === 'P'
+      if (chartTypeFilter === 'Short Put')  return qty < 0 && right === 'P'
+      return true
+    })
+  }, [livePositions, chartTypeFilter])
 
   const executionsFinalIdSet = useMemo(
     () => new Set(executionsFinal.map(e => e.account_executions_id).filter((id): id is number => id != null)),
@@ -1530,10 +1768,286 @@ export function PositionsPage({
     return list
   }, [optionsTabPositions, openOptSort, quotesMap])
 
-  const liveStockPositions = useMemo(
-    () => livePositions.filter(position => (position.secType ?? '').toUpperCase() !== 'OPT'),
-    [livePositions],
+  const liveStockPositions = useMemo(() => {
+    const rows = livePositions.filter(p => (p.secType ?? '').toUpperCase() !== 'OPT')
+    if (!chartTypeFilter) return rows
+    return rows.filter(p => {
+      const qty = Number(p.position)
+      if (chartTypeFilter === 'Long Stock')  return qty > 0
+      if (chartTypeFilter === 'Short Stock') return qty < 0
+      return true
+    })
+  }, [livePositions, chartTypeFilter])
+
+  // Price resolution for donut charts: snapshot price → live quote → avgCost (cost basis)
+  const resolveDonutPrice = useCallback((pos: IbPositionRow): number | null => {
+    if (pos.price != null && Number.isFinite(Number(pos.price)) && Number(pos.price) > 0)
+      return Math.abs(Number(pos.price))
+    const ck = pos.contract_key
+    if (ck) {
+      const q  = quotesMap[ck]
+      const qp = q?.last ?? q?.mid
+      if (qp != null && Number.isFinite(qp) && qp > 0) return Math.abs(qp)
+    }
+    if (pos.avgCost != null && Number.isFinite(Number(pos.avgCost)) && Math.abs(Number(pos.avgCost)) > 0)
+      return Math.abs(Number(pos.avgCost))
+    return null
+  }, [quotesMap])
+
+  const resolvePositionUnrealizedPnl = useCallback((pos: IbPositionRow): number | null => {
+    const rec = pos as unknown as Record<string, unknown>
+    const raw = rec.unrealized_pnl ?? rec.unrealizedPNL ?? null
+    const v = Number(raw)
+    return Number.isFinite(v) ? v : null
+  }, [])
+
+  const resolveUnderlyingCategory = useCallback((pos: IbPositionRow): UnderlyingCategoryFilter => {
+    const raw = String(pos.category ?? '').trim()
+    if (isLedgerFixedIncomeCategory(raw)) return 'Fixed Income'
+    if (isLedgerCashLikeCategory(raw)) return 'Cash-like'
+    return 'Stocks'
+  }, [])
+
+  // Plan A: donut by underlying symbol (unfiltered — full portfolio snapshot)
+  const symbolDonutSegments = useMemo((): DonutSegment[] => {
+    const accounts = status?.portfolio?.accounts ?? []
+    const bySymbol = new Map<string, number>()
+    for (const account of accounts) {
+      for (const pos of account.positions ?? []) {
+        const cat = resolveUnderlyingCategory(pos)
+        if (!underlyingCategoryFilter[cat]) continue
+        const qty = Number(pos.position)
+        if (!Number.isFinite(qty) || qty === 0) continue
+        const price = resolveDonutPrice(pos)
+        if (price == null) continue
+        const sym     = (pos.symbol ?? '?').toUpperCase()
+        const secType = (pos.secType ?? '').toUpperCase()
+        const mv      = Math.abs(qty) * price * (secType === 'OPT' ? 100 : 1)
+        bySymbol.set(sym, (bySymbol.get(sym) ?? 0) + mv)
+      }
+    }
+    return [...bySymbol.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([sym, mv], i) => ({
+        label: sym, value: mv,
+        color: DONUT_SYMBOL_COLORS[i % DONUT_SYMBOL_COLORS.length],
+      }))
+  }, [status?.portfolio?.accounts, resolveDonutPrice, resolveUnderlyingCategory, underlyingCategoryFilter])
+
+  const categoryDetailLegendGroups = useMemo((): { category: UnderlyingCategoryFilter; segments: DonutSegment[] }[] => {
+    const accounts = status?.portfolio?.accounts ?? []
+    const byCategorySymbol = new Map<UnderlyingCategoryFilter, Map<string, number>>()
+    for (const account of accounts) {
+      for (const pos of account.positions ?? []) {
+        const cat = resolveUnderlyingCategory(pos)
+        if (!underlyingCategoryFilter[cat]) continue
+        const qty = Number(pos.position)
+        if (!Number.isFinite(qty) || qty === 0) continue
+        const price = resolveDonutPrice(pos)
+        if (price == null) continue
+        const sym = (pos.symbol ?? '?').toUpperCase()
+        const secType = (pos.secType ?? '').toUpperCase()
+        const mv = Math.abs(qty) * price * (secType === 'OPT' ? 100 : 1)
+        if (!byCategorySymbol.has(cat)) byCategorySymbol.set(cat, new Map<string, number>())
+        const m = byCategorySymbol.get(cat)!
+        m.set(sym, (m.get(sym) ?? 0) + mv)
+      }
+    }
+    const symbolColorMap = new Map<string, string>()
+    for (const seg of symbolDonutSegments) {
+      if (!symbolColorMap.has(seg.label)) symbolColorMap.set(seg.label, seg.color)
+    }
+    return UNDERLYING_CATEGORY_ORDER
+      .map(category => {
+        const m = byCategorySymbol.get(category)
+        if (!m || m.size === 0) return null
+        const segments = [...m.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .map(([label, value], idx) => ({
+            label,
+            value,
+            color: symbolColorMap.get(label) ?? DONUT_SYMBOL_COLORS[idx % DONUT_SYMBOL_COLORS.length],
+          }))
+        return { category, segments }
+      })
+      .filter((g): g is { category: UnderlyingCategoryFilter; segments: DonutSegment[] } => g != null)
+  }, [
+    status?.portfolio?.accounts,
+    resolveUnderlyingCategory,
+    underlyingCategoryFilter,
+    resolveDonutPrice,
+    symbolDonutSegments,
+  ])
+
+  const underlyingCategorySegments = useMemo((): DonutSegment[] => {
+    const accounts = status?.portfolio?.accounts ?? []
+    const byCategory = new Map<UnderlyingCategoryFilter, number>()
+    for (const account of accounts) {
+      for (const pos of account.positions ?? []) {
+        const cat = resolveUnderlyingCategory(pos)
+        const qty = Number(pos.position)
+        if (!Number.isFinite(qty) || qty === 0) continue
+        const price = resolveDonutPrice(pos)
+        if (price == null) continue
+        const secType = (pos.secType ?? '').toUpperCase()
+        const mv = Math.abs(qty) * price * (secType === 'OPT' ? 100 : 1)
+        byCategory.set(cat, (byCategory.get(cat) ?? 0) + mv)
+      }
+    }
+    return UNDERLYING_CATEGORY_ORDER
+      .map(cat => ({
+        label: cat,
+        value: byCategory.get(cat) ?? 0,
+        color: UNDERLYING_CATEGORY_COLORS[cat],
+      }))
+      .filter(seg => seg.value > 0)
+  }, [status?.portfolio?.accounts, resolveDonutPrice, resolveUnderlyingCategory])
+
+  const anyUnderlyingCategoryEnabled = useMemo(
+    () => UNDERLYING_CATEGORY_ORDER.some(cat => underlyingCategoryFilter[cat]),
+    [underlyingCategoryFilter],
   )
+
+  const handleCategoryWeightSelect = useCallback((label: string | null) => {
+    /** Pie ring calls `onSegmentClick(null)` when re-clicking the active arc to clear selection. */
+    if (label == null) {
+      setActiveCategoryWeightFilter(null)
+      return
+    }
+    const next = label as UnderlyingCategoryFilter
+    if (activeCategoryWeightFilter === next) {
+      setActiveCategoryWeightFilter(null)
+      return
+    }
+    setActiveCategoryWeightFilter(next)
+    if (label === 'Fixed Income') {
+      setOpenTab('fixed_income')
+      return
+    }
+    if (label === 'Cash-like') {
+      setOpenTab('cash_like')
+      return
+    }
+    if (label === 'Stocks') {
+      setOpenTab('stocks')
+    }
+  }, [activeCategoryWeightFilter])
+
+  useEffect(() => {
+    const activeSymbol = openFilterSymbol.trim().toUpperCase()
+    if (!activeSymbol) return
+    const hasActiveSymbol = symbolDonutSegments.some(seg => seg.label === activeSymbol)
+    if (!hasActiveSymbol) setOpenFilterSymbol('')
+  }, [openFilterSymbol, symbolDonutSegments])
+
+  const optionDetailSegments = useMemo((): DonutSegment[] => {
+    const accounts = status?.portfolio?.accounts ?? []
+    const byContract = new Map<string, number>()
+    for (const account of accounts) {
+      for (const pos of account.positions ?? []) {
+        const qty = Number(pos.position)
+        if (!Number.isFinite(qty) || qty === 0) continue
+        const price = resolveDonutPrice(pos)
+        if (price == null) continue
+        const secType = (pos.secType ?? '').toUpperCase()
+        if (secType !== 'OPT') continue
+        const right = (pos.right ?? '').toUpperCase()
+        const side = qty > 0 ? 'L' : 'S'
+        const rightLbl = right === 'C' ? 'C' : right === 'P' ? 'P' : 'O'
+        const strike = pos.strike != null && Number.isFinite(pos.strike) ? String(pos.strike) : '?'
+        const expiry = (pos.expiry ?? '').trim() || '—'
+        const symbol = (pos.symbol ?? getContractLabelParts(pos.contract_key ?? '').symbol ?? '?').toUpperCase()
+        const contractLabel = `${symbol} ${rightLbl}${strike} ${expiry} ${side}`
+        const mv = Math.abs(qty) * price * 100
+        byContract.set(contractLabel, (byContract.get(contractLabel) ?? 0) + mv)
+      }
+    }
+    return [...byContract.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, value], i) => ({
+        label,
+        value,
+        color: DONUT_SYMBOL_COLORS[i % DONUT_SYMBOL_COLORS.length],
+      }))
+  }, [status?.portfolio?.accounts, resolveDonutPrice])
+
+  const optionCategorySegments = useMemo((): DonutSegment[] => {
+    const accounts = status?.portfolio?.accounts ?? []
+    const byType = new Map<string, number>([
+      ['Call', 0],
+      ['Put', 0],
+      ['Underlying Stock', 0],
+    ])
+    for (const account of accounts) {
+      for (const pos of account.positions ?? []) {
+        const qty = Number(pos.position)
+        if (!Number.isFinite(qty) || qty === 0) continue
+        const price = resolveDonutPrice(pos)
+        if (price == null) continue
+        const secType = (pos.secType ?? '').toUpperCase()
+        const mv = Math.abs(qty) * price * (secType === 'OPT' ? 100 : 1)
+        if (secType === 'OPT') {
+          const right = (pos.right ?? '').toUpperCase()
+          const key = right === 'C' ? 'Call' : 'Put'
+          byType.set(key, (byType.get(key) ?? 0) + mv)
+        } else {
+          byType.set('Underlying Stock', (byType.get('Underlying Stock') ?? 0) + mv)
+        }
+      }
+    }
+    return ['Call', 'Put', 'Underlying Stock']
+      .filter(t => (byType.get(t) ?? 0) > 0)
+      .map(t => ({ label: t, value: byType.get(t)!, color: OPTION_CATEGORY_COLORS[t] }))
+  }, [status?.portfolio?.accounts, resolveDonutPrice])
+
+  const positionTypeSummary = useMemo(() => {
+    const accounts = status?.portfolio?.accounts ?? []
+    let optionMv = 0
+    let stockMv = 0
+    let totalPnl = 0
+    let weightedOptionDays = 0
+    for (const account of accounts) {
+      for (const pos of account.positions ?? []) {
+        const qty = Number(pos.position)
+        if (!Number.isFinite(qty) || qty === 0) continue
+        const price = resolveDonutPrice(pos)
+        if (price == null) continue
+        const secType = (pos.secType ?? '').toUpperCase()
+        const mv = Math.abs(qty) * price * (secType === 'OPT' ? 100 : 1)
+        if (secType === 'OPT') {
+          optionMv += mv
+          const dte = daysUntilExpiry(pos.expiry ?? '')
+          if (dte != null && Number.isFinite(dte) && dte > 0) weightedOptionDays += mv * dte
+        } else {
+          stockMv += mv
+        }
+        totalPnl += resolvePositionUnrealizedPnl(pos) ?? 0
+      }
+    }
+    const totalMv = optionMv + stockMv
+    const optionPct = totalMv > 0 ? (optionMv / totalMv) * 100 : 0
+    const stockPct = totalMv > 0 ? (stockMv / totalMv) * 100 : 0
+    const avgDays = optionMv > 0 ? weightedOptionDays / optionMv : 365
+    const annualFactor = avgDays > 0 ? 365 / avgDays : 0
+    const projectedAnnualReturnPct = totalMv > 0 ? (totalPnl / totalMv) * annualFactor * 100 : 0
+    return { optionPct, stockPct, projectedAnnualReturnPct }
+  }, [status?.portfolio?.accounts, resolveDonutPrice, resolvePositionUnrealizedPnl])
+
+  const performancePanelData = useMemo(() => {
+    const candles = buildPerfCandlesFromExecutions(executionsCanonical ?? [], 26)
+    let optionUnrealized = 0
+    let stockUnrealized = 0
+    const accounts = status?.portfolio?.accounts ?? []
+    for (const account of accounts) {
+      for (const pos of account.positions ?? []) {
+        const pnl = resolvePositionUnrealizedPnl(pos) ?? 0
+        const secType = (pos.secType ?? '').toUpperCase()
+        if (secType === 'OPT') optionUnrealized += pnl
+        else stockUnrealized += pnl
+      }
+    }
+    return { candles, optionUnrealized, stockUnrealized, totalUnrealized: optionUnrealized + stockUnrealized }
+  }, [executionsCanonical, resolvePositionUnrealizedPnl, status?.portfolio?.accounts])
 
   const { fixedIncomeStockPositions, cashLikeStockPositions, coreStockPositions } = useMemo(() => {
     const fixedIncomeStockPositions: LivePositionRow[] = []
@@ -2834,6 +3348,328 @@ export function PositionsPage({
         />
       </div>
 
+      {(symbolDonutSegments.length > 0 || optionDetailSegments.length > 0 || optionCategorySegments.length > 0) && (
+        <div
+          className="pos-comp-charts-row"
+          style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.75rem', alignItems: 'start' }}
+        >
+          <div className="coverage-asset-pie-section" style={{ minWidth: 0, maxWidth: 'none' }}>
+            <div
+              className="coverage-asset-pie-chart-toggle-row"
+              style={{ marginBottom: '0.45rem', gap: '0.35rem', flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}
+            >
+              <span className="coverage-asset-pie-bp-label">Underlying category</span>
+              <div className="coverage-asset-pie-bubble-switch" role="group" aria-label="Toggle underlying categories">
+                {UNDERLYING_CATEGORY_ORDER.map(cat => {
+                  const active = underlyingCategoryFilter[cat]
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      className={`coverage-asset-pie-bubble-btn${active ? ' active' : ''}`}
+                      aria-pressed={active}
+                      onClick={() => {
+                        setUnderlyingCategoryFilter(prev => ({ ...prev, [cat]: !prev[cat] }))
+                      }}
+                      title={active ? `Hide ${cat}` : `Show ${cat}`}
+                    >
+                      {cat}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: '0.25rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '140px minmax(0, 1fr)', alignItems: 'center', gap: '0.6rem' }}>
+                <PositionDonutChart
+                  title="Category Detail"
+                  segments={symbolDonutSegments}
+                  activeLabel={openFilterSymbol.trim().toUpperCase() || null}
+                  onSegmentClick={sym => {
+                    setOpenFilterSymbol(sym ?? '')
+                    if (sym) setChartTypeFilter(null)
+                  }}
+                  showLegend={false}
+                  embedded
+                  showActiveChip={false}
+                />
+                <div className="coverage-asset-pie-legend" style={{ minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', gap: '0.25rem 0.4rem' }}>
+                  {categoryDetailLegendGroups.map(group => (
+                    <div key={`detail-group-${group.category}`} style={{ flex: '1 1 100%', minWidth: 0 }}>
+                      <div className="coverage-asset-pie-bp-label" style={{ marginBottom: '0.08rem' }}>{group.category}</div>
+                      <div
+                        className="coverage-asset-pie-legend"
+                        style={
+                          group.category === 'Stocks'
+                            ? {
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                                gap: '0.16rem 0.34rem',
+                              }
+                            : { flexDirection: 'row', flexWrap: 'wrap', gap: '0.25rem 0.4rem' }
+                        }
+                      >
+                        {group.segments.map(seg => {
+                          const total = symbolDonutSegments.reduce((acc, s) => acc + s.value, 0)
+                          const pct = total > 0 ? (seg.value / total) * 100 : 0
+                          const isActive = openFilterSymbol.trim().toUpperCase() === seg.label
+                          const isDimmed = openFilterSymbol.trim() !== '' && !isActive
+                          return (
+                            <div
+                              key={`sym-${group.category}-${seg.label}`}
+                              className="coverage-asset-pie-legend-item"
+                              style={{
+                                cursor: 'pointer',
+                                opacity: isDimmed ? 0.38 : 1,
+                                borderRadius: 4,
+                                padding: group.category === 'Stocks' ? '0.03rem 0.16rem' : '0.06rem 0.25rem',
+                                background: isActive ? `color-mix(in oklab, ${seg.color} 14%, transparent)` : 'transparent',
+                                transition: 'opacity 0.18s, background 0.15s',
+                                fontSize: group.category === 'Stocks' ? '0.74rem' : undefined,
+                              }}
+                              onClick={() => {
+                                const curr = openFilterSymbol.trim().toUpperCase()
+                                setOpenFilterSymbol(curr === seg.label ? '' : seg.label)
+                                if (curr !== seg.label) setChartTypeFilter(null)
+                              }}
+                              title={`Click to filter: ${seg.label}`}
+                            >
+                              <span className="coverage-asset-pie-dot" style={{ background: seg.color }} />
+                              <span className="coverage-asset-pie-legend-label">{seg.label}</span>
+                              <span className="coverage-asset-pie-legend-pct">{pct.toFixed(1)}%</span>
+                              <span className="coverage-asset-pie-legend-value">{fmtMvAbbrev(seg.value)}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '140px minmax(0, 1fr)', alignItems: 'center', gap: '0.6rem' }}>
+                <PositionDonutChart
+                  title="Category Weight"
+                  segments={underlyingCategorySegments}
+                  activeLabel={activeCategoryWeightFilter}
+                  onSegmentClick={handleCategoryWeightSelect}
+                  interactive
+                  showLegend={false}
+                  embedded
+                showActiveChip={false}
+                />
+                <div className="coverage-asset-pie-legend" style={{ minWidth: 0, flexDirection: 'column', gap: '0.25rem' }}>
+                  {underlyingCategorySegments.map(seg => {
+                    const total = underlyingCategorySegments.reduce((acc, s) => acc + s.value, 0)
+                    const pct = total > 0 ? (seg.value / total) * 100 : 0
+                    const isActive = activeCategoryWeightFilter === seg.label
+                    return (
+                      <div
+                        key={`cat-${seg.label}`}
+                        className="coverage-asset-pie-legend-item"
+                        style={{
+                          cursor: 'pointer',
+                          borderRadius: 4,
+                          padding: '0.06rem 0.25rem',
+                          background: isActive ? `color-mix(in oklab, ${seg.color} 14%, transparent)` : 'transparent',
+                          transition: 'background 0.15s ease',
+                        }}
+                        onClick={() => handleCategoryWeightSelect(seg.label)}
+                        title={`Switch instruments tab: ${seg.label}`}
+                      >
+                        <span className="coverage-asset-pie-dot" style={{ background: seg.color }} />
+                        <span className="coverage-asset-pie-legend-label">{seg.label}</span>
+                        <span className="coverage-asset-pie-legend-pct">{pct.toFixed(1)}%</span>
+                        <span className="coverage-asset-pie-legend-value">{fmtMvAbbrev(seg.value)}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+            {!anyUnderlyingCategoryEnabled && (
+              <p className="section-hint" style={{ marginTop: '0.45rem' }}>
+                Turn on at least one category to show symbol proportions.
+              </p>
+            )}
+          </div>
+          <div className="coverage-asset-pie-section" style={{ minWidth: 0, maxWidth: 'none' }}>
+            <div className="coverage-asset-pie-header">
+              <span className="coverage-asset-pie-title">Option</span>
+              <div
+                style={{
+                  marginLeft: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-end',
+                  gap: '0.12rem',
+                  minWidth: 0,
+                  maxWidth: '100%',
+                  textAlign: 'right',
+                }}
+              >
+                <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '0.25rem 0.4rem', fontSize: '0.72rem', lineHeight: 1.25, color: 'var(--color-text-muted)' }}>
+                  <span>Option / Underlying Stock</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-main)', fontWeight: 600 }}>
+                    {positionTypeSummary.optionPct.toFixed(1)}% / {positionTypeSummary.stockPct.toFixed(1)}%
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '0.25rem 0.4rem', fontSize: '0.72rem', lineHeight: 1.25, color: 'var(--color-text-muted)' }}>
+                  <span>Projected annual return</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-main)', fontWeight: 600 }}>
+                    {positionTypeSummary.projectedAnnualReturnPct >= 0 ? '+' : ''}{positionTypeSummary.projectedAnnualReturnPct.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '140px minmax(0, 1fr)', alignItems: 'center', gap: '0.6rem' }}>
+              <PositionDonutChart
+                title="Detail"
+                segments={optionDetailSegments}
+                activeLabel={optionDetailActiveLabel}
+                onSegmentClick={label => {
+                  if (label === optionDetailActiveLabel) {
+                    setOptionDetailActiveLabel(null)
+                    return
+                  }
+                  setOptionDetailActiveLabel(label)
+                  setOpenTab('options')
+                }}
+                showLegend={false}
+                embedded
+              />
+              <div className="coverage-asset-pie-legend" style={{ minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', gap: '0.25rem 0.4rem' }}>
+                {optionDetailSegments.map(seg => {
+                  const total = optionDetailSegments.reduce((acc, s) => acc + s.value, 0)
+                  const pct = total > 0 ? (seg.value / total) * 100 : 0
+                  const isActive = optionDetailActiveLabel === seg.label
+                  return (
+                    <div
+                      key={`opt-detail-${seg.label}`}
+                      className="coverage-asset-pie-legend-item"
+                      style={{
+                        cursor: 'pointer',
+                        borderRadius: 4,
+                        padding: '0.06rem 0.25rem',
+                        background: isActive ? `color-mix(in oklab, ${seg.color} 14%, transparent)` : 'transparent',
+                      }}
+                      onClick={() => {
+                        if (optionDetailActiveLabel === seg.label) setOptionDetailActiveLabel(null)
+                        else {
+                          setOptionDetailActiveLabel(seg.label)
+                          setOpenTab('options')
+                        }
+                      }}
+                      title={`Filter by ${seg.label}`}
+                    >
+                      <span className="coverage-asset-pie-dot" style={{ background: seg.color }} />
+                      <span className="coverage-asset-pie-legend-label">{seg.label}</span>
+                      <span className="coverage-asset-pie-legend-pct">{pct.toFixed(1)}%</span>
+                      <span className="coverage-asset-pie-legend-value">{fmtMvAbbrev(seg.value)}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '140px minmax(0, 1fr)', alignItems: 'center', gap: '0.6rem', marginTop: '0.2rem' }}>
+              <PositionDonutChart
+                title="Category"
+                segments={optionCategorySegments}
+                activeLabel={null}
+                onSegmentClick={() => {}}
+                interactive={false}
+                showLegend={false}
+                embedded
+              />
+              <div className="coverage-asset-pie-legend" style={{ minWidth: 0, flexDirection: 'column', gap: '0.22rem' }}>
+                {optionCategorySegments.map(seg => {
+                  const total = optionCategorySegments.reduce((acc, s) => acc + s.value, 0)
+                  const pct = total > 0 ? (seg.value / total) * 100 : 0
+                  return (
+                    <div key={`opt-cat-${seg.label}`} className="coverage-asset-pie-legend-item" style={{ padding: '0.06rem 0.25rem' }}>
+                      <span className="coverage-asset-pie-dot" style={{ background: seg.color }} />
+                      <span className="coverage-asset-pie-legend-label">{seg.label}</span>
+                      <span className="coverage-asset-pie-legend-pct">{pct.toFixed(1)}%</span>
+                      <span className="coverage-asset-pie-legend-value">{fmtMvAbbrev(seg.value)}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+          <div className="coverage-asset-pie-section" style={{ minWidth: 0, maxWidth: 'none' }}>
+            <div className="coverage-asset-pie-header">
+              <span className="coverage-asset-pie-title">Stock & Option Performance</span>
+            </div>
+            <div className="coverage-asset-pie-legend" style={{ marginBottom: '0.3rem', flexDirection: 'row', flexWrap: 'wrap', gap: '0.3rem 0.45rem' }}>
+              <div className="coverage-asset-pie-legend-item" style={{ padding: '0.06rem 0.25rem' }}>
+                <span className="coverage-asset-pie-legend-label">Option UN PNL</span>
+                <span className={`coverage-asset-pie-legend-pct ${performancePanelData.optionUnrealized >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                  {fmtUsd(performancePanelData.optionUnrealized)}
+                </span>
+              </div>
+              <div className="coverage-asset-pie-legend-item" style={{ padding: '0.06rem 0.25rem' }}>
+                <span className="coverage-asset-pie-legend-label">Stock UN PNL</span>
+                <span className={`coverage-asset-pie-legend-pct ${performancePanelData.stockUnrealized >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                  {fmtUsd(performancePanelData.stockUnrealized)}
+                </span>
+              </div>
+              <div className="coverage-asset-pie-legend-item" style={{ padding: '0.06rem 0.25rem' }}>
+                <span className="coverage-asset-pie-legend-label">Total UN PNL</span>
+                <span className={`coverage-asset-pie-legend-pct ${performancePanelData.totalUnrealized >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                  {fmtUsd(performancePanelData.totalUnrealized)}
+                </span>
+              </div>
+            </div>
+            <div style={{ border: '1px solid var(--color-border)', borderRadius: 8, padding: '0.3rem 0.35rem', background: 'var(--color-surface-elevated)' }}>
+              {performancePanelData.candles.length === 0 ? (
+                <p className="section-hint" style={{ margin: 0 }}>No execution data for K-line yet.</p>
+              ) : (
+                <svg viewBox="0 0 360 170" width="100%" height="170" role="img" aria-label="Stock and Option performance K-line chart">
+                  {(() => {
+                    const candles = performancePanelData.candles
+                    const padL = 14, padR = 10, padT = 8, padB = 22
+                    const w = 360 - padL - padR
+                    const h = 170 - padT - padB
+                    let minP = Infinity, maxP = -Infinity
+                    for (const c of candles) {
+                      if (c.low < minP) minP = c.low
+                      if (c.high > maxP) maxP = c.high
+                    }
+                    const span = Math.max(1e-6, maxP - minP)
+                    const step = w / Math.max(1, candles.length)
+                    const xOf = (i: number) => padL + step * i + step * 0.5
+                    const yOf = (p: number) => padT + (maxP - p) / span * h
+                    const bodyW = Math.max(3, Math.min(10, step * 0.58))
+                    return (
+                      <>
+                        <line x1={padL} y1={padT + h} x2={padL + w} y2={padT + h} stroke="var(--color-border)" strokeWidth="1" />
+                        {candles.map((c, i) => {
+                          const x = xOf(i)
+                          const yHigh = yOf(c.high)
+                          const yLow = yOf(c.low)
+                          const yOpen = yOf(c.open)
+                          const yClose = yOf(c.close)
+                          const up = c.close >= c.open
+                          const fill = up ? '#22c55e' : '#ef4444'
+                          const yTop = Math.min(yOpen, yClose)
+                          const bh = Math.max(1.2, Math.abs(yOpen - yClose))
+                          return (
+                            <g key={`${c.day}-${i}`}>
+                              <line x1={x} y1={yHigh} x2={x} y2={yLow} stroke={fill} strokeWidth="1.2" opacity="0.95" />
+                              <rect x={x - bodyW / 2} y={yTop} width={bodyW} height={bh} fill={fill} opacity="0.88" rx="0.8" />
+                            </g>
+                          )
+                        })}
+                      </>
+                    )
+                  })()}
+                </svg>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <section className="replay-section replay-section-trade-records" aria-label="Open positions">
           <div className="replay-toolbar">
             <div className="replay-fetch-range-group" aria-label="Position filters">
@@ -2981,6 +3817,12 @@ export function PositionsPage({
                   <p className="section-hint replay-portfolio-tab-hint">
                     {openPositionsTabHint(openTab)}
                   </p>
+                  {chartTypeFilter && (
+                    <button type="button" className="pos-comp-filter-chip" onClick={() => setChartTypeFilter(null)}>
+                      <svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="2.2" style={{ flexShrink: 0 }}><path d="M9 3 3 9M3 3l6 6"/></svg>
+                      Type: {chartTypeFilter}
+                    </button>
+                  )}
                 </div>
               </div>
               {openTab === 'instance' ? (
@@ -4240,7 +5082,7 @@ export function PositionsPage({
                   {optionsTabPositions.length === 0 ? (
                     <p className="section-hint">No open option positions under the current filters.</p>
                   ) : (
-                <div className="replay-portfolio-table-wrap">
+                <div className="replay-portfolio-table-wrap replay-portfolio-table-wrap--no-scroll">
                   <table className="table-operations replay-opt-groups positions-opt-main-table">
                     <colgroup>
                       <col className="pom-col-expand" />
@@ -4254,8 +5096,6 @@ export function PositionsPage({
                       <col className="pom-col-quote" />
                       <col className="pom-col-time" />
                       <col className="pom-col-unpnl" />
-                      <col className="pom-col-pool" />
-                      <col className="pom-col-account" />
                       <col className="pom-col-opp" />
                       <col className="pom-col-actions" />
                     </colgroup>
@@ -4295,8 +5135,6 @@ export function PositionsPage({
                             return [th]
                           })
                         })()}
-                        <th>Pool</th>
-                        <th>Account</th>
                         <th title="Opportunity">Opp</th>
                         <th className="replay-opt-actions-cell">Actions</th>
                       </tr>
@@ -4499,8 +5337,6 @@ export function PositionsPage({
                                     )
                                   })()}
                                 </td>
-                                <td className="replay-muted">{pos.pool_label}</td>
-                                <td className="positions-opt-account-cell">{pos.account_id || '—'}</td>
                                 <td className="replay-strategy-opp-cell positions-opt-opp-hint-cell">
                                   {execCount === 0 ? '—' : (
                                     <span className="replay-muted" title={`${execCount} execution${execCount > 1 ? 's' : ''} — expand row`}>
@@ -4514,10 +5350,10 @@ export function PositionsPage({
                             const execRows = isPosExpanded
                               ? [
                                   ...execLists.final.map((ex, ei) =>
-                                    renderOpenOptionExecutionRow(pos, posKey, ex, ei, 'final', execLists.final, execLists.tws, false),
+                                    renderOpenOptionExecutionRow(pos, posKey, ex, ei, 'final', execLists.final, execLists.tws, false, false),
                                   ),
                                   ...execLists.tws.map((ex, ei) =>
-                                    renderOpenOptionExecutionRow(pos, posKey, ex, ei, 'tws', execLists.final, execLists.tws, false),
+                                    renderOpenOptionExecutionRow(pos, posKey, ex, ei, 'tws', execLists.final, execLists.tws, false, false),
                                   ),
                                 ]
                               : []
@@ -4526,7 +5362,7 @@ export function PositionsPage({
                     </tbody>
                     <tfoot>
                       <tr className="replay-opt-tfoot-total">
-                        <td colSpan={14} className="replay-opt-tfoot-label">Total</td>
+                        <td colSpan={12} className="replay-opt-tfoot-label">Total</td>
                         <td>
                           <span className="replay-pnl-unrealized">
                             {fmtUsd(optionsTabPositions.reduce((acc, p) => acc + p.unrealized_pnl, 0))}
