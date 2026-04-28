@@ -3,6 +3,7 @@
 import json
 import logging
 import math
+import os
 from datetime import date, datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -445,3 +446,29 @@ def _rows_to_executions(rows: Any, cur: Any) -> List[Dict[str, Any]]:
         _fill_contract_key_for_opt(d)
         out.append(d)
     return out
+
+
+# STK: if contract_quote_live is older than this (sec) or has no NBBO, prefer stock_day close for Last/price.
+STK_LIVE_STALE_SEC = float(os.environ.get("POSITIONS_STK_LIVE_STALE_SEC", str(4 * 3600)))
+
+
+def stk_contract_quote_stale_for_positions(p: Dict[str, Any]) -> bool:
+    """True when NBBO or heartbeat suggests IB live should not drive STK display price."""
+    bid = p.get("price_bid")
+    ask = p.get("price_ask")
+    if bid is None and ask is None:
+        return True
+    pu = p.get("price_updated_at")
+    if pu is None:
+        return True
+    try:
+        if hasattr(pu, "timestamp"):
+            ts = float(pu.timestamp())
+        elif isinstance(pu, (int, float)) and math.isfinite(float(pu)):
+            ts = float(pu)
+        else:
+            return True
+    except (TypeError, ValueError, OSError):
+        return True
+    age = datetime.now(timezone.utc).timestamp() - ts
+    return age > STK_LIVE_STALE_SEC

@@ -83,7 +83,10 @@ export interface IbPositionRow {
   expiry?: string
   strike?: number
   right?: string
-  /** 当前价（来自 contract_quote_live.mid/last），用于逐行计算盈亏 */
+  /**
+   * Mark / last for display and PnL. STK: live mid/last when quote is fresh (NBBO + updated_at);
+   * otherwise `public.stock_day` close (see backend `get_accounts_from_tables` / `get_stock_day_fallback_price`).
+   */
   price?: number | null
   /** 当前持仓浮动盈亏（后端用 contract_quote_live.last 与 position/avg_cost 计算） */
   unrealized_pnl?: number | null

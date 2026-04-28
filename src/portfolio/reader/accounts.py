@@ -21,6 +21,7 @@ from src.portfolio.reader.accounts_helpers import (
     _fill_contract_key_for_opt,
     _has_meaningful_commission,
     _norm_option_right,
+    stk_contract_quote_stale_for_positions,
 )
 
 logger = logging.getLogger(__name__)
@@ -254,6 +255,8 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                         ap.strike,
                         ap.option_right,
                         ap.contract_key,
+                        ip.bid AS price_bid,
+                        ip.ask AS price_ask,
                         ip.mid AS price_mid,
                         ip.last AS price_last,
                         ip.updated_at AS price_updated_at,
@@ -342,36 +345,49 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
 
                 raw_mid = p.get("price_mid")
                 raw_last = p.get("price_last")
+                sec_typ = (p.get("sec_type") or "").strip().upper()
+
+                def _live_mid_or_last() -> Optional[float]:
+                    for candidate in (raw_mid, raw_last):
+                        if candidate is None:
+                            continue
+                        try:
+                            v = float(candidate)
+                        except (TypeError, ValueError):
+                            continue
+                        if not math.isfinite(v) or v <= 0:
+                            continue
+                        return v
+                    return None
+
+                from_live = _live_mid_or_last()
                 price_val: Optional[float] = None
-                for candidate in (raw_mid, raw_last):
-                    if candidate is None:
-                        continue
-                    try:
-                        v = float(candidate)
-                    except (TypeError, ValueError):
-                        continue
-                    if not math.isfinite(v) or v <= 0:
-                        continue
-                    price_val = v
-                    break
+                used_stock_day_price = False
+
+                if sec_typ == "STK":
+                    stale = stk_contract_quote_stale_for_positions(p)
+                    fb = market_module.get_stock_day_fallback_price(conn, p.get("symbol") or "")
+                    if from_live is not None and not stale:
+                        price_val = from_live
+                    elif fb is not None:
+                        price_val = fb[0]
+                        used_stock_day_price = True
+                        pos_dict["price_updated_at"] = fb[1]
+                        if fb[2] is not None:
+                            pos_dict["daily_prev_close"] = fb[2]
+                    elif from_live is not None:
+                        price_val = from_live
+                else:
+                    price_val = from_live
+
                 if price_val is not None:
                     pos_dict["price"] = price_val
-                else:
-                    sec_typ = (p.get("sec_type") or "").strip().upper()
-                    if sec_typ == "STK":
-                        fallback = market_module.get_stock_day_fallback_price(conn, p.get("symbol") or "")
-                        if fallback is not None:
-                            price_val = fallback[0]
-                            pos_dict["price"] = price_val
-                            pos_dict["price_updated_at"] = fallback[1]
-                            if fallback[2] is not None:
-                                pos_dict["daily_prev_close"] = fallback[2]
 
                 raw_updated = next(
                     (p[k] for k in p if k and k.lower() == "price_updated_at"),
                     p.get("price_updated_at"),
                 )
-                if raw_updated is not None:
+                if not used_stock_day_price and raw_updated is not None:
                     try:
                         if hasattr(raw_updated, "timestamp"):
                             pos_dict["price_updated_at"] = raw_updated.timestamp()
@@ -394,19 +410,22 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                         pass
 
                 price_for_pnl: Optional[float] = None
-                for candidate in (raw_last, raw_mid):
-                    if candidate is None:
-                        continue
-                    try:
-                        v = float(candidate)
-                    except (TypeError, ValueError):
-                        continue
-                    if not math.isfinite(v) or v <= 0:
-                        continue
-                    price_for_pnl = v
-                    break
-                if price_for_pnl is None and price_val is not None:
+                if used_stock_day_price:
                     price_for_pnl = price_val
+                else:
+                    for candidate in (raw_last, raw_mid):
+                        if candidate is None:
+                            continue
+                        try:
+                            v = float(candidate)
+                        except (TypeError, ValueError):
+                            continue
+                        if not math.isfinite(v) or v <= 0:
+                            continue
+                        price_for_pnl = v
+                        break
+                    if price_for_pnl is None and price_val is not None:
+                        price_for_pnl = price_val
                 pos_qty = p.get("position")
                 pos_avg = p.get("avg_cost")
                 sec_type = (p.get("sec_type") or "").strip().upper()

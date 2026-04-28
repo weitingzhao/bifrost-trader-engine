@@ -987,6 +987,557 @@ class MassiveClient:
                 return {"results": [], "error": logical}
         return data if isinstance(data, dict) else {"results": []}
 
+    # ── Stock Fundamentals (vX/reference/financials + Short Interest / Short Volume / Float) ──
+
+    _FISCAL_PERIOD_QUARTER_MAP = {"Q1": 1, "Q2": 2, "Q3": 3, "Q4": 4}
+
+    def _fetch_stock_financials_vx(
+        self,
+        ticker: str,
+        section: Optional[str] = None,
+        *,
+        timeframe: Optional[str] = None,
+        fiscal_year: Optional[int] = None,
+        fiscal_quarter: Optional[int] = None,
+        period_end: Optional[str] = None,
+        filing_date: Optional[str] = None,
+        limit: int = 10,
+        sort: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Call /vX/reference/financials (starter-tier) and optionally extract a section.
+
+        section: 'income_statement' | 'balance_sheet' | 'cash_flow_statement' | None (full)
+        """
+        ticker = (ticker or "").strip().upper()
+        if not ticker or not self._api_key:
+            return {"results": [], "error": "ticker or api key missing"}
+        params: Dict[str, Any] = {"ticker": ticker, "limit": min(max(int(limit), 1), 100)}
+        if timeframe:
+            tf = timeframe.strip().lower()
+            if tf == "trailing_twelve_months":
+                tf = "ttm"
+            params["timeframe"] = tf
+        if period_end:
+            params["period_of_report_date"] = period_end
+        if filing_date:
+            params["filing_date"] = filing_date
+        if sort:
+            params["sort"] = sort
+            params["order"] = "desc" if ".desc" in sort else "asc"
+        status, data = self._get("/vX/reference/financials", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        if not isinstance(data, dict):
+            return {"results": []}
+
+        results = data.get("results")
+        if not isinstance(results, list):
+            return data
+
+        # Client-side fiscal_year / fiscal_quarter filtering (vX doesn't support these as params)
+        if fiscal_year is not None or fiscal_quarter is not None:
+            filtered = []
+            for row in results:
+                if fiscal_year is not None and str(row.get("fiscal_year", "")) != str(fiscal_year):
+                    continue
+                if fiscal_quarter is not None:
+                    fp = str(row.get("fiscal_period", "")).upper()
+                    rq = self._FISCAL_PERIOD_QUARTER_MAP.get(fp)
+                    if rq != fiscal_quarter:
+                        continue
+                filtered.append(row)
+            results = filtered
+
+        if section:
+            transformed = []
+            for row in results:
+                fins = row.get("financials", {})
+                sec_data = fins.get(section, {})
+                flat: Dict[str, Any] = {
+                    "start_date": row.get("start_date"),
+                    "end_date": row.get("end_date"),
+                    "filing_date": row.get("filing_date"),
+                    "timeframe": row.get("timeframe"),
+                    "fiscal_period": row.get("fiscal_period"),
+                    "fiscal_year": row.get("fiscal_year"),
+                    "company_name": row.get("company_name"),
+                    "tickers": row.get("tickers"),
+                }
+                for field_name, field_val in sec_data.items():
+                    if isinstance(field_val, dict):
+                        flat[field_name] = field_val.get("value")
+                    else:
+                        flat[field_name] = field_val
+                transformed.append(flat)
+            out = dict(data)
+            out["results"] = transformed
+            return out
+
+        return data
+
+    def fetch_stock_income_statements(self, ticker: str, **kwargs: Any) -> Dict[str, Any]:
+        """GET /vX/reference/financials → income_statement section."""
+        return self._fetch_stock_financials_vx(ticker, "income_statement", **kwargs)
+
+    def fetch_stock_balance_sheets(self, ticker: str, **kwargs: Any) -> Dict[str, Any]:
+        """GET /vX/reference/financials → balance_sheet section."""
+        return self._fetch_stock_financials_vx(ticker, "balance_sheet", **kwargs)
+
+    def fetch_stock_cash_flow_statements(self, ticker: str, **kwargs: Any) -> Dict[str, Any]:
+        """GET /vX/reference/financials → cash_flow_statement section."""
+        return self._fetch_stock_financials_vx(ticker, "cash_flow_statement", **kwargs)
+
+    def fetch_stock_ratios(
+        self,
+        ticker: str,
+        *,
+        limit: int = 10,
+        sort: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Compute key ratios from /vX/reference/financials data."""
+        data = self._fetch_stock_financials_vx(ticker, None, limit=limit, sort=sort)
+        if data.get("error"):
+            return data
+        results = data.get("results")
+        if not isinstance(results, list):
+            return {"results": [], "error": "unexpected response"}
+
+        ratios_list: List[Dict[str, Any]] = []
+        for row in results:
+            fins = row.get("financials", {})
+            inc = fins.get("income_statement", {})
+            bs = fins.get("balance_sheet", {})
+
+            def _val(section: Dict, key: str) -> Optional[float]:
+                v = section.get(key)
+                if isinstance(v, dict):
+                    v = v.get("value")
+                if v is None:
+                    return None
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return None
+
+            revenue = _val(inc, "revenues")
+            gross = _val(inc, "gross_profit")
+            op_inc = _val(inc, "operating_income_loss")
+            net_inc = _val(inc, "net_income_loss")
+            assets = _val(bs, "assets")
+            equity = _val(bs, "equity")
+            liabilities = _val(bs, "liabilities")
+            cur_assets = _val(bs, "current_assets")
+            cur_liab = _val(bs, "current_liabilities")
+            eps = _val(inc, "basic_earnings_per_share")
+            diluted_eps = _val(inc, "diluted_earnings_per_share")
+
+            entry: Dict[str, Any] = {
+                "start_date": row.get("start_date"),
+                "end_date": row.get("end_date"),
+                "timeframe": row.get("timeframe"),
+                "fiscal_period": row.get("fiscal_period"),
+                "fiscal_year": row.get("fiscal_year"),
+                "company_name": row.get("company_name"),
+                "basic_earnings_per_share": eps,
+                "diluted_earnings_per_share": diluted_eps,
+                "return_on_equity": round(net_inc / equity, 4) if net_inc is not None and equity else None,
+                "return_on_assets": round(net_inc / assets, 4) if net_inc is not None and assets else None,
+                "debt_to_equity": round(liabilities / equity, 4) if liabilities is not None and equity else None,
+                "current_ratio": round(cur_assets / cur_liab, 4) if cur_assets is not None and cur_liab else None,
+                "gross_margin": round(gross / revenue, 4) if gross is not None and revenue else None,
+                "operating_margin": round(op_inc / revenue, 4) if op_inc is not None and revenue else None,
+                "net_margin": round(net_inc / revenue, 4) if net_inc is not None and revenue else None,
+                "revenue": revenue,
+                "net_income": net_inc,
+                "total_assets": assets,
+                "total_equity": equity,
+                "total_liabilities": liabilities,
+            }
+            ratios_list.append(entry)
+
+        out = dict(data)
+        out["results"] = ratios_list
+        return out
+
+    def fetch_stock_short_interest(
+        self,
+        ticker: str,
+        *,
+        settlement_date: Optional[str] = None,
+        limit: int = 10,
+        sort: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /stocks/v1/short-interest — shares sold short, days-to-cover, avg daily volume."""
+        ticker = (ticker or "").strip().upper()
+        if not ticker or not self._api_key:
+            return {"results": [], "error": "ticker or api key missing"}
+        params: Dict[str, Any] = {"ticker": ticker, "limit": min(max(int(limit), 1), 1000)}
+        if settlement_date:
+            params["settlement_date"] = settlement_date
+        if sort:
+            params["sort"] = sort
+        status, data = self._get("/stocks/v1/short-interest", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_stock_short_volume(
+        self,
+        ticker: str,
+        *,
+        date: Optional[str] = None,
+        limit: int = 10,
+        sort: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /stocks/v1/short-volume — daily short sale volume per venue + short_volume_ratio."""
+        ticker = (ticker or "").strip().upper()
+        if not ticker or not self._api_key:
+            return {"results": [], "error": "ticker or api key missing"}
+        params: Dict[str, Any] = {"ticker": ticker, "limit": min(max(int(limit), 1), 1000)}
+        if date:
+            params["date"] = date
+        if sort:
+            params["sort"] = sort
+        status, data = self._get("/stocks/v1/short-volume", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_stock_float(
+        self,
+        ticker: str,
+        *,
+        limit: int = 10,
+        sort: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /stocks/vX/float — free_float shares and free_float_percent (experimental vX)."""
+        ticker = (ticker or "").strip().upper()
+        if not ticker or not self._api_key:
+            return {"results": [], "error": "ticker or api key missing"}
+        params: Dict[str, Any] = {"ticker": ticker, "limit": min(max(int(limit), 1), 5000)}
+        if sort:
+            params["sort"] = sort
+        status, data = self._get("/stocks/vX/float", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
+    # ── SEC Filings & Disclosures ──────────────────────────────────────────────
+
+    def fetch_edgar_index(
+        self,
+        *,
+        ticker: Optional[str] = None,
+        cik: Optional[str] = None,
+        form_type: Optional[str] = None,
+        filing_date: Optional[str] = None,
+        filing_date_gt: Optional[str] = None,
+        filing_date_gte: Optional[str] = None,
+        filing_date_lt: Optional[str] = None,
+        filing_date_lte: Optional[str] = None,
+        limit: int = 100,
+        sort: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /stocks/filings/vX/index — EDGAR filing index search."""
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        params: Dict[str, Any] = {"limit": min(max(int(limit), 1), 50000)}
+        if ticker: params["ticker"] = ticker.strip().upper()
+        if cik: params["cik"] = cik.strip()
+        if form_type: params["form_type"] = form_type
+        if filing_date: params["filing_date"] = filing_date
+        if filing_date_gt: params["filing_date.gt"] = filing_date_gt
+        if filing_date_gte: params["filing_date.gte"] = filing_date_gte
+        if filing_date_lt: params["filing_date.lt"] = filing_date_lt
+        if filing_date_lte: params["filing_date.lte"] = filing_date_lte
+        if sort: params["sort"] = sort
+        status, data = self._get("/stocks/filings/vX/index", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_10k_sections(
+        self,
+        *,
+        ticker: Optional[str] = None,
+        cik: Optional[str] = None,
+        section: Optional[str] = None,
+        filing_date: Optional[str] = None,
+        filing_date_gt: Optional[str] = None,
+        filing_date_gte: Optional[str] = None,
+        filing_date_lt: Optional[str] = None,
+        filing_date_lte: Optional[str] = None,
+        period_end: Optional[str] = None,
+        period_end_gte: Optional[str] = None,
+        period_end_lte: Optional[str] = None,
+        limit: int = 10,
+        sort: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /stocks/filings/10-K/vX/sections — plain-text sections from annual 10-K filings."""
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        params: Dict[str, Any] = {"limit": min(max(int(limit), 1), 99)}
+        if ticker: params["ticker"] = ticker.strip().upper()
+        if cik: params["cik"] = cik.strip()
+        if section: params["section"] = section
+        if filing_date: params["filing_date"] = filing_date
+        if filing_date_gt: params["filing_date.gt"] = filing_date_gt
+        if filing_date_gte: params["filing_date.gte"] = filing_date_gte
+        if filing_date_lt: params["filing_date.lt"] = filing_date_lt
+        if filing_date_lte: params["filing_date.lte"] = filing_date_lte
+        if period_end: params["period_end"] = period_end
+        if period_end_gte: params["period_end.gte"] = period_end_gte
+        if period_end_lte: params["period_end.lte"] = period_end_lte
+        if sort: params["sort"] = sort
+        status, data = self._get("/stocks/filings/10-K/vX/sections", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_8k_text(
+        self,
+        *,
+        ticker: Optional[str] = None,
+        cik: Optional[str] = None,
+        form_type: Optional[str] = None,
+        filing_date: Optional[str] = None,
+        filing_date_gt: Optional[str] = None,
+        filing_date_gte: Optional[str] = None,
+        filing_date_lt: Optional[str] = None,
+        filing_date_lte: Optional[str] = None,
+        limit: int = 10,
+        sort: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /stocks/filings/8-K/vX/text — parsed plain-text from 8-K current report Items."""
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        params: Dict[str, Any] = {"limit": min(max(int(limit), 1), 99)}
+        if ticker: params["ticker"] = ticker.strip().upper()
+        if cik: params["cik"] = cik.strip()
+        if form_type: params["form_type"] = form_type
+        if filing_date: params["filing_date"] = filing_date
+        if filing_date_gt: params["filing_date.gt"] = filing_date_gt
+        if filing_date_gte: params["filing_date.gte"] = filing_date_gte
+        if filing_date_lt: params["filing_date.lt"] = filing_date_lt
+        if filing_date_lte: params["filing_date.lte"] = filing_date_lte
+        if sort: params["sort"] = sort
+        status, data = self._get("/stocks/filings/8-K/vX/text", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_13f_filings(
+        self,
+        *,
+        filer_cik: Optional[str] = None,
+        filing_date: Optional[str] = None,
+        filing_date_gt: Optional[str] = None,
+        filing_date_gte: Optional[str] = None,
+        filing_date_lt: Optional[str] = None,
+        filing_date_lte: Optional[str] = None,
+        limit: int = 100,
+        sort: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /stocks/filings/vX/13-F — institutional holdings from Form 13-F."""
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        params: Dict[str, Any] = {"limit": min(max(int(limit), 1), 1000)}
+        if filer_cik: params["filer_cik"] = filer_cik.strip()
+        if filing_date: params["filing_date"] = filing_date
+        if filing_date_gt: params["filing_date.gt"] = filing_date_gt
+        if filing_date_gte: params["filing_date.gte"] = filing_date_gte
+        if filing_date_lt: params["filing_date.lt"] = filing_date_lt
+        if filing_date_lte: params["filing_date.lte"] = filing_date_lte
+        if sort: params["sort"] = sort
+        status, data = self._get("/stocks/filings/vX/13-F", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_risk_factors(
+        self,
+        *,
+        ticker: Optional[str] = None,
+        cik: Optional[str] = None,
+        filing_date: Optional[str] = None,
+        filing_date_gt: Optional[str] = None,
+        filing_date_gte: Optional[str] = None,
+        filing_date_lt: Optional[str] = None,
+        filing_date_lte: Optional[str] = None,
+        limit: int = 100,
+        sort: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /stocks/filings/vX/risk-factors — standardized risk factor disclosures from SEC filings."""
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        params: Dict[str, Any] = {"limit": min(max(int(limit), 1), 49999)}
+        if ticker: params["ticker"] = ticker.strip().upper()
+        if cik: params["cik"] = cik.strip()
+        if filing_date: params["filing_date"] = filing_date
+        if filing_date_gt: params["filing_date.gt"] = filing_date_gt
+        if filing_date_gte: params["filing_date.gte"] = filing_date_gte
+        if filing_date_lt: params["filing_date.lt"] = filing_date_lt
+        if filing_date_lte: params["filing_date.lte"] = filing_date_lte
+        if sort: params["sort"] = sort
+        status, data = self._get("/stocks/filings/vX/risk-factors", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_risk_categories(
+        self,
+        *,
+        taxonomy: Optional[int] = None,
+        primary_category: Optional[str] = None,
+        secondary_category: Optional[str] = None,
+        tertiary_category: Optional[str] = None,
+        limit: int = 200,
+        sort: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /stocks/taxonomies/vX/risk-factors — hierarchical risk factor taxonomy."""
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        params: Dict[str, Any] = {"limit": min(max(int(limit), 1), 999)}
+        if taxonomy is not None: params["taxonomy"] = taxonomy
+        if primary_category: params["primary_category"] = primary_category
+        if secondary_category: params["secondary_category"] = secondary_category
+        if tertiary_category: params["tertiary_category"] = tertiary_category
+        if sort: params["sort"] = sort
+        status, data = self._get("/stocks/taxonomies/vX/risk-factors", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_form_3(
+        self,
+        *,
+        issuer_cik: Optional[str] = None,
+        owner_cik: Optional[str] = None,
+        tickers: Optional[str] = None,
+        form_type: Optional[str] = None,
+        filing_date: Optional[str] = None,
+        filing_date_gt: Optional[str] = None,
+        filing_date_gte: Optional[str] = None,
+        filing_date_lt: Optional[str] = None,
+        filing_date_lte: Optional[str] = None,
+        limit: int = 100,
+        sort: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /stocks/filings/vX/form-3 — initial insider ownership statements (Form 3)."""
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        params: Dict[str, Any] = {"limit": min(max(int(limit), 1), 10000)}
+        if issuer_cik: params["issuer_cik"] = issuer_cik.strip()
+        if owner_cik: params["owner_cik"] = owner_cik.strip()
+        if tickers: params["tickers"] = tickers.strip().upper()
+        if form_type: params["form_type"] = form_type
+        if filing_date: params["filing_date"] = filing_date
+        if filing_date_gt: params["filing_date.gt"] = filing_date_gt
+        if filing_date_gte: params["filing_date.gte"] = filing_date_gte
+        if filing_date_lt: params["filing_date.lt"] = filing_date_lt
+        if filing_date_lte: params["filing_date.lte"] = filing_date_lte
+        if sort: params["sort"] = sort
+        status, data = self._get("/stocks/filings/vX/form-3", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_form_4(
+        self,
+        *,
+        issuer_cik: Optional[str] = None,
+        owner_cik: Optional[str] = None,
+        tickers: Optional[str] = None,
+        form_type: Optional[str] = None,
+        transaction_code: Optional[str] = None,
+        filing_date: Optional[str] = None,
+        filing_date_gt: Optional[str] = None,
+        filing_date_gte: Optional[str] = None,
+        filing_date_lt: Optional[str] = None,
+        filing_date_lte: Optional[str] = None,
+        limit: int = 100,
+        sort: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /stocks/filings/vX/form-4 — insider ownership changes (Form 4)."""
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        params: Dict[str, Any] = {"limit": min(max(int(limit), 1), 10000)}
+        if issuer_cik: params["issuer_cik"] = issuer_cik.strip()
+        if owner_cik: params["owner_cik"] = owner_cik.strip()
+        if tickers: params["tickers"] = tickers.strip().upper()
+        if form_type: params["form_type"] = form_type
+        if transaction_code: params["transaction_code"] = transaction_code
+        if filing_date: params["filing_date"] = filing_date
+        if filing_date_gt: params["filing_date.gt"] = filing_date_gt
+        if filing_date_gte: params["filing_date.gte"] = filing_date_gte
+        if filing_date_lt: params["filing_date.lt"] = filing_date_lt
+        if filing_date_lte: params["filing_date.lte"] = filing_date_lte
+        if sort: params["sort"] = sort
+        status, data = self._get("/stocks/filings/vX/form-4", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
     def fetch_ipos_for_ticker(self, ticker: str, limit: int = 100) -> Dict[str, Any]:
         """GET /v3/reference/ipos?ticker=… — IPO reference (per-ticker filter)."""
         ticker = (ticker or "").strip().upper()

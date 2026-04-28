@@ -26,6 +26,8 @@ python -m pip install -r requirements.txt
 python -m pip install -e .
 ```
 
+**`stock_day` Gap Check** uses PostgreSQL `public.reference_us_holidays` (`exchange = 'NYSE'`) plus weekends. Backfill 2020–2024 NYSE closures: `scripts/db/reference_us_holidays_nyse_2020_2024.sql` (ad-hoc closures must be inserted manually).
+
 **Windows** (if `pip` or `python` are not on PATH): run from project root `.\os\win\install.cmd` or `.\os\win\install.ps1`. See [os/win/README.md](os/win/README.md).
 
 ## Config

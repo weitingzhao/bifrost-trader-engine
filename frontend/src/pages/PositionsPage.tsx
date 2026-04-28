@@ -681,6 +681,8 @@ interface DonutSegment {
   color: string
   /** Option Detail: underlying stock cost / MV (colored) or margin line. */
   optionDetailFoot?: OptionDetailFootnote
+  /** Category detail legend: hover copy for how market value was computed. */
+  marketValueTooltip?: string
 }
 type UnderlyingCategoryFilter = 'Stocks' | 'Fixed Income' | 'Cash-like'
 
@@ -697,6 +699,27 @@ function fmtMvAbbrev(v: number): string {
   if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
   if (v >= 1_000)     return `$${(v / 1_000).toFixed(0)}K`
   return `$${Math.round(v)}`
+}
+
+function fmtQtyForMvTooltip(n: number): string {
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 8 }).format(n)
+}
+
+/** Explains ring MV for one symbol: sum of |position| × mark price per portfolio row. */
+function buildMarketValueTooltip(
+  symbol: string,
+  totalMv: number,
+  lines: { qty: number; price: number; mv: number }[],
+): string {
+  const head =
+    'Market value = |position| × mark price (per row; summed if multiple rows or accounts).'
+  if (lines.length === 0) return head
+  if (lines.length === 1) {
+    const { qty, price, mv } = lines[0]
+    return `${head}\nExample (${symbol}): ${fmtQtyForMvTooltip(qty)} × ${fmtUsd(price)} = ${fmtUsd(mv)}`
+  }
+  const body = lines.map(l => `  ${fmtQtyForMvTooltip(l.qty)} × ${fmtUsd(l.price)} = ${fmtUsd(l.mv)}`).join('\n')
+  return `${head}\nExample (${symbol}):\n${body}\n  → ${fmtUsd(totalMv)}`
 }
 
 /** Open Positions account bubbles: row visible when it matches a selected HOST / Secondary (multi-select). */
@@ -1177,6 +1200,8 @@ export function PositionsPage({
     'Fixed Income': false,
     'Cash-like': false,
   })
+  /** Same scope as Account / Asset mix chips: All vs one IB account for top-row portfolio donuts. */
+  const [stockCoverageSectionAccount, setStockCoverageSectionAccount] = useState<string>('all')
   const [stockInspector, setStockInspector] = useState<{
     symbol: string
     accountId: string
@@ -1980,7 +2005,8 @@ export function PositionsPage({
     })
   }, [livePositions, chartTypeFilter])
 
-  // Price resolution for donut charts: snapshot price → live quote → avgCost (cost basis)
+  // Price resolution for donut charts: snapshot price → live quote → avgCost (cost basis).
+  // All return values are per-share so callers can apply the OPT ×100 multiplier uniformly.
   const resolveDonutPrice = useCallback((pos: IbPositionRow): number | null => {
     if (pos.price != null && Number.isFinite(Number(pos.price)) && Number(pos.price) > 0)
       return Math.abs(Number(pos.price))
@@ -1990,8 +2016,13 @@ export function PositionsPage({
       const qp = q?.last ?? q?.mid
       if (qp != null && Number.isFinite(qp) && qp > 0) return Math.abs(qp)
     }
-    if (pos.avgCost != null && Number.isFinite(Number(pos.avgCost)) && Math.abs(Number(pos.avgCost)) > 0)
-      return Math.abs(Number(pos.avgCost))
+    if (pos.avgCost != null && Number.isFinite(Number(pos.avgCost)) && Math.abs(Number(pos.avgCost)) > 0) {
+      const ac = Math.abs(Number(pos.avgCost))
+      // IB avgCost for US options is per-contract (already includes ×100 multiplier);
+      // normalize to per-share so the caller's `qty × price × 100` stays correct.
+      if ((pos.secType ?? '').toUpperCase() === 'OPT') return ac / 100
+      return ac
+    }
     return null
   }, [quotesMap])
 
@@ -2002,37 +2033,15 @@ export function PositionsPage({
     return 'Stocks'
   }, [])
 
-  // Plan A: donut by underlying symbol (unfiltered — full portfolio snapshot)
+  // Donut by underlying symbol — STK only (options have their own column).
   const symbolDonutSegments = useMemo((): DonutSegment[] => {
-    const accounts = status?.portfolio?.accounts ?? []
-    const bySymbol = new Map<string, number>()
+    const all = status?.portfolio?.accounts ?? []
+    const acct = stockCoverageSectionAccount
+    const accounts = acct === 'all' ? all : all.filter(a => (a.account_id ?? '').trim() === acct)
+    const bySymbol = new Map<string, { total: number; lines: { qty: number; price: number; mv: number }[] }>()
     for (const account of accounts) {
       for (const pos of account.positions ?? []) {
-        const cat = resolveUnderlyingCategory(pos)
-        if (!underlyingCategoryFilter[cat]) continue
-        const qty = Number(pos.position)
-        if (!Number.isFinite(qty) || qty === 0) continue
-        const price = resolveDonutPrice(pos)
-        if (price == null) continue
-        const sym     = (pos.symbol ?? '?').toUpperCase()
-        const secType = (pos.secType ?? '').toUpperCase()
-        const mv      = Math.abs(qty) * price * (secType === 'OPT' ? 100 : 1)
-        bySymbol.set(sym, (bySymbol.get(sym) ?? 0) + mv)
-      }
-    }
-    return [...bySymbol.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([sym, mv], i) => ({
-        label: sym, value: mv,
-        color: DONUT_SYMBOL_COLORS[i % DONUT_SYMBOL_COLORS.length],
-      }))
-  }, [status?.portfolio?.accounts, resolveDonutPrice, resolveUnderlyingCategory, underlyingCategoryFilter])
-
-  const categoryDetailLegendGroups = useMemo((): { category: UnderlyingCategoryFilter; segments: DonutSegment[] }[] => {
-    const accounts = status?.portfolio?.accounts ?? []
-    const byCategorySymbol = new Map<UnderlyingCategoryFilter, Map<string, number>>()
-    for (const account of accounts) {
-      for (const pos of account.positions ?? []) {
+        if ((pos.secType ?? '').toUpperCase() === 'OPT') continue
         const cat = resolveUnderlyingCategory(pos)
         if (!underlyingCategoryFilter[cat]) continue
         const qty = Number(pos.position)
@@ -2040,27 +2049,67 @@ export function PositionsPage({
         const price = resolveDonutPrice(pos)
         if (price == null) continue
         const sym = (pos.symbol ?? '?').toUpperCase()
-        const secType = (pos.secType ?? '').toUpperCase()
-        const mv = Math.abs(qty) * price * (secType === 'OPT' ? 100 : 1)
+        const mv = Math.abs(qty) * price
+        const rec = bySymbol.get(sym) ?? { total: 0, lines: [] as { qty: number; price: number; mv: number }[] }
+        rec.lines.push({ qty: Math.abs(qty), price, mv })
+        rec.total += mv
+        bySymbol.set(sym, rec)
+      }
+    }
+    return [...bySymbol.entries()]
+      .sort((a, b) => b[1].total - a[1].total)
+      .map(([sym, agg], i) => ({
+        label: sym,
+        value: agg.total,
+        color: DONUT_SYMBOL_COLORS[i % DONUT_SYMBOL_COLORS.length],
+        marketValueTooltip: buildMarketValueTooltip(sym, agg.total, agg.lines),
+      }))
+  }, [
+    status?.portfolio?.accounts,
+    resolveDonutPrice,
+    resolveUnderlyingCategory,
+    underlyingCategoryFilter,
+    stockCoverageSectionAccount,
+  ])
+
+  const categoryDetailLegendGroups = useMemo((): { category: UnderlyingCategoryFilter; segments: DonutSegment[] }[] => {
+    const all = status?.portfolio?.accounts ?? []
+    const acct = stockCoverageSectionAccount
+    const accounts = acct === 'all' ? all : all.filter(a => (a.account_id ?? '').trim() === acct)
+    const byCategorySymbol = new Map<UnderlyingCategoryFilter, Map<string, number>>()
+    for (const account of accounts) {
+      for (const pos of account.positions ?? []) {
+        if ((pos.secType ?? '').toUpperCase() === 'OPT') continue
+        const cat = resolveUnderlyingCategory(pos)
+        if (!underlyingCategoryFilter[cat]) continue
+        const qty = Number(pos.position)
+        if (!Number.isFinite(qty) || qty === 0) continue
+        const price = resolveDonutPrice(pos)
+        if (price == null) continue
+        const sym = (pos.symbol ?? '?').toUpperCase()
+        const mv = Math.abs(qty) * price
         if (!byCategorySymbol.has(cat)) byCategorySymbol.set(cat, new Map<string, number>())
         const m = byCategorySymbol.get(cat)!
         m.set(sym, (m.get(sym) ?? 0) + mv)
       }
     }
     const symbolColorMap = new Map<string, string>()
+    const mvTipBySymbol = new Map<string, string | undefined>()
     for (const seg of symbolDonutSegments) {
       if (!symbolColorMap.has(seg.label)) symbolColorMap.set(seg.label, seg.color)
+      mvTipBySymbol.set(seg.label, seg.marketValueTooltip)
     }
     return UNDERLYING_CATEGORY_ORDER
       .map(category => {
         const m = byCategorySymbol.get(category)
         if (!m || m.size === 0) return null
-        const segments = [...m.entries()]
+        const segments: DonutSegment[] = [...m.entries()]
           .sort((a, b) => b[1] - a[1])
-          .map(([label, value], idx) => ({
+          .map(([label, value], idx): DonutSegment => ({
             label,
             value,
             color: symbolColorMap.get(label) ?? DONUT_SYMBOL_COLORS[idx % DONUT_SYMBOL_COLORS.length],
+            marketValueTooltip: mvTipBySymbol.get(label),
           }))
         return { category, segments }
       })
@@ -2071,20 +2120,23 @@ export function PositionsPage({
     underlyingCategoryFilter,
     resolveDonutPrice,
     symbolDonutSegments,
+    stockCoverageSectionAccount,
   ])
 
   const underlyingCategorySegments = useMemo((): DonutSegment[] => {
-    const accounts = status?.portfolio?.accounts ?? []
+    const all = status?.portfolio?.accounts ?? []
+    const acct = stockCoverageSectionAccount
+    const accounts = acct === 'all' ? all : all.filter(a => (a.account_id ?? '').trim() === acct)
     const byCategory = new Map<UnderlyingCategoryFilter, number>()
     for (const account of accounts) {
       for (const pos of account.positions ?? []) {
+        if ((pos.secType ?? '').toUpperCase() === 'OPT') continue
         const cat = resolveUnderlyingCategory(pos)
         const qty = Number(pos.position)
         if (!Number.isFinite(qty) || qty === 0) continue
         const price = resolveDonutPrice(pos)
         if (price == null) continue
-        const secType = (pos.secType ?? '').toUpperCase()
-        const mv = Math.abs(qty) * price * (secType === 'OPT' ? 100 : 1)
+        const mv = Math.abs(qty) * price
         byCategory.set(cat, (byCategory.get(cat) ?? 0) + mv)
       }
     }
@@ -2095,7 +2147,7 @@ export function PositionsPage({
         color: UNDERLYING_CATEGORY_COLORS[cat],
       }))
       .filter(seg => seg.value > 0)
-  }, [status?.portfolio?.accounts, resolveDonutPrice, resolveUnderlyingCategory])
+  }, [status?.portfolio?.accounts, resolveDonutPrice, resolveUnderlyingCategory, stockCoverageSectionAccount])
 
   const anyUnderlyingCategoryEnabled = useMemo(
     () => UNDERLYING_CATEGORY_ORDER.some(cat => underlyingCategoryFilter[cat]),
@@ -2135,7 +2187,9 @@ export function PositionsPage({
   }, [openFilterSymbol, symbolDonutSegments])
 
   const optionDetailSegments = useMemo((): DonutSegment[] => {
-    const accounts = status?.portfolio?.accounts ?? []
+    const all = status?.portfolio?.accounts ?? []
+    const acct = stockCoverageSectionAccount
+    const accounts = acct === 'all' ? all : all.filter(a => (a.account_id ?? '').trim() === acct)
     const stkByAccount = new Map<string, IbPositionRow[]>()
     for (const account of accounts) {
       const accId = (account.account_id ?? '').trim()
@@ -2171,7 +2225,7 @@ export function PositionsPage({
         color: DONUT_SYMBOL_COLORS[i % DONUT_SYMBOL_COLORS.length],
         optionDetailFoot: bucket.foot ?? undefined,
       }))
-  }, [status?.portfolio?.accounts, resolveDonutPrice])
+  }, [status?.portfolio?.accounts, resolveDonutPrice, stockCoverageSectionAccount])
 
   const { fixedIncomeStockPositions, cashLikeStockPositions, coreStockPositions } = useMemo(() => {
     const fixedIncomeStockPositions: LivePositionRow[] = []
@@ -2666,8 +2720,6 @@ export function PositionsPage({
     out.sort((a, b) => a.symbol.localeCompare(b.symbol) || a.account_id.localeCompare(b.account_id))
     return out
   }, [stockCoverageItems])
-
-  const [stockCoverageSectionAccount, setStockCoverageSectionAccount] = useState<string>('all')
 
   const optionUnderlyingPoolMarketTotal = useMemo(() => {
     const rows =
@@ -4052,7 +4104,20 @@ export function PositionsPage({
                               title={`Click to filter: ${seg.label}`}
                             >
                               <span className="coverage-asset-pie-dot" style={{ background: seg.color }} />
-                              <span className="coverage-asset-pie-legend-label">{seg.label}</span>
+                              <span
+                                className={
+                                  seg.marketValueTooltip
+                                    ? 'coverage-asset-pie-legend-label pos-cat-symbol-mv-tooltip'
+                                    : 'coverage-asset-pie-legend-label'
+                                }
+                              >
+                                {seg.label}
+                                {seg.marketValueTooltip ? (
+                                  <span className="pos-cat-symbol-mv-tooltip-popup" role="tooltip">
+                                    {seg.marketValueTooltip}
+                                  </span>
+                                ) : null}
+                              </span>
                               <span className="coverage-asset-pie-legend-pct">{pct.toFixed(1)}%</span>
                               <span className="coverage-asset-pie-legend-value">{fmtMvAbbrev(seg.value)}</span>
                             </div>

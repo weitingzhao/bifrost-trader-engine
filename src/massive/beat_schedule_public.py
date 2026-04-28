@@ -46,6 +46,13 @@ MASSIVE_BEAT_SCHEDULE_SPEC: List[Dict[str, Any]] = [
         "note": "Runs expiration cache + option_contracts refresh in-process; not a run_massive_job enqueue.",
         "crontab_kwargs": {"hour": "*/6", "minute": 20},
     },
+    {
+        "name": "massive-stock-day-eod",
+        "task": "src.massive.tasks.beat_stock_day_eod",
+        "label": "Stock day EOD sync (daily_smart)",
+        "note": "After market close, enqueues feed_stocks_aggregate daily_smart for all watchlist STK symbols. Skips non-trading days. UTC 21:30 = 5:30pm EDT / 4:30pm EST.",
+        "crontab_kwargs": {"hour": 21, "minute": 30},
+    },
 ]
 
 

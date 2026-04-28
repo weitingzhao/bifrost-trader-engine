@@ -19309,6 +19309,40 @@ th:has(> .coverage-pool-th-held-amt) {
   white-space: nowrap;
 }
 
+/* Positions → Category Detail: hover symbol for MV = |qty| × mark (per row). */
+.coverage-asset-pie-legend-label.pos-cat-symbol-mv-tooltip {
+  position: relative;
+  cursor: help;
+  text-decoration: underline dotted color-mix(in oklab, currentColor 40%, transparent);
+  text-underline-offset: 2px;
+}
+
+.coverage-asset-pie-legend-label.pos-cat-symbol-mv-tooltip .pos-cat-symbol-mv-tooltip-popup {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 120;
+  min-width: max-content;
+  max-width: min(22rem, 85vw);
+  padding: 0.5rem 0.75rem;
+  font-size: var(--text-caption, 0.72rem);
+  font-weight: normal;
+  line-height: 1.45;
+  white-space: pre-line;
+  color: var(--color-text-muted, #7a8492);
+  background: var(--color-bg, #0f1218);
+  border: 1px solid var(--color-border, #2a313c);
+  border-radius: 6px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-fast, 0.12s ease);
+}
+
+.coverage-asset-pie-legend-label.pos-cat-symbol-mv-tooltip:hover .pos-cat-symbol-mv-tooltip-popup {
+  opacity: 1;
+}
+
 .coverage-asset-pie-legend-pct {
   font-variant-numeric: tabular-nums;
   font-weight: 600;

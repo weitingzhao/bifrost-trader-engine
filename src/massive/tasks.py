@@ -2673,6 +2673,41 @@ def beat_refresh_expirations() -> Dict[str, Any]:
     return refresh_expirations_watchlist_batch(config, config, symbols, max_symbols=batch)
 
 
+@app.task(name="src.massive.tasks.beat_stock_day_eod")
+def beat_stock_day_eod() -> Dict[str, Any]:
+    """Celery Beat: enqueue feed_stocks_aggregate daily_smart after market close (UTC 21:30)."""
+    from src.app.config import read_config
+    from src.massive.stock_ohlc_daily_smart import is_ny_session_safely_closed, ny_calendar_today
+    from src.monitor.reader.market import get_is_us_trading_day
+    from src.vendor.massive.reader import get_watchlist_optionable_stk_symbols
+
+    cfg_path = _config_path_for_task()
+    config, _ = read_config(cfg_path)
+
+    today_et = ny_calendar_today()
+    if not get_is_us_trading_day(config, today_et.isoformat()):
+        logger.info("beat_stock_day_eod: not a trading day (%s), skip", today_et.isoformat())
+        return {"ok": True, "skipped": True, "reason": "not_trading_day", "date": today_et.isoformat()}
+
+    if not is_ny_session_safely_closed():
+        logger.warning("beat_stock_day_eod: session not yet closed, skip")
+        return {"ok": True, "skipped": True, "reason": "session_not_closed"}
+
+    symbols = get_watchlist_optionable_stk_symbols(config)
+    if not symbols:
+        logger.info("beat_stock_day_eod: empty watchlist, skip")
+        return {"ok": True, "skipped": True, "reason": "empty_watchlist"}
+
+    logger.info("beat_stock_day_eod: enqueuing daily_smart for %d symbols (%s)", len(symbols), today_et.isoformat())
+    return _enqueue_massive_job("feed_stocks_aggregate", {
+        "mode": "custom_bars",
+        "custom_bars_sync_mode": "daily_smart",
+        "custom_bars_period_group": "daily",
+        "sync_all_periods": True,
+        "symbols": symbols,
+    })
+
+
 def reenqueue_massive_job_from_row(control_via_db: dict, row: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     """Submit ``run_massive_job`` on the correct queue after a row was reset to pending (Ops retry-failed)."""
     try:

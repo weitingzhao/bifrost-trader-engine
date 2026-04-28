@@ -178,6 +178,7 @@ async def market_ingest_services(request: Request) -> Dict[str, Any]:
             "process_active": active,
             "redis_control_env": redis_control_env,
             "redis_control_host": redis_control_host,
+            "redis_control_updated_at": redis_control_updated_at,
         })
     return {"ok": True, "services": out}
 

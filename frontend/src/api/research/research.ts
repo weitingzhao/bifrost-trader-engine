@@ -2131,6 +2131,111 @@ export async function fetchMassiveStockPrev(
   }
 }
 
+// ── Stock Fundamentals proxies ────────────────────────────────────────────
+
+export interface StockFundamentalsOpts {
+  timeframe?: string
+  fiscal_year?: number
+  fiscal_quarter?: number
+  period_end?: string
+  filing_date?: string
+  limit?: number
+  sort?: string
+}
+
+async function _fetchStockFundamentals(
+  path: string,
+  ticker: string,
+  opts?: StockFundamentalsOpts,
+): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  q.set('ticker', ticker.trim().toUpperCase())
+  if (opts?.timeframe) q.set('timeframe', opts.timeframe)
+  if (opts?.fiscal_year != null) q.set('fiscal_year', String(opts.fiscal_year))
+  if (opts?.fiscal_quarter != null) q.set('fiscal_quarter', String(opts.fiscal_quarter))
+  if (opts?.period_end) q.set('period_end', opts.period_end)
+  if (opts?.filing_date) q.set('filing_date', opts.filing_date)
+  if (opts?.limit != null) q.set('limit', String(opts.limit))
+  if (opts?.sort) q.set('sort', opts.sort)
+  const r = await fetch(massiveUrl(`${path}?${q.toString()}`))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  const parsed = parseMassiveTickerProxyResponse(j, r)
+  if (!parsed.ok) return { ok: false, error: parsed.error }
+  return { ok: true, data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined }
+}
+
+export function fetchMassiveStockIncomeStatements(ticker: string, opts?: StockFundamentalsOpts) {
+  return _fetchStockFundamentals('/research/massive/stocks/fundamentals/income-statements', ticker, opts)
+}
+export function fetchMassiveStockBalanceSheets(ticker: string, opts?: StockFundamentalsOpts) {
+  return _fetchStockFundamentals('/research/massive/stocks/fundamentals/balance-sheets', ticker, opts)
+}
+export function fetchMassiveStockCashFlowStatements(ticker: string, opts?: StockFundamentalsOpts) {
+  return _fetchStockFundamentals('/research/massive/stocks/fundamentals/cash-flow-statements', ticker, opts)
+}
+
+export async function fetchMassiveStockRatios(
+  ticker: string,
+  opts?: { limit?: number; sort?: string },
+): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  q.set('ticker', ticker.trim().toUpperCase())
+  if (opts?.limit != null) q.set('limit', String(opts.limit))
+  if (opts?.sort) q.set('sort', opts.sort)
+  const r = await fetch(massiveUrl(`/research/massive/stocks/fundamentals/ratios?${q.toString()}`))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  const parsed = parseMassiveTickerProxyResponse(j, r)
+  if (!parsed.ok) return { ok: false, error: parsed.error }
+  return { ok: true, data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined }
+}
+
+export async function fetchMassiveStockShortInterest(
+  ticker: string,
+  opts?: { settlement_date?: string; limit?: number; sort?: string },
+): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  q.set('ticker', ticker.trim().toUpperCase())
+  if (opts?.settlement_date) q.set('settlement_date', opts.settlement_date)
+  if (opts?.limit != null) q.set('limit', String(opts.limit))
+  if (opts?.sort) q.set('sort', opts.sort)
+  const r = await fetch(massiveUrl(`/research/massive/stocks/fundamentals/short-interest?${q.toString()}`))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  const parsed = parseMassiveTickerProxyResponse(j, r)
+  if (!parsed.ok) return { ok: false, error: parsed.error }
+  return { ok: true, data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined }
+}
+
+export async function fetchMassiveStockShortVolume(
+  ticker: string,
+  opts?: { date?: string; limit?: number; sort?: string },
+): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  q.set('ticker', ticker.trim().toUpperCase())
+  if (opts?.date) q.set('date', opts.date)
+  if (opts?.limit != null) q.set('limit', String(opts.limit))
+  if (opts?.sort) q.set('sort', opts.sort)
+  const r = await fetch(massiveUrl(`/research/massive/stocks/fundamentals/short-volume?${q.toString()}`))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  const parsed = parseMassiveTickerProxyResponse(j, r)
+  if (!parsed.ok) return { ok: false, error: parsed.error }
+  return { ok: true, data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined }
+}
+
+export async function fetchMassiveStockFloat(
+  ticker: string,
+  opts?: { limit?: number; sort?: string },
+): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  q.set('ticker', ticker.trim().toUpperCase())
+  if (opts?.limit != null) q.set('limit', String(opts.limit))
+  if (opts?.sort) q.set('sort', opts.sort)
+  const r = await fetch(massiveUrl(`/research/massive/stocks/fundamentals/float?${q.toString()}`))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  const parsed = parseMassiveTickerProxyResponse(j, r)
+  if (!parsed.ok) return { ok: false, error: parsed.error }
+  return { ok: true, data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined }
+}
+
 /** PostgreSQL-backed ticker reference: search autocomplete. */
 export interface TickerReferenceSearchRow {
   tickers_id: number
@@ -2145,6 +2250,160 @@ export interface TickerReferenceSearchRow {
 
 /** @deprecated use TickerReferenceSearchRow */
 export type StockReferenceSearchRow = TickerReferenceSearchRow
+
+// ── SEC Filings & Disclosures proxies ────────────────────────────────────────
+
+interface FilingsDateRangeOpts {
+  filing_date?: string
+  filing_date_gt?: string
+  filing_date_gte?: string
+  filing_date_lt?: string
+  filing_date_lte?: string
+  limit?: number
+  sort?: string
+}
+
+function _setFilingsDateRange(q: URLSearchParams, o: FilingsDateRangeOpts) {
+  if (o.filing_date) q.set('filing_date', o.filing_date)
+  if (o.filing_date_gt) q.set('filing_date_gt', o.filing_date_gt)
+  if (o.filing_date_gte) q.set('filing_date_gte', o.filing_date_gte)
+  if (o.filing_date_lt) q.set('filing_date_lt', o.filing_date_lt)
+  if (o.filing_date_lte) q.set('filing_date_lte', o.filing_date_lte)
+  if (o.limit != null) q.set('limit', String(o.limit))
+  if (o.sort) q.set('sort', o.sort)
+}
+
+async function _fetchFilingsProxy(path: string, q: URLSearchParams): Promise<MassiveTickerProxyResponse> {
+  const qs = q.toString()
+  const r = await fetch(massiveUrl(`${path}${qs ? `?${qs}` : ''}`))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  const parsed = parseMassiveTickerProxyResponse(j, r)
+  if (!parsed.ok) return { ok: false, error: parsed.error }
+  return { ok: true, data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined }
+}
+
+export interface EdgarIndexOpts extends FilingsDateRangeOpts {
+  ticker?: string
+  cik?: string
+  form_type?: string
+}
+export async function fetchMassiveEdgarIndex(opts?: EdgarIndexOpts): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  if (opts?.ticker) q.set('ticker', opts.ticker.trim().toUpperCase())
+  if (opts?.cik) q.set('cik', opts.cik)
+  if (opts?.form_type) q.set('form_type', opts.form_type)
+  if (opts) _setFilingsDateRange(q, opts)
+  return _fetchFilingsProxy('/research/massive/stocks/filings/edgar-index', q)
+}
+
+export interface TenKSectionsOpts extends FilingsDateRangeOpts {
+  ticker?: string
+  cik?: string
+  section?: string
+  period_end?: string
+  period_end_gte?: string
+  period_end_lte?: string
+}
+export async function fetchMassive10KSections(opts?: TenKSectionsOpts): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  if (opts?.ticker) q.set('ticker', opts.ticker.trim().toUpperCase())
+  if (opts?.cik) q.set('cik', opts.cik)
+  if (opts?.section) q.set('section', opts.section)
+  if (opts?.period_end) q.set('period_end', opts.period_end)
+  if (opts?.period_end_gte) q.set('period_end_gte', opts.period_end_gte)
+  if (opts?.period_end_lte) q.set('period_end_lte', opts.period_end_lte)
+  if (opts) _setFilingsDateRange(q, opts)
+  return _fetchFilingsProxy('/research/massive/stocks/filings/10k-sections', q)
+}
+
+export interface EightKTextOpts extends FilingsDateRangeOpts {
+  ticker?: string
+  cik?: string
+  form_type?: string
+}
+export async function fetchMassive8KText(opts?: EightKTextOpts): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  if (opts?.ticker) q.set('ticker', opts.ticker.trim().toUpperCase())
+  if (opts?.cik) q.set('cik', opts.cik)
+  if (opts?.form_type) q.set('form_type', opts.form_type)
+  if (opts) _setFilingsDateRange(q, opts)
+  return _fetchFilingsProxy('/research/massive/stocks/filings/8k-text', q)
+}
+
+export interface ThirteenFOpts extends FilingsDateRangeOpts {
+  filer_cik?: string
+}
+export async function fetchMassive13FFilings(opts?: ThirteenFOpts): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  if (opts?.filer_cik) q.set('filer_cik', opts.filer_cik)
+  if (opts) _setFilingsDateRange(q, opts)
+  return _fetchFilingsProxy('/research/massive/stocks/filings/13f', q)
+}
+
+export interface RiskFactorsOpts extends FilingsDateRangeOpts {
+  ticker?: string
+  cik?: string
+}
+export async function fetchMassiveRiskFactors(opts?: RiskFactorsOpts): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  if (opts?.ticker) q.set('ticker', opts.ticker.trim().toUpperCase())
+  if (opts?.cik) q.set('cik', opts.cik)
+  if (opts) _setFilingsDateRange(q, opts)
+  return _fetchFilingsProxy('/research/massive/stocks/filings/risk-factors', q)
+}
+
+export interface RiskCategoriesOpts {
+  taxonomy?: number
+  primary_category?: string
+  secondary_category?: string
+  tertiary_category?: string
+  limit?: number
+  sort?: string
+}
+export async function fetchMassiveRiskCategories(opts?: RiskCategoriesOpts): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  if (opts?.taxonomy != null) q.set('taxonomy', String(opts.taxonomy))
+  if (opts?.primary_category) q.set('primary_category', opts.primary_category)
+  if (opts?.secondary_category) q.set('secondary_category', opts.secondary_category)
+  if (opts?.tertiary_category) q.set('tertiary_category', opts.tertiary_category)
+  if (opts?.limit != null) q.set('limit', String(opts.limit))
+  if (opts?.sort) q.set('sort', opts.sort)
+  return _fetchFilingsProxy('/research/massive/stocks/filings/risk-categories', q)
+}
+
+export interface Form3Opts extends FilingsDateRangeOpts {
+  issuer_cik?: string
+  owner_cik?: string
+  tickers?: string
+  form_type?: string
+}
+export async function fetchMassiveForm3(opts?: Form3Opts): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  if (opts?.issuer_cik) q.set('issuer_cik', opts.issuer_cik)
+  if (opts?.owner_cik) q.set('owner_cik', opts.owner_cik)
+  if (opts?.tickers) q.set('tickers', opts.tickers.trim().toUpperCase())
+  if (opts?.form_type) q.set('form_type', opts.form_type)
+  if (opts) _setFilingsDateRange(q, opts)
+  return _fetchFilingsProxy('/research/massive/stocks/filings/form-3', q)
+}
+
+export interface Form4Opts extends FilingsDateRangeOpts {
+  issuer_cik?: string
+  owner_cik?: string
+  tickers?: string
+  form_type?: string
+  transaction_code?: string
+}
+export async function fetchMassiveForm4(opts?: Form4Opts): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  if (opts?.issuer_cik) q.set('issuer_cik', opts.issuer_cik)
+  if (opts?.owner_cik) q.set('owner_cik', opts.owner_cik)
+  if (opts?.tickers) q.set('tickers', opts.tickers.trim().toUpperCase())
+  if (opts?.form_type) q.set('form_type', opts.form_type)
+  if (opts?.transaction_code) q.set('transaction_code', opts.transaction_code)
+  if (opts) _setFilingsDateRange(q, opts)
+  return _fetchFilingsProxy('/research/massive/stocks/filings/form-4', q)
+}
 
 export async function fetchTickerReferenceSearch(opts: {
   q: string
@@ -2962,7 +3221,7 @@ export interface StockDayGapResult {
   symbol?: string
   error?: string
   has_rows?: boolean
-  /** Global trading-day count (all symbols, same window). */
+  /** NYSE trading-day count in the lookback window through cap_date (weekends + holidays excluded). */
   ref_total?: number
   /** Distinct bar_time count for this symbol. */
   covered_total?: number

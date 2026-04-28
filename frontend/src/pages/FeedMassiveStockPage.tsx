@@ -8,6 +8,21 @@ import {
   fetchMassiveStockGroupedDaily,
   fetchMassiveStockOpenClose,
   fetchMassiveStockPrev,
+  fetchMassiveStockIncomeStatements,
+  fetchMassiveStockBalanceSheets,
+  fetchMassiveStockCashFlowStatements,
+  fetchMassiveStockRatios,
+  fetchMassiveStockShortInterest,
+  fetchMassiveStockShortVolume,
+  fetchMassiveStockFloat,
+  fetchMassiveEdgarIndex,
+  fetchMassive10KSections,
+  fetchMassive8KText,
+  fetchMassive13FFilings,
+  fetchMassiveRiskFactors,
+  fetchMassiveRiskCategories,
+  fetchMassiveForm3,
+  fetchMassiveForm4,
   fetchMassiveTickerDetail,
   fetchMassiveTickerTypes,
   postMassiveStocksApiCoverageSync,
@@ -248,6 +263,146 @@ export function FeedMassiveStockPage({
   const [prevErr, setPrevErr] = useState<string | null>(null)
   const [prevResult, setPrevResult] = useState<Record<string, unknown> | null>(null)
 
+  // ── Fundamentals sub-tabs ─────────────────────────────────────────────────
+  const [fundSubTab, setFundSubTab] = useState<
+    'income_statements' | 'balance_sheets' | 'cash_flow' | 'ratios' | 'short_interest' | 'short_volume' | 'float'
+  >('income_statements')
+
+  const [fundTicker, setFundTicker] = useState('AAPL')
+  const [fundTimeframe, setFundTimeframe] = useState('annual')
+  const [fundFiscalYear, setFundFiscalYear] = useState('')
+  const [fundFiscalQuarter, setFundFiscalQuarter] = useState('')
+  const [fundPeriodEnd, setFundPeriodEnd] = useState('')
+  const [fundFilingDate, setFundFilingDate] = useState('')
+  const [fundLimit, setFundLimit] = useState('4')
+
+  const [fundISBusy, setFundISBusy] = useState(false)
+  const [fundISErr, setFundISErr] = useState<string | null>(null)
+  const [fundISResult, setFundISResult] = useState<Record<string, unknown> | null>(null)
+
+  const [fundBSBusy, setFundBSBusy] = useState(false)
+  const [fundBSErr, setFundBSErr] = useState<string | null>(null)
+  const [fundBSResult, setFundBSResult] = useState<Record<string, unknown> | null>(null)
+
+  const [fundCFBusy, setFundCFBusy] = useState(false)
+  const [fundCFErr, setFundCFErr] = useState<string | null>(null)
+  const [fundCFResult, setFundCFResult] = useState<Record<string, unknown> | null>(null)
+
+  const [fundRatiosBusy, setFundRatiosBusy] = useState(false)
+  const [fundRatiosErr, setFundRatiosErr] = useState<string | null>(null)
+  const [fundRatiosResult, setFundRatiosResult] = useState<Record<string, unknown> | null>(null)
+
+  const [fundSITicker, setFundSITicker] = useState('AAPL')
+  const [fundSIDate, setFundSIDate] = useState('')
+  const [fundSILimit, setFundSILimit] = useState('10')
+  const [fundSIBusy, setFundSIBusy] = useState(false)
+  const [fundSIErr, setFundSIErr] = useState<string | null>(null)
+  const [fundSIResult, setFundSIResult] = useState<Record<string, unknown> | null>(null)
+
+  const [fundSVTicker, setFundSVTicker] = useState('AAPL')
+  const [fundSVDate, setFundSVDate] = useState('')
+  const [fundSVLimit, setFundSVLimit] = useState('10')
+  const [fundSVBusy, setFundSVBusy] = useState(false)
+  const [fundSVErr, setFundSVErr] = useState<string | null>(null)
+  const [fundSVResult, setFundSVResult] = useState<Record<string, unknown> | null>(null)
+
+  const [fundFloatTicker, setFundFloatTicker] = useState('AAPL')
+  const [fundFloatLimit, setFundFloatLimit] = useState('10')
+  const [fundFloatBusy, setFundFloatBusy] = useState(false)
+  const [fundFloatErr, setFundFloatErr] = useState<string | null>(null)
+  const [fundFloatResult, setFundFloatResult] = useState<Record<string, unknown> | null>(null)
+
+  // ── Filings & Disclosures sub-tabs ───────────────────────────────────────
+  const [filingsSubTab, setFilingsSubTab] = useState<
+    'edgar_index' | 'sections_10k' | 'text_8k' | 'form_13f' | 'risk_factors' | 'risk_categories' | 'form_3' | 'form_4'
+  >('edgar_index')
+
+  // Edgar Index form
+  const [flEiTicker, setFlEiTicker] = useState('AAPL')
+  const [flEiCik, setFlEiCik] = useState('')
+  const [flEiFormType, setFlEiFormType] = useState('')
+  const [flEiDateGte, setFlEiDateGte] = useState('')
+  const [flEiDateLte, setFlEiDateLte] = useState('')
+  const [flEiLimit, setFlEiLimit] = useState('100')
+  const [flEiBusy, setFlEiBusy] = useState(false)
+  const [flEiErr, setFlEiErr] = useState<string | null>(null)
+  const [flEiResult, setFlEiResult] = useState<Record<string, unknown> | null>(null)
+
+  // 10-K Sections form
+  const [fl10kTicker, setFl10kTicker] = useState('AAPL')
+  const [fl10kCik, setFl10kCik] = useState('')
+  const [fl10kSection, setFl10kSection] = useState('')
+  const [fl10kDateGte, setFl10kDateGte] = useState('')
+  const [fl10kDateLte, setFl10kDateLte] = useState('')
+  const [fl10kPeriodEndGte, setFl10kPeriodEndGte] = useState('')
+  const [fl10kPeriodEndLte, setFl10kPeriodEndLte] = useState('')
+  const [fl10kLimit, setFl10kLimit] = useState('5')
+  const [fl10kBusy, setFl10kBusy] = useState(false)
+  const [fl10kErr, setFl10kErr] = useState<string | null>(null)
+  const [fl10kResult, setFl10kResult] = useState<Record<string, unknown> | null>(null)
+
+  // 8-K Text form
+  const [fl8kTicker, setFl8kTicker] = useState('AAPL')
+  const [fl8kCik, setFl8kCik] = useState('')
+  const [fl8kFormType, setFl8kFormType] = useState('')
+  const [fl8kDateGte, setFl8kDateGte] = useState('')
+  const [fl8kDateLte, setFl8kDateLte] = useState('')
+  const [fl8kLimit, setFl8kLimit] = useState('5')
+  const [fl8kBusy, setFl8kBusy] = useState(false)
+  const [fl8kErr, setFl8kErr] = useState<string | null>(null)
+  const [fl8kResult, setFl8kResult] = useState<Record<string, unknown> | null>(null)
+
+  // 13-F Filings form
+  const [fl13fFilerCik, setFl13fFilerCik] = useState('')
+  const [fl13fDateGte, setFl13fDateGte] = useState('')
+  const [fl13fDateLte, setFl13fDateLte] = useState('')
+  const [fl13fLimit, setFl13fLimit] = useState('50')
+  const [fl13fBusy, setFl13fBusy] = useState(false)
+  const [fl13fErr, setFl13fErr] = useState<string | null>(null)
+  const [fl13fResult, setFl13fResult] = useState<Record<string, unknown> | null>(null)
+
+  // Risk Factors form
+  const [flRfTicker, setFlRfTicker] = useState('AAPL')
+  const [flRfCik, setFlRfCik] = useState('')
+  const [flRfDateGte, setFlRfDateGte] = useState('')
+  const [flRfDateLte, setFlRfDateLte] = useState('')
+  const [flRfLimit, setFlRfLimit] = useState('20')
+  const [flRfBusy, setFlRfBusy] = useState(false)
+  const [flRfErr, setFlRfErr] = useState<string | null>(null)
+  const [flRfResult, setFlRfResult] = useState<Record<string, unknown> | null>(null)
+
+  // Risk Categories form
+  const [flRcPrimary, setFlRcPrimary] = useState('')
+  const [flRcSecondary, setFlRcSecondary] = useState('')
+  const [flRcTertiary, setFlRcTertiary] = useState('')
+  const [flRcLimit, setFlRcLimit] = useState('200')
+  const [flRcBusy, setFlRcBusy] = useState(false)
+  const [flRcErr, setFlRcErr] = useState<string | null>(null)
+  const [flRcResult, setFlRcResult] = useState<Record<string, unknown> | null>(null)
+
+  // Form 3 form
+  const [flF3IssuerCik, setFlF3IssuerCik] = useState('')
+  const [flF3OwnerCik, setFlF3OwnerCik] = useState('')
+  const [flF3Tickers, setFlF3Tickers] = useState('AAPL')
+  const [flF3DateGte, setFlF3DateGte] = useState('')
+  const [flF3DateLte, setFlF3DateLte] = useState('')
+  const [flF3Limit, setFlF3Limit] = useState('50')
+  const [flF3Busy, setFlF3Busy] = useState(false)
+  const [flF3Err, setFlF3Err] = useState<string | null>(null)
+  const [flF3Result, setFlF3Result] = useState<Record<string, unknown> | null>(null)
+
+  // Form 4 form
+  const [flF4IssuerCik, setFlF4IssuerCik] = useState('')
+  const [flF4OwnerCik, setFlF4OwnerCik] = useState('')
+  const [flF4Tickers, setFlF4Tickers] = useState('AAPL')
+  const [flF4TxCode, setFlF4TxCode] = useState('')
+  const [flF4DateGte, setFlF4DateGte] = useState('')
+  const [flF4DateLte, setFlF4DateLte] = useState('')
+  const [flF4Limit, setFlF4Limit] = useState('50')
+  const [flF4Busy, setFlF4Busy] = useState(false)
+  const [flF4Err, setFlF4Err] = useState<string | null>(null)
+  const [flF4Result, setFlF4Result] = useState<Record<string, unknown> | null>(null)
+
   const loadStatus = useCallback(async () => {
     try { setMassiveStatus(await fetchMassiveStatus()) } catch { /* ignore */ }
   }, [])
@@ -461,6 +616,237 @@ export function FeedMassiveStockPage({
       setPrevBusy(false)
     }
   }, [prevStTicker])
+
+  const runFundamentalsFinancials = useCallback(async (
+    fetcher: typeof fetchMassiveStockIncomeStatements,
+    setBusy: (b: boolean) => void,
+    setErr: (e: string | null) => void,
+    setResult: (r: Record<string, unknown> | null) => void,
+  ) => {
+    const t = fundTicker.trim()
+    if (!t) { setErr('Ticker is required'); return }
+    setBusy(true); setErr(null); setResult(null)
+    try {
+      const res = await fetcher(t, {
+        timeframe: fundTimeframe || undefined,
+        fiscal_year: fundFiscalYear ? parseInt(fundFiscalYear, 10) : undefined,
+        fiscal_quarter: fundFiscalQuarter ? parseInt(fundFiscalQuarter, 10) : undefined,
+        period_end: fundPeriodEnd || undefined,
+        filing_date: fundFilingDate || undefined,
+        limit: Math.min(1000, Math.max(1, parseInt(fundLimit, 10) || 4)),
+      })
+      if (!res.ok) { setErr(res.error ?? 'Request failed'); return }
+      setResult(res.data ?? null)
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally { setBusy(false) }
+  }, [fundTicker, fundTimeframe, fundFiscalYear, fundFiscalQuarter, fundPeriodEnd, fundFilingDate, fundLimit])
+
+  const runFundIS = useCallback(() =>
+    runFundamentalsFinancials(fetchMassiveStockIncomeStatements, setFundISBusy, setFundISErr, setFundISResult),
+    [runFundamentalsFinancials])
+
+  const runFundBS = useCallback(() =>
+    runFundamentalsFinancials(fetchMassiveStockBalanceSheets, setFundBSBusy, setFundBSErr, setFundBSResult),
+    [runFundamentalsFinancials])
+
+  const runFundCF = useCallback(() =>
+    runFundamentalsFinancials(fetchMassiveStockCashFlowStatements, setFundCFBusy, setFundCFErr, setFundCFResult),
+    [runFundamentalsFinancials])
+
+  const runFundRatios = useCallback(async () => {
+    const t = fundTicker.trim()
+    if (!t) { setFundRatiosErr('Ticker is required'); return }
+    setFundRatiosBusy(true); setFundRatiosErr(null); setFundRatiosResult(null)
+    try {
+      const res = await fetchMassiveStockRatios(t, { limit: Math.min(1000, Math.max(1, parseInt(fundLimit, 10) || 4)) })
+      if (!res.ok) { setFundRatiosErr(res.error ?? 'Request failed'); return }
+      setFundRatiosResult(res.data ?? null)
+    } catch (e: unknown) {
+      setFundRatiosErr(e instanceof Error ? e.message : String(e))
+    } finally { setFundRatiosBusy(false) }
+  }, [fundTicker, fundLimit])
+
+  const runFundShortInterest = useCallback(async () => {
+    const t = fundSITicker.trim()
+    if (!t) { setFundSIErr('Ticker is required'); return }
+    setFundSIBusy(true); setFundSIErr(null); setFundSIResult(null)
+    try {
+      const res = await fetchMassiveStockShortInterest(t, {
+        settlement_date: fundSIDate || undefined,
+        limit: Math.min(1000, Math.max(1, parseInt(fundSILimit, 10) || 10)),
+      })
+      if (!res.ok) { setFundSIErr(res.error ?? 'Request failed'); return }
+      setFundSIResult(res.data ?? null)
+    } catch (e: unknown) {
+      setFundSIErr(e instanceof Error ? e.message : String(e))
+    } finally { setFundSIBusy(false) }
+  }, [fundSITicker, fundSIDate, fundSILimit])
+
+  const runFundShortVolume = useCallback(async () => {
+    const t = fundSVTicker.trim()
+    if (!t) { setFundSVErr('Ticker is required'); return }
+    setFundSVBusy(true); setFundSVErr(null); setFundSVResult(null)
+    try {
+      const res = await fetchMassiveStockShortVolume(t, {
+        date: fundSVDate || undefined,
+        limit: Math.min(1000, Math.max(1, parseInt(fundSVLimit, 10) || 10)),
+      })
+      if (!res.ok) { setFundSVErr(res.error ?? 'Request failed'); return }
+      setFundSVResult(res.data ?? null)
+    } catch (e: unknown) {
+      setFundSVErr(e instanceof Error ? e.message : String(e))
+    } finally { setFundSVBusy(false) }
+  }, [fundSVTicker, fundSVDate, fundSVLimit])
+
+  const runFundFloat = useCallback(async () => {
+    const t = fundFloatTicker.trim()
+    if (!t) { setFundFloatErr('Ticker is required'); return }
+    setFundFloatBusy(true); setFundFloatErr(null); setFundFloatResult(null)
+    try {
+      const res = await fetchMassiveStockFloat(t, {
+        limit: Math.min(5000, Math.max(1, parseInt(fundFloatLimit, 10) || 10)),
+      })
+      if (!res.ok) { setFundFloatErr(res.error ?? 'Request failed'); return }
+      setFundFloatResult(res.data ?? null)
+    } catch (e: unknown) {
+      setFundFloatErr(e instanceof Error ? e.message : String(e))
+    } finally { setFundFloatBusy(false) }
+  }, [fundFloatTicker, fundFloatLimit])
+
+  const runEdgarIndex = useCallback(async () => {
+    setFlEiBusy(true); setFlEiErr(null); setFlEiResult(null)
+    try {
+      const res = await fetchMassiveEdgarIndex({
+        ticker: flEiTicker.trim() || undefined,
+        cik: flEiCik.trim() || undefined,
+        form_type: flEiFormType.trim() || undefined,
+        filing_date_gte: flEiDateGte.trim() || undefined,
+        filing_date_lte: flEiDateLte.trim() || undefined,
+        limit: Math.min(50000, Math.max(1, parseInt(flEiLimit, 10) || 100)),
+      })
+      if (!res.ok) { setFlEiErr(res.error ?? 'Request failed'); return }
+      setFlEiResult(res.data ?? null)
+    } catch (e: unknown) { setFlEiErr(e instanceof Error ? e.message : String(e)) }
+    finally { setFlEiBusy(false) }
+  }, [flEiTicker, flEiCik, flEiFormType, flEiDateGte, flEiDateLte, flEiLimit])
+
+  const run10KSections = useCallback(async () => {
+    setFl10kBusy(true); setFl10kErr(null); setFl10kResult(null)
+    try {
+      const res = await fetchMassive10KSections({
+        ticker: fl10kTicker.trim() || undefined,
+        cik: fl10kCik.trim() || undefined,
+        section: fl10kSection.trim() || undefined,
+        filing_date_gte: fl10kDateGte.trim() || undefined,
+        filing_date_lte: fl10kDateLte.trim() || undefined,
+        period_end_gte: fl10kPeriodEndGte.trim() || undefined,
+        period_end_lte: fl10kPeriodEndLte.trim() || undefined,
+        limit: Math.min(99, Math.max(1, parseInt(fl10kLimit, 10) || 5)),
+      })
+      if (!res.ok) { setFl10kErr(res.error ?? 'Request failed'); return }
+      setFl10kResult(res.data ?? null)
+    } catch (e: unknown) { setFl10kErr(e instanceof Error ? e.message : String(e)) }
+    finally { setFl10kBusy(false) }
+  }, [fl10kTicker, fl10kCik, fl10kSection, fl10kDateGte, fl10kDateLte, fl10kPeriodEndGte, fl10kPeriodEndLte, fl10kLimit])
+
+  const run8KText = useCallback(async () => {
+    setFl8kBusy(true); setFl8kErr(null); setFl8kResult(null)
+    try {
+      const res = await fetchMassive8KText({
+        ticker: fl8kTicker.trim() || undefined,
+        cik: fl8kCik.trim() || undefined,
+        form_type: fl8kFormType.trim() || undefined,
+        filing_date_gte: fl8kDateGte.trim() || undefined,
+        filing_date_lte: fl8kDateLte.trim() || undefined,
+        limit: Math.min(99, Math.max(1, parseInt(fl8kLimit, 10) || 5)),
+      })
+      if (!res.ok) { setFl8kErr(res.error ?? 'Request failed'); return }
+      setFl8kResult(res.data ?? null)
+    } catch (e: unknown) { setFl8kErr(e instanceof Error ? e.message : String(e)) }
+    finally { setFl8kBusy(false) }
+  }, [fl8kTicker, fl8kCik, fl8kFormType, fl8kDateGte, fl8kDateLte, fl8kLimit])
+
+  const run13FFilings = useCallback(async () => {
+    setFl13fBusy(true); setFl13fErr(null); setFl13fResult(null)
+    try {
+      const res = await fetchMassive13FFilings({
+        filer_cik: fl13fFilerCik.trim() || undefined,
+        filing_date_gte: fl13fDateGte.trim() || undefined,
+        filing_date_lte: fl13fDateLte.trim() || undefined,
+        limit: Math.min(1000, Math.max(1, parseInt(fl13fLimit, 10) || 50)),
+      })
+      if (!res.ok) { setFl13fErr(res.error ?? 'Request failed'); return }
+      setFl13fResult(res.data ?? null)
+    } catch (e: unknown) { setFl13fErr(e instanceof Error ? e.message : String(e)) }
+    finally { setFl13fBusy(false) }
+  }, [fl13fFilerCik, fl13fDateGte, fl13fDateLte, fl13fLimit])
+
+  const runRiskFactors = useCallback(async () => {
+    setFlRfBusy(true); setFlRfErr(null); setFlRfResult(null)
+    try {
+      const res = await fetchMassiveRiskFactors({
+        ticker: flRfTicker.trim() || undefined,
+        cik: flRfCik.trim() || undefined,
+        filing_date_gte: flRfDateGte.trim() || undefined,
+        filing_date_lte: flRfDateLte.trim() || undefined,
+        limit: Math.min(49999, Math.max(1, parseInt(flRfLimit, 10) || 20)),
+      })
+      if (!res.ok) { setFlRfErr(res.error ?? 'Request failed'); return }
+      setFlRfResult(res.data ?? null)
+    } catch (e: unknown) { setFlRfErr(e instanceof Error ? e.message : String(e)) }
+    finally { setFlRfBusy(false) }
+  }, [flRfTicker, flRfCik, flRfDateGte, flRfDateLte, flRfLimit])
+
+  const runRiskCategories = useCallback(async () => {
+    setFlRcBusy(true); setFlRcErr(null); setFlRcResult(null)
+    try {
+      const res = await fetchMassiveRiskCategories({
+        primary_category: flRcPrimary.trim() || undefined,
+        secondary_category: flRcSecondary.trim() || undefined,
+        tertiary_category: flRcTertiary.trim() || undefined,
+        limit: Math.min(999, Math.max(1, parseInt(flRcLimit, 10) || 200)),
+      })
+      if (!res.ok) { setFlRcErr(res.error ?? 'Request failed'); return }
+      setFlRcResult(res.data ?? null)
+    } catch (e: unknown) { setFlRcErr(e instanceof Error ? e.message : String(e)) }
+    finally { setFlRcBusy(false) }
+  }, [flRcPrimary, flRcSecondary, flRcTertiary, flRcLimit])
+
+  const runForm3 = useCallback(async () => {
+    setFlF3Busy(true); setFlF3Err(null); setFlF3Result(null)
+    try {
+      const res = await fetchMassiveForm3({
+        issuer_cik: flF3IssuerCik.trim() || undefined,
+        owner_cik: flF3OwnerCik.trim() || undefined,
+        tickers: flF3Tickers.trim() || undefined,
+        filing_date_gte: flF3DateGte.trim() || undefined,
+        filing_date_lte: flF3DateLte.trim() || undefined,
+        limit: Math.min(10000, Math.max(1, parseInt(flF3Limit, 10) || 50)),
+      })
+      if (!res.ok) { setFlF3Err(res.error ?? 'Request failed'); return }
+      setFlF3Result(res.data ?? null)
+    } catch (e: unknown) { setFlF3Err(e instanceof Error ? e.message : String(e)) }
+    finally { setFlF3Busy(false) }
+  }, [flF3IssuerCik, flF3OwnerCik, flF3Tickers, flF3DateGte, flF3DateLte, flF3Limit])
+
+  const runForm4 = useCallback(async () => {
+    setFlF4Busy(true); setFlF4Err(null); setFlF4Result(null)
+    try {
+      const res = await fetchMassiveForm4({
+        issuer_cik: flF4IssuerCik.trim() || undefined,
+        owner_cik: flF4OwnerCik.trim() || undefined,
+        tickers: flF4Tickers.trim() || undefined,
+        transaction_code: flF4TxCode.trim() || undefined,
+        filing_date_gte: flF4DateGte.trim() || undefined,
+        filing_date_lte: flF4DateLte.trim() || undefined,
+        limit: Math.min(10000, Math.max(1, parseInt(flF4Limit, 10) || 50)),
+      })
+      if (!res.ok) { setFlF4Err(res.error ?? 'Request failed'); return }
+      setFlF4Result(res.data ?? null)
+    } catch (e: unknown) { setFlF4Err(e instanceof Error ? e.message : String(e)) }
+    finally { setFlF4Busy(false) }
+  }, [flF4IssuerCik, flF4OwnerCik, flF4Tickers, flF4TxCode, flF4DateGte, flF4DateLte, flF4Limit])
 
   const toggleCap = useCallback((id: string) => {
     setCapExpanded(prev => ({ ...prev, [id]: !prev[id] }))
@@ -1454,6 +1840,888 @@ export function FeedMassiveStockPage({
     )
   }
 
+  // ── Fundamentals — 7 sub-tabs ─────────────────────────────────────────────
+  function renderFundamentalsCap() {
+    const id = 'stock-fundamentals'
+    const row = rowById(id)
+    const eff = rowEff(row)
+
+    const sharedFinancialsForm = (busy: boolean) => (
+      <div className="feed-massive-form-grid">
+        <label className="feed-massive-field">
+          <span className="form-label">Ticker <span style={{ color: 'var(--clr-error, #e05)' }}>*</span></span>
+          <input className="form-input" value={fundTicker} onChange={e => setFundTicker(e.target.value)}
+            disabled={!configured || busy} placeholder="AAPL" autoComplete="off" />
+        </label>
+        <label className="feed-massive-field">
+          <span className="form-label">Timeframe</span>
+          <select className="form-input" value={fundTimeframe} onChange={e => setFundTimeframe(e.target.value)}
+            disabled={!configured || busy}>
+            <option value="annual">Annual</option>
+            <option value="quarterly">Quarterly</option>
+            <option value="trailing_twelve_months">Trailing 12 months</option>
+          </select>
+        </label>
+        <label className="feed-massive-field">
+          <span className="form-label">Fiscal Year</span>
+          <input className="form-input" value={fundFiscalYear} onChange={e => setFundFiscalYear(e.target.value)}
+            disabled={!configured || busy} placeholder="e.g. 2024" autoComplete="off" />
+        </label>
+        <label className="feed-massive-field">
+          <span className="form-label">Fiscal Quarter</span>
+          <select className="form-input" value={fundFiscalQuarter} onChange={e => setFundFiscalQuarter(e.target.value)}
+            disabled={!configured || busy}>
+            <option value="">Any</option>
+            <option value="1">Q1</option>
+            <option value="2">Q2</option>
+            <option value="3">Q3</option>
+            <option value="4">Q4</option>
+          </select>
+        </label>
+        <label className="feed-massive-field">
+          <span className="form-label">Period End</span>
+          <input className="form-input" value={fundPeriodEnd} onChange={e => setFundPeriodEnd(e.target.value)}
+            disabled={!configured || busy} placeholder="YYYY-MM-DD" autoComplete="off" />
+        </label>
+        <label className="feed-massive-field">
+          <span className="form-label">Filing Date</span>
+          <input className="form-input" value={fundFilingDate} onChange={e => setFundFilingDate(e.target.value)}
+            disabled={!configured || busy} placeholder="YYYY-MM-DD" autoComplete="off" />
+        </label>
+        <label className="feed-massive-field">
+          <span className="form-label">Limit</span>
+          <input className="form-input" type="number" value={fundLimit} onChange={e => setFundLimit(e.target.value)}
+            disabled={!configured || busy} min={1} max={1000} />
+        </label>
+      </div>
+    )
+
+    return (
+      <StockCapabilityPanel
+        key={id} capId={id} checklistRow={row} effectiveStatus={eff}
+        expanded={capExpanded[id] === true} onToggle={() => toggleCap(id)}
+        highlight={highlightedCapabilityId === id} ariaLabel={row.service}
+      >
+        <FeedMassiveServiceBlock effectiveStatus={eff} checklistRow={row} evidence={evidenceFor(row)}>
+          <div className="feed-massive-card-head">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <span className="feed-massive-card-icon" aria-hidden>
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M4 5h12M4 9h8M4 13h10M4 17h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                </svg>
+              </span>
+              <h3>{row.service}</h3>
+            </div>
+          </div>
+          <p className="feed-massive-card-lead">{row.description}</p>
+        </FeedMassiveServiceBlock>
+
+        <div className="feed-massive-agg-tabs-wrap">
+          <div className="feed-massive-agg-tabs" role="tablist" aria-label="Fundamentals API endpoints">
+            {(
+              [
+                ['income_statements', 'Income Statements'],
+                ['balance_sheets', 'Balance Sheets'],
+                ['cash_flow', 'Cash Flow'],
+                ['ratios', 'Ratios'],
+                ['short_interest', 'Short Interest'],
+                ['short_volume', 'Short Volume'],
+                ['float', 'Float'],
+              ] as const
+            ).map(([key, label]) => (
+              <button key={key} type="button" role="tab"
+                id={`feed-massive-stk-fund-tab-${key}`}
+                className={`feed-massive-agg-tab${fundSubTab === key ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={fundSubTab === key}
+                tabIndex={fundSubTab === key ? 0 : -1}
+                onClick={() => setFundSubTab(key)}
+              >
+                {label}
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="feed-massive-agg-tab-panels">
+
+            {/* ── Income Statements ──────────────────────────────────────── */}
+            {fundSubTab === 'income_statements' && (
+              <div className="feed-massive-agg-tab-panel" role="tabpanel"
+                id="feed-massive-stk-fund-panel-income"
+                aria-labelledby="feed-massive-stk-fund-tab-income_statements">
+                <div className="feed-massive-agg-sub-doc">
+                  <p><strong>Use case:</strong> Retrieve P&amp;L data — revenue, gross profit, operating income, net income, EPS — for annual, quarterly, or trailing-twelve-month periods.</p>
+                  <p><strong>When to use:</strong> Earnings trend analysis, profitability screening, fundamental research.</p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /stocks/financials/v1/income-statements</code></p>
+                </div>
+                {sharedFinancialsForm(fundISBusy)}
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <p><strong>Key fields:</strong> <code>revenues</code>, <code>gross_profit</code>, <code>operating_income_loss</code>, <code>net_income_loss</code>, <code>basic_earnings_per_share</code>, <code>diluted_earnings_per_share</code>, <code>research_and_development</code>, <code>fiscal_year</code>, <code>fiscal_quarter</code></p>
+                  <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/fundamentals/income-statements</code></p>
+                </div>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || fundISBusy} onClick={runFundIS}>
+                    {fundISBusy ? 'Loading…' : 'Execute'}
+                  </button>
+                </div>
+                {fundISErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundISErr}</p>}
+                {fundISResult && (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Result{Array.isArray((fundISResult as Record<string, unknown>).results) ? ` — ${((fundISResult as Record<string, unknown>).results as unknown[]).length} period(s)` : ''}</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>{JSON.stringify(fundISResult, null, 2)}</pre>
+                  </details>
+                )}
+              </div>
+            )}
+
+            {/* ── Balance Sheets ─────────────────────────────────────────── */}
+            {fundSubTab === 'balance_sheets' && (
+              <div className="feed-massive-agg-tab-panel" role="tabpanel"
+                id="feed-massive-stk-fund-panel-bs"
+                aria-labelledby="feed-massive-stk-fund-tab-balance_sheets">
+                <div className="feed-massive-agg-sub-doc">
+                  <p><strong>Use case:</strong> Retrieve point-in-time assets, liabilities, and equity — cash, receivables, inventory, PP&amp;E, short/long-term debt, retained earnings.</p>
+                  <p><strong>When to use:</strong> Financial health assessment, solvency screening, debt-to-equity calculation.</p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /stocks/financials/v1/balance-sheets</code></p>
+                </div>
+                {sharedFinancialsForm(fundBSBusy)}
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <p><strong>Key fields:</strong> <code>assets</code>, <code>current_assets</code>, <code>cash_and_cash_equivalents_including_short_term_investments</code>, <code>liabilities</code>, <code>long_term_debt</code>, <code>equity</code>, <code>retained_earnings</code></p>
+                  <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/fundamentals/balance-sheets</code></p>
+                </div>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || fundBSBusy} onClick={runFundBS}>
+                    {fundBSBusy ? 'Loading…' : 'Execute'}
+                  </button>
+                </div>
+                {fundBSErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundBSErr}</p>}
+                {fundBSResult && (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Result{Array.isArray((fundBSResult as Record<string, unknown>).results) ? ` — ${((fundBSResult as Record<string, unknown>).results as unknown[]).length} period(s)` : ''}</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>{JSON.stringify(fundBSResult, null, 2)}</pre>
+                  </details>
+                )}
+              </div>
+            )}
+
+            {/* ── Cash Flow Statements ───────────────────────────────────── */}
+            {fundSubTab === 'cash_flow' && (
+              <div className="feed-massive-agg-tab-panel" role="tabpanel"
+                id="feed-massive-stk-fund-panel-cf"
+                aria-labelledby="feed-massive-stk-fund-tab-cash_flow">
+                <div className="feed-massive-agg-sub-doc">
+                  <p><strong>Use case:</strong> Retrieve operating cash flow (OCF), CapEx, asset sales, debt issuance/repayment, and dividends paid to assess cash generation quality and free cash flow.</p>
+                  <p><strong>When to use:</strong> FCF analysis, capital allocation research, quality-of-earnings checks.</p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /stocks/financials/v1/cash-flow-statements</code></p>
+                </div>
+                {sharedFinancialsForm(fundCFBusy)}
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <p><strong>Key fields:</strong> <code>net_cash_flow_from_operating_activities</code>, <code>net_cash_flow_from_investing_activities</code>, <code>net_cash_flow_from_financing_activities</code>, <code>capital_expenditure</code>, <code>dividends_and_dividend_equivalents_paid_to_common_stockholders</code></p>
+                  <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/fundamentals/cash-flow-statements</code></p>
+                </div>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || fundCFBusy} onClick={runFundCF}>
+                    {fundCFBusy ? 'Loading…' : 'Execute'}
+                  </button>
+                </div>
+                {fundCFErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundCFErr}</p>}
+                {fundCFResult && (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Result{Array.isArray((fundCFResult as Record<string, unknown>).results) ? ` — ${((fundCFResult as Record<string, unknown>).results as unknown[]).length} period(s)` : ''}</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>{JSON.stringify(fundCFResult, null, 2)}</pre>
+                  </details>
+                )}
+              </div>
+            )}
+
+            {/* ── Ratios ─────────────────────────────────────────────────── */}
+            {fundSubTab === 'ratios' && (
+              <div className="feed-massive-agg-tab-panel" role="tabpanel"
+                id="feed-massive-stk-fund-panel-ratios"
+                aria-labelledby="feed-massive-stk-fund-tab-ratios">
+                <div className="feed-massive-agg-sub-doc">
+                  <p><strong>Use case:</strong> Retrieve valuation, profitability, liquidity, and leverage ratios (P/E, P/B, ROE, D/E, dividend yield, EPS) combined with the latest daily stock price.</p>
+                  <p><strong>When to use:</strong> Quantitative screening, ratio scorecards, comparative valuation.</p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /stocks/financials/v1/ratios</code></p>
+                </div>
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Ticker <span style={{ color: 'var(--clr-error, #e05)' }}>*</span></span>
+                    <input className="form-input" value={fundTicker} onChange={e => setFundTicker(e.target.value)}
+                      disabled={!configured || fundRatiosBusy} placeholder="AAPL" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Limit</span>
+                    <input className="form-input" type="number" value={fundLimit} onChange={e => setFundLimit(e.target.value)}
+                      disabled={!configured || fundRatiosBusy} min={1} max={1000} />
+                  </label>
+                </div>
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <p><strong>Key fields:</strong> <code>price_to_earnings</code>, <code>price_to_book</code>, <code>price_to_sales</code>, <code>return_on_equity</code>, <code>return_on_assets</code>, <code>debt_to_equity</code>, <code>dividend_yield</code>, <code>earnings_per_share</code>, <code>market_cap</code>, <code>enterprise_value</code></p>
+                  <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/fundamentals/ratios</code></p>
+                </div>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || fundRatiosBusy} onClick={runFundRatios}>
+                    {fundRatiosBusy ? 'Loading…' : 'Execute'}
+                  </button>
+                </div>
+                {fundRatiosErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundRatiosErr}</p>}
+                {fundRatiosResult && (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Result</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>{JSON.stringify(fundRatiosResult, null, 2)}</pre>
+                  </details>
+                )}
+              </div>
+            )}
+
+            {/* ── Short Interest ─────────────────────────────────────────── */}
+            {fundSubTab === 'short_interest' && (
+              <div className="feed-massive-agg-tab-panel" role="tabpanel"
+                id="feed-massive-stk-fund-panel-si"
+                aria-labelledby="feed-massive-stk-fund-tab-short_interest">
+                <div className="feed-massive-agg-sub-doc">
+                  <p><strong>Use case:</strong> Retrieve total shares sold short, average daily volume, and days-to-cover by settlement date to assess short squeeze risk and monitor crowded short positions.</p>
+                  <p><strong>When to use:</strong> Short squeeze screening, sentiment analysis, pre-earnings risk assessment.</p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /stocks/v1/short-interest</code></p>
+                </div>
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Ticker <span style={{ color: 'var(--clr-error, #e05)' }}>*</span></span>
+                    <input className="form-input" value={fundSITicker} onChange={e => setFundSITicker(e.target.value)}
+                      disabled={!configured || fundSIBusy} placeholder="AAPL" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Settlement Date</span>
+                    <input className="form-input" value={fundSIDate} onChange={e => setFundSIDate(e.target.value)}
+                      disabled={!configured || fundSIBusy} placeholder="YYYY-MM-DD (optional)" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Limit</span>
+                    <input className="form-input" type="number" value={fundSILimit} onChange={e => setFundSILimit(e.target.value)}
+                      disabled={!configured || fundSIBusy} min={1} max={1000} />
+                  </label>
+                </div>
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <p><strong>Key fields:</strong> <code>short_interest</code>, <code>avg_daily_volume</code>, <code>days_to_cover</code>, <code>settlement_date</code></p>
+                  <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/fundamentals/short-interest</code></p>
+                </div>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || fundSIBusy} onClick={runFundShortInterest}>
+                    {fundSIBusy ? 'Loading…' : 'Execute'}
+                  </button>
+                </div>
+                {fundSIErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundSIErr}</p>}
+                {fundSIResult && (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Result{Array.isArray((fundSIResult as Record<string, unknown>).results) ? ` — ${((fundSIResult as Record<string, unknown>).results as unknown[]).length} record(s)` : ''}</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>{JSON.stringify(fundSIResult, null, 2)}</pre>
+                  </details>
+                )}
+              </div>
+            )}
+
+            {/* ── Short Volume ───────────────────────────────────────────── */}
+            {fundSubTab === 'short_volume' && (
+              <div className="feed-massive-agg-tab-panel" role="tabpanel"
+                id="feed-massive-stk-fund-panel-sv"
+                aria-labelledby="feed-massive-stk-fund-tab-short_volume">
+                <div className="feed-massive-agg-sub-doc">
+                  <p><strong>Use case:</strong> Retrieve daily short-sale volume per trading venue (NYSE, NASDAQ, ADF) and the overall short-volume ratio (short/total) for trend and sentiment analysis.</p>
+                  <p><strong>When to use:</strong> Intraday short-selling activity monitoring, venue distribution research, short-ratio trend tracking.</p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /stocks/v1/short-volume</code></p>
+                </div>
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Ticker <span style={{ color: 'var(--clr-error, #e05)' }}>*</span></span>
+                    <input className="form-input" value={fundSVTicker} onChange={e => setFundSVTicker(e.target.value)}
+                      disabled={!configured || fundSVBusy} placeholder="AAPL" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Date</span>
+                    <input className="form-input" value={fundSVDate} onChange={e => setFundSVDate(e.target.value)}
+                      disabled={!configured || fundSVBusy} placeholder="YYYY-MM-DD (optional)" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Limit</span>
+                    <input className="form-input" type="number" value={fundSVLimit} onChange={e => setFundSVLimit(e.target.value)}
+                      disabled={!configured || fundSVBusy} min={1} max={1000} />
+                  </label>
+                </div>
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <p><strong>Key fields:</strong> <code>short_volume</code>, <code>short_volume_ratio</code>, <code>total_volume</code>, <code>nyse_short_volume</code>, <code>nasdaq_carteret_short_volume</code>, <code>adf_short_volume</code>, <code>date</code></p>
+                  <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/fundamentals/short-volume</code></p>
+                </div>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || fundSVBusy} onClick={runFundShortVolume}>
+                    {fundSVBusy ? 'Loading…' : 'Execute'}
+                  </button>
+                </div>
+                {fundSVErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundSVErr}</p>}
+                {fundSVResult && (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Result{Array.isArray((fundSVResult as Record<string, unknown>).results) ? ` — ${((fundSVResult as Record<string, unknown>).results as unknown[]).length} record(s)` : ''}</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>{JSON.stringify(fundSVResult, null, 2)}</pre>
+                  </details>
+                )}
+              </div>
+            )}
+
+            {/* ── Float ──────────────────────────────────────────────────── */}
+            {fundSubTab === 'float' && (
+              <div className="feed-massive-agg-tab-panel" role="tabpanel"
+                id="feed-massive-stk-fund-panel-float"
+                aria-labelledby="feed-massive-stk-fund-tab-float">
+                <div className="feed-massive-agg-sub-doc">
+                  <p><strong>Use case:</strong> Retrieve freely tradable shares (<code>free_float</code>) and their percentage of total shares outstanding (<code>free_float_percent</code>), excluding strategic holders, insiders, and 5%+ shareholders.</p>
+                  <p><strong>When to use:</strong> Float-adjusted screening, short-float ratio calculation, supply/demand analysis for volatility assessment.</p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /stocks/vX/float</code></p>
+                </div>
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Ticker <span style={{ color: 'var(--clr-error, #e05)' }}>*</span></span>
+                    <input className="form-input" value={fundFloatTicker} onChange={e => setFundFloatTicker(e.target.value)}
+                      disabled={!configured || fundFloatBusy} placeholder="AAPL" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Limit</span>
+                    <input className="form-input" type="number" value={fundFloatLimit} onChange={e => setFundFloatLimit(e.target.value)}
+                      disabled={!configured || fundFloatBusy} min={1} max={5000} />
+                  </label>
+                </div>
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <p><strong>Key fields:</strong> <code>free_float</code>, <code>free_float_percent</code>, <code>effective_date</code>, <code>ticker</code></p>
+                  <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/fundamentals/float</code></p>
+                </div>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || fundFloatBusy} onClick={runFundFloat}>
+                    {fundFloatBusy ? 'Loading…' : 'Execute'}
+                  </button>
+                </div>
+                {fundFloatErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundFloatErr}</p>}
+                {fundFloatResult && (
+                  <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                    <summary>Result{Array.isArray((fundFloatResult as Record<string, unknown>).results) ? ` — ${((fundFloatResult as Record<string, unknown>).results as unknown[]).length} record(s)` : ''}</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>{JSON.stringify(fundFloatResult, null, 2)}</pre>
+                  </details>
+                )}
+              </div>
+            )}
+
+          </div>
+        </div>
+      </StockCapabilityPanel>
+    )
+  }
+
+  // ── Render Filings & Disclosures section with 8 sub-tabs ─────────────────
+  function renderFilingsCap() {
+    const id = 'stock-filings'
+    const row = rowById(id)
+    const eff = rowEff(row)
+
+    const resultBlock = (result: Record<string, unknown> | null, label?: string) =>
+      result ? (
+        <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+          <summary>{label ?? 'Result'}{Array.isArray((result).results) ? ` — ${((result).results as unknown[]).length} record(s)` : ''}</summary>
+          <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>{JSON.stringify(result, null, 2)}</pre>
+        </details>
+      ) : null
+
+    return (
+      <StockCapabilityPanel
+        key={id} capId={id} checklistRow={row} effectiveStatus={eff}
+        expanded={capExpanded[id] === true} onToggle={() => toggleCap(id)}
+        highlight={highlightedCapabilityId === id} ariaLabel={row.service}
+      >
+        <FeedMassiveServiceBlock effectiveStatus={eff} checklistRow={row} evidence={evidenceFor(row)}>
+          <div className="feed-massive-card-head">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <span className="feed-massive-card-icon" aria-hidden>
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="3" y="2" width="14" height="16" rx="2" stroke="currentColor" strokeWidth="1.5" />
+                  <path d="M7 6h6M7 9h6M7 12h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                </svg>
+              </span>
+              <h3>{row.service}</h3>
+            </div>
+          </div>
+          <p className="feed-massive-card-lead">{row.description}</p>
+        </FeedMassiveServiceBlock>
+
+        <div className="feed-massive-agg-tabs-wrap">
+          <div className="feed-massive-agg-tabs" role="tablist" aria-label="Filings & Disclosures API endpoints">
+            {(
+              [
+                ['edgar_index', 'Edgar Index'],
+                ['sections_10k', '10-K Sections'],
+                ['text_8k', '8-K Text'],
+                ['form_13f', '13-F Filings'],
+                ['risk_factors', 'Risk Factors'],
+                ['risk_categories', 'Risk Categories'],
+                ['form_3', 'Form 3'],
+                ['form_4', 'Form 4'],
+              ] as const
+            ).map(([key, label]) => (
+              <button key={key} type="button" role="tab"
+                id={`feed-massive-stk-fl-tab-${key}`}
+                className={`feed-massive-agg-tab${filingsSubTab === key ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={filingsSubTab === key}
+                tabIndex={filingsSubTab === key ? 0 : -1}
+                onClick={() => setFilingsSubTab(key)}
+              >
+                {label}
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="feed-massive-agg-tab-panels">
+
+            {/* ── Edgar Index ────────────────────────────────────────────── */}
+            {filingsSubTab === 'edgar_index' && (
+              <div className="feed-massive-agg-tab-panel" role="tabpanel"
+                id="feed-massive-stk-fl-panel-edgar" aria-labelledby="feed-massive-stk-fl-tab-edgar_index">
+                <div className="feed-massive-agg-sub-doc">
+                  <p><strong>Use case:</strong> Search the SEC EDGAR database for corporate filings (10-K, 10-Q, 8-K, S-1, etc.) by ticker, CIK, form type, or filing date range with powerful comparison operators.</p>
+                  <p><strong>When to use:</strong> Discover filing history for a company, monitor new submissions, or build event-driven pipelines triggered by specific form types.</p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /stocks/filings/vX/index</code></p>
+                </div>
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Ticker</span>
+                    <input className="form-input" value={flEiTicker} onChange={e => setFlEiTicker(e.target.value)}
+                      disabled={!configured || flEiBusy} placeholder="AAPL" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">CIK</span>
+                    <input className="form-input" value={flEiCik} onChange={e => setFlEiCik(e.target.value)}
+                      disabled={!configured || flEiBusy} placeholder="0000320193" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Form Type</span>
+                    <input className="form-input" value={flEiFormType} onChange={e => setFlEiFormType(e.target.value)}
+                      disabled={!configured || flEiBusy} placeholder="10-K, 10-Q, 8-K…" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Filing Date ≥</span>
+                    <input className="form-input" value={flEiDateGte} onChange={e => setFlEiDateGte(e.target.value)}
+                      disabled={!configured || flEiBusy} placeholder="YYYY-MM-DD" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Filing Date ≤</span>
+                    <input className="form-input" value={flEiDateLte} onChange={e => setFlEiDateLte(e.target.value)}
+                      disabled={!configured || flEiBusy} placeholder="YYYY-MM-DD" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Limit</span>
+                    <input className="form-input" type="number" value={flEiLimit} onChange={e => setFlEiLimit(e.target.value)}
+                      disabled={!configured || flEiBusy} min={1} max={50000} />
+                  </label>
+                </div>
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <p><strong>Key fields:</strong> <code>accession_number</code>, <code>cik</code>, <code>ticker</code>, <code>issuer_name</code>, <code>form_type</code>, <code>filing_date</code>, <code>filing_url</code></p>
+                  <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/filings/edgar-index</code></p>
+                </div>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || flEiBusy} onClick={runEdgarIndex}>
+                    {flEiBusy ? 'Loading…' : 'Execute'}
+                  </button>
+                </div>
+                {flEiErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{flEiErr}</p>}
+                {resultBlock(flEiResult)}
+              </div>
+            )}
+
+            {/* ── 10-K Sections ─────────────────────────────────────────── */}
+            {filingsSubTab === 'sections_10k' && (
+              <div className="feed-massive-agg-tab-panel" role="tabpanel"
+                id="feed-massive-stk-fl-panel-10k" aria-labelledby="feed-massive-stk-fl-tab-sections_10k">
+                <div className="feed-massive-agg-sub-doc">
+                  <p><strong>Use case:</strong> Extract plain-text sections from annual 10-K filings — business overview, risk factors, MD&A, financial statements, legal proceedings, and more.</p>
+                  <p><strong>When to use:</strong> NLP text analysis, risk assessment, competitive benchmarking from standardized annual report sections. Each result includes the full section text.</p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /stocks/filings/10-K/vX/sections</code></p>
+                </div>
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Ticker</span>
+                    <input className="form-input" value={fl10kTicker} onChange={e => setFl10kTicker(e.target.value)}
+                      disabled={!configured || fl10kBusy} placeholder="AAPL" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">CIK</span>
+                    <input className="form-input" value={fl10kCik} onChange={e => setFl10kCik(e.target.value)}
+                      disabled={!configured || fl10kBusy} placeholder="0000320193" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Section</span>
+                    <input className="form-input" value={fl10kSection} onChange={e => setFl10kSection(e.target.value)}
+                      disabled={!configured || fl10kBusy} placeholder="e.g. RISK_FACTORS, MD_AND_A" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Filing Date ≥</span>
+                    <input className="form-input" value={fl10kDateGte} onChange={e => setFl10kDateGte(e.target.value)}
+                      disabled={!configured || fl10kBusy} placeholder="YYYY-MM-DD" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Filing Date ≤</span>
+                    <input className="form-input" value={fl10kDateLte} onChange={e => setFl10kDateLte(e.target.value)}
+                      disabled={!configured || fl10kBusy} placeholder="YYYY-MM-DD" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Period End ≥</span>
+                    <input className="form-input" value={fl10kPeriodEndGte} onChange={e => setFl10kPeriodEndGte(e.target.value)}
+                      disabled={!configured || fl10kBusy} placeholder="YYYY-MM-DD" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Period End ≤</span>
+                    <input className="form-input" value={fl10kPeriodEndLte} onChange={e => setFl10kPeriodEndLte(e.target.value)}
+                      disabled={!configured || fl10kBusy} placeholder="YYYY-MM-DD" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Limit (max 99)</span>
+                    <input className="form-input" type="number" value={fl10kLimit} onChange={e => setFl10kLimit(e.target.value)}
+                      disabled={!configured || fl10kBusy} min={1} max={99} />
+                  </label>
+                </div>
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <p><strong>Key fields:</strong> <code>cik</code>, <code>ticker</code>, <code>filing_date</code>, <code>period_end</code>, <code>section</code>, <code>text</code>, <code>filing_url</code></p>
+                  <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/filings/10k-sections</code></p>
+                </div>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || fl10kBusy} onClick={run10KSections}>
+                    {fl10kBusy ? 'Loading…' : 'Execute'}
+                  </button>
+                </div>
+                {fl10kErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fl10kErr}</p>}
+                {resultBlock(fl10kResult)}
+              </div>
+            )}
+
+            {/* ── 8-K Text ───────────────────────────────────────────────── */}
+            {filingsSubTab === 'text_8k' && (
+              <div className="feed-massive-agg-tab-panel" role="tabpanel"
+                id="feed-massive-stk-fl-panel-8k" aria-labelledby="feed-massive-stk-fl-tab-text_8k">
+                <div className="feed-massive-agg-sub-doc">
+                  <p><strong>Use case:</strong> Retrieve parsed plain-text from the core Items sections of Form 8-K current reports — material events, M&A, executive changes, earnings announcements.</p>
+                  <p><strong>When to use:</strong> Real-time event detection, M&A tracking, automated text analysis for major corporate event items. Includes <code>items_text</code> parsed from the filing body.</p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /stocks/filings/8-K/vX/text</code></p>
+                </div>
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Ticker</span>
+                    <input className="form-input" value={fl8kTicker} onChange={e => setFl8kTicker(e.target.value)}
+                      disabled={!configured || fl8kBusy} placeholder="AAPL" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">CIK</span>
+                    <input className="form-input" value={fl8kCik} onChange={e => setFl8kCik(e.target.value)}
+                      disabled={!configured || fl8kBusy} placeholder="0000320193" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Form Type</span>
+                    <input className="form-input" value={fl8kFormType} onChange={e => setFl8kFormType(e.target.value)}
+                      disabled={!configured || fl8kBusy} placeholder="8-K, 8-K/A" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Filing Date ≥</span>
+                    <input className="form-input" value={fl8kDateGte} onChange={e => setFl8kDateGte(e.target.value)}
+                      disabled={!configured || fl8kBusy} placeholder="YYYY-MM-DD" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Filing Date ≤</span>
+                    <input className="form-input" value={fl8kDateLte} onChange={e => setFl8kDateLte(e.target.value)}
+                      disabled={!configured || fl8kBusy} placeholder="YYYY-MM-DD" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Limit (max 99)</span>
+                    <input className="form-input" type="number" value={fl8kLimit} onChange={e => setFl8kLimit(e.target.value)}
+                      disabled={!configured || fl8kBusy} min={1} max={99} />
+                  </label>
+                </div>
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <p><strong>Key fields:</strong> <code>accession_number</code>, <code>ticker</code>, <code>cik</code>, <code>filing_date</code>, <code>items_text</code></p>
+                  <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/filings/8k-text</code></p>
+                </div>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || fl8kBusy} onClick={run8KText}>
+                    {fl8kBusy ? 'Loading…' : 'Execute'}
+                  </button>
+                </div>
+                {fl8kErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fl8kErr}</p>}
+                {resultBlock(fl8kResult)}
+              </div>
+            )}
+
+            {/* ── 13-F Filings ──────────────────────────────────────────── */}
+            {filingsSubTab === 'form_13f' && (
+              <div className="feed-massive-agg-tab-panel" role="tabpanel"
+                id="feed-massive-stk-fl-panel-13f" aria-labelledby="feed-massive-stk-fl-tab-form_13f">
+                <div className="feed-massive-agg-sub-doc">
+                  <p><strong>Use case:</strong> Retrieve institutional equity holdings from quarterly Form 13-F filings. See what hedge funds, mutual funds, and $100M+ asset managers hold.</p>
+                  <p><strong>When to use:</strong> Analyze institutional ownership trends, track portfolio entries/exits by specific managers, or identify crowded institutional positions.</p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /stocks/filings/vX/13-F</code></p>
+                </div>
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Filer CIK</span>
+                    <input className="form-input" value={fl13fFilerCik} onChange={e => setFl13fFilerCik(e.target.value)}
+                      disabled={!configured || fl13fBusy} placeholder="SEC CIK of the institution" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Filing Date ≥</span>
+                    <input className="form-input" value={fl13fDateGte} onChange={e => setFl13fDateGte(e.target.value)}
+                      disabled={!configured || fl13fBusy} placeholder="YYYY-MM-DD" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Filing Date ≤</span>
+                    <input className="form-input" value={fl13fDateLte} onChange={e => setFl13fDateLte(e.target.value)}
+                      disabled={!configured || fl13fBusy} placeholder="YYYY-MM-DD" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Limit</span>
+                    <input className="form-input" type="number" value={fl13fLimit} onChange={e => setFl13fLimit(e.target.value)}
+                      disabled={!configured || fl13fBusy} min={1} max={1000} />
+                  </label>
+                </div>
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <p><strong>Key fields:</strong> <code>accession_number</code>, <code>filer_cik</code>, <code>filing_date</code>, <code>issuer_name</code>, <code>market_value</code>, <code>shares_or_principal_amount</code>, <code>period</code>, <code>voting_authority_sole</code></p>
+                  <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/filings/13f</code></p>
+                </div>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || fl13fBusy} onClick={run13FFilings}>
+                    {fl13fBusy ? 'Loading…' : 'Execute'}
+                  </button>
+                </div>
+                {fl13fErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fl13fErr}</p>}
+                {resultBlock(fl13fResult)}
+              </div>
+            )}
+
+            {/* ── Risk Factors ───────────────────────────────────────────── */}
+            {filingsSubTab === 'risk_factors' && (
+              <div className="feed-massive-agg-tab-panel" role="tabpanel"
+                id="feed-massive-stk-fl-panel-rf" aria-labelledby="feed-massive-stk-fl-tab-risk_factors">
+                <div className="feed-massive-agg-sub-doc">
+                  <p><strong>Use case:</strong> Access standardized, machine-readable risk factor disclosures from SEC filings. Each record includes the supporting text and a three-level taxonomy classification (primary / secondary / tertiary category).</p>
+                  <p><strong>When to use:</strong> Build risk dashboards, compare risk profiles across companies, track how a company's disclosed risks change over time.</p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /stocks/filings/vX/risk-factors</code></p>
+                </div>
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Ticker</span>
+                    <input className="form-input" value={flRfTicker} onChange={e => setFlRfTicker(e.target.value)}
+                      disabled={!configured || flRfBusy} placeholder="AAPL" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">CIK</span>
+                    <input className="form-input" value={flRfCik} onChange={e => setFlRfCik(e.target.value)}
+                      disabled={!configured || flRfBusy} placeholder="0000320193" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Filing Date ≥</span>
+                    <input className="form-input" value={flRfDateGte} onChange={e => setFlRfDateGte(e.target.value)}
+                      disabled={!configured || flRfBusy} placeholder="YYYY-MM-DD" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Filing Date ≤</span>
+                    <input className="form-input" value={flRfDateLte} onChange={e => setFlRfDateLte(e.target.value)}
+                      disabled={!configured || flRfBusy} placeholder="YYYY-MM-DD" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Limit</span>
+                    <input className="form-input" type="number" value={flRfLimit} onChange={e => setFlRfLimit(e.target.value)}
+                      disabled={!configured || flRfBusy} min={1} max={49999} />
+                  </label>
+                </div>
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <p><strong>Key fields:</strong> <code>cik</code>, <code>ticker</code>, <code>filing_date</code>, <code>primary_category</code>, <code>secondary_category</code>, <code>tertiary_category</code>, <code>supporting_text</code></p>
+                  <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/filings/risk-factors</code></p>
+                </div>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || flRfBusy} onClick={runRiskFactors}>
+                    {flRfBusy ? 'Loading…' : 'Execute'}
+                  </button>
+                </div>
+                {flRfErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{flRfErr}</p>}
+                {resultBlock(flRfResult)}
+              </div>
+            )}
+
+            {/* ── Risk Categories ────────────────────────────────────────── */}
+            {filingsSubTab === 'risk_categories' && (
+              <div className="feed-massive-agg-tab-panel" role="tabpanel"
+                id="feed-massive-stk-fl-panel-rc" aria-labelledby="feed-massive-stk-fl-tab-risk_categories">
+                <div className="feed-massive-agg-sub-doc">
+                  <p><strong>Use case:</strong> Browse the hierarchical taxonomy used to classify risk factors — three levels of categories with descriptions. Use this as a reference to understand and filter the Risk Factors endpoint.</p>
+                  <p><strong>When to use:</strong> Discover all available risk categories before filtering Risk Factors, or build risk classification models and category-level analytics dashboards.</p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /stocks/taxonomies/vX/risk-factors</code></p>
+                </div>
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Primary Category</span>
+                    <input className="form-input" value={flRcPrimary} onChange={e => setFlRcPrimary(e.target.value)}
+                      disabled={!configured || flRcBusy} placeholder="e.g. MARKET_RISK" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Secondary Category</span>
+                    <input className="form-input" value={flRcSecondary} onChange={e => setFlRcSecondary(e.target.value)}
+                      disabled={!configured || flRcBusy} placeholder="optional filter" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Tertiary Category</span>
+                    <input className="form-input" value={flRcTertiary} onChange={e => setFlRcTertiary(e.target.value)}
+                      disabled={!configured || flRcBusy} placeholder="optional filter" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Limit (max 999)</span>
+                    <input className="form-input" type="number" value={flRcLimit} onChange={e => setFlRcLimit(e.target.value)}
+                      disabled={!configured || flRcBusy} min={1} max={999} />
+                  </label>
+                </div>
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <p><strong>Key fields:</strong> <code>description</code>, <code>primary_category</code>, <code>secondary_category</code>, <code>tertiary_category</code>, <code>taxonomy</code></p>
+                  <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/filings/risk-categories</code></p>
+                </div>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || flRcBusy} onClick={runRiskCategories}>
+                    {flRcBusy ? 'Loading…' : 'Execute'}
+                  </button>
+                </div>
+                {flRcErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{flRcErr}</p>}
+                {resultBlock(flRcResult)}
+              </div>
+            )}
+
+            {/* ── Form 3 ─────────────────────────────────────────────────── */}
+            {filingsSubTab === 'form_3' && (
+              <div className="feed-massive-agg-tab-panel" role="tabpanel"
+                id="feed-massive-stk-fl-panel-f3" aria-labelledby="feed-massive-stk-fl-tab-form_3">
+                <div className="feed-massive-agg-sub-doc">
+                  <p><strong>Use case:</strong> Retrieve Form 3 filings — initial statements of beneficial ownership filed by corporate insiders (directors, officers, 10%+ shareholders) when first acquiring a reportable position.</p>
+                  <p><strong>When to use:</strong> Track insider position initiations, identify new insider appointments, monitor initial ownership disclosures for governance analysis.</p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /stocks/filings/vX/form-3</code></p>
+                </div>
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Tickers</span>
+                    <input className="form-input" value={flF3Tickers} onChange={e => setFlF3Tickers(e.target.value)}
+                      disabled={!configured || flF3Busy} placeholder="AAPL" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Issuer CIK</span>
+                    <input className="form-input" value={flF3IssuerCik} onChange={e => setFlF3IssuerCik(e.target.value)}
+                      disabled={!configured || flF3Busy} placeholder="CIK of the company" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Owner CIK</span>
+                    <input className="form-input" value={flF3OwnerCik} onChange={e => setFlF3OwnerCik(e.target.value)}
+                      disabled={!configured || flF3Busy} placeholder="CIK of the insider" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Filing Date ≥</span>
+                    <input className="form-input" value={flF3DateGte} onChange={e => setFlF3DateGte(e.target.value)}
+                      disabled={!configured || flF3Busy} placeholder="YYYY-MM-DD" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Filing Date ≤</span>
+                    <input className="form-input" value={flF3DateLte} onChange={e => setFlF3DateLte(e.target.value)}
+                      disabled={!configured || flF3Busy} placeholder="YYYY-MM-DD" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Limit</span>
+                    <input className="form-input" type="number" value={flF3Limit} onChange={e => setFlF3Limit(e.target.value)}
+                      disabled={!configured || flF3Busy} min={1} max={10000} />
+                  </label>
+                </div>
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <p><strong>Key fields:</strong> <code>accession_number</code>, <code>filing_date</code>, <code>period_of_report</code>, <code>issuer_name</code>, <code>owner_name</code>, <code>security_title</code>, <code>shares_owned</code>, <code>is_director</code>, <code>is_officer</code>, <code>is_ten_percent_owner</code></p>
+                  <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/filings/form-3</code></p>
+                </div>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || flF3Busy} onClick={runForm3}>
+                    {flF3Busy ? 'Loading…' : 'Execute'}
+                  </button>
+                </div>
+                {flF3Err && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{flF3Err}</p>}
+                {resultBlock(flF3Result)}
+              </div>
+            )}
+
+            {/* ── Form 4 ─────────────────────────────────────────────────── */}
+            {filingsSubTab === 'form_4' && (
+              <div className="feed-massive-agg-tab-panel" role="tabpanel"
+                id="feed-massive-stk-fl-panel-f4" aria-labelledby="feed-massive-stk-fl-tab-form_4">
+                <div className="feed-massive-agg-sub-doc">
+                  <p><strong>Use case:</strong> Retrieve Form 4 filings documenting changes in insider securities ownership — purchases, sales, option exercises, and awards. Filter by transaction code to isolate open-market buys (P) or sales (S).</p>
+                  <p><strong>When to use:</strong> Insider trading signal analysis, track buying clusters before earnings, identify insider selling pressure, or monitor executive compensation awards.</p>
+                  <p className="feed-massive-agg-sub-endpoint"><code>GET /stocks/filings/vX/form-4</code></p>
+                </div>
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Tickers</span>
+                    <input className="form-input" value={flF4Tickers} onChange={e => setFlF4Tickers(e.target.value)}
+                      disabled={!configured || flF4Busy} placeholder="AAPL" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Issuer CIK</span>
+                    <input className="form-input" value={flF4IssuerCik} onChange={e => setFlF4IssuerCik(e.target.value)}
+                      disabled={!configured || flF4Busy} placeholder="CIK of the company" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Owner CIK</span>
+                    <input className="form-input" value={flF4OwnerCik} onChange={e => setFlF4OwnerCik(e.target.value)}
+                      disabled={!configured || flF4Busy} placeholder="CIK of the insider" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Transaction Code</span>
+                    <select className="form-input" value={flF4TxCode} onChange={e => setFlF4TxCode(e.target.value)}
+                      disabled={!configured || flF4Busy}>
+                      <option value="">Any</option>
+                      <option value="P">P — Open-market purchase</option>
+                      <option value="S">S — Open-market sale</option>
+                      <option value="A">A — Grant/award</option>
+                      <option value="M">M — Option exercise</option>
+                      <option value="F">F — Tax withholding</option>
+                      <option value="G">G — Gift</option>
+                    </select>
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Filing Date ≥</span>
+                    <input className="form-input" value={flF4DateGte} onChange={e => setFlF4DateGte(e.target.value)}
+                      disabled={!configured || flF4Busy} placeholder="YYYY-MM-DD" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Filing Date ≤</span>
+                    <input className="form-input" value={flF4DateLte} onChange={e => setFlF4DateLte(e.target.value)}
+                      disabled={!configured || flF4Busy} placeholder="YYYY-MM-DD" autoComplete="off" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Limit</span>
+                    <input className="form-input" type="number" value={flF4Limit} onChange={e => setFlF4Limit(e.target.value)}
+                      disabled={!configured || flF4Busy} min={1} max={10000} />
+                  </label>
+                </div>
+                <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+                  <p><strong>Key fields:</strong> <code>accession_number</code>, <code>filing_date</code>, <code>issuer_name</code>, <code>owner_name</code>, <code>transaction_shares</code>, <code>transaction_price_per_share</code>, <code>transaction_value</code>, <code>is_director</code>, <code>is_officer</code></p>
+                  <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/filings/form-4</code></p>
+                </div>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={!configured || flF4Busy} onClick={runForm4}>
+                    {flF4Busy ? 'Loading…' : 'Execute'}
+                  </button>
+                </div>
+                {flF4Err && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{flF4Err}</p>}
+                {resultBlock(flF4Result)}
+              </div>
+            )}
+
+          </div>
+        </div>
+      </StockCapabilityPanel>
+    )
+  }
+
   // ── Render a single capability section ───────────────────────────────────
   function renderCap(id: string) {
     const row = rowById(id)
@@ -1744,7 +3012,11 @@ export function FeedMassiveStockPage({
                       ? renderTickersCap()
                       : id === 'stock-aggregates'
                         ? renderStockAggregatesCap()
-                        : renderCap(id)}
+                        : id === 'stock-fundamentals'
+                          ? renderFundamentalsCap()
+                          : id === 'stock-filings'
+                            ? renderFilingsCap()
+                            : renderCap(id)}
                   </div>
                 )
               })}

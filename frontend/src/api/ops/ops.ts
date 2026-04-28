@@ -452,6 +452,8 @@ export interface MarketIngestServiceRow {
   redis_control_env?: string | null
   /** Hostname from bifrost_ops_control_host at last Ops start; null if missing. */
   redis_control_host?: string | null
+  /** Unix timestamp (seconds) of last bifrost_ops_control_updated_at write; null if missing. */
+  redis_control_updated_at?: number | null
 }
 
 export async function fetchMarketIngestServices(): Promise<{

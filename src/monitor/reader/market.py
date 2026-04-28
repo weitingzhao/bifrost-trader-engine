@@ -323,7 +323,12 @@ def get_bars_benchmark(
 
 
 def get_stock_day_fallback_price(conn: Any, symbol: str) -> Optional[Tuple[float, float, Optional[float]]]:
-    """Return (close, bar_time_epoch, prev_close) from stock_day for display when contract_quote_live has no row."""
+    """Return (close, bar_time_epoch, prev_close) from stock_day for display when live quote is missing or stale.
+
+    When the latest bar is **today**'s session date: before NY regular close (+ grace) we still use the prior
+    completed session (avoids intraday partial aggregates). After that cutoff we use today's close so Positions
+    can show the finalized daily bar when IB live is unavailable.
+    """
     if not (symbol or "").strip():
         return None
     sym = (symbol or "").strip()
@@ -338,7 +343,7 @@ def get_stock_day_fallback_price(conn: Any, symbol: str) -> Optional[Tuple[float
                   SELECT DISTINCT ON (bar_time)
                     bar_time, close
                   FROM stock_day
-                  WHERE symbol = %s
+                  WHERE UPPER(TRIM(symbol)) = UPPER(TRIM(%s))
                   ORDER BY bar_time DESC,
                     CASE COALESCE(source, 'ib')
                       WHEN 'ib' THEN 0 WHEN 'tv' THEN 1 WHEN 'massive' THEN 2 ELSE 3 END ASC
@@ -354,10 +359,20 @@ def get_stock_day_fallback_price(conn: Any, symbol: str) -> Optional[Tuple[float
         bt0 = rows[0].get("bar_time")
         bar_date_0 = bt0.date() if hasattr(bt0, "date") else (bt0 if isinstance(bt0, date) else today)
         if bar_date_0 == today:
-            if len(rows) < 2:
-                return None
-            r = rows[1]
-            prev_close = rows[2].get("close") if len(rows) > 2 else None
+            try:
+                from src.massive.stock_ohlc_daily_smart import is_ny_session_safely_closed
+
+                session_done = is_ny_session_safely_closed()
+            except Exception:
+                session_done = False
+            if session_done:
+                r = rows[0]
+                prev_close = rows[1].get("close") if len(rows) > 1 else None
+            else:
+                if len(rows) < 2:
+                    return None
+                r = rows[1]
+                prev_close = rows[2].get("close") if len(rows) > 2 else None
         else:
             r = rows[0]
             prev_close = rows[1].get("close") if len(rows) > 1 else None

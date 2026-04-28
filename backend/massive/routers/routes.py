@@ -2690,6 +2690,401 @@ def get_massive_stock_bars_prev(
     return {"ok": True, "data": data}
 
 
+# ── Stock Fundamentals (Financials v1 + Short Interest / Short Volume / Float) ──
+
+
+def _massive_fundamentals_client(request: Request):
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+    if not ms["api_key"]:
+        return None, {"ok": False, "error": "Massive API key not configured"}
+    return MassiveClient(ms["api_key"], ms["rest_base"]), None
+
+
+@router.get("/research/massive/stocks/fundamentals/income-statements")
+def get_stock_income_statements(
+    request: Request,
+    ticker: str = Query(..., description="Stock symbol, e.g. AAPL"),
+    timeframe: Optional[str] = Query(None, description="quarterly | annual | trailing_twelve_months"),
+    fiscal_year: Optional[int] = Query(None),
+    fiscal_quarter: Optional[int] = Query(None, ge=1, le=4),
+    period_end: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    filing_date: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    limit: int = Query(10, ge=1, le=1000),
+    sort: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /stocks/financials/v1/income-statements — P&L proxy."""
+    client, err = _massive_fundamentals_client(request)
+    if err:
+        return err
+    data = client.fetch_stock_income_statements(
+        ticker, timeframe=timeframe, fiscal_year=fiscal_year, fiscal_quarter=fiscal_quarter,
+        period_end=period_end, filing_date=filing_date, limit=limit, sort=sort,
+    )
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/stocks/fundamentals/balance-sheets")
+def get_stock_balance_sheets(
+    request: Request,
+    ticker: str = Query(..., description="Stock symbol, e.g. AAPL"),
+    timeframe: Optional[str] = Query(None),
+    fiscal_year: Optional[int] = Query(None),
+    fiscal_quarter: Optional[int] = Query(None, ge=1, le=4),
+    period_end: Optional[str] = Query(None),
+    filing_date: Optional[str] = Query(None),
+    limit: int = Query(10, ge=1, le=1000),
+    sort: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /stocks/financials/v1/balance-sheets — assets, liabilities, equity proxy."""
+    client, err = _massive_fundamentals_client(request)
+    if err:
+        return err
+    data = client.fetch_stock_balance_sheets(
+        ticker, timeframe=timeframe, fiscal_year=fiscal_year, fiscal_quarter=fiscal_quarter,
+        period_end=period_end, filing_date=filing_date, limit=limit, sort=sort,
+    )
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/stocks/fundamentals/cash-flow-statements")
+def get_stock_cash_flow_statements(
+    request: Request,
+    ticker: str = Query(..., description="Stock symbol, e.g. AAPL"),
+    timeframe: Optional[str] = Query(None),
+    fiscal_year: Optional[int] = Query(None),
+    fiscal_quarter: Optional[int] = Query(None, ge=1, le=4),
+    period_end: Optional[str] = Query(None),
+    filing_date: Optional[str] = Query(None),
+    limit: int = Query(10, ge=1, le=1000),
+    sort: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /stocks/financials/v1/cash-flow-statements — OCF, CapEx, financing proxy."""
+    client, err = _massive_fundamentals_client(request)
+    if err:
+        return err
+    data = client.fetch_stock_cash_flow_statements(
+        ticker, timeframe=timeframe, fiscal_year=fiscal_year, fiscal_quarter=fiscal_quarter,
+        period_end=period_end, filing_date=filing_date, limit=limit, sort=sort,
+    )
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/stocks/fundamentals/ratios")
+def get_stock_ratios(
+    request: Request,
+    ticker: str = Query(..., description="Stock symbol, e.g. AAPL"),
+    limit: int = Query(10, ge=1, le=1000),
+    sort: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /stocks/financials/v1/ratios — P/E, P/B, ROE, D/E, dividend yield proxy."""
+    client, err = _massive_fundamentals_client(request)
+    if err:
+        return err
+    data = client.fetch_stock_ratios(ticker, limit=limit, sort=sort)
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/stocks/fundamentals/short-interest")
+def get_stock_short_interest(
+    request: Request,
+    ticker: str = Query(..., description="Stock symbol, e.g. AAPL"),
+    settlement_date: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    limit: int = Query(10, ge=1, le=1000),
+    sort: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /stocks/v1/short-interest — short interest and days-to-cover proxy."""
+    client, err = _massive_fundamentals_client(request)
+    if err:
+        return err
+    data = client.fetch_stock_short_interest(ticker, settlement_date=settlement_date, limit=limit, sort=sort)
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/stocks/fundamentals/short-volume")
+def get_stock_short_volume(
+    request: Request,
+    ticker: str = Query(..., description="Stock symbol, e.g. AAPL"),
+    date: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    limit: int = Query(10, ge=1, le=1000),
+    sort: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /stocks/v1/short-volume — daily short volume per venue + ratio proxy."""
+    client, err = _massive_fundamentals_client(request)
+    if err:
+        return err
+    data = client.fetch_stock_short_volume(ticker, date=date, limit=limit, sort=sort)
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/stocks/fundamentals/float")
+def get_stock_float(
+    request: Request,
+    ticker: str = Query(..., description="Stock symbol, e.g. AAPL"),
+    limit: int = Query(10, ge=1, le=5000),
+    sort: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /stocks/vX/float — free float shares and float percent proxy."""
+    client, err = _massive_fundamentals_client(request)
+    if err:
+        return err
+    data = client.fetch_stock_float(ticker, limit=limit, sort=sort)
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+# ── SEC Filings & Disclosures ─────────────────────────────────────────────────
+
+
+@router.get("/research/massive/stocks/filings/edgar-index")
+def get_edgar_index(
+    request: Request,
+    ticker: Optional[str] = Query(None),
+    cik: Optional[str] = Query(None),
+    form_type: Optional[str] = Query(None),
+    filing_date: Optional[str] = Query(None),
+    filing_date_gt: Optional[str] = Query(None),
+    filing_date_gte: Optional[str] = Query(None),
+    filing_date_lt: Optional[str] = Query(None),
+    filing_date_lte: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=50000),
+    sort: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /stocks/filings/vX/index — EDGAR filing index search."""
+    client, err = _massive_fundamentals_client(request)
+    if err:
+        return err
+    data = client.fetch_edgar_index(
+        ticker=ticker, cik=cik, form_type=form_type,
+        filing_date=filing_date, filing_date_gt=filing_date_gt,
+        filing_date_gte=filing_date_gte, filing_date_lt=filing_date_lt,
+        filing_date_lte=filing_date_lte, limit=limit, sort=sort,
+    )
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/stocks/filings/10k-sections")
+def get_10k_sections(
+    request: Request,
+    ticker: Optional[str] = Query(None),
+    cik: Optional[str] = Query(None),
+    section: Optional[str] = Query(None),
+    filing_date: Optional[str] = Query(None),
+    filing_date_gt: Optional[str] = Query(None),
+    filing_date_gte: Optional[str] = Query(None),
+    filing_date_lt: Optional[str] = Query(None),
+    filing_date_lte: Optional[str] = Query(None),
+    period_end: Optional[str] = Query(None),
+    period_end_gte: Optional[str] = Query(None),
+    period_end_lte: Optional[str] = Query(None),
+    limit: int = Query(10, ge=1, le=99),
+    sort: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /stocks/filings/10-K/vX/sections — plain-text sections from 10-K filings."""
+    client, err = _massive_fundamentals_client(request)
+    if err:
+        return err
+    data = client.fetch_10k_sections(
+        ticker=ticker, cik=cik, section=section,
+        filing_date=filing_date, filing_date_gt=filing_date_gt,
+        filing_date_gte=filing_date_gte, filing_date_lt=filing_date_lt,
+        filing_date_lte=filing_date_lte, period_end=period_end,
+        period_end_gte=period_end_gte, period_end_lte=period_end_lte,
+        limit=limit, sort=sort,
+    )
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/stocks/filings/8k-text")
+def get_8k_text(
+    request: Request,
+    ticker: Optional[str] = Query(None),
+    cik: Optional[str] = Query(None),
+    form_type: Optional[str] = Query(None),
+    filing_date: Optional[str] = Query(None),
+    filing_date_gt: Optional[str] = Query(None),
+    filing_date_gte: Optional[str] = Query(None),
+    filing_date_lt: Optional[str] = Query(None),
+    filing_date_lte: Optional[str] = Query(None),
+    limit: int = Query(10, ge=1, le=99),
+    sort: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /stocks/filings/8-K/vX/text — parsed plain-text from 8-K current report Items."""
+    client, err = _massive_fundamentals_client(request)
+    if err:
+        return err
+    data = client.fetch_8k_text(
+        ticker=ticker, cik=cik, form_type=form_type,
+        filing_date=filing_date, filing_date_gt=filing_date_gt,
+        filing_date_gte=filing_date_gte, filing_date_lt=filing_date_lt,
+        filing_date_lte=filing_date_lte, limit=limit, sort=sort,
+    )
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/stocks/filings/13f")
+def get_13f_filings(
+    request: Request,
+    filer_cik: Optional[str] = Query(None),
+    filing_date: Optional[str] = Query(None),
+    filing_date_gt: Optional[str] = Query(None),
+    filing_date_gte: Optional[str] = Query(None),
+    filing_date_lt: Optional[str] = Query(None),
+    filing_date_lte: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    sort: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /stocks/filings/vX/13-F — institutional holdings from Form 13-F."""
+    client, err = _massive_fundamentals_client(request)
+    if err:
+        return err
+    data = client.fetch_13f_filings(
+        filer_cik=filer_cik,
+        filing_date=filing_date, filing_date_gt=filing_date_gt,
+        filing_date_gte=filing_date_gte, filing_date_lt=filing_date_lt,
+        filing_date_lte=filing_date_lte, limit=limit, sort=sort,
+    )
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/stocks/filings/risk-factors")
+def get_risk_factors(
+    request: Request,
+    ticker: Optional[str] = Query(None),
+    cik: Optional[str] = Query(None),
+    filing_date: Optional[str] = Query(None),
+    filing_date_gt: Optional[str] = Query(None),
+    filing_date_gte: Optional[str] = Query(None),
+    filing_date_lt: Optional[str] = Query(None),
+    filing_date_lte: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=49999),
+    sort: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /stocks/filings/vX/risk-factors — standardized risk factor disclosures."""
+    client, err = _massive_fundamentals_client(request)
+    if err:
+        return err
+    data = client.fetch_risk_factors(
+        ticker=ticker, cik=cik,
+        filing_date=filing_date, filing_date_gt=filing_date_gt,
+        filing_date_gte=filing_date_gte, filing_date_lt=filing_date_lt,
+        filing_date_lte=filing_date_lte, limit=limit, sort=sort,
+    )
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/stocks/filings/risk-categories")
+def get_risk_categories(
+    request: Request,
+    taxonomy: Optional[int] = Query(None),
+    primary_category: Optional[str] = Query(None),
+    secondary_category: Optional[str] = Query(None),
+    tertiary_category: Optional[str] = Query(None),
+    limit: int = Query(200, ge=1, le=999),
+    sort: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /stocks/taxonomies/vX/risk-factors — hierarchical risk factor taxonomy."""
+    client, err = _massive_fundamentals_client(request)
+    if err:
+        return err
+    data = client.fetch_risk_categories(
+        taxonomy=taxonomy, primary_category=primary_category,
+        secondary_category=secondary_category, tertiary_category=tertiary_category,
+        limit=limit, sort=sort,
+    )
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/stocks/filings/form-3")
+def get_form_3(
+    request: Request,
+    issuer_cik: Optional[str] = Query(None),
+    owner_cik: Optional[str] = Query(None),
+    tickers: Optional[str] = Query(None),
+    form_type: Optional[str] = Query(None),
+    filing_date: Optional[str] = Query(None),
+    filing_date_gt: Optional[str] = Query(None),
+    filing_date_gte: Optional[str] = Query(None),
+    filing_date_lt: Optional[str] = Query(None),
+    filing_date_lte: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=10000),
+    sort: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /stocks/filings/vX/form-3 — initial insider ownership statements."""
+    client, err = _massive_fundamentals_client(request)
+    if err:
+        return err
+    data = client.fetch_form_3(
+        issuer_cik=issuer_cik, owner_cik=owner_cik, tickers=tickers, form_type=form_type,
+        filing_date=filing_date, filing_date_gt=filing_date_gt,
+        filing_date_gte=filing_date_gte, filing_date_lt=filing_date_lt,
+        filing_date_lte=filing_date_lte, limit=limit, sort=sort,
+    )
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
+@router.get("/research/massive/stocks/filings/form-4")
+def get_form_4(
+    request: Request,
+    issuer_cik: Optional[str] = Query(None),
+    owner_cik: Optional[str] = Query(None),
+    tickers: Optional[str] = Query(None),
+    form_type: Optional[str] = Query(None),
+    transaction_code: Optional[str] = Query(None),
+    filing_date: Optional[str] = Query(None),
+    filing_date_gt: Optional[str] = Query(None),
+    filing_date_gte: Optional[str] = Query(None),
+    filing_date_lt: Optional[str] = Query(None),
+    filing_date_lte: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=10000),
+    sort: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /stocks/filings/vX/form-4 — insider ownership changes."""
+    client, err = _massive_fundamentals_client(request)
+    if err:
+        return err
+    data = client.fetch_form_4(
+        issuer_cik=issuer_cik, owner_cik=owner_cik, tickers=tickers, form_type=form_type,
+        transaction_code=transaction_code,
+        filing_date=filing_date, filing_date_gt=filing_date_gt,
+        filing_date_gte=filing_date_gte, filing_date_lt=filing_date_lt,
+        filing_date_lte=filing_date_lte, limit=limit, sort=sort,
+    )
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
 @router.get("/research/massive/stocks/{symbol}")
 def get_stock_reference_detail_legacy(request: Request, symbol: str) -> Dict[str, Any]:
     """Deprecated: use ``GET /research/massive/reference/tickers/{ticker}``."""

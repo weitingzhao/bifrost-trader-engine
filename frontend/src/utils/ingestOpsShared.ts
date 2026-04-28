@@ -62,9 +62,16 @@ export function runtimeControlHostDisplay(
 export type IngestActionBlock = 'none' | 'admin' | 'script' | 'remote_env' | 'stack_conflict'
 
 /**
- * Per-row Redis lease plus stack-wide view: only one of dev or prod may run Socket (or Daemon ingest)
- * services against the same Redis. Ops writes `redis_control_env` per `redis_meta_key`; rows without a
- * lease yet must still respect a lease held on any sibling row.
+ * IB services share TWS client connections and must be controlled from one stack together.
+ * massive_ws writes to a completely independent Redis key and does not conflict with IB.
+ */
+const IB_SERVICE_IDS = new Set(['ib_ingestor', 'ib_market', 'ib_account_agent', 'ib_operator'])
+
+/**
+ * Per-row effective Redis control env using conflict groups:
+ * - massive_ws: standalone — only its own lease matters; IB leases do not block it.
+ * - IB services: grouped together — any IB peer lease on the other stack blocks the row.
+ * - Others: full aggregate across all rows (legacy / future services).
  */
 export function resolveEffectiveRedisControlEnv(
   svc: { id: string; redis_control_env?: string | null },
@@ -74,8 +81,17 @@ export function resolveEffectiveRedisControlEnv(
   if (own === 'dev' || own === 'prod') {
     return svc.redis_control_env
   }
+  // Determine which sibling rows count for conflict detection.
+  let conflictRows: typeof allRows
+  if (svc.id === 'massive_ws') {
+    conflictRows = []  // standalone — never blocked by IB or other peers
+  } else if (IB_SERVICE_IDS.has(svc.id)) {
+    conflictRows = allRows.filter(r => IB_SERVICE_IDS.has(r.id))
+  } else {
+    conflictRows = allRows
+  }
   const distinct = new Set<'dev' | 'prod'>()
-  for (const r of allRows) {
+  for (const r of conflictRows) {
     const v = (r.redis_control_env ?? '').toLowerCase().trim()
     if (v === 'dev' || v === 'prod') distinct.add(v)
   }

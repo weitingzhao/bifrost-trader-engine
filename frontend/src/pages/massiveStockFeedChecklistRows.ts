@@ -113,29 +113,84 @@ const rows: ChecklistRow[] = [
     service: 'Fundamentals',
     group: 'rest',
     description:
-      'Financial statements and fundamental data: income statement, balance sheet, cash flow, and key metrics via Massive vX financials endpoint.',
+      'Seven Massive REST endpoints covering financial statements, ratios, and short data: '
+      + 'Income Statements (revenue, net income, EPS — quarterly/annual/TTM), '
+      + 'Balance Sheets (assets, liabilities, equity snapshot), '
+      + 'Cash Flow Statements (OCF, CapEx, financing), '
+      + 'Ratios (ROE, ROA, D/E, margins — computed from vX financials), '
+      + 'Short Interest (shares short, days-to-cover), '
+      + 'Short Volume (daily venue-level short volume + ratio), '
+      + 'and Float (free float shares and percent).',
     tierMin: 'starter',
-    projectStatus: 'not-implemented',
-    verification: 'N/A — not yet implemented.',
+    projectStatus: 'implemented',
+    verification:
+      'Settings → Feed → Massive Stock → Fundamentals: each sub-tab has Execute → JSON. '
+      + 'Proxies: GET /research/massive/stocks/fundamentals/income-statements, '
+      + 'GET /research/massive/stocks/fundamentals/balance-sheets, '
+      + 'GET /research/massive/stocks/fundamentals/cash-flow-statements, '
+      + 'GET /research/massive/stocks/fundamentals/ratios, '
+      + 'GET /research/massive/stocks/fundamentals/short-interest, '
+      + 'GET /research/massive/stocks/fundamentals/short-volume, '
+      + 'GET /research/massive/stocks/fundamentals/float.',
     purpose:
-      'Pull structured financial statements for stocks from Massive to support fundamental screening and valuation research.',
+      'Pull structured financial statements, valuation ratios, and short-selling data from Massive to support '
+      + 'fundamental screening, short squeeze monitoring, and float-adjusted analysis.',
     helpVerification:
-      'Not yet implemented. Target endpoints: GET /vX/reference/financials (query by ticker, timeframe, include_sources).',
+      'Income Statements / Balance Sheets / Cash Flow: backed by GET /vX/reference/financials (starter tier). '
+      + 'Ratios: computed from vX financials data (ROE, ROA, D/E, current ratio, margins, EPS). '
+      + 'Short Interest: GET /stocks/v1/short-interest. '
+      + 'Short Volume: GET /stocks/v1/short-volume. '
+      + 'Float: GET /stocks/vX/float. '
+      + 'All require ticker param; financials also accept timeframe (quarterly|annual|trailing_twelve_months), '
+      + 'fiscal_year, fiscal_quarter, period_end, filing_date.',
   },
   {
     id: 'stock-filings',
     service: 'Filings & Disclosures',
     group: 'rest',
     description:
-      'SEC filings and regulatory disclosures: 8-K, 10-K, 10-Q, and insider transaction filings via Massive reference endpoints.',
+      'Eight Massive REST endpoints covering SEC filings and insider ownership: '
+      + 'Edgar Index (EDGAR filing discovery across all form types with powerful filtering), '
+      + '10-K Sections (plain-text section extraction from annual reports), '
+      + '8-K Text (parsed Items text from current event reports), '
+      + '13-F Filings (institutional holdings from Form 13-F), '
+      + 'Risk Factors (standardized risk factor disclosures with taxonomy), '
+      + 'Risk Categories (hierarchical risk factor taxonomy reference), '
+      + 'Form 3 (initial insider ownership statements), '
+      + 'and Form 4 (changes in insider ownership).',
     tierMin: 'starter',
-    projectStatus: 'not-implemented',
-    verification: 'N/A — not yet implemented.',
+    projectStatus: 'implemented',
+    verification:
+      'Settings → Feed → Massive Stock → Filings & Disclosures: each sub-tab has Execute → JSON. '
+      + 'Proxies: GET /research/massive/stocks/filings/edgar-index, '
+      + 'GET /research/massive/stocks/filings/10k-sections, '
+      + 'GET /research/massive/stocks/filings/8k-text, '
+      + 'GET /research/massive/stocks/filings/13f, '
+      + 'GET /research/massive/stocks/filings/risk-factors, '
+      + 'GET /research/massive/stocks/filings/risk-categories, '
+      + 'GET /research/massive/stocks/filings/form-3, '
+      + 'GET /research/massive/stocks/filings/form-4.',
     purpose:
-      'Access and store SEC filing metadata and insider disclosure data for stocks. Useful for event-driven research and compliance monitoring.',
+      'Comprehensive SEC filing access: discover filings via EDGAR Index, extract 10-K section text for NLP, '
+      + 'stream 8-K event text for real-time alerts, analyze institutional positioning via 13-F, '
+      + 'monitor standardized risk disclosures across companies, and track insider buying/selling via Form 3 & 4.',
     helpVerification:
-      'Not yet implemented. Target endpoints: GET /vX/reference/sec/filings, GET /vX/reference/sec/filings/{accession_number} '
-      + '(filter by ticker, type, period_of_report).',
+      'Edgar Index: GET /stocks/filings/vX/index — params: ticker, cik, form_type, filing_date (gt/gte/lt/lte), limit (max 50000). '
+      + 'Response: results[].accession_number, ticker, issuer_name, form_type, filing_date, filing_url. '
+      + '10-K Sections: GET /stocks/filings/10-K/vX/sections — params: ticker, cik, section, filing_date, period_end, limit (max 99). '
+      + 'Response: results[].cik, ticker, filing_date, period_end, section, text, filing_url. '
+      + '8-K Text: GET /stocks/filings/8-K/vX/text — params: ticker, cik, form_type, filing_date, limit (max 99). '
+      + 'Response: results[].accession_number, ticker, filing_date, items_text. '
+      + '13-F Filings: GET /stocks/filings/vX/13-F — params: filer_cik, filing_date (gt/gte/lt/lte), limit (max 1000). '
+      + 'Response: results[].accession_number, filer_cik, filing_date, issuer_name, market_value, shares_or_principal_amount, period. '
+      + 'Risk Factors: GET /stocks/filings/vX/risk-factors — params: ticker, cik, filing_date, limit (max 49999). '
+      + 'Response: results[].cik, ticker, filing_date, primary_category, secondary_category, tertiary_category, supporting_text. '
+      + 'Risk Categories: GET /stocks/taxonomies/vX/risk-factors — params: taxonomy, primary/secondary/tertiary_category, limit (max 999). '
+      + 'Response: results[].description, primary_category, secondary_category, tertiary_category, taxonomy. '
+      + 'Form 3: GET /stocks/filings/vX/form-3 — params: issuer_cik, owner_cik, tickers, form_type, filing_date, limit (max 10000). '
+      + 'Response: results[].accession_number, filing_date, issuer_name, owner_name, security_title, shares_owned, is_director/is_officer. '
+      + 'Form 4: GET /stocks/filings/vX/form-4 — params: issuer_cik, owner_cik, tickers, transaction_code, filing_date, limit (max 10000). '
+      + 'Response: results[].accession_number, filing_date, issuer_name, owner_name, transaction_shares, transaction_price_per_share, transaction_value.',
   },
   {
     id: 'stock-news',

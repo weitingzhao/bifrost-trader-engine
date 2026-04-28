@@ -792,6 +792,47 @@ function ServiceRow(props: {
             ) : null}
           </div>
         ) : null}
+        {/* Massive WS: service heartbeat countdown (~Ns until next _watchlist_refresh_loop tick) */}
+        {svc.id === 'massive_ws' ? (() => {
+          const updAt = svc.redis_control_updated_at
+          if (updAt == null || !Number.isFinite(updAt) || updAt <= 0) return null
+          const HEARTBEAT_PERIOD = 60
+          const leaseAgeS = Math.max(0, Date.now() / 1000 - updAt + elapsed)
+          const nextInS   = Math.max(0, HEARTBEAT_PERIOD - leaseAgeS)
+          const overdue   = leaseAgeS > HEARTBEAT_PERIOD + 10   // > 70s — heartbeat late
+          const critical  = leaseAgeS > 120                      // orphan-detection threshold
+          const isSoon    = !overdue && nextInS <= 2
+          const bg     = critical ? 'rgba(239,68,68,0.18)'   : overdue ? 'rgba(234,179,8,0.18)'   : isSoon ? 'rgba(59,130,246,0.2)'  : 'rgba(148,163,184,0.2)'
+          const color  = critical ? '#f87171'                 : overdue ? '#fbbf24'                : isSoon ? '#93c5fd'               : '#cbd5e1'
+          const border = critical ? '1px solid rgba(239,68,68,0.35)' : overdue ? '1px solid rgba(234,179,8,0.35)' : isSoon ? '1px solid rgba(59,130,246,0.45)' : '1px solid rgba(148,163,184,0.35)'
+          const label  = critical ? `Overdue ${Math.floor(leaseAgeS)}s` : overdue ? `Late ~${Math.ceil(nextInS)}s` : `~${Math.ceil(nextInS)}s`
+          const tipText = critical
+            ? 'Service heartbeat overdue (>120s) — orphan detection threshold reached; HOST may be cleared.'
+            : overdue
+              ? 'Service heartbeat late (expected every 60s). Health hash may go stale.'
+              : 'Next service heartbeat tick. Health hash (updated_at + connected) refreshed each tick.'
+          return (
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: massive ? 4 : 0 }}
+            >
+              <span className="massive-api-doc-hint" style={{ margin: 0 }}>Service heartbeat</span>
+              <span
+                title={tipText}
+                style={{
+                  display: 'inline-flex', alignItems: 'center',
+                  padding: '1px 8px', borderRadius: 99,
+                  fontSize: '0.72rem', fontWeight: 700,
+                  fontVariantNumeric: 'tabular-nums',
+                  letterSpacing: '0.01em', lineHeight: 1.65,
+                  background: bg, color, border,
+                  verticalAlign: 'middle', minWidth: 38, justifyContent: 'center',
+                }}
+              >
+                {label}
+              </span>
+            </div>
+          )
+        })() : null}
         {svc.id === 'massive_ws' && !massive ? (
           <span className="massive-api-doc-hint">—</span>
         ) : null}

@@ -825,7 +825,7 @@ export function DataOverviewStockDayJobsBar({
 
           <div className="data-overview-contracts-panel__toolbar-right" aria-label="stock_day gap">
             <button type="button" className="data-overview-ctl data-overview-ctl--plain"
-              title="How Gap and Cov% are defined for stock_day: Gap = global trading-day calendar minus this symbol's covered dates."
+              title="How Gap and Cov% are defined for stock_day: Gap = weekdays (minus reference_us_holidays NYSE) through cap date, minus this symbol's covered bar_time dates."
               onClick={() => setAllGapsOpen(true)}
               disabled={checkedSymbols.length === 0}
             >
@@ -836,7 +836,7 @@ export function DataOverviewStockDayJobsBar({
               type="button"
               className="data-overview-ctl data-overview-ctl--check"
               disabled={!canCheck}
-              title="Compare stock_day bar_time coverage against the global trading-day calendar (purely local — no external API)."
+              title="Compare stock_day bar_time coverage against weekdays minus PostgreSQL reference_us_holidays (exchange=NYSE); purely local — no vendor API."
               onClick={() => void handleCheck()}
             >
               <IcoRefCheck className={ico} />
@@ -940,8 +940,8 @@ export function DataOverviewStockDayJobsBar({
           <div className="data-overview-contracts-panel__conclusion-body">
             <p className="data-overview-contracts-panel__guide-text">
               <span className="data-overview-contracts-panel__em">Pool:</span> click a <strong>Symbol</strong> in the matrix below, <strong>Select all</strong>, or <strong>Clear</strong>.{' '}
-              <span className="data-overview-contracts-panel__em">Check</span> compares each symbol's <code>stock_day</code> bar dates against the global trading-day calendar derived from all symbols in the table (purely local — no external API call).{' '}
-              Gap = calendar days − covered days for this symbol.{' '}
+              <span className="data-overview-contracts-panel__em">Check</span> compares each symbol's <code>stock_day</code> bar dates against weekdays in the lookback window minus <code>public.reference_us_holidays</code> rows with <code>exchange = 'NYSE'</code> (and weekends), through the same safe end date as daily gap-fill — purely local, no vendor API call.{' '}
+              Gap = expected trading days − covered days for this symbol.{' '}
               <span className="data-overview-contracts-panel__em">Fill row gap</span> is available only after Check and enqueues <code>feed_stocks_aggregate</code> daily_smart for pooled symbols with Gap &gt; 0:
               it starts from the earliest missing day with overlap and uses a safer final-day policy so the latest completed session can overwrite partial daily bars.{' '}
               <span className="data-overview-contracts-panel__em">Fill column data</span> re-fetches recent bars for symbols whose OHLC / optional metrics are below 97%. Click <strong>↗</strong> on a symbol for daily OHLC / volume / VWAP quality breakdown.

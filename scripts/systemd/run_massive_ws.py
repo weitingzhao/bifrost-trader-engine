@@ -324,14 +324,12 @@ class MassiveWsIngest:
         self._ops_profile = ops_profile_from_config(cfg)
 
     def _heartbeat_ops_lease(self) -> None:
-        """Restore/refresh bifrost_ops_control_env on the health hash each heartbeat.
+        """Refresh bifrost_ops_control_updated_at every heartbeat so the frontend countdown resets.
 
-        Writes to REDIS_META_STATUS (the health hash) — the key that GET /services actually reads.
-        Also refreshes bifrost_ops_control_updated_at so the orphan-detection grace period
-        (120 s) never expires while the service is running (heartbeat fires every 60 s).
+        Two paths:
+        - Lease present (written by Ops START): only touch updated_at — no profile needed.
+        - Lease cleared (orphan detection): restore all three fields — requires _ops_profile.
         """
-        if not self._ops_profile:
-            return
         try:
             from backend.ops.market_ingest_control_env import (
                 BIFROST_OPS_CONTROL_ENV_FIELD,
@@ -339,9 +337,14 @@ class MassiveWsIngest:
                 BIFROST_OPS_CONTROL_UPDATED_AT_FIELD,
                 control_hostname,
             )
-            existing = self._rds.hget(REDIS_META_STATUS, BIFROST_OPS_CONTROL_ENV_FIELD)
             now = time.time()
-            if not existing:
+            existing = self._rds.hget(REDIS_META_STATUS, BIFROST_OPS_CONTROL_ENV_FIELD)
+            if existing:
+                # Lease is alive — just advance the timestamp so the countdown resets.
+                self._rds.hset(REDIS_META_STATUS, BIFROST_OPS_CONTROL_UPDATED_AT_FIELD, str(now))
+                logger.debug("ops_lease: heartbeat updated_at on %s", REDIS_META_STATUS)
+            elif self._ops_profile:
+                # Lease was cleared (orphan detection recovery) — restore all three fields.
                 hostname = control_hostname()
                 self._rds.hset(REDIS_META_STATUS, mapping={
                     BIFROST_OPS_CONTROL_ENV_FIELD: self._ops_profile,
@@ -352,9 +355,6 @@ class MassiveWsIngest:
                     "ops_lease: restored bifrost_ops_control_env on %s → %s @ %s",
                     REDIS_META_STATUS, self._ops_profile, hostname,
                 )
-            else:
-                # Refresh updated_at to keep the orphan-detection grace period alive.
-                self._rds.hset(REDIS_META_STATUS, BIFROST_OPS_CONTROL_UPDATED_AT_FIELD, str(now))
         except Exception as e:
             logger.debug("_heartbeat_ops_lease: %s", e)
 
@@ -549,6 +549,9 @@ class MassiveWsIngest:
                 pass
 
             self._heartbeat_ops_lease()
+            # Keep health hash fresh: ingest_redis_health_looks_live checks updated_at < 90s.
+            # _watchlist_refresh_loop only runs inside the active websockets session, so connected=True.
+            self._redis_writer.update_status(True, time.time(), self._reconnects, self._msg_count)
             new_symbols = _watchlist_option_symbols(self._cfg)
             if not new_symbols or new_symbols == self._current_symbols:
                 continue
