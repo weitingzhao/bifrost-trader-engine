@@ -119,6 +119,7 @@ export {
   fetchMassiveStockShortInterest,
   fetchMassiveStockShortVolume,
   fetchMassiveStockFloat,
+  fetchMassiveStockNews,
   fetchMassiveEdgarIndex,
   fetchMassive10KSections,
   fetchMassive8KText,

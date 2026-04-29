@@ -22,6 +22,7 @@ import {
 import { LivePage } from './pages/LivePage'
 import { AccountsPage } from './pages/AccountsPage'
 import { OptionScreenerPage } from './pages/OptionScreenerPage'
+import { SepaScreenerPage } from './pages/SepaScreenerPage'
 import { PositionsPage } from './pages/PositionsPage'
 import { TradeHistoryPage } from './pages/TradeHistoryPage'
 import type { PortfolioView } from './pages/portfolio/types'
@@ -347,7 +348,7 @@ export default function App() {
   const [systemMessages, setSystemMessages] = useState<SystemMessage[]>([])
   const [urlHash, setUrlHash] = useState(() => (typeof window !== 'undefined' ? window.location.hash : ''))
   const [portfolioView, setPortfolioView] = useState<PortfolioView>('accounts')
-  const [researchView, setResearchView] = useState<'risk' | 'screener' | 'watchlist' | 'backtest' | 'options' | 'greeks'>('risk')
+  const [researchView, setResearchView] = useState<'risk' | 'screener' | 'sepa' | 'watchlist' | 'backtest' | 'options' | 'greeks'>('risk')
   const [strategyView, setStrategyView] = useState<'structure' | 'opportunity' | 'allocations' | 'gates' | 'typeConfig' | 'instances' | 'winRate'>('structure')
   /** Instance id from URL hash #/strategies/instances/:id; drives Strategy Instances detail view and back/forward. */
   const [urlStrategyInstanceId, setUrlStrategyInstanceId] = useState<number | null>(null)
@@ -971,14 +972,15 @@ export default function App() {
   const researchSubmenuGroups: {
     id: string
     label: string
-    items: { id: 'risk' | 'screener' | 'watchlist' | 'backtest' | 'options' | 'greeks'; label: string }[]
+    items: { id: 'risk' | 'screener' | 'sepa' | 'watchlist' | 'backtest' | 'options' | 'greeks'; label: string }[]
   }[] = [
     {
       id: 'screener-section',
       label: 'Screener',
       items: [
-        { id: 'watchlist', label: 'Stock Screener' },
+        { id: 'sepa', label: 'SEPA Screener' },
         { id: 'screener', label: 'Option Screener' },
+        { id: 'watchlist', label: 'Watchlist' },
       ],
     },
     {
@@ -1802,6 +1804,13 @@ export default function App() {
             window.location.hash = `#${COVERAGE_OVERVIEW_SUMMARY_ID}`
           }}
           breadcrumbLabel="Option Screener"
+        />
+      )}
+
+      {activeTab === 'research' && researchView === 'sepa' && (
+        <SepaScreenerPage
+          onBreadcrumbResearch={goResearchHome}
+          breadcrumbLabel="SEPA Screener"
         />
       )}
 

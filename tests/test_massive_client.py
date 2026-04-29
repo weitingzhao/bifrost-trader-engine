@@ -139,6 +139,39 @@ class TestFetchStockAggs:
         assert out.get("error")
 
 
+class TestFetchStockNews:
+    def test_builds_query_params(self):
+        captured: list[dict | None] = []
+
+        def capture_get(self, path, params=None):
+            assert path == "/v2/reference/news"
+            captured.append(params)
+            return (200, {"status": "OK", "results": []})
+
+        with patch.object(MassiveClient, "_get", capture_get):
+            out = _client().fetch_stock_news(
+                ticker="aapl",
+                published_utc_gte="2026-04-01T00:00:00Z",
+                published_utc_lte="2026-04-28T23:59:59Z",
+                limit=25,
+                sort="published_utc",
+                order="desc",
+            )
+        assert not out.get("error")
+        p = captured[0] or {}
+        assert p.get("ticker") == "AAPL"
+        assert p.get("published_utc.gte") == "2026-04-01T00:00:00Z"
+        assert p.get("published_utc.lte") == "2026-04-28T23:59:59Z"
+        assert p.get("limit") == 25
+        assert p.get("sort") == "published_utc"
+        assert p.get("order") == "desc"
+
+    def test_requires_api_key(self):
+        c = MassiveClient(api_key="")
+        out = c.fetch_stock_news(ticker="AAPL")
+        assert out.get("error")
+
+
 class TestFetchOptionsSnapshotAllPages:
     """Chain snapshot pagination merges all pages (Option Discovery worker)."""
 

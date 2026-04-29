@@ -2849,6 +2849,33 @@ def get_stock_float(
     return {"ok": True, "data": data}
 
 
+@router.get("/research/massive/stocks/news")
+def get_stock_news(
+    request: Request,
+    ticker: Optional[str] = Query(None, description="Stock symbol, e.g. AAPL"),
+    published_utc_gte: Optional[str] = Query(None, description="RFC3339 datetime lower bound"),
+    published_utc_lte: Optional[str] = Query(None, description="RFC3339 datetime upper bound"),
+    limit: int = Query(10, ge=1, le=1000),
+    sort: Optional[str] = Query(None),
+    order: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    """GET /v2/reference/news — stock market news articles."""
+    client, err = _massive_fundamentals_client(request)
+    if err:
+        return err
+    data = client.fetch_stock_news(
+        ticker=ticker,
+        published_utc_gte=published_utc_gte,
+        published_utc_lte=published_utc_lte,
+        limit=limit,
+        sort=sort,
+        order=order,
+    )
+    if data.get("error"):
+        return {"ok": False, "error": _as_error_str(data["error"])}
+    return {"ok": True, "data": data}
+
+
 # ── SEC Filings & Disclosures ─────────────────────────────────────────────────
 
 

@@ -29,6 +29,7 @@
 | | **R-A3** | 复盘辅助行情可获取：为复盘与风控分析提供辅助行情数据（如 K 线、历史 tick 等）。 | §3.4 |
 | | **R-A6** | Massive 期权研究数据：从 Massive（Polygon）获取期权链、快照、聚合 K 线、Greeks/IV、日终 OI、参考数据与公司行动等，作为期权研究主力数据源；分级能力（Starter / Developer）。 | §3.5 |
 | | **R-A7** | 美股标的参考数据：从 Massive（Polygon）Stocks 参考类 REST（All Tickers、Ticker Overview、Ticker Types、Related Tickers）拉取并持久化至 PostgreSQL，支持更新策略与查询/联想（含 Research UI）；与 R-A6 互补；**不依赖 IB** 作为标的元数据来源。 | §3.5.1 |
+| | **R-A8** | 股票筛选与基本面数据：基于 Massive Stocks 的技术面与基本面接口，支持 SEPA 等股票筛选（技术面 + EPS/Revenue 增长与加速），并形成可复用筛选结果接口。 | §3.5.2 |
 | | **R-M6** | 标的与持仓当前市价可获取：监控页须能获取并展示交易标的与持仓的当前市价（spot/last/mid 等），供评估持仓盈亏、期权虚实与风险。 | §3.2 |
 | **d. 策略编辑、回测与历史统计** | **R-H2** | 历史统计：基于历史数据做胜率、盈亏分布、按日/周/月汇总、对冲次数与滑点等。 | §4.1 |
 | | **R-B1** | 策略 PnL 优化：在历史数据上对比不同参数的理论 P&L、收益曲线、回撤等，优化策略回报。 | §4.2 |
@@ -212,6 +213,22 @@
 - **UI**：Research 或 Settings → Feed 等：**标的选择/搜索**、**详情与 peers** 以**落库/API**为准；与 Massive Stock Feed 页**原始代理调试**并存时，**生产分析路径以 PostgreSQL/API 为准**，代理仅作排障与能力验证。
 - **边界**：与 R-A6 相同——**不得**将 Massive 侧数据作为 ExecutionGuard 或自动下单决策输入；界面展示须与套餐/延迟一致（如 Starter 下 **15 分钟延迟**类提示，与实现及 Massive 文档对齐），避免与 IB 实盘行情混淆。
 
+### 3.5.2 股票筛选与基本面数据（R-A8）
+
+- **目标**：基于 Massive Stocks 现有数据能力，支持**美股股票量化筛选**。首个目标方法论为 **SEPA（Specific Entry Point Analysis，Mark Minervini）**，并将筛选结果作为后续研究与观察列表输入。
+- **筛选范围**：
+  - **基础筛选（技术面）**：50 日均量阈值、价格相对 52 周高低点、SMA(50/150/200) 关系、SMA(200) 上升斜率、价格位于关键均线上方、CRS（相对强弱）阈值等。
+  - **二级筛选（基本面）**：EPS/Revenue 的季度同比增长、连续季度增速加速、3 年增长、最近财年增长加速等。
+- **数据来源与映射**：
+  - **技术面**：`stock_day`（OHLCV）与现有 Massive 聚合能力（如 grouped daily）用于计算 SMA、52 周 high/low、均量和全市场排名所需原始数据。
+  - **基本面**：Massive `GET /vX/reference/financials`（已由服务端 fundamentals 路由代理）用于读取 `income_statement` 中 `basic_earnings_per_share`、`diluted_earnings_per_share`、`revenues` 等字段，支持 `timeframe=quarterly|annual|trailing_twelve_months`。
+- **CRS 定义约束**：CRS（相对强弱排名）与 RSI（技术指标）不同；CRS 需基于全市场可比样本计算 52 周区间表现并转化为百分位排名。
+- **实施建议（分阶段）**：
+  - **Phase 1（技术面筛选）**：先在本地库按技术面条件过滤，形成候选集。
+  - **Phase 2（基本面筛选）**：仅对候选集调用 financials 接口计算 EPS/Revenue 条件，降低外部 API 压力。
+  - **Phase 3（可选）**：若筛选规模扩大，可增加财务数据缓存/落库与定时刷新策略。
+- **边界**：筛选结果用于研究与候选池管理，不直接作为 ExecutionGuard 或自动下单决策输入；交易执行侧仍以 IB 实盘链路为准。
+
 ### 3.6 IB 边缘服务与 Daemon 边界（目标架构，R-IB1～R-IB4）
 
 以下描述**目标架构**下 IB 相关进程职责与 Daemon 边界；与 [ARCHITECTURE.md](ARCHITECTURE.md) §2.11 一致。迁移中的代码路径以实现为准，能力进度见 [CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
@@ -341,6 +358,7 @@
 | | R-A5 | 未成交订单可观测（事件驱动） |
 | | R-A3 | 复盘辅助行情可获取（如 K 线） |
 | | R-A6 | Massive 期权研究数据（链/快照/Greeks/OI/聚合等） |
+| | R-A8 | 股票筛选与基本面数据（SEPA 技术面 + EPS/Revenue 条件） |
 | | R-M6 | 标的与持仓当前市价可获取 |
 | d. 策略编辑、回测与历史统计 | R-H2 | 历史统计 |
 | | R-B1、R-B2 | 回测（策略 PnL 优化 + Guard 验证） |
@@ -360,4 +378,4 @@
 
 ---
 
-*最后更新：2026-04-07，**R-C1 / R-M5 / §7.3**：补充 Engine 经 Ops+systemd 与 Socket 同源启停及 `daemon_heartbeat` 优雅写库；**R-DV3** 补充 Ops 启停 Engine 时互斥纪律。此前：新增 **R-IB1～R-IB4**（§3.6）与 IB 边缘服务拆分目标架构；修订 **R-RM***、**R-DV4** 及 R-A/R-C3 相关叙述，与 [ARCHITECTURE.md](ARCHITECTURE.md) §2.11 对齐。*
+*最后更新：2026-04-28，新增 **R-A8（§3.5.2）**：股票筛选与基本面数据（SEPA）需求，明确技术面/基本面条件、CRS 口径与分阶段实施建议，并同步更新总览与小结表。此前：2026-04-07，**R-C1 / R-M5 / §7.3**：补充 Engine 经 Ops+systemd 与 Socket 同源启停及 `daemon_heartbeat` 优雅写库；**R-DV3** 补充 Ops 启停 Engine 时互斥纪律。此前：新增 **R-IB1～R-IB4**（§3.6）与 IB 边缘服务拆分目标架构；修订 **R-RM***、**R-DV4** 及 R-A/R-C3 相关叙述，与 [ARCHITECTURE.md](ARCHITECTURE.md) §2.11 对齐。*

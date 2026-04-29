@@ -199,12 +199,14 @@ const rows: ChecklistRow[] = [
     description:
       'Market news articles for stocks via Massive REST news endpoint, filterable by ticker, publisher, and date range.',
     tierMin: 'starter',
-    projectStatus: 'not-implemented',
-    verification: 'N/A — not yet implemented.',
+    projectStatus: 'implemented',
+    verification:
+      'Settings → Feed → Massive Stock → News: set query filters and Execute. '
+      + 'Proxy: GET /research/massive/stocks/news.',
     purpose:
       'Fetch and display news articles relevant to a stock ticker from Massive. Supports event correlation and sentiment research.',
     helpVerification:
-      'Not yet implemented. Target endpoints: GET /v2/reference/news (query by ticker, published_utc range, limit, sort).',
+      'GET /v2/reference/news — supports ticker, published_utc.gte, published_utc.lte, limit, sort, order.',
   },
   // ── WebSocket ──────────────────────────────────────────────────────────────
   {

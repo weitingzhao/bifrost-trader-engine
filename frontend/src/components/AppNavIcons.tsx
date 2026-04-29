@@ -166,6 +166,13 @@ export function SubmenuIcon({ name }: { name: string }) {
         <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
       </svg>
     ),
+    sepa: (
+      <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M3 6h18M3 12h12M3 18h8" />
+        <path d="M17 10l2 2 3-3" />
+        <path d="M14 17l1.5 1.5L18 16" />
+      </svg>
+    ),
     typeConfig: (
       <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <circle cx="12" cy="12" r="3" />

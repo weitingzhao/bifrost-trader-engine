@@ -17,6 +17,7 @@ CACHE_TTL_SEARCH_SEC = 120
 CACHE_TTL_TICKER_TYPES_SEC = 86400
 CACHE_TTL_INSTRUMENT_TYPES_SEC = 86400  # deprecated alias for CACHE_TTL_TICKER_TYPES_SEC
 CACHE_TTL_PEERS_SEC = 1800
+CACHE_TTL_SEPA_FUNDAMENTALS_SEC = 21600
 
 MASSIVE_INGESTOR_CACHE_PREFIX = "massive:ingestor:cache"
 
@@ -65,6 +66,11 @@ def key_instrument_types(locale: str, asset_class: str) -> str:
 
 def key_peers(symbol: str) -> str:
     return f"{MASSIVE_INGESTOR_CACHE_PREFIX}:peers:{normalize_symbol(symbol)}"
+
+
+def key_sepa_fundamentals(symbol: str, rule_version: str = "sepa_fundamentals_v1") -> str:
+    rv = (rule_version or "sepa_fundamentals_v1").strip()
+    return f"{MASSIVE_INGESTOR_CACHE_PREFIX}:sepa:fundamentals:{normalize_symbol(symbol)}:{rv}"
 
 
 def invalidate_ticker_cache(rds: Any, symbol: str) -> None:

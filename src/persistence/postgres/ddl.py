@@ -2499,6 +2499,29 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             WHERE status IN ('pending', 'running') AND payload_hash IS NOT NULL
             """
         )
+        _log_table("job_sepa_phase4", "SEPA Phase4 async screening job queue")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS job_sepa_phase4 (
+                job_sepa_phase4_id bigserial PRIMARY KEY,
+                job_id text NOT NULL UNIQUE,
+                status text NOT NULL DEFAULT 'queued',
+                progress jsonb NOT NULL DEFAULT '{}'::jsonb,
+                request jsonb NOT NULL DEFAULT '{}'::jsonb,
+                summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+                result jsonb,
+                errors jsonb NOT NULL DEFAULT '[]'::jsonb,
+                created_at timestamptz DEFAULT now(),
+                updated_at timestamptz DEFAULT now(),
+                started_at timestamptz,
+                finished_at timestamptz,
+                version text NOT NULL DEFAULT 'sepa_phase4_v1'
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_job_sepa_phase4_status_created ON job_sepa_phase4 (status, created_at)"
+        )
 
         _log_table("report_option_max_pain_daily", "Max Pain daily report (R-A6)")
         cur.execute(

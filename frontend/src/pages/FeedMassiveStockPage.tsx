@@ -15,6 +15,7 @@ import {
   fetchMassiveStockShortInterest,
   fetchMassiveStockShortVolume,
   fetchMassiveStockFloat,
+  fetchMassiveStockNews,
   fetchMassiveEdgarIndex,
   fetchMassive10KSections,
   fetchMassive8KText,
@@ -402,6 +403,17 @@ export function FeedMassiveStockPage({
   const [flF4Busy, setFlF4Busy] = useState(false)
   const [flF4Err, setFlF4Err] = useState<string | null>(null)
   const [flF4Result, setFlF4Result] = useState<Record<string, unknown> | null>(null)
+
+  // News form
+  const [newsTicker, setNewsTicker] = useState('AAPL')
+  const [newsPublishedGte, setNewsPublishedGte] = useState('')
+  const [newsPublishedLte, setNewsPublishedLte] = useState('')
+  const [newsLimit, setNewsLimit] = useState('20')
+  const [newsSort, setNewsSort] = useState('published_utc')
+  const [newsOrder, setNewsOrder] = useState('desc')
+  const [newsBusy, setNewsBusy] = useState(false)
+  const [newsErr, setNewsErr] = useState<string | null>(null)
+  const [newsResult, setNewsResult] = useState<Record<string, unknown> | null>(null)
 
   const loadStatus = useCallback(async () => {
     try { setMassiveStatus(await fetchMassiveStatus()) } catch { /* ignore */ }
@@ -847,6 +859,26 @@ export function FeedMassiveStockPage({
     } catch (e: unknown) { setFlF4Err(e instanceof Error ? e.message : String(e)) }
     finally { setFlF4Busy(false) }
   }, [flF4IssuerCik, flF4OwnerCik, flF4Tickers, flF4TxCode, flF4DateGte, flF4DateLte, flF4Limit])
+
+  const runStockNews = useCallback(async () => {
+    setNewsBusy(true); setNewsErr(null); setNewsResult(null)
+    try {
+      const res = await fetchMassiveStockNews({
+        ticker: newsTicker.trim() || undefined,
+        published_utc_gte: newsPublishedGte.trim() || undefined,
+        published_utc_lte: newsPublishedLte.trim() || undefined,
+        limit: Math.min(1000, Math.max(1, parseInt(newsLimit, 10) || 20)),
+        sort: newsSort.trim() || undefined,
+        order: newsOrder.trim() || undefined,
+      })
+      if (!res.ok) { setNewsErr(res.error ?? 'Request failed'); return }
+      setNewsResult(res.data ?? null)
+    } catch (e: unknown) {
+      setNewsErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setNewsBusy(false)
+    }
+  }, [newsTicker, newsPublishedGte, newsPublishedLte, newsLimit, newsSort, newsOrder])
 
   const toggleCap = useCallback((id: string) => {
     setCapExpanded(prev => ({ ...prev, [id]: !prev[id] }))
@@ -2722,6 +2754,85 @@ export function FeedMassiveStockPage({
     )
   }
 
+  function renderNewsCap() {
+    const id = 'stock-news'
+    const row = rowById(id)
+    const eff = rowEff(row)
+    return (
+      <StockCapabilityPanel
+        key={id} capId={id} checklistRow={row} effectiveStatus={eff}
+        expanded={capExpanded[id] === true} onToggle={() => toggleCap(id)}
+        highlight={highlightedCapabilityId === id} ariaLabel={row.service}
+      >
+        <FeedMassiveServiceBlock effectiveStatus={eff} checklistRow={row} evidence={evidenceFor(row)}>
+          <div className="feed-massive-card-head">
+            <h3>{row.service}</h3>
+          </div>
+          <p className="feed-massive-card-lead">{row.description}</p>
+        </FeedMassiveServiceBlock>
+
+        <div className="feed-massive-agg-sub-doc">
+          <p><strong>Use case:</strong> Retrieve stock-related news articles with ticker and publication time filters for event tracking and research context.</p>
+          <p><strong>When to use:</strong> Earnings/news event correlation, catalyst detection, and timeline reconstruction around large price moves.</p>
+          <p className="feed-massive-agg-sub-endpoint"><code>GET /v2/reference/news</code></p>
+        </div>
+
+        <div className="feed-massive-form-grid">
+          <label className="feed-massive-field">
+            <span className="form-label">Ticker</span>
+            <input className="form-input" value={newsTicker} onChange={e => setNewsTicker(e.target.value)}
+              disabled={!configured || newsBusy} placeholder="AAPL" autoComplete="off" />
+          </label>
+          <label className="feed-massive-field">
+            <span className="form-label">Published UTC ≥</span>
+            <input className="form-input" value={newsPublishedGte} onChange={e => setNewsPublishedGte(e.target.value)}
+              disabled={!configured || newsBusy} placeholder="2026-04-01T00:00:00Z" autoComplete="off" />
+          </label>
+          <label className="feed-massive-field">
+            <span className="form-label">Published UTC ≤</span>
+            <input className="form-input" value={newsPublishedLte} onChange={e => setNewsPublishedLte(e.target.value)}
+              disabled={!configured || newsBusy} placeholder="2026-04-28T23:59:59Z" autoComplete="off" />
+          </label>
+          <label className="feed-massive-field">
+            <span className="form-label">Limit</span>
+            <input className="form-input" type="number" value={newsLimit} onChange={e => setNewsLimit(e.target.value)}
+              disabled={!configured || newsBusy} min={1} max={1000} />
+          </label>
+          <label className="feed-massive-field">
+            <span className="form-label">Sort</span>
+            <input className="form-input" value={newsSort} onChange={e => setNewsSort(e.target.value)}
+              disabled={!configured || newsBusy} placeholder="published_utc" autoComplete="off" />
+          </label>
+          <label className="feed-massive-field">
+            <span className="form-label">Order</span>
+            <select className="form-input" value={newsOrder} onChange={e => setNewsOrder(e.target.value)}
+              disabled={!configured || newsBusy}>
+              <option value="desc">desc</option>
+              <option value="asc">asc</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
+          <p><strong>Key fields:</strong> <code>id</code>, <code>title</code>, <code>author</code>, <code>published_utc</code>, <code>article_url</code>, <code>tickers[]</code>, <code>publisher.name</code></p>
+          <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/news</code></p>
+        </div>
+        <div style={{ marginTop: 'var(--space-3)' }}>
+          <button type="button" className="btn btn-secondary" disabled={!configured || newsBusy} onClick={runStockNews}>
+            {newsBusy ? 'Loading…' : 'Execute'}
+          </button>
+        </div>
+        {newsErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{newsErr}</p>}
+        {newsResult ? (
+          <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+            <summary>Result{Array.isArray((newsResult).results) ? ` — ${((newsResult).results as unknown[]).length} record(s)` : ''}</summary>
+            <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '28rem' }}>{JSON.stringify(newsResult, null, 2)}</pre>
+          </details>
+        ) : null}
+      </StockCapabilityPanel>
+    )
+  }
+
   // ── Render a single capability section ───────────────────────────────────
   function renderCap(id: string) {
     const row = rowById(id)
@@ -3016,6 +3127,8 @@ export function FeedMassiveStockPage({
                           ? renderFundamentalsCap()
                           : id === 'stock-filings'
                             ? renderFilingsCap()
+                            : id === 'stock-news'
+                              ? renderNewsCap()
                             : renderCap(id)}
                   </div>
                 )

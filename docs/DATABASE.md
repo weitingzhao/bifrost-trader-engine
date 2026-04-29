@@ -645,6 +645,33 @@
 - **索引**：`(symbol, expiry, trade_date DESC)`、`(symbol, trade_date DESC)`。
 - **保留**：可与 `option_snapshots` 热数据窗口对齐（约 90 天），旧行可按运维策略归档或删除。
 
+### 2.16.5c 表 `job_sepa_phase4`（R-A8：SEPA Phase4 异步筛选任务）
+
+- **用途**：SEPA Phase4（候选漏斗 + fundamentals 复筛）的异步任务持久化队列。替代进程内存 job registry，支持服务重启后查询历史任务。
+- **写入**：`POST /research/screening/sepa/phase4/jobs` 提交任务时 INSERT `queued`；引擎运行中持续 UPDATE `progress/status`；结束后写入 `summary/result/errors`。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| job_sepa_phase4_id | bigserial | 自增主键（内部） |
+| job_id | text NOT NULL UNIQUE | 对外任务 ID（uuid hex 字符串） |
+| status | text NOT NULL | queued \| running \| succeeded \| partial \| failed |
+| progress | jsonb NOT NULL | 进度快照：`{ current, total, stage, pct }` |
+| request | jsonb NOT NULL | 请求参数快照（symbols + Phase4 配置） |
+| summary | jsonb NOT NULL | 任务摘要统计（候选数、命中率、重试、耗时等） |
+| result | jsonb | 任务结果（rows + phase1/crs 聚合结果） |
+| errors | jsonb NOT NULL | 错误列表（字符串数组） |
+| created_at | timestamptz | 创建时间（默认 now()） |
+| updated_at | timestamptz | 最后更新时间（默认 now()） |
+| started_at | timestamptz | 任务启动时间（可空） |
+| finished_at | timestamptz | 任务结束时间（可空） |
+| version | text NOT NULL | 规则/输出版本（默认 `sepa_phase4_v1`） |
+
+- **索引**：`(status, created_at)` 便于按状态拉取最新任务。
+- **读取**：`GET /research/screening/sepa/phase4/jobs`（列表）、
+  `GET /research/screening/sepa/phase4/jobs/{job_id}`（状态）、
+  `GET /research/screening/sepa/phase4/jobs/{job_id}/result`（分页结果）。
+
 ### 2.16.6 表 `massive_corporate_action`（R-A6：公司行动缓存）
 
 - **用途**：缓存 Massive 返回的**公司行动**数据（股息、拆股、IPO、ticker 生命周期事件等），供期权分析时对照历史价格与合约调整。轻量缓存表，按需拉取。

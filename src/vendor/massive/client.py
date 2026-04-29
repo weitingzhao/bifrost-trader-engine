@@ -1242,6 +1242,40 @@ class MassiveClient:
                 return {"results": [], "error": logical}
         return data if isinstance(data, dict) else {"results": []}
 
+    def fetch_stock_news(
+        self,
+        *,
+        ticker: Optional[str] = None,
+        published_utc_gte: Optional[str] = None,
+        published_utc_lte: Optional[str] = None,
+        limit: int = 10,
+        sort: Optional[str] = None,
+        order: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /v2/reference/news — stock market news articles."""
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        params: Dict[str, Any] = {"limit": min(max(int(limit), 1), 1000)}
+        if ticker:
+            params["ticker"] = ticker.strip().upper()
+        if published_utc_gte:
+            params["published_utc.gte"] = published_utc_gte
+        if published_utc_lte:
+            params["published_utc.lte"] = published_utc_lte
+        if sort:
+            params["sort"] = sort
+        if order:
+            params["order"] = order
+        status, data = self._get("/v2/reference/news", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
     # ── SEC Filings & Disclosures ──────────────────────────────────────────────
 
     def fetch_edgar_index(

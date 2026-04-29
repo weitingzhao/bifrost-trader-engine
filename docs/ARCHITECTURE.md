@@ -271,6 +271,42 @@ flowchart LR
 
 - **Worker**：与 §2.10.5 **`massive` queue** 一致；R-A7 任务 **kind** 含 **universe / overview / related / ticker_types**；**429/5xx 退避**与 **UPSERT 幂等**同节。
 
+#### 2.10.10 股票筛选数据流（R-A8）
+
+与 [REQUIREMENTS.md](REQUIREMENTS.md) **§3.5.2（R-A8）** 对应，本节定义 SEPA 等股票筛选在现有 Massive Stocks 能力上的数据流与分层策略。
+
+- **目标**：在不改变执行链路边界的前提下，形成可复用的股票筛选数据路径（技术面 + 基本面），供 Research 场景使用。
+- **技术面输入**：`stock_day`（OHLCV）与 grouped daily 数据用于 SMA(50/150/200)、52 周高低点、50 日均量等计算。
+- **基本面输入**：Massive Financials（`/vX/reference/financials`，经后端 fundamentals 路由代理）提供 EPS 与 Revenue 相关字段，用于季度/年度增长与加速判断。
+- **CRS 约定**：CRS 为全市场相对强弱百分位排名（非 RSI），需基于可比股票池的 52 周区间收益计算并排序。
+- **批量效率**：采用两阶段漏斗——先用本地技术面过滤候选，再对候选集调用 financials，避免全量 ticker 外部调用。
+- **可选演进**：如筛选规模扩大，可增加 `stock_financials` 类缓存表与定时刷新任务（当前非强制）。
+- **接口形态（规划）**：Research 域可提供 `GET/POST /research/screening/sepa`（或等价）以返回条件命中明细与综合结果。
+- **边界**：筛选结果为研究输出，不进入 ExecutionGuard 或自动下单判定链路。
+
+```mermaid
+flowchart LR
+  stockDay[(PostgreSQL_stock_day)]
+  groupedDaily[Massive_grouped_daily]
+  financials[Massive_vX_reference_financials]
+  techFilter[TechnicalFilter_SMA_52w_volume]
+  crsRank[CRSRanking_percentile]
+  candidateSet[CandidateSet]
+  fundamentalFilter[FundamentalFilter_EPS_Revenue]
+  sepaEngine[SEPAEngine]
+  screeningApi[ResearchScreeningAPI]
+
+  stockDay --> techFilter
+  groupedDaily --> crsRank
+  stockDay --> crsRank
+  techFilter --> candidateSet
+  crsRank --> candidateSet
+  candidateSet --> fundamentalFilter
+  financials --> fundamentalFilter
+  fundamentalFilter --> sepaEngine
+  sepaEngine --> screeningApi
+```
+
 ### 2.11 IB Ingestor、IB Account Agent、IB Operator 与 Engine（目标职责）
 
 与 [REQUIREMENTS.md](REQUIREMENTS.md) **§3.6（R-IB1～R-IB4）** 一致，以下为 **IB 边缘服务** 与 **Engine** 的架构边界（实现迁移中允许与下文不完全一致，以代码与 CAPABILITY_TRACKING 为准）。
@@ -642,4 +678,4 @@ flowchart LR
 - **[Guard 微调与影响](research/GUARD_TUNING_AND_IMPACT.md)** — 参数调整与后果
 - **§8 本文** — 安全边界配置的存储与版本管理（文件 vs 配置注册表、可追溯性、与回测结果匹配）
 
-*最后更新：2026-04-07 — §2.10.3、§6.1：**Engine** 经 Ops `market-ingest` + systemd 启停；启停语义表区分 systemd stop 与 POST /control/stop。此前：新增 §2.11（IB Ingestor / Account Agent / Operator / Engine 目标职责），修订 §2.1、§2.6、§2.8、§4.1、§5、§6.1、§7 映射与 [REQUIREMENTS.md](REQUIREMENTS.md) §3.6、R-RM*、R-DV4 对齐。*
+*最后更新：2026-04-28 — 新增 §2.10.10（R-A8）股票筛选数据流：明确技术面 + 基本面（financials）两阶段筛选、CRS 口径与研究边界。此前：2026-04-07 — §2.10.3、§6.1：**Engine** 经 Ops `market-ingest` + systemd 启停；启停语义表区分 systemd stop 与 POST /control/stop。此前：新增 §2.11（IB Ingestor / Account Agent / Operator / Engine 目标职责），修订 §2.1、§2.6、§2.8、§4.1、§5、§6.1、§7 映射与 [REQUIREMENTS.md](REQUIREMENTS.md) §3.6、R-RM*、R-DV4 对齐。*

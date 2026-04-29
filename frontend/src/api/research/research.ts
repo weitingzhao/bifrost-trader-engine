@@ -2236,6 +2236,30 @@ export async function fetchMassiveStockFloat(
   return { ok: true, data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined }
 }
 
+export interface MassiveStockNewsOpts {
+  ticker?: string
+  published_utc_gte?: string
+  published_utc_lte?: string
+  limit?: number
+  sort?: string
+  order?: string
+}
+
+export async function fetchMassiveStockNews(opts?: MassiveStockNewsOpts): Promise<MassiveTickerProxyResponse> {
+  const q = new URLSearchParams()
+  if (opts?.ticker) q.set('ticker', opts.ticker.trim().toUpperCase())
+  if (opts?.published_utc_gte) q.set('published_utc_gte', opts.published_utc_gte)
+  if (opts?.published_utc_lte) q.set('published_utc_lte', opts.published_utc_lte)
+  if (opts?.limit != null) q.set('limit', String(opts.limit))
+  if (opts?.sort) q.set('sort', opts.sort)
+  if (opts?.order) q.set('order', opts.order)
+  const r = await fetch(massiveUrl(`/research/massive/stocks/news?${q.toString()}`))
+  const j = (await r.json().catch(() => ({}))) as Record<string, unknown>
+  const parsed = parseMassiveTickerProxyResponse(j, r)
+  if (!parsed.ok) return { ok: false, error: parsed.error }
+  return { ok: true, data: typeof j.data === 'object' && j.data != null ? (j.data as Record<string, unknown>) : undefined }
+}
+
 /** PostgreSQL-backed ticker reference: search autocomplete. */
 export interface TickerReferenceSearchRow {
   tickers_id: number
