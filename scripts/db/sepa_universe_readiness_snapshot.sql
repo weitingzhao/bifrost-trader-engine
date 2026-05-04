@@ -1,0 +1,10 @@
+-- SEPA universe + price readiness daily snapshot (reference).
+--
+-- Canonical implementation: Python module ``src.research.sepa.readiness_snapshot``
+-- (used by Research API ``POST /research/screening/sepa/readiness/snapshot``).
+--
+-- CLI (same merged config resolution as db_refresh_schema / run_server):
+--   python scripts/db/run_sepa_readiness_snapshot.py [--config PATH] [--prod|--dev]
+--
+-- Prerequisites: ``db_refresh_schema`` has created ``sepa_universe_readiness_daily``
+-- and views ``v_sepa_us_equity_universe``, ``v_sepa_symbol_price_readiness``.

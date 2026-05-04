@@ -2708,6 +2708,41 @@ def beat_stock_day_eod() -> Dict[str, Any]:
     })
 
 
+@app.task(name="src.massive.tasks.beat_sepa_universe_grouped_daily")
+def beat_sepa_universe_grouped_daily() -> Dict[str, Any]:
+    """Celery Beat: nightly full-market OHLCV update via Grouped Daily Bars API (UTC 22:00).
+
+    One job = one API call = OHLCV for ALL 5,000+ US stocks for today's date.
+    Designed for SEPA Screener universe maintenance — covers the full equity universe,
+    not just watchlist symbols. Complements beat_stock_day_eod (watchlist gap-fill).
+    """
+    from src.app.config import read_config
+    from src.massive.stock_ohlc_daily_smart import is_ny_session_safely_closed, ny_calendar_today
+    from src.monitor.reader.market import get_is_us_trading_day
+
+    cfg_path = _config_path_for_task()
+    config, _ = read_config(cfg_path)
+
+    today_et = ny_calendar_today()
+    if not get_is_us_trading_day(config, today_et.isoformat()):
+        logger.info(
+            "beat_sepa_universe_grouped_daily: not a trading day (%s), skip", today_et.isoformat()
+        )
+        return {"ok": True, "skipped": True, "reason": "not_trading_day", "date": today_et.isoformat()}
+
+    if not is_ny_session_safely_closed():
+        logger.warning("beat_sepa_universe_grouped_daily: session not yet closed, skip")
+        return {"ok": True, "skipped": True, "reason": "session_not_closed"}
+
+    date_str = today_et.isoformat()
+    logger.info("beat_sepa_universe_grouped_daily: enqueuing daily_market_summary for %s", date_str)
+    return _enqueue_massive_job("feed_stocks_aggregate", {
+        "mode": "daily_market_summary",
+        "date": date_str,
+        "adjusted": True,
+    })
+
+
 def reenqueue_massive_job_from_row(control_via_db: dict, row: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     """Submit ``run_massive_job`` on the correct queue after a row was reset to pending (Ops retry-failed)."""
     try:

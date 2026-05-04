@@ -7,6 +7,7 @@ import {
   getOpsApiBaseForBrowser,
   getMarketApiBase,
   getResearchApiBase,
+  getResearchApiBaseForBrowser,
   initApiRouting,
   joinServiceBase,
 } from './apiRouting'
@@ -20,6 +21,7 @@ export {
   getOpsApiBaseForBrowser,
   getMarketApiBase,
   getResearchApiBase,
+  getResearchApiBaseForBrowser,
   initApiRouting,
   joinServiceBase,
 }

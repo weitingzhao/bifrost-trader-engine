@@ -4,6 +4,10 @@ import {
   deleteAllMassiveJobs,
   fetchBarsJobs,
   fetchMassiveJobsList,
+  postRetryBarsJob,
+  postRetryFailedBarsJobs,
+  postRetryFailedMassiveJobs,
+  postRetryMassiveJob,
   trimBarsJobs,
   trimMassiveJobs,
 } from '../../api'
@@ -213,6 +217,7 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
   const [barsError, setBarsError] = useState<string | null>(null)
 
   const [actionMsg, setActionMsg] = useState<{ text: string; isErr: boolean } | null>(null)
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null)
 
   const [confirm, setConfirm] = useState<{
     title: string
@@ -452,6 +457,64 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
     })
   }
 
+  const openResetFailed = () => {
+    if (!activeTab) return
+    setConfirm({
+      title:
+        activeTab.pipeline === 'stocks_ib'
+          ? 'Retry failed bars jobs'
+          : `Retry failed Massive jobs (queue “${activeTab.celeryQueue}”)`,
+      message:
+        'Reset up to 500 oldest failed jobs to pending and re-queue Celery. Some rows may fail to enqueue.',
+      confirming: false,
+      confirmLabel: 'Confirm',
+      action: async () => {
+        if (activeTab.pipeline === 'massive_async') {
+          const r = await postRetryFailedMassiveJobs(activeTab.celeryQueue, 500)
+          if (!r.ok) throw new Error(r.error ?? 'Reset failed')
+          setActionMsg({
+            text: `Reset ${r.reset ?? 0} job(s), enqueued ${r.enqueued ?? 0}.${r.enqueue_errors?.length ? ' Some enqueue errors.' : ''}`,
+            isErr: Boolean(r.enqueue_errors?.length),
+          })
+          await loadMassiveQueue(activeTab.celeryQueue)
+        } else {
+          const r = await postRetryFailedBarsJobs(500)
+          if (!r.ok) throw new Error(r.error ?? 'Reset failed')
+          setActionMsg({
+            text: `Reset ${r.reset ?? 0} job(s), enqueued ${r.enqueued ?? 0}.${r.enqueue_errors?.length ? ' Some enqueue errors.' : ''}`,
+            isErr: Boolean(r.enqueue_errors?.length),
+          })
+          await loadBarsQueue()
+        }
+        void onJobCountsChanged?.()
+      },
+    })
+  }
+
+  const retryOneJob = async (jobId: string) => {
+    if (!activeTab || retryingJobId) return
+    setRetryingJobId(jobId)
+    setActionMsg(null)
+    try {
+      if (activeTab.pipeline === 'massive_async') {
+        const r = await postRetryMassiveJob(jobId)
+        if (!r.ok) throw new Error(r.error ?? 'Retry failed')
+        setActionMsg({ text: `Job ${jobId} reset to pending and enqueued.`, isErr: false })
+        await loadMassiveQueue(activeTab.celeryQueue)
+      } else {
+        const r = await postRetryBarsJob(jobId)
+        if (!r.ok) throw new Error(r.error ?? 'Retry failed')
+        setActionMsg({ text: `Job ${jobId} reset to pending and enqueued.`, isErr: false })
+        await loadBarsQueue()
+      }
+      void onJobCountsChanged?.()
+    } catch (e) {
+      setActionMsg({ text: e instanceof Error ? e.message : 'Retry failed', isErr: true })
+    } finally {
+      setRetryingJobId(null)
+    }
+  }
+
   const openTrim = () => {
     if (!activeTab) return
     const n = parseInt(keepLast, 10)
@@ -504,7 +567,7 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
       <div className="celery-queues-header">
         <h3 id="celery-queues-head" className="page-title-with-tooltip" style={{ margin: 0 }}>
           Queues
-          <InfoTooltip text="Queue summary (above main tabs) shows all queues. Tabs follow ops.worker_profiles (GET /ops/workers/profiles). Each tab lists PostgreSQL jobs for that Celery queue: stocks_ib → job_bars_backfill; Polygon/Massive queues → job_massive_backfill filtered by routing. Bulk delete icons: pending (clock), running (worker), done (trash), failed (circle with X). When Status is not All, only the icon for the current filter is shown. Trim applies to row age by ID." />
+          <InfoTooltip text="Queue summary (above main tabs) shows all queues. Tabs follow ops.worker_profiles (GET /ops/workers/profiles). Each tab lists PostgreSQL jobs for that Celery queue: stocks_ib → job_bars_backfill; Polygon/Massive queues → job_massive_backfill filtered by routing. Bulk delete icons: pending (clock), running (worker), done (trash), failed (circle with X). With Failed filter, the circular-arrow icon resets up to 500 oldest failed rows to pending and re-queues Celery. Per-row Retry appears for failed jobs. When Status is not All, only the icon for the current filter is shown. Trim applies to row age by ID." />
         </h3>
       </div>
 
@@ -629,6 +692,17 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
             <CeleryQueueDeleteFailedIcon />
           </button>
         ) : null}
+        {showBulkDeleteFor('failed') ? (
+          <button
+            type="button"
+            className="celery-queue-icon-btn celery-queue-icon-btn--refresh"
+            onClick={openResetFailed}
+            title="Reset up to 500 oldest failed jobs to pending and re-queue Celery"
+            aria-label="Reset failed jobs to pending and re-queue"
+          >
+            <CeleryQueueRefreshIcon />
+          </button>
+        ) : null}
         <div className="celery-queue-keep-group">
           <label className="celery-queue-field celery-queue-field--inline">
             <span className="celery-queue-field-label">Keep last</span>
@@ -695,12 +769,13 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
                 <th scope="col">Status</th>
                 <th scope="col">Created</th>
                 <th scope="col">Result</th>
+                <th scope="col">Actions</th>
               </tr>
             </thead>
             <tbody>
               {massiveJobs.length === 0 && !massiveLoading ? (
                 <tr>
-                  <td colSpan={6}>
+                  <td colSpan={7}>
                     <div className="feed-massive-empty">No jobs match the filter.</div>
                   </td>
                 </tr>
@@ -731,6 +806,21 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
                         <div className="celery-massive-job-result-detail">{resultDetail}</div>
                       ) : null}
                     </td>
+                    <td>
+                      {(row.status || '').toLowerCase() === 'failed' ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={retryingJobId !== null}
+                          aria-label={`Retry job ${row.job_id}`}
+                          onClick={() => void retryOneJob(row.job_id)}
+                        >
+                          {retryingJobId === row.job_id ? '…' : 'Retry'}
+                        </button>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                   </tr>
                   )
                 })
@@ -749,12 +839,13 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
                 <th scope="col">Status</th>
                 <th scope="col">Result</th>
                 <th scope="col">Updated</th>
+                <th scope="col">Actions</th>
               </tr>
             </thead>
             <tbody>
               {barsJobs.length === 0 && !barsLoading ? (
                 <tr>
-                  <td colSpan={6}>
+                  <td colSpan={7}>
                     <div className="feed-massive-empty">No jobs match the filter.</div>
                   </td>
                 </tr>
@@ -776,6 +867,21 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
                       {formatBarsJobResult(row) || '—'}
                     </td>
                     <td>{row.updated_ts != null ? fmtTs(row.updated_ts) : '—'}</td>
+                    <td>
+                      {(row.status || '').toLowerCase() === 'failed' ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={retryingJobId !== null}
+                          aria-label={`Retry job ${row.job_id}`}
+                          onClick={() => void retryOneJob(String(row.job_id))}
+                        >
+                          {retryingJobId === String(row.job_id) ? '…' : 'Retry'}
+                        </button>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                   </tr>
                 ))
               )}

@@ -67,6 +67,7 @@ def create_research_app(
     from backend.research.routers.sepa_crs import router as sepa_crs_router
     from backend.research.routers.sepa_fundamentals import router as sepa_fundamentals_router
     from backend.research.routers.sepa_phase4_jobs import router as sepa_phase4_jobs_router
+    from backend.research.routers.sepa_readiness import router as sepa_readiness_router
 
     app.include_router(option_discovery_router)
     app.include_router(max_pain_router)
@@ -76,6 +77,7 @@ def create_research_app(
     app.include_router(sepa_crs_router)
     app.include_router(sepa_fundamentals_router)
     app.include_router(sepa_phase4_jobs_router)
+    app.include_router(sepa_readiness_router)
 
     from backend.ops.services.audit_store import AuditStore
 

@@ -2523,6 +2523,139 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             "CREATE INDEX IF NOT EXISTS idx_job_sepa_phase4_status_created ON job_sepa_phase4 (status, created_at)"
         )
 
+        _log_table(
+            "sepa_universe_readiness_daily",
+            "SEPA full-scan data prep: daily universe + stock_day readiness snapshot rows",
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS public.sepa_universe_readiness_daily (
+                as_of_date date NOT NULL,
+                symbol text NOT NULL,
+                tickers_id bigint NULL REFERENCES public.tickers (tickers_id) ON DELETE SET NULL,
+                universe_rule_version text NOT NULL DEFAULT 'v1',
+                price_source text NOT NULL DEFAULT 'massive',
+                included_in_universe boolean NOT NULL DEFAULT false,
+                bar_count_lookback integer NOT NULL DEFAULT 0,
+                first_bar_date date NULL,
+                last_bar_date date NULL,
+                null_close_rows integer NOT NULL DEFAULT 0,
+                null_volume_rows integer NOT NULL DEFAULT 0,
+                price_ready boolean NOT NULL DEFAULT false,
+                fund_cache_present boolean NOT NULL DEFAULT false,
+                fund_cache_expire_at timestamptz NULL,
+                notes text NULL,
+                computed_at timestamptz NOT NULL DEFAULT now(),
+                PRIMARY KEY (as_of_date, symbol, universe_rule_version, price_source)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_sepa_urd_asof_ready
+            ON public.sepa_universe_readiness_daily (as_of_date, price_ready)
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_sepa_urd_asof_symbol
+            ON public.sepa_universe_readiness_daily (symbol)
+            """
+        )
+
+        _log_table("v_sepa_us_equity_universe", "View: US equity candidate universe from tickers (+ overview)")
+        cur.execute(
+            """
+            CREATE OR REPLACE VIEW public.v_sepa_us_equity_universe AS
+            SELECT
+                t.tickers_id,
+                upper(trim(t.ticker)) AS symbol,
+                t.name,
+                t.market,
+                t.locale,
+                t.primary_exchange,
+                t.instrument_type,
+                t.active,
+                t.delisted_utc,
+                o.list_date,
+                o.sector,
+                o.industry
+            FROM public.tickers t
+            LEFT JOIN public.ticker_overview o ON o.tickers_id = t.tickers_id
+            WHERE COALESCE(t.active, false) = true
+              AND lower(COALESCE(t.locale, '')) = 'us'
+              AND lower(COALESCE(t.market, '')) = 'stocks'
+            """
+        )
+
+        _log_table(
+            "v_sepa_symbol_price_readiness",
+            "View: per-symbol stock_day bar counts and price_ready vs lookback window (calendar days)",
+        )
+        cur.execute(
+            """
+            CREATE OR REPLACE VIEW public.v_sepa_symbol_price_readiness AS
+            WITH params AS (
+                SELECT
+                    'massive'::text AS price_source,
+                    (CURRENT_DATE - integer '420') AS window_start,
+                    CURRENT_DATE AS as_of_date,
+                    240::integer AS min_bar_rows,
+                    7::integer AS max_stale_calendar_days
+            )
+            SELECT
+                p.as_of_date,
+                upper(trim(sd.symbol)) AS symbol,
+                p.price_source,
+                count(*)::integer AS bar_rows,
+                min(sd.bar_time)::date AS first_bar_date,
+                max(sd.bar_time)::date AS last_bar_date,
+                count(*) FILTER (WHERE sd.close IS NULL)::integer AS null_close_rows,
+                count(*) FILTER (WHERE sd.volume IS NULL)::integer AS null_volume_rows,
+                (
+                    count(*) >= p.min_bar_rows
+                    AND max(sd.bar_time) >= (
+                        p.as_of_date - (p.max_stale_calendar_days || ' days')::interval
+                    )::date
+                    AND count(*) FILTER (WHERE sd.close IS NULL) = 0
+                    AND count(*) FILTER (WHERE sd.volume IS NULL) = 0
+                ) AS price_ready
+            FROM params p
+            JOIN public.stock_day sd
+                ON sd.source = p.price_source
+               AND sd.bar_time >= p.window_start
+               AND sd.bar_time <= p.as_of_date
+            GROUP BY p.as_of_date, p.price_source, p.min_bar_rows, p.max_stale_calendar_days, p.window_start,
+                     upper(trim(sd.symbol))
+            """
+        )
+
+        _log_table(
+            "v_sepa_symbol_fund_cache_readiness",
+            "View: valid-row snapshot of research_sepa_fundamentals_cache (created when cache table exists)",
+        )
+        cur.execute(
+            """
+            DO $sepa_fund_v$
+            BEGIN
+              IF to_regclass('public.research_sepa_fundamentals_cache') IS NOT NULL THEN
+                EXECUTE $sql$
+                CREATE OR REPLACE VIEW public.v_sepa_symbol_fund_cache_readiness AS
+                SELECT
+                    upper(trim(c.symbol)) AS symbol,
+                    c.rule_version,
+                    (c.expire_at > now()) AS fund_cache_valid,
+                    c.expire_at,
+                    c.fetched_at
+                FROM public.research_sepa_fundamentals_cache c
+                WHERE c.rule_version = 'sepa_fundamentals_v1'
+                $sql$;
+              END IF;
+            END
+            $sepa_fund_v$
+            """
+        )
+
         _log_table("report_option_max_pain_daily", "Max Pain daily report (R-A6)")
         cur.execute(
             """

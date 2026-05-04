@@ -88,6 +88,7 @@ export {
   fetchMassiveJobsSummary,
   postMassiveJobsClearDone,
   postRetryFailedMassiveJobs,
+  postRetryMassiveJob,
   deleteMassiveJob,
   deleteAllMassiveJobs,
   trimMassiveJobs,

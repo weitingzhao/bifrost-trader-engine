@@ -409,6 +409,32 @@ async def ops_retry_failed_massive_jobs(
     }
 
 
+@router.post("/ops/research/massive/jobs/{job_id}/retry")
+async def ops_retry_one_massive_job(request: Request, job_id: str) -> Any:
+    """Reset one failed Massive job to pending and re-submit its Celery task (same job ID)."""
+    denied = _require_role(request, "operator")
+    if denied:
+        return denied
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return {"ok": False, "error": "No DB"}
+    from src.massive.tasks import reenqueue_massive_job_from_row
+    from src.vendor.massive.reader import reset_failed_job_massive_backfill_one
+
+    row = reset_failed_job_massive_backfill_one(control_via_db, job_id)
+    if row is None:
+        return {"ok": False, "error": "Job not found or not in failed status"}
+    ok, err = reenqueue_massive_job_from_row(control_via_db, row)
+    if not ok:
+        return {"ok": False, "error": err or "Re-enqueue failed"}
+    from src.vendor.massive.reader import get_job_massive_backfill
+
+    fresh = get_job_massive_backfill(control_via_db, job_id)
+    if fresh is None:
+        return {"ok": True, "job": _massive_job_to_api(dict(row))}
+    return {"ok": True, "job": _massive_job_to_api(dict(fresh))}
+
+
 @router.post("/ops/research/massive/jobs/trim")
 def ops_trim_massive_jobs(
     request: Request,

@@ -1,4 +1,10 @@
-import { getMassiveApiBase, getDocsApiBase, getOpsApiBase, getResearchApiBase, joinServiceBase } from '../shared/apiRouting'
+import {
+  getMassiveApiBase,
+  getDocsApiBase,
+  getOpsApiBase,
+  getResearchApiBaseForBrowser,
+  joinServiceBase,
+} from '../shared/apiRouting'
 import { fetchWithTimeout } from '../shared/fetchTimeout'
 import type { JobQueueStatusCounts } from '../ops/bars'
 import { opsAuthHeaders, opsControlFailureMessage, type OpsCapabilities } from '../ops/ops'
@@ -30,7 +36,7 @@ function massiveUrl(path: string): string {
 }
 
 function researchApiUrl(path: string): string {
-  return joinServiceBase(getResearchApiBase(), path)
+  return joinServiceBase(getResearchApiBaseForBrowser(), path)
 }
 function docsUrl(path: string): string {
   return joinServiceBase(getDocsApiBase(), path)
@@ -1432,6 +1438,38 @@ export async function postRetryFailedMassiveJobs(
     reset: typeof j.reset === 'number' ? j.reset : undefined,
     enqueued: typeof j.enqueued === 'number' ? j.enqueued : undefined,
     enqueue_errors: Array.isArray(j.enqueue_errors) ? j.enqueue_errors : undefined,
+  }
+}
+
+/** Reset one failed Massive job to pending and re-queue Celery (requires Ops operator token). */
+export async function postRetryMassiveJob(jobId: string): Promise<{
+  ok: boolean
+  error?: string
+  job?: MassiveJobApiRow
+}> {
+  const r = await fetch(opsMassiveJobsUrl(`/${encodeURIComponent(jobId)}/retry`), {
+    method: 'POST',
+    headers: opsAuthHeaders(),
+  })
+  const j = await r.json().catch(() => ({}))
+  const raw = j.job as Record<string, unknown> | undefined
+  let job: MassiveJobApiRow | undefined
+  if (raw && typeof raw === 'object') {
+    job = {
+      job_id: String(raw.job_id ?? ''),
+      type: typeof raw.type === 'string' ? raw.type : undefined,
+      kind: typeof raw.kind === 'string' ? raw.kind : undefined,
+      goal: typeof raw.goal === 'string' ? raw.goal : undefined,
+      status: typeof raw.status === 'string' ? raw.status : undefined,
+      result: raw.result,
+      created_ts: typeof raw.created_ts === 'number' ? raw.created_ts : undefined,
+      updated_ts: typeof raw.updated_ts === 'number' ? raw.updated_ts : undefined,
+    }
+  }
+  return {
+    ok: r.ok && j.ok === true,
+    error: typeof j.error === 'string' ? j.error : undefined,
+    job,
   }
 }
 

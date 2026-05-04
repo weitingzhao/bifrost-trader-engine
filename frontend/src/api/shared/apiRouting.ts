@@ -395,6 +395,11 @@ export function getResearchApiBase(): string {
   return researchBase
 }
 
+/** Same loopback/LAN alignment as portfolio: use same-origin + Vite proxy when page host ≠ API host. */
+export function getResearchApiBaseForBrowser(): string {
+  return _browserAlignApiBaseToPage(researchBase)
+}
+
 async function loadHealth(): Promise<HealthRoutingFields | null> {
   const entry = trimEnv(import.meta.env.VITE_API_BASE) ?? ''
   const url = joinServiceBase(entry, '/health')

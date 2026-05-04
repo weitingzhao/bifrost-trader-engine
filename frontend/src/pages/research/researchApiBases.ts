@@ -1,6 +1,6 @@
 import {
   getMarketApiBase,
-  getResearchApiBase,
+  getResearchApiBaseForBrowser,
   getStrategyApiBase,
 } from '../../api/shared/apiRouting'
 
@@ -14,7 +14,7 @@ export type MonitorHealthForResearchBases = {
 export function researchServiceBase(monitorHealth: MonitorHealthForResearchBases): string {
   const explicit = import.meta.env.VITE_RESEARCH_API_ORIGIN?.trim()
   if (explicit) return explicit.replace(/\/$/, '')
-  const routed = getResearchApiBase().replace(/\/$/, '')
+  const routed = getResearchApiBaseForBrowser().replace(/\/$/, '')
   if (routed) return routed
   const p = monitorHealth?.research_port
   if (typeof p === 'number' && Number.isFinite(p) && typeof window !== 'undefined') {

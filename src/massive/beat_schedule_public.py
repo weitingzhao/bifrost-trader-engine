@@ -53,6 +53,13 @@ MASSIVE_BEAT_SCHEDULE_SPEC: List[Dict[str, Any]] = [
         "note": "After market close, enqueues feed_stocks_aggregate daily_smart for all watchlist STK symbols. Skips non-trading days. UTC 21:30 = 5:30pm EDT / 4:30pm EST.",
         "crontab_kwargs": {"hour": 21, "minute": 30},
     },
+    {
+        "name": "massive-sepa-universe-grouped-daily",
+        "task": "src.massive.tasks.beat_sepa_universe_grouped_daily",
+        "label": "SEPA universe daily bars (Grouped Daily, full market)",
+        "note": "After market close, enqueues feed_stocks_aggregate daily_market_summary for today. One API call covers all 5,000+ US stocks simultaneously. Skips non-trading days. UTC 22:00 = 6:00pm EDT / 5:00pm EST.",
+        "crontab_kwargs": {"hour": 22, "minute": 0},
+    },
 ]
 
 

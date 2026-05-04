@@ -443,6 +443,37 @@ def reset_failed_job_massive_backfill_batch(
         return []
 
 
+def reset_failed_job_massive_backfill_one(status_config: dict, job_id: Any) -> Optional[Dict[str, Any]]:
+    """If the row is ``failed``, set ``pending`` and clear ``result`` / ``celery_task_id``. Returns row for re-enqueue."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return None
+    try:
+        jid = int(job_id)
+    except (TypeError, ValueError):
+        return None
+    sql = """
+        UPDATE job_massive_backfill
+        SET status = 'pending', result = NULL, updated_at = now(), celery_task_id = NULL
+        WHERE job_massive_backfill_id = %s AND status = 'failed'
+        RETURNING job_massive_backfill_id, kind, payload, status, result,
+                  celery_task_id, created_at, updated_at
+    """
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(sql, (jid,))
+                row = cur.fetchone()
+            conn.commit()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("reset_failed_job_massive_backfill_one failed: %s", e)
+        return None
+
+
 def _publish_massive_job_redis(job_id: int, status: str, result: Optional[Dict[str, Any]] = None) -> None:
     """Optional: notify subscribers (e.g. future WS) when a job reaches a terminal state."""
     try:

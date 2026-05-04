@@ -403,6 +403,20 @@
 - **用途**：全市场 All Tickers 分页游标等状态；`sync_kind` 为主键（如 `universe_tickers`）。历史表名 `job_stock_reference_state` 已迁移。
 - **列**：`sync_kind` (text PK)、`last_cursor` (text)、`status` (text)、`updated_at` (timestamptz)。
 
+### 2.14.6 表 `sepa_universe_readiness_daily`（SEPA 全量扫描：数据准备日快照）
+
+- **用途**：在跑 SEPA Phase4 / 全市场批扫前，将「参考 Universe（`tickers`）」与「行情是否满足 `stock_day` 窗口」固化成**按日一行 per symbol** 的快照，便于补数编排与缺口查询。与 SEPA 引擎读数路径一致：`price_source` 默认 **`massive`**，与 `get_stock_day_series_for_sepa` / `get_stock_day_close_series_for_crs` 的 `source` 筛选对齐。
+- **主键**：`PRIMARY KEY (as_of_date, symbol, universe_rule_version, price_source)`。
+- **外键**：`tickers_id` → `tickers(tickers_id)` ON DELETE SET NULL。
+- **列（要点）**：`included_in_universe`（是否落在 `v_sepa_us_equity_universe`）、`bar_count_lookback`、`first_bar_date`、`last_bar_date`、`null_close_rows`、`null_volume_rows`、`price_ready`、`fund_cache_present`、`fund_cache_expire_at`（与 `research_sepa_fundamentals_cache` 有效行左连，可选）、`notes`、`computed_at`。
+- **填充**：不由守护进程自动写；运维在日线补数完成后可任选其一：**Research UI** → **SEPA Data Ready** → **Refresh snapshot**（`POST /research/screening/sepa/readiness/snapshot`，逻辑见 [`src/research/sepa/readiness_snapshot.py`](../src/research/sepa/readiness_snapshot.py)）；或 CLI `python scripts/db/run_sepa_readiness_snapshot.py`。原 `scripts/db/sepa_universe_readiness_snapshot.sql` 仅保留说明指向上述真源。阈值（回溯日历天数、最少 bar 数、允许 stale 天数）在 Python 模块内与视图定义对齐可调。
+
+### 2.14.7 视图 `v_sepa_us_equity_universe` / `v_sepa_symbol_price_readiness` / `v_sepa_symbol_fund_cache_readiness`
+
+- **`v_sepa_us_equity_universe`**：`tickers` LEFT JOIN `ticker_overview`；默认过滤 `active = true`、`locale = 'us'`、`market = 'stocks'`（大小写不敏感）。**生产前请用 Dev 库对 `market` / `locale` / `instrument_type` 做 `DISTINCT` 校准**，必要时收紧 `instrument_type` 或排除 `delisted_utc` 非空行，避免 Universe 与业务定义不一致。
+- **`v_sepa_symbol_price_readiness`**：对 `stock_day` 在固定窗口（当前为 **最近 420 个日历日至 `CURRENT_DATE`**、`source = 'massive'`）按 symbol 聚合；`price_ready` 条件为：bar 数 ≥ 阈值、最新 `bar_time` 不超过允许陈旧天数、窗口内无 `close`/`volume` 为 NULL 的行。阈值写死在视图定义中；若与 Phase4 `lookback_days` 分歧，应同步改视图或改为参数化表/MV（后续迭代）。
+- **`v_sepa_symbol_fund_cache_readiness`**：读 `research_sepa_fundamentals_cache` 中 `rule_version = 'sepa_fundamentals_v1'` 且 `expire_at > now()` 的行。若缓存表尚不存在，`db_refresh_schema` 内以 `DO` 块跳过创建该视图，避免首次建库失败；表首次由 SEPA fundamentals / Phase4 写入路径创建（与 [`src/vendor/massive/reader.py`](../src/vendor/massive/reader.py) 中 `_ensure_sepa_fundamentals_cache_table` 一致）。快照脚本内带 **同结构 `CREATE TABLE IF NOT EXISTS`**，便于在从未跑过 Phase4 的库上仍能执行快照（`fund_cache_*` 可能长期为 false）。
+
 ### 2.15 表 `option_day`（阶段 3 R-A3 扩展：期权日 K 线）
 
 - **用途**：存**期权**的**日线** OHLC 数据；期权按标的+到期+行权价+权利区分合约。
@@ -1560,6 +1574,8 @@ python scripts/db/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-04-19 Massive ticker types 任务 kind 合并更名 | `job_massive_backfill.kind`：`ticker_reference_ticker_types` 与 `ticker_reference_instrument_types` / `stock_reference_instrument_types` 合并规范名为 **`feed_stocks_tickers_types`**；`normalize_ticker_ref_kind` 将旧名映射至新名；路由仍为 `massive_stocks` / `massive_stocks_high`。§2.14 / §2.16。 | Massive |
 | 2026-04-19 Massive 股票公司行动任务 kind 更名与 API | `job_massive_backfill.kind`：公司行动同步（dividends / splits / IPOs / ticker events → `massive_corporate_action`）规范名为 **`feed_stocks_corporate_action`**；`normalize_ticker_ref_kind` 将 `corporate_action` 映射至新名；REST 使用 `GET /stocks/v1/dividends`、`GET /stocks/v1/splits`（替代已弃用的 v3 reference），并补充 `GET /v3/reference/ipos`、`GET /v3/reference/tickers/{ticker}/events`。§2.16。 | Massive |
 | 2026-04-20 K 线表 RANGE 分区（时序） | `stock_day`、`stock_min`、`option_day`、`option_min` 改为 `PARTITION BY RANGE (bar_time)`（`stock_day` 分区键为 `date`），按月子分区 + DEFAULT 分区；业务主键与 `ON CONFLICT` 目标一致（`stock_day`/`stock_min` 去掉 surrogate `id`）；`option_day_id` / `option_min_id` 保留为序列列。存量堆表由 `db_refresh_schema`（`pg_ddl`）自动迁移。`option_contracts` 不变。§2.13–§2.16。 | 研究 / 运维 |
+| 2026-04-29 SEPA 数据准备层 | 新增表 `sepa_universe_readiness_daily`（§2.14.6）；视图 `v_sepa_us_equity_universe`、`v_sepa_symbol_price_readiness`、`v_sepa_symbol_fund_cache_readiness`（§2.14.7，后者在 `research_sepa_fundamentals_cache` 存在时创建）。运维快照脚本 `scripts/db/sepa_universe_readiness_snapshot.sql`。由 `pg_ddl` / `db_refresh_schema` 创建。 | 研究 / SEPA |
+| 2026-04-29 SEPA Data Ready UI | §2.14.6 增补：快照可由 Research API / UI 与 `scripts/db/run_sepa_readiness_snapshot.py` 触发；`GET /research/screening/sepa/readiness/summary` 供前端 **SEPA Data Ready** 页展示 KPI。无新表。 | 研究 / SEPA |
 
 ---
 
