@@ -589,6 +589,59 @@ def fetch_sepa_readiness_summary(status_config: dict) -> Dict[str, Any]:
                 out["stock_unified_snapshot_row_count"] = None
                 out["stock_unified_snapshot_last_fetched_at"] = None
 
+            # Step 2 breakdown: cache_stock_snapshot rows grouped by tickers.instrument_type,
+            # joined to ticker_types (asset_class='stocks', locale='us') for human-readable label.
+            # Includes a coverage column (universe_ticker_count) so users can spot which types
+            # are under-snapshotted vs. their baseline universe footprint.
+            try:
+                cur.execute(
+                    """
+                    WITH snap_by_type AS (
+                        SELECT
+                            COALESCE(NULLIF(t.instrument_type, ''), '(unknown)') AS code,
+                            count(*)::bigint AS snapshot_row_count
+                        FROM public.cache_stock_snapshot c
+                        JOIN public.tickers t ON upper(trim(t.ticker)) = c.symbol
+                        GROUP BY COALESCE(NULLIF(t.instrument_type, ''), '(unknown)')
+                    ),
+                    uni_by_type AS (
+                        SELECT
+                            COALESCE(NULLIF(instrument_type, ''), '(unknown)') AS code,
+                            count(*)::bigint AS universe_ticker_count
+                        FROM public.tickers
+                        WHERE active = true
+                          AND lower(coalesce(locale, '')) = 'us'
+                          AND lower(coalesce(market, '')) = 'stocks'
+                        GROUP BY COALESCE(NULLIF(instrument_type, ''), '(unknown)')
+                    )
+                    SELECT
+                        s.code,
+                        tt.description,
+                        s.snapshot_row_count,
+                        COALESCE(u.universe_ticker_count, 0)::bigint AS universe_ticker_count
+                    FROM snap_by_type s
+                    LEFT JOIN uni_by_type u ON u.code = s.code
+                    LEFT JOIN public.ticker_types tt
+                        ON tt.code = s.code
+                       AND tt.asset_class = 'stocks'
+                       AND tt.locale = 'us'
+                    ORDER BY s.snapshot_row_count DESC, s.code
+                    """
+                )
+                rows = cur.fetchall() or []
+                out["stock_unified_snapshot_by_type"] = [
+                    {
+                        "code": r.get("code"),
+                        "description": r.get("description"),
+                        "snapshot_row_count": int(r.get("snapshot_row_count") or 0),
+                        "universe_ticker_count": int(r.get("universe_ticker_count") or 0),
+                    }
+                    for r in rows
+                ]
+            except Exception as e:
+                logger.debug("stock_unified_snapshot_by_type query failed: %s", e)
+                out["stock_unified_snapshot_by_type"] = None
+
             try:
                 cur.execute(
                     f"""

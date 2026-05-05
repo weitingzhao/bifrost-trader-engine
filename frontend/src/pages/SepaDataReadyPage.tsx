@@ -11,6 +11,7 @@ import {
   type SepaReadinessCatalogEntry,
   type SepaReadinessSummaryResponse,
   type SepaPriceGapItem,
+  type SepaSnapshotByTypeRow,
   type SepaSyncHolidaysResponse,
 } from '../api/research/sepaReadiness'
 import { fetchQueueSummary, type QueueSummaryRow } from '../api/ops/ops'
@@ -67,6 +68,71 @@ function splitObject(obj: string): [string, string] {
   const dot = obj.indexOf('.')
   if (dot === -1) return ['', obj]
   return [obj.slice(0, dot + 1), obj.slice(dot + 1)]
+}
+
+// ── Snapshot by-type breakdown (Step 2) ─────────────────────────────────────
+
+function SnapshotByTypeBreakdown({ rows }: { rows: SepaSnapshotByTypeRow[] | null }) {
+  if (rows == null) return null
+  if (rows.length === 0) {
+    return (
+      <div className="sdp-step-aside-empty">
+        No instrument-type breakdown yet — refresh once to populate{' '}
+        <code>cache_stock_snapshot</code>.
+      </div>
+    )
+  }
+  const totalSnap = rows.reduce((s, r) => s + (r.snapshot_row_count || 0), 0)
+  const totalUni = rows.reduce((s, r) => s + (r.universe_ticker_count || 0), 0)
+  return (
+    <div className="sdp-step-aside">
+      <div className="sdp-step-aside-title">
+        Instrument types in <code>cache_stock_snapshot</code>{' '}
+        <span className="sdp-step-aside-meta">
+          {rows.length} types · {fmt(totalSnap)} snapshot rows · {fmt(totalUni)} universe tickers
+        </span>
+      </div>
+      <div className="sdp-step-aside-table-scroll">
+        <table className="sdp-snap-by-type-table">
+          <thead>
+            <tr>
+              <th className="sdp-snap-by-type-code">Code</th>
+              <th>Description</th>
+              <th className="sdp-snap-by-type-num">Snapshot rows</th>
+              <th className="sdp-snap-by-type-num">Universe tickers</th>
+              <th className="sdp-snap-by-type-num">Coverage</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const coverage =
+                r.universe_ticker_count > 0
+                  ? (r.snapshot_row_count / r.universe_ticker_count) * 100
+                  : null
+              const lowCoverage = coverage != null && coverage < 90
+              return (
+                <tr key={r.code}>
+                  <td className="sdp-snap-by-type-code">
+                    <code>{r.code}</code>
+                  </td>
+                  <td>{r.description ?? <span className="sdp-step-aside-dim">—</span>}</td>
+                  <td className="sdp-snap-by-type-num">{fmt(r.snapshot_row_count)}</td>
+                  <td className="sdp-snap-by-type-num sdp-step-aside-dim">
+                    {fmt(r.universe_ticker_count)}
+                  </td>
+                  <td
+                    className={`sdp-snap-by-type-num${lowCoverage ? ' sdp-snap-by-type-low' : ''}`}
+                  >
+                    {coverage == null ? '—' : `${coverage.toFixed(1)}%`}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
 }
 
 // ── Check Strip ──────────────────────────────────────────────────────────────
@@ -685,6 +751,7 @@ function SepaDataReadyPageInner({
   const [summaryLoading, setSummaryLoading] = useState(false)
   const [summaryErr, setSummaryErr] = useState<string | null>(null)
   const summaryLoadedAtRef = useRef<string | null>(null)
+  const [activeRunStep, setActiveRunStep] = useState<1 | 2 | 3 | 4 | 5>(1)
 
   const [snapshotBusy, setSnapshotBusy] = useState(false)
   const [snapshotMsg, setSnapshotMsg] = useState<string | null>(null)
@@ -1114,6 +1181,64 @@ function SepaDataReadyPageInner({
     ? `Checked ${fmtRelativeTime(summaryLoadedAtRef.current)}`
     : null
 
+  const runbookSteps: Array<{
+    id: 1 | 2 | 3 | 4 | 5
+    title: string
+    short: string
+    status: CheckStatus
+    done: boolean
+    metric: string
+  }> = [
+    {
+      id: 1,
+      title: 'Universe + holidays',
+      short: 'Reference data',
+      status: step1Status === 'ok' && holidaysStatus === 'ok'
+        ? 'ok'
+        : step1Status === 'error' || holidaysStatus === 'error'
+        ? 'error'
+        : step1Status === 'loading' || holidaysStatus === 'loading'
+        ? 'loading'
+        : step1Status === 'warn' || holidaysStatus === 'warn'
+        ? 'warn'
+        : 'unknown',
+      done: step1Done && holidaysTotal > 0,
+      metric: `${fmt(universeCount)} symbols`,
+    },
+    {
+      id: 2,
+      title: 'Unified snapshots',
+      short: 'Massive baseline',
+      status: unifiedSnapStatus,
+      done: unifiedSnapDone,
+      metric: unifiedSnapRows != null ? `${fmt(unifiedSnapRows)} rows` : 'not loaded',
+    },
+    {
+      id: 3,
+      title: 'Stock day bars',
+      short: 'Daily fill',
+      status: barStepStatus,
+      done: barStepStatus === 'ok',
+      metric: priceGap != null ? `${fmt(priceGap)} gaps` : 'unchecked',
+    },
+    {
+      id: 4,
+      title: 'Readiness snapshot',
+      short: 'Materialize',
+      status: matSnapshotStepStatus,
+      done: matSnapshotStepDone,
+      metric: snap?.rows_total != null ? `${fmt(snap.rows_total)} rows` : 'today',
+    },
+    {
+      id: 5,
+      title: 'Review + fix',
+      short: 'Close loop',
+      status: reviewStepStatus,
+      done: reviewStepDone,
+      metric: notesCount > 0 ? `${fmt(notesCount)} failing` : 'ready',
+    },
+  ]
+
   return (
     <div className="sdp-root">
       <SectionPageTitle
@@ -1128,10 +1253,40 @@ function SepaDataReadyPageInner({
       <div className="sdp-actions-card">
         <div className="sdp-actions-title">Run book</div>
 
-        <div className="sdp-step-list">
+        <div className="sdp-runbook-stepper" role="tablist" aria-label="SEPA Data Ready run book steps">
+          {runbookSteps.map((s, idx) => (
+            <button
+              key={s.id}
+              type="button"
+              role="tab"
+              aria-selected={activeRunStep === s.id}
+              aria-controls={`sepa-runbook-step-${s.id}`}
+              className={[
+                'sdp-runbook-tab',
+                activeRunStep === s.id ? 'sdp-runbook-tab--active' : '',
+                s.done ? 'sdp-runbook-tab--done' : '',
+                `sdp-runbook-tab--${s.status}`,
+              ].filter(Boolean).join(' ')}
+              onClick={() => setActiveRunStep(s.id)}
+            >
+              <span className="sdp-runbook-tab-index">{s.id}</span>
+              <span className="sdp-runbook-tab-text">
+                <span className="sdp-runbook-tab-title">{s.title}</span>
+                <span className="sdp-runbook-tab-sub">{s.short} · {s.metric}</span>
+              </span>
+              {idx < runbookSteps.length - 1 && <span className="sdp-runbook-tab-rail" aria-hidden="true" />}
+            </button>
+          ))}
+        </div>
+
+        <div className="sdp-step-list sdp-step-list--panel">
 
           {/* Step 1 — Tickers Universe + Market Holidays */}
-          <div className={`sdp-step ${step1Done ? 'sdp-step--done' : ''}`}>
+          <div
+            id="sepa-runbook-step-1"
+            role="tabpanel"
+            className={`sdp-step ${step1Done ? 'sdp-step--done' : ''} ${activeRunStep === 1 ? 'sdp-step--panel-active' : 'sdp-step--panel-hidden'}`}
+          >
             <div className="sdp-step-num">1</div>
             <div className="sdp-step-body">
               <div className="sdp-step-label">
@@ -1287,7 +1442,11 @@ function SepaDataReadyPageInner({
           </div>
 
           {/* Step 2 — Massive unified stock snapshot baseline (before stock_day backfill) */}
-          <div className={`sdp-step ${unifiedSnapDone ? 'sdp-step--done' : ''}`}>
+          <div
+            id="sepa-runbook-step-2"
+            role="tabpanel"
+            className={`sdp-step ${unifiedSnapDone ? 'sdp-step--done' : ''} ${activeRunStep === 2 ? 'sdp-step--panel-active' : 'sdp-step--panel-hidden'}`}
+          >
             <div className="sdp-step-num">2</div>
             <div className="sdp-step-body">
               <div className="sdp-step-label">
@@ -1337,11 +1496,17 @@ function SepaDataReadyPageInner({
               {unifiedSnapMsg != null && (
                 <div className={`sdp-feedback sdp-msg--${unifiedSnapOk ? 'ok' : 'err'}`}>{unifiedSnapMsg}</div>
               )}
+
+              <SnapshotByTypeBreakdown rows={summary?.stock_unified_snapshot_by_type ?? null} />
             </div>
           </div>
 
           {/* Step 3 — Stock Day Bars */}
-          <div className={`sdp-step ${barStepDone ? 'sdp-step--done' : ''}`}>
+          <div
+            id="sepa-runbook-step-3"
+            role="tabpanel"
+            className={`sdp-step ${barStepDone ? 'sdp-step--done' : ''} ${activeRunStep === 3 ? 'sdp-step--panel-active' : 'sdp-step--panel-hidden'}`}
+          >
             <div className="sdp-step-num">3</div>
             <div className="sdp-step-body">
               <div className="sdp-step-label">Backfill <code>public.stock_day</code> bars</div>
@@ -1448,7 +1613,11 @@ function SepaDataReadyPageInner({
           </div>
 
           {/* Step 4 — Readiness Snapshot */}
-          <div className={`sdp-step ${matSnapshotStepDone ? 'sdp-step--done' : 'sdp-step--active'}`}>
+          <div
+            id="sepa-runbook-step-4"
+            role="tabpanel"
+            className={`sdp-step ${matSnapshotStepDone ? 'sdp-step--done' : 'sdp-step--active'} ${activeRunStep === 4 ? 'sdp-step--panel-active' : 'sdp-step--panel-hidden'}`}
+          >
             <div className="sdp-step-num">4</div>
             <div className="sdp-step-body">
               <div className="sdp-step-label">Refresh readiness snapshot</div>
@@ -1500,7 +1669,11 @@ function SepaDataReadyPageInner({
           </div>
 
           {/* Step 5 — Review & Fix */}
-          <div className={`sdp-step ${reviewStepDone ? 'sdp-step--done' : ''}`}>
+          <div
+            id="sepa-runbook-step-5"
+            role="tabpanel"
+            className={`sdp-step ${reviewStepDone ? 'sdp-step--done' : ''} ${activeRunStep === 5 ? 'sdp-step--panel-active' : 'sdp-step--panel-hidden'}`}
+          >
             <div className="sdp-step-num">5</div>
             <div className="sdp-step-body">
               <div className="sdp-step-label">Review metrics &amp; fix gaps</div>

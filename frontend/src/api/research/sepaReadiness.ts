@@ -61,11 +61,24 @@ export interface SepaReadinessSummaryResponse {
   /** Rows in public.cache_stock_snapshot (Massive unified /v3/snapshot); null if table missing. */
   stock_unified_snapshot_row_count?: number | null
   stock_unified_snapshot_last_fetched_at?: string | null
+  /** Step 2 breakdown: cache_stock_snapshot rows grouped by tickers.instrument_type. */
+  stock_unified_snapshot_by_type?: SepaSnapshotByTypeRow[] | null
   /**
    * Step 3 stock_day gap count: vendor NY date from cache.last_minute_updated vs max(stock_day);
    * fallback to NOT price_ready when last_minute_updated is null. Null if query failed.
    */
   stock_day_vendor_fill_gap_count?: number | null
+}
+
+export interface SepaSnapshotByTypeRow {
+  /** tickers.instrument_type code (e.g. CS, ETF, WARRANT). '(unknown)' if NULL/empty. */
+  code: string
+  /** Human-readable description from public.ticker_types (asset_class=stocks, locale=us). */
+  description: string | null
+  /** Number of cache_stock_snapshot rows for this instrument_type. */
+  snapshot_row_count: number
+  /** Number of public.tickers rows (active US stocks) for this instrument_type. */
+  universe_ticker_count: number
 }
 
 export async function fetchSepaReadinessSummary(): Promise<SepaReadinessSummaryResponse> {
