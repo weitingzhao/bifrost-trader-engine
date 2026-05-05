@@ -226,6 +226,20 @@ def describe_massive_job_goal(kind: str, payload: Any) -> str:
     if k == "trim_jobs":
         return "Trim job_massive_backfill history"
 
+    # --- stocks fundamentals v1 (SEPA raw tables) ---
+    if k == "feed_stocks_income_statements":
+        return _trunc(f"Income statements v1 · {_symbols_snippet(p) or 'symbols'}")
+    if k == "feed_stocks_balance_sheets":
+        return _trunc(f"Balance sheets v1 · {_symbols_snippet(p) or 'symbols'}")
+    if k == "feed_stocks_cash_flows":
+        return _trunc(f"Cash flow statements v1 · {_symbols_snippet(p) or 'symbols'}")
+    if k == "feed_stocks_ratios":
+        return _trunc(f"Ratios ingest · {_symbols_snippet(p) or 'symbols'}")
+    if k == "feed_stocks_short_interest":
+        return _trunc(f"Short interest · {_symbols_snippet(p) or 'symbols'}")
+    if k == "feed_stocks_short_volume":
+        return _trunc(f"Short volume · {_symbols_snippet(p) or 'symbols'}")
+
     # --- corporate action ---
     if k in ("feed_stocks_corporate_action", "corporate_action"):
         sym = _str_field(p, "symbol")

@@ -1,8 +1,8 @@
-import { getResearchApiBase, joinServiceBase } from '../shared/apiRouting'
+import { getResearchApiBaseForBrowser, joinServiceBase } from '../shared/apiRouting'
 import { fetchWithTimeout } from '../shared/fetchTimeout'
 
 function researchApiUrl(path: string): string {
-  return joinServiceBase(getResearchApiBase(), path)
+  return joinServiceBase(getResearchApiBaseForBrowser(), path)
 }
 
 export interface SepaReadinessNotesRow {
@@ -18,6 +18,8 @@ export interface SepaReadinessCatalogEntry {
   typical_ingest?: string
   depends_on?: string[]
   data_points: string[]
+  /** Present for SQL views; pulled from PostgreSQL via pg_get_viewdef. */
+  view_query?: string
 }
 
 export interface SepaReadinessDataCatalog {
@@ -68,6 +70,13 @@ export interface SepaReadinessSummaryResponse {
    * fallback to NOT price_ready when last_minute_updated is null. Null if query failed.
    */
   stock_day_vendor_fill_gap_count?: number | null
+  /** Steps 4–9: per-table gap counts (null if table missing or query failed). */
+  income_statements_gap_count?: number | null
+  balance_sheets_gap_count?: number | null
+  cash_flows_gap_count?: number | null
+  ratios_gap_count?: number | null
+  short_interest_gap_count?: number | null
+  short_volume_gap_count?: number | null
 }
 
 export interface SepaSnapshotByTypeRow {
@@ -83,13 +92,23 @@ export interface SepaSnapshotByTypeRow {
 
 export async function fetchSepaReadinessSummary(): Promise<SepaReadinessSummaryResponse> {
   const url = researchApiUrl('/research/screening/sepa/readiness/summary')
-  const r = await fetchWithTimeout(url, { method: 'GET' }, 45_000)
-  const j = await r.json().catch(() => ({}))
-  if (!r.ok) {
-    const msg = typeof j?.detail === 'string' ? j.detail : (j?.error ?? `HTTP ${r.status}`)
-    return { ok: false, error: msg }
+  try {
+    const r = await fetchWithTimeout(url, { method: 'GET' }, 45_000)
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) {
+      const msg = typeof j?.detail === 'string' ? j.detail : (j?.error ?? `HTTP ${r.status}`)
+      return { ok: false, error: msg }
+    }
+    return j as SepaReadinessSummaryResponse
+  } catch (e) {
+    const base = getResearchApiBaseForBrowser()
+    const hint =
+      base && typeof window !== 'undefined' && !base.includes(window.location.hostname)
+        ? ' (API base host differs from the page; use same host as the UI or rely on dev proxy.)'
+        : ''
+    const msg = e instanceof Error ? e.message : 'Network error'
+    return { ok: false, error: `${msg}${hint}` }
   }
-  return j as SepaReadinessSummaryResponse
 }
 
 export interface SepaGroupedHistoryBackfillResponse {
@@ -223,6 +242,35 @@ export async function postSepaSyncHolidays(): Promise<SepaSyncHolidaysResponse> 
   return j as SepaSyncHolidaysResponse
 }
 
+export interface SepaFundamentalsBackfillResponse {
+  ok: boolean
+  error?: string
+  gap_count?: number
+  job_id?: string | null
+  message?: string
+}
+
+export async function postSepaFundamentalsBackfill(opts?: {
+  max_workers?: number
+  rate_limit_rps?: number
+  cache_ttl_sec?: number
+  max_symbols?: number
+}): Promise<SepaFundamentalsBackfillResponse> {
+  const url = researchApiUrl('/research/screening/sepa/readiness/backfill-fundamentals')
+  const body = opts ? JSON.stringify(opts) : '{}'
+  const r = await fetchWithTimeout(
+    url,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body },
+    60_000,
+  )
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    const msg = typeof j?.detail === 'string' ? j.detail : (j?.error ?? `HTTP ${r.status}`)
+    return { ok: false, error: msg }
+  }
+  return j as SepaFundamentalsBackfillResponse
+}
+
 export interface SepaStockUnifiedSnapshotResponse {
   ok: boolean
   error?: string
@@ -274,3 +322,87 @@ export async function postSepaReadinessSnapshot(): Promise<{
     elapsed_ms: typeof j.elapsed_ms === 'number' ? j.elapsed_ms : undefined,
   }
 }
+
+export interface SepaFinGapRow {
+  symbol: string
+  quarterly_rows?: number | null
+  annual_rows?: number | null
+  quarterly_max_period_end?: string | null
+  annual_max_period_end?: string | null
+  gap_reason?: string | null
+}
+
+export interface SepaFinancialsGapsResponse {
+  ok: boolean
+  error?: string
+  gaps?: SepaFinGapRow[]
+  total_gap_count?: number
+  returned?: number
+}
+
+export interface SepaFinancialsBackfillResponse {
+  ok: boolean
+  error?: string
+  gap_count?: number
+  chunks?: number
+  job_ids?: string[]
+  kind?: string
+  message?: string
+  errors?: string[]
+}
+
+async function _getFinGaps(path: string): Promise<SepaFinancialsGapsResponse> {
+  const url = researchApiUrl(path)
+  const r = await fetchWithTimeout(url, { method: 'GET' }, 60_000)
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    const msg = typeof j?.detail === 'string' ? j.detail : (j?.error ?? `HTTP ${r.status}`)
+    return { ok: false, error: msg }
+  }
+  return j as SepaFinancialsGapsResponse
+}
+
+async function _postFinBackfill(path: string, body: Record<string, unknown>): Promise<SepaFinancialsBackfillResponse> {
+  const url = researchApiUrl(path)
+  const r = await fetchWithTimeout(
+    url,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    120_000,
+  )
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    const msg = typeof j?.detail === 'string' ? j.detail : (j?.error ?? `HTTP ${r.status}`)
+    return { ok: false, error: msg }
+  }
+  return j as SepaFinancialsBackfillResponse
+}
+
+export const fetchSepaIncomeStatementsGaps = (): Promise<SepaFinancialsGapsResponse> =>
+  _getFinGaps('/research/screening/sepa/readiness/income-statements-gaps')
+export const postSepaIncomeStatementsBackfill = (symbols?: string[]): Promise<SepaFinancialsBackfillResponse> =>
+  _postFinBackfill('/research/screening/sepa/readiness/backfill-income-statements', symbols?.length ? { symbols } : {})
+
+export const fetchSepaBalanceSheetsGaps = (): Promise<SepaFinancialsGapsResponse> =>
+  _getFinGaps('/research/screening/sepa/readiness/balance-sheets-gaps')
+export const postSepaBalanceSheetsBackfill = (symbols?: string[]): Promise<SepaFinancialsBackfillResponse> =>
+  _postFinBackfill('/research/screening/sepa/readiness/backfill-balance-sheets', symbols?.length ? { symbols } : {})
+
+export const fetchSepaCashFlowsGaps = (): Promise<SepaFinancialsGapsResponse> =>
+  _getFinGaps('/research/screening/sepa/readiness/cash-flows-gaps')
+export const postSepaCashFlowsBackfill = (symbols?: string[]): Promise<SepaFinancialsBackfillResponse> =>
+  _postFinBackfill('/research/screening/sepa/readiness/backfill-cash-flows', symbols?.length ? { symbols } : {})
+
+export const fetchSepaRatiosGaps = (): Promise<SepaFinancialsGapsResponse> =>
+  _getFinGaps('/research/screening/sepa/readiness/ratios-gaps')
+export const postSepaRatiosBackfill = (symbols?: string[]): Promise<SepaFinancialsBackfillResponse> =>
+  _postFinBackfill('/research/screening/sepa/readiness/backfill-ratios', symbols?.length ? { symbols } : {})
+
+export const fetchSepaShortInterestGaps = (): Promise<SepaFinancialsGapsResponse> =>
+  _getFinGaps('/research/screening/sepa/readiness/short-interest-gaps')
+export const postSepaShortInterestBackfill = (symbols?: string[]): Promise<SepaFinancialsBackfillResponse> =>
+  _postFinBackfill('/research/screening/sepa/readiness/backfill-short-interest', symbols?.length ? { symbols } : {})
+
+export const fetchSepaShortVolumeGaps = (): Promise<SepaFinancialsGapsResponse> =>
+  _getFinGaps('/research/screening/sepa/readiness/short-volume-gaps')
+export const postSepaShortVolumeBackfill = (symbols?: string[]): Promise<SepaFinancialsBackfillResponse> =>
+  _postFinBackfill('/research/screening/sepa/readiness/backfill-short-volume', symbols?.length ? { symbols } : {})

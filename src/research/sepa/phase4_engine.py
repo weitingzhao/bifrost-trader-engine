@@ -265,6 +265,37 @@ def _fetch_eval_one(
                 pass
         return out
 
+    from src.research.sepa.financials_data import fetch_income_rows_for_sepa_from_pg
+
+    pg_pair = fetch_income_rows_for_sepa_from_pg(status_config, symbol)
+    if pg_pair:
+        qrows, arows = pg_pair
+        evaluated = evaluate_fundamentals(qrows, arows, cfg=cfg)
+        evaluated["symbol"] = symbol
+        evaluated["cache_hit"] = "postgres_income_table"
+        eval_payload = {
+            "evaluation": evaluated,
+            "quarterly_rows": qrows,
+            "annual_rows": arows,
+            "error": None,
+            "saved_at": _utc_now(),
+        }
+        upsert_sepa_fundamentals_cache(
+            status_config,
+            symbol,
+            eval_payload,
+            rule_version=FUNDAMENTALS_RULE_VERSION,
+            ttl_sec=p4cfg.cache_ttl_sec,
+        )
+        if redis_client:
+            try:
+                import json
+
+                redis_client.setex(cache_key, int(p4cfg.cache_ttl_sec), json.dumps(eval_payload))
+            except Exception:
+                pass
+        return evaluated
+
     qres = _fetch_income_with_retry(
         client,
         symbol,

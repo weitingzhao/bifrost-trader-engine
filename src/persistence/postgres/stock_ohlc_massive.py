@@ -9,6 +9,19 @@ from typing import Any, Dict, Optional
 SOURCE_MASSIVE = "massive"
 
 
+def _pg_row_first_value(row: Any) -> Any:
+    """First cell from a fetchone row (tuple or mapping / RealDictRow)."""
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        vals = list(row.values())
+        return vals[0] if vals else None
+    try:
+        return row[0]
+    except (IndexError, TypeError, KeyError):
+        return None
+
+
 def get_massive_stock_day_max_date(cur: Any, symbol: str) -> Optional[date]:
     """Latest daily bar date in stock_day for symbol (Massive source only)."""
     sym = (symbol or "").strip().upper()
@@ -22,9 +35,9 @@ def get_massive_stock_day_max_date(cur: Any, symbol: str) -> Optional[date]:
         (sym, SOURCE_MASSIVE),
     )
     row = cur.fetchone()
-    if not row or row[0] is None:
+    v = _pg_row_first_value(row)
+    if v is None:
         return None
-    v = row[0]
     if isinstance(v, datetime):
         return v.date()
     if isinstance(v, date):
@@ -243,7 +256,15 @@ def apply_stock_daily_ticker_summary(
     sym = (ticker or "").strip().upper()
     if not sym:
         return 0
-    from_s = (data.get("from") or data.get("date") or "")[:10]
+    raw_fd = data.get("from") or data.get("date")
+    if raw_fd is None:
+        from_s = ""
+    elif isinstance(raw_fd, datetime):
+        from_s = raw_fd.date().isoformat()[:10]
+    elif isinstance(raw_fd, date):
+        from_s = raw_fd.isoformat()[:10]
+    else:
+        from_s = str(raw_fd)[:10]
     try:
         bar_d = date.fromisoformat(from_s)
     except (ValueError, TypeError):

@@ -2717,6 +2717,247 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             """
         )
 
+        # --- Massive Stocks Fundamentals v1 (flat REST) — SEPA Data Ready Steps 4–9 ---
+        _log_table(
+            "stock_income_statements",
+            "Massive GET /stocks/financials/v1/income-statements (quarterly/annual/ttm)",
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS public.stock_income_statements (
+                symbol text NOT NULL,
+                timeframe text NOT NULL,
+                period_end date NOT NULL,
+                filing_date date NULL,
+                fiscal_year integer NOT NULL,
+                fiscal_quarter integer NOT NULL DEFAULT 0,
+                basic_earnings_per_share double precision NULL,
+                diluted_earnings_per_share double precision NULL,
+                revenue double precision NULL,
+                basic_shares_outstanding double precision NULL,
+                diluted_shares_outstanding double precision NULL,
+                consolidated_net_income_loss double precision NULL,
+                cost_of_revenue double precision NULL,
+                gross_profit double precision NULL,
+                operating_income double precision NULL,
+                total_operating_expenses double precision NULL,
+                selling_general_administrative double precision NULL,
+                research_development double precision NULL,
+                depreciation_depletion_amortization double precision NULL,
+                ebitda double precision NULL,
+                interest_income double precision NULL,
+                interest_expense double precision NULL,
+                other_income_expense double precision NULL,
+                total_other_income_expense double precision NULL,
+                income_before_income_taxes double precision NULL,
+                income_taxes double precision NULL,
+                net_income_loss_attributable_common_shareholders double precision NULL,
+                noncontrolling_interest double precision NULL,
+                discontinued_operations double precision NULL,
+                extraordinary_items double precision NULL,
+                equity_in_affiliates double precision NULL,
+                preferred_stock_dividends_declared double precision NULL,
+                other_operating_expenses double precision NULL,
+                cik text NULL,
+                source text NOT NULL DEFAULT 'massive',
+                fetched_at timestamptz NOT NULL DEFAULT now(),
+                PRIMARY KEY (symbol, timeframe, period_end, source)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_stock_income_sym_tf
+            ON public.stock_income_statements (symbol, timeframe, source)
+            """
+        )
+
+        _log_table(
+            "stock_balance_sheets",
+            "Massive GET /stocks/financials/v1/balance-sheets",
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS public.stock_balance_sheets (
+                symbol text NOT NULL,
+                timeframe text NOT NULL,
+                period_end date NOT NULL,
+                filing_date date NULL,
+                fiscal_year integer NOT NULL,
+                fiscal_quarter integer NOT NULL DEFAULT 0,
+                accounts_payable double precision NULL,
+                accrued_and_other_current_liabilities double precision NULL,
+                accumulated_other_comprehensive_income double precision NULL,
+                additional_paid_in_capital double precision NULL,
+                cash_and_equivalents double precision NULL,
+                cik text NULL,
+                commitments_and_contingencies double precision NULL,
+                common_stock double precision NULL,
+                debt_current double precision NULL,
+                deferred_revenue_current double precision NULL,
+                goodwill double precision NULL,
+                intangible_assets_net double precision NULL,
+                inventories double precision NULL,
+                long_term_debt_and_capital_lease_obligations double precision NULL,
+                noncontrolling_interest double precision NULL,
+                other_assets double precision NULL,
+                other_current_assets double precision NULL,
+                other_equity double precision NULL,
+                other_noncurrent_liabilities double precision NULL,
+                preferred_stock double precision NULL,
+                property_plant_equipment_net double precision NULL,
+                receivables double precision NULL,
+                retained_earnings_deficit double precision NULL,
+                short_term_investments double precision NULL,
+                total_assets double precision NULL,
+                total_current_assets double precision NULL,
+                total_current_liabilities double precision NULL,
+                total_equity double precision NULL,
+                total_equity_attributable_to_parent double precision NULL,
+                total_liabilities double precision NULL,
+                total_liabilities_and_equity double precision NULL,
+                treasury_stock double precision NULL,
+                source text NOT NULL DEFAULT 'massive',
+                fetched_at timestamptz NOT NULL DEFAULT now(),
+                PRIMARY KEY (symbol, timeframe, period_end, source)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_stock_balance_sym_tf
+            ON public.stock_balance_sheets (symbol, timeframe, source)
+            """
+        )
+
+        _log_table(
+            "stock_cash_flows",
+            "Massive GET /stocks/financials/v1/cash-flow-statements",
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS public.stock_cash_flows (
+                symbol text NOT NULL,
+                timeframe text NOT NULL,
+                period_end date NOT NULL,
+                filing_date date NULL,
+                fiscal_year integer NOT NULL,
+                fiscal_quarter integer NOT NULL DEFAULT 0,
+                net_cash_flow_from_operating_activities double precision NULL,
+                net_cash_flow_from_investing_activities double precision NULL,
+                net_cash_flow_from_financing_activities double precision NULL,
+                net_change_in_cash_and_equivalents double precision NULL,
+                free_cash_flow double precision NULL,
+                capital_expenditure double precision NULL,
+                depreciation_and_amortization double precision NULL,
+                cik text NULL,
+                source text NOT NULL DEFAULT 'massive',
+                fetched_at timestamptz NOT NULL DEFAULT now(),
+                PRIMARY KEY (symbol, timeframe, period_end, source)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_stock_cashflow_sym_tf
+            ON public.stock_cash_flows (symbol, timeframe, source)
+            """
+        )
+
+        _log_table(
+            "stock_ratios",
+            "Massive GET /stocks/financials/v1/ratios (or computed ingest)",
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS public.stock_ratios (
+                symbol text NOT NULL,
+                timeframe text NOT NULL,
+                period_end date NOT NULL,
+                filing_date date NULL,
+                fiscal_year integer NOT NULL,
+                fiscal_quarter integer NOT NULL DEFAULT 0,
+                basic_earnings_per_share double precision NULL,
+                diluted_earnings_per_share double precision NULL,
+                return_on_equity double precision NULL,
+                return_on_assets double precision NULL,
+                debt_to_equity double precision NULL,
+                current_ratio double precision NULL,
+                gross_margin double precision NULL,
+                operating_margin double precision NULL,
+                net_margin double precision NULL,
+                revenue double precision NULL,
+                net_income double precision NULL,
+                total_assets double precision NULL,
+                total_equity double precision NULL,
+                total_liabilities double precision NULL,
+                cik text NULL,
+                source text NOT NULL DEFAULT 'massive',
+                fetched_at timestamptz NOT NULL DEFAULT now(),
+                PRIMARY KEY (symbol, timeframe, period_end, source)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_stock_ratios_sym_tf
+            ON public.stock_ratios (symbol, timeframe, source)
+            """
+        )
+
+        _log_table(
+            "stock_short_interest",
+            "Massive GET /stocks/v1/short-interest",
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS public.stock_short_interest (
+                symbol text NOT NULL,
+                settlement_date date NOT NULL,
+                short_interest bigint NULL,
+                avg_daily_volume double precision NULL,
+                days_to_cover double precision NULL,
+                cik text NULL,
+                source text NOT NULL DEFAULT 'massive',
+                fetched_at timestamptz NOT NULL DEFAULT now(),
+                PRIMARY KEY (symbol, settlement_date, source)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_stock_short_int_sym_settle
+            ON public.stock_short_interest (symbol, settlement_date DESC)
+            """
+        )
+
+        _log_table(
+            "stock_short_volume",
+            "Massive GET /stocks/v1/short-volume",
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS public.stock_short_volume (
+                symbol text NOT NULL,
+                trade_date date NOT NULL,
+                short_volume bigint NULL,
+                total_volume bigint NULL,
+                short_volume_ratio double precision NULL,
+                exchanges jsonb NULL,
+                cik text NULL,
+                source text NOT NULL DEFAULT 'massive',
+                fetched_at timestamptz NOT NULL DEFAULT now(),
+                PRIMARY KEY (symbol, trade_date, source)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_stock_short_vol_sym_date
+            ON public.stock_short_volume (symbol, trade_date DESC)
+            """
+        )
+
         _log_table("v_sepa_us_equity_universe", "View: US equity candidate universe from tickers (+ overview)")
         cur.execute(
             """

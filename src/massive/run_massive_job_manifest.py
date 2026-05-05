@@ -15,6 +15,7 @@ from src.massive.celery_queues import (
     FEED_OPTIONS_TRADES_QUOTES_KINDS,
     FEED_STOCKS_AGGREGATE_KINDS,
     FEED_STOCKS_CORPORATE_ACTION_KINDS,
+    FEED_STOCKS_FINANCIALS_KINDS,
     FEED_STOCKS_TICKERS_REFERENCE_UNIVERSE_KINDS,
     FEED_STOCKS_TICKERS_TYPES_KINDS,
     TICKER_REFERENCE_KINDS,
@@ -124,6 +125,9 @@ def build_run_massive_job_matrix() -> Tuple[RunMassiveJobMatrixRow, ...]:
 
     rows.append(_row("feed_stocks_corporate_action", None, "n/a"))
 
+    for k in FEED_STOCKS_FINANCIALS_KINDS:
+        rows.append(_row(k, None, "n/a"))
+
     # feed_option_contracts — payload.mode
     for m in ("list", "detail", "reference_upsert", "nullable_column_backfill"):
         rows.append(_row("feed_option_contracts", m, "payload.mode"))
@@ -179,4 +183,5 @@ RUN_MASSIVE_JOB_TOP_LEVEL_KINDS: frozenset[str] = frozenset(
     | FEED_OPTION_CONTRACTS_KINDS
     | FEED_STOCKS_TICKERS_REFERENCE_UNIVERSE_KINDS
     | FEED_STOCKS_TICKERS_TYPES_KINDS
+    | FEED_STOCKS_FINANCIALS_KINDS
 )

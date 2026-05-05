@@ -42,6 +42,7 @@ def test_top_level_kinds_cover_celery_routing_universe() -> None:
         FEED_OPTION_CONTRACTS_KINDS,
         FEED_OPTIONS_AGGREGATE_KINDS,
         FEED_OPTIONS_TRADES_QUOTES_KINDS,
+        FEED_STOCKS_FINANCIALS_KINDS,
         FEED_STOCKS_TICKERS_REFERENCE_UNIVERSE_KINDS,
         FEED_STOCKS_TICKERS_TYPES_KINDS,
         MASSIVE_STOCKS_QUEUE_KINDS,
@@ -60,6 +61,8 @@ def test_top_level_kinds_cover_celery_routing_universe() -> None:
     for k in FEED_STOCKS_TICKERS_TYPES_KINDS:
         assert k in RUN_MASSIVE_JOB_TOP_LEVEL_KINDS, f"missing feed_stocks_tickers_types kind: {k!r}"
     for k in ("feed_option_snapshots", "feed_stocks_aggregate", "feed_options_aggregate", "feed_option_contracts", "feed_options_trades_quotes", "oi"):
+        assert k in RUN_MASSIVE_JOB_TOP_LEVEL_KINDS
+    for k in FEED_STOCKS_FINANCIALS_KINDS:
         assert k in RUN_MASSIVE_JOB_TOP_LEVEL_KINDS
 
 

@@ -64,6 +64,18 @@ FEED_STOCKS_CORPORATE_ACTION_KINDS: Final[frozenset[str]] = frozenset(
     }
 )
 
+# SEPA fundamentals raw ingest (Massive Stocks REST → PostgreSQL).
+FEED_STOCKS_FINANCIALS_KINDS: Final[frozenset[str]] = frozenset(
+    {
+        "feed_stocks_income_statements",
+        "feed_stocks_balance_sheets",
+        "feed_stocks_cash_flows",
+        "feed_stocks_ratios",
+        "feed_stocks_short_interest",
+        "feed_stocks_short_volume",
+    }
+)
+
 STOCK_REFERENCE_KINDS = TICKER_REFERENCE_KINDS  # backward compat for reader/tests
 
 MASSIVE_STOCKS_QUEUE_KINDS: Final[frozenset[str]] = (
@@ -72,6 +84,7 @@ MASSIVE_STOCKS_QUEUE_KINDS: Final[frozenset[str]] = (
     | FEED_STOCKS_TICKERS_REFERENCE_UNIVERSE_KINDS
     | FEED_STOCKS_TICKERS_TYPES_KINDS
     | FEED_STOCKS_CORPORATE_ACTION_KINDS
+    | FEED_STOCKS_FINANCIALS_KINDS
 )
 
 # Option contract OHLC / pool fills on Massive options queues (``options_massive`` / ``options_massive_high``).

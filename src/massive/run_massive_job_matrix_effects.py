@@ -151,6 +151,36 @@ _REGISTRY: Dict[Tuple[str, str], MatrixRowEffects] = {
         ("massive_corporate_action",),
         ("—",),
     ),
+    ("feed_stocks_income_statements", ""): _e(
+        ("GET /stocks/financials/v1/income-statements",),
+        ("stock_income_statements",),
+        ("—",),
+    ),
+    ("feed_stocks_balance_sheets", ""): _e(
+        ("GET /stocks/financials/v1/balance-sheets",),
+        ("stock_balance_sheets",),
+        ("—",),
+    ),
+    ("feed_stocks_cash_flows", ""): _e(
+        ("GET /stocks/financials/v1/cash-flow-statements",),
+        ("stock_cash_flows",),
+        ("—",),
+    ),
+    ("feed_stocks_ratios", ""): _e(
+        ("GET /stocks/financials/v1/ratios (or GET /vX/reference/financials fallback)",),
+        ("stock_ratios",),
+        ("—",),
+    ),
+    ("feed_stocks_short_interest", ""): _e(
+        ("GET /stocks/v1/short-interest",),
+        ("stock_short_interest",),
+        ("—",),
+    ),
+    ("feed_stocks_short_volume", ""): _e(
+        ("GET /stocks/v1/short-volume",),
+        ("stock_short_volume",),
+        ("—",),
+    ),
     # — feed_option_contracts
     ("feed_option_contracts", "list"): _e(
         ("GET /v3/reference/options/contracts",),

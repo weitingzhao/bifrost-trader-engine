@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import logging
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -199,21 +200,6 @@ READINESS_DATA_CATALOG: Dict[str, Any] = {
             ],
         },
         {
-            "id": "research_sepa_fundamentals_cache",
-            "object": "public.research_sepa_fundamentals_cache",
-            "role": "Cached income-statement payload for SEPA fundamentals / Phase4.",
-            "typical_ingest": "Written by SEPA Phase4 or fundamentals batch jobs",
-            "data_points": [
-                "symbol",
-                "rule_version",
-                "payload (jsonb: evaluation + rows)",
-                "source",
-                "fetched_at",
-                "expire_at",
-                "updated_at",
-            ],
-        },
-        {
             "id": "cache_stock_snapshot",
             "object": "public.cache_stock_snapshot",
             "role": "Massive GET /v3/snapshot via ticker.any_of (no type param) — per-symbol session + last_minute baseline before stock_day backfill.",
@@ -272,6 +258,21 @@ READINESS_DATA_CATALOG: Dict[str, Any] = {
             ],
         },
         {
+            "id": "research_sepa_fundamentals_cache",
+            "object": "public.research_sepa_fundamentals_cache",
+            "role": "Cached income-statement payload for SEPA fundamentals / Phase4.",
+            "typical_ingest": "Written by SEPA Phase4 or fundamentals batch jobs",
+            "data_points": [
+                "symbol",
+                "rule_version",
+                "payload (jsonb: evaluation + rows)",
+                "source",
+                "fetched_at",
+                "expire_at",
+                "updated_at",
+            ],
+        },
+        {
             "id": "sepa_universe_readiness_daily",
             "object": "public.sepa_universe_readiness_daily",
             "role": "Materialized daily snapshot (UPSERT) combining universe + bars + optional fund cache hit.",
@@ -314,6 +315,111 @@ READINESS_DATA_CATALOG: Dict[str, Any] = {
         },
     ],
 }
+
+
+def _split_qualified_object_name(obj: str) -> Tuple[str, str]:
+    s = (obj or "").strip()
+    if not s:
+        return ("public", "")
+    if "." not in s:
+        return ("public", s)
+    schema, name = s.split(".", 1)
+    return ((schema or "public").strip(), name.strip())
+
+
+def _read_object_columns(
+    cur: Any,
+    *,
+    schema: str,
+    name: str,
+) -> List[str]:
+    if not schema or not name:
+        return []
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = %s
+          AND table_name = %s
+        ORDER BY ordinal_position
+        """,
+        (schema, name),
+    )
+    rows = cur.fetchall() or []
+    cols: List[str] = []
+    for r in rows:
+        c = (r or {}).get("column_name")
+        if isinstance(c, str) and c.strip():
+            cols.append(c.strip())
+    return cols
+
+
+def _read_view_query(
+    cur: Any,
+    *,
+    schema: str,
+    name: str,
+) -> Optional[str]:
+    if not schema or not name:
+        return None
+    fq_name = f"{schema}.{name}"
+    try:
+        cur.execute(
+            """
+            SELECT pg_get_viewdef(to_regclass(%s), true) AS view_sql
+            """,
+            (fq_name,),
+        )
+        row = cur.fetchone() or {}
+        sql = row.get("view_sql")
+        if isinstance(sql, str) and sql.strip():
+            return sql.strip()
+    except Exception:
+        pass
+    # Fallback: information_schema.views (works when pg_get_viewdef path is restricted).
+    try:
+        cur.execute(
+            """
+            SELECT view_definition
+            FROM information_schema.views
+            WHERE table_schema = %s
+              AND table_name = %s
+            """,
+            (schema, name),
+        )
+        row = cur.fetchone() or {}
+        sql = row.get("view_definition")
+        if isinstance(sql, str) and sql.strip():
+            return sql.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _build_runtime_data_catalog(cur: Any) -> Dict[str, Any]:
+    """Return catalog with dynamic data_points from current DB object columns."""
+    catalog = deepcopy(READINESS_DATA_CATALOG)
+    for bucket in ("raw_sources", "computed_layers"):
+        entries = catalog.get(bucket) or []
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            schema, name = _split_qualified_object_name(str(entry.get("object") or ""))
+            try:
+                dynamic_cols = _read_object_columns(cur, schema=schema, name=name)
+                if dynamic_cols:
+                    entry["data_points"] = dynamic_cols
+            except Exception as e:
+                logger.debug("read object columns failed for %s.%s: %s", schema, name, e)
+            try:
+                view_query = _read_view_query(cur, schema=schema, name=name)
+                if view_query:
+                    entry["view_query"] = view_query
+            except Exception as e:
+                logger.debug("read view query failed for %s.%s: %s", schema, name, e)
+    return catalog
 
 _ENSURE_FUND_CACHE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS public.research_sepa_fundamentals_cache (
@@ -656,6 +762,59 @@ def fetch_sepa_readiness_summary(status_config: dict) -> Dict[str, Any]:
                 logger.debug("stock_day_vendor_fill_gap_count query failed: %s", e)
                 out["stock_day_vendor_fill_gap_count"] = None
 
+            # Fundamentals raw tables (SEPA Data Ready Steps 4–9) — gap counts when tables exist.
+            try:
+                from src.research.sepa import financials_data as _fd
+
+                cur.execute(
+                    "SELECT (to_regclass('public.stock_income_statements') IS NOT NULL) AS texists"
+                )
+                if bool((cur.fetchone() or {}).get("texists")):
+                    out["income_statements_gap_count"] = _fd.count_income_statements_gaps(cur)
+                else:
+                    out["income_statements_gap_count"] = None
+                cur.execute(
+                    "SELECT (to_regclass('public.stock_balance_sheets') IS NOT NULL) AS texists"
+                )
+                if bool((cur.fetchone() or {}).get("texists")):
+                    out["balance_sheets_gap_count"] = _fd.count_balance_sheet_gaps(cur)
+                else:
+                    out["balance_sheets_gap_count"] = None
+                cur.execute(
+                    "SELECT (to_regclass('public.stock_cash_flows') IS NOT NULL) AS texists"
+                )
+                if bool((cur.fetchone() or {}).get("texists")):
+                    out["cash_flows_gap_count"] = _fd.count_cash_flow_gaps(cur)
+                else:
+                    out["cash_flows_gap_count"] = None
+                cur.execute("SELECT (to_regclass('public.stock_ratios') IS NOT NULL) AS texists")
+                if bool((cur.fetchone() or {}).get("texists")):
+                    out["ratios_gap_count"] = _fd.count_ratios_gaps(cur)
+                else:
+                    out["ratios_gap_count"] = None
+                cur.execute(
+                    "SELECT (to_regclass('public.stock_short_interest') IS NOT NULL) AS texists"
+                )
+                if bool((cur.fetchone() or {}).get("texists")):
+                    out["short_interest_gap_count"] = _fd.count_short_interest_gaps(cur)
+                else:
+                    out["short_interest_gap_count"] = None
+                cur.execute(
+                    "SELECT (to_regclass('public.stock_short_volume') IS NOT NULL) AS texists"
+                )
+                if bool((cur.fetchone() or {}).get("texists")):
+                    out["short_volume_gap_count"] = _fd.count_short_volume_gaps(cur)
+                else:
+                    out["short_volume_gap_count"] = None
+            except Exception as e:
+                logger.debug("fundamentals gap counts failed: %s", e)
+                out["income_statements_gap_count"] = None
+                out["balance_sheets_gap_count"] = None
+                out["cash_flows_gap_count"] = None
+                out["ratios_gap_count"] = None
+                out["short_interest_gap_count"] = None
+                out["short_volume_gap_count"] = None
+
             cur.execute(
                 """
                 SELECT count(*)::bigint AS n
@@ -771,7 +930,13 @@ def fetch_sepa_readiness_summary(status_config: dict) -> Dict[str, Any]:
                     "last_massive_sync": None,
                     "by_exchange": [],
                 }
-        out["data_catalog"] = READINESS_DATA_CATALOG
+
+            # Must run while cursor is open (was incorrectly placed after `with` closed cur).
+            try:
+                out["data_catalog"] = _build_runtime_data_catalog(cur)
+            except Exception as e:
+                logger.debug("build runtime data_catalog failed, fallback to static: %s", e)
+                out["data_catalog"] = READINESS_DATA_CATALOG
     finally:
         conn.close()
     return out
@@ -840,13 +1005,25 @@ def get_sepa_grouped_backfill_dates(
                 {"days_back": int(days_back)},
             )
             rows = cur.fetchall() or []
-        total_checked = int(rows[0][2]) if rows else 0
-        missing_dates: List[str] = [str(r[0]) for r in rows]
+        # Window column total_checked equals len(rows) for this query; avoid rows[0][2]
+        # (tuple/RealDictRow shape mismatches caused IndexError / KeyError in the wild).
+        total_low_cov_days = len(rows)
+        missing_dates: List[str] = []
+        for r in rows:
+            if isinstance(r, dict):
+                dt_v = r.get("dt")
+            else:
+                try:
+                    dt_v = r[0]
+                except (IndexError, TypeError, KeyError):
+                    dt_v = None
+            if dt_v is not None and str(dt_v).strip():
+                missing_dates.append(str(dt_v).strip())
         return {
             "ok": True,
             "missing_dates": missing_dates,
             "missing_count": len(missing_dates),
-            "checked_dates": total_checked,
+            "checked_dates": total_low_cov_days,
         }
     except Exception as e:
         logger.warning("get_sepa_grouped_backfill_dates query failed: %s", e)
@@ -1006,7 +1183,20 @@ def get_sepa_price_gap_symbols(
                 """
             )
             rows = cur.fetchall() or []
-        symbols: List[str] = [str(r[0]) for r in rows]
+        symbols: List[str] = []
+        for r in rows:
+            if not r:
+                continue
+            if isinstance(r, dict):
+                s = r.get("symbol")
+            else:
+                try:
+                    s = r[0]
+                except (IndexError, TypeError, KeyError):
+                    s = None
+            if s is None or s == "":
+                continue
+            symbols.append(str(s).strip().upper())
         batches: List[List[str]] = [
             symbols[i : i + batch_size] for i in range(0, len(symbols), batch_size)
         ]

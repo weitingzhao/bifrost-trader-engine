@@ -1,9 +1,9 @@
-import { getResearchApiBase, joinServiceBase } from '../shared/apiRouting'
+import { getResearchApiBaseForBrowser, joinServiceBase } from '../shared/apiRouting'
 import { fetchWithTimeout } from '../shared/fetchTimeout'
 import type { SepaConditionResult } from './sepa'
 
 function researchApiUrl(path: string): string {
-  return joinServiceBase(getResearchApiBase(), path)
+  return joinServiceBase(getResearchApiBaseForBrowser(), path)
 }
 
 export interface SepaFundamentalsRequest {

@@ -1247,6 +1247,162 @@ class MassiveClient:
                 return {"results": [], "error": logical}
         return data if isinstance(data, dict) else {"results": []}
 
+    # ── Stocks Fundamentals v1 (flat REST: /stocks/financials/v1/...) ─────────
+
+    def _fetch_financials_v1(
+        self,
+        path: str,
+        *,
+        tickers: Optional[str] = None,
+        tickers_any_of: Optional[str] = None,
+        min_ticker: Optional[str] = None,
+        max_ticker: Optional[str] = None,
+        timeframe: Optional[str] = None,
+        fiscal_year: Optional[int] = None,
+        fiscal_quarter: Optional[int] = None,
+        limit: int = 50000,
+        sort: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        params: Dict[str, Any] = {"limit": min(max(int(limit), 1), 50000)}
+        if tickers_any_of:
+            params["tickers.any_of"] = tickers_any_of.strip()
+        elif tickers:
+            params["tickers"] = str(tickers).strip()
+        if min_ticker:
+            params["min_ticker"] = str(min_ticker).strip()
+        if max_ticker:
+            params["max_ticker"] = str(max_ticker).strip()
+        if timeframe:
+            tf = str(timeframe).strip().lower()
+            if tf == "trailing_twelve_months":
+                tf = "ttm"
+            params["timeframe"] = tf
+        if fiscal_year is not None:
+            params["fiscal_year"] = int(fiscal_year)
+        if fiscal_quarter is not None:
+            params["fiscal_quarter"] = int(fiscal_quarter)
+        if sort:
+            params["sort"] = sort.strip()
+        status, data = self._get(path, params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_financials_v1_income_statements(
+        self,
+        *,
+        tickers: Optional[str] = None,
+        tickers_any_of: Optional[str] = None,
+        min_ticker: Optional[str] = None,
+        max_ticker: Optional[str] = None,
+        timeframe: Optional[str] = None,
+        limit: int = 50000,
+        sort: Optional[str] = "period_end.desc",
+        fiscal_year: Optional[int] = None,
+        fiscal_quarter: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """GET /stocks/financials/v1/income-statements — flat quarterly/annual/ttm rows."""
+        return self._fetch_financials_v1(
+            "/stocks/financials/v1/income-statements",
+            tickers=tickers,
+            tickers_any_of=tickers_any_of,
+            min_ticker=min_ticker,
+            max_ticker=max_ticker,
+            timeframe=timeframe,
+            fiscal_year=fiscal_year,
+            fiscal_quarter=fiscal_quarter,
+            limit=limit,
+            sort=sort,
+        )
+
+    def fetch_financials_v1_balance_sheets(
+        self,
+        *,
+        tickers: Optional[str] = None,
+        tickers_any_of: Optional[str] = None,
+        min_ticker: Optional[str] = None,
+        max_ticker: Optional[str] = None,
+        timeframe: Optional[str] = None,
+        limit: int = 50000,
+        sort: Optional[str] = "period_end.desc",
+        fiscal_year: Optional[int] = None,
+        fiscal_quarter: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """GET /stocks/financials/v1/balance-sheets."""
+        return self._fetch_financials_v1(
+            "/stocks/financials/v1/balance-sheets",
+            tickers=tickers,
+            tickers_any_of=tickers_any_of,
+            min_ticker=min_ticker,
+            max_ticker=max_ticker,
+            timeframe=timeframe,
+            fiscal_year=fiscal_year,
+            fiscal_quarter=fiscal_quarter,
+            limit=limit,
+            sort=sort,
+        )
+
+    def fetch_financials_v1_cash_flow_statements(
+        self,
+        *,
+        tickers: Optional[str] = None,
+        tickers_any_of: Optional[str] = None,
+        min_ticker: Optional[str] = None,
+        max_ticker: Optional[str] = None,
+        timeframe: Optional[str] = None,
+        limit: int = 50000,
+        sort: Optional[str] = "period_end.desc",
+        fiscal_year: Optional[int] = None,
+        fiscal_quarter: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """GET /stocks/financials/v1/cash-flow-statements."""
+        return self._fetch_financials_v1(
+            "/stocks/financials/v1/cash-flow-statements",
+            tickers=tickers,
+            tickers_any_of=tickers_any_of,
+            min_ticker=min_ticker,
+            max_ticker=max_ticker,
+            timeframe=timeframe,
+            fiscal_year=fiscal_year,
+            fiscal_quarter=fiscal_quarter,
+            limit=limit,
+            sort=sort,
+        )
+
+    def fetch_financials_v1_ratios(
+        self,
+        *,
+        tickers: Optional[str] = None,
+        tickers_any_of: Optional[str] = None,
+        min_ticker: Optional[str] = None,
+        max_ticker: Optional[str] = None,
+        timeframe: Optional[str] = None,
+        limit: int = 50000,
+        sort: Optional[str] = "period_end.desc",
+        fiscal_year: Optional[int] = None,
+        fiscal_quarter: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """GET /stocks/financials/v1/ratios — when unavailable, caller may fall back to fetch_stock_ratios."""
+        return self._fetch_financials_v1(
+            "/stocks/financials/v1/ratios",
+            tickers=tickers,
+            tickers_any_of=tickers_any_of,
+            min_ticker=min_ticker,
+            max_ticker=max_ticker,
+            timeframe=timeframe,
+            fiscal_year=fiscal_year,
+            fiscal_quarter=fiscal_quarter,
+            limit=limit,
+            sort=sort,
+        )
+
     def fetch_stock_news(
         self,
         *,
