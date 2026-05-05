@@ -55,12 +55,24 @@ def test_row_from_ticker_list_item_currency_fields():
 
 def test_row_from_ticker_detail_branding_and_address():
     body = {
+        "request_id": "req-1",
+        "status": "OK",
+        "count": 1,
         "results": {
             "ticker": "AAPL",
             "name": "Apple Inc.",
+            "primary_exchange": "XNAS",
             "market_cap": 3e12,
             "total_employees": 100000,
             "list_date": "1980-12-12",
+            "ticker_root": "AAPL",
+            "ticker_suffix": "",
+            "sic_code": "3571",
+            "sic_description": "ELECTRONIC COMPUTERS",
+            "homepage_url": "https://www.apple.com",
+            "round_lot": 100,
+            "share_class_shares_outstanding": 16406400000,
+            "weighted_shares_outstanding": 16334371000,
             "address": {
                 "address1": "One Apple Park Way",
                 "city": "Cupertino",
@@ -72,13 +84,23 @@ def test_row_from_ticker_detail_branding_and_address():
                 "logo_url": "https://example.com/logo.svg",
             },
             "phone_number": "+1-555-0100",
-        }
+        },
     }
     tcols, dcols = row_from_ticker_detail(body)
     assert tcols["ticker"] == "AAPL"
+    assert tcols["primary_exchange"] == "XNAS"
+    assert dcols["exchange"] == "XNAS"
     assert dcols["address_city"] == "Cupertino"
     assert dcols["icon_url"] == "https://example.com/icon.png"
     assert dcols["market_cap"] == 3e12
+    assert dcols["sic_code"] == "3571"
+    assert dcols["homepage_url"] == "https://www.apple.com"
+    assert dcols["round_lot"] == 100
+    assert dcols["share_class_shares_outstanding"] == 16406400000.0
+    assert dcols["weighted_shares_outstanding"] == 16334371000.0
+    assert dcols["overview_api_request_id"] == "req-1"
+    assert dcols["overview_api_status"] == "OK"
+    assert dcols["overview_api_count"] == 1
 
 
 def test_next_cursor_from_next_url():

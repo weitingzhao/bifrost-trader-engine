@@ -42,32 +42,29 @@ def get_is_us_trading_day_conn(conn: Any, date_str: str) -> bool:
 
 
 def get_market_holidays_conn(
-    conn: Any, exchange: str = "NYSE", year: Optional[int] = None
+    conn: Any, exchange: Optional[str] = None, year: Optional[int] = None
 ) -> List[Dict[str, Any]]:
-    """Return list of holidays from reference_us_holidays. Optional year filter."""
+    """Return list of holidays from reference_us_holidays. Optional exchange and year filters.
+    If exchange is None or empty, returns all exchanges."""
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            base = """SELECT exchange, holiday_date::text AS holiday_date,
+                              COALESCE(name, label) AS label,
+                              name, status,
+                              open_time, close_time, source
+                       FROM reference_us_holidays"""
+            where_parts = []
+            params: list = []
+            if exchange:
+                where_parts.append("exchange = %s")
+                params.append(exchange)
             if year is not None:
-                cur.execute(
-                    """SELECT exchange, holiday_date::text AS holiday_date,
-                              COALESCE(name, label) AS label,
-                              name, status,
-                              open_time, close_time, source
-                       FROM reference_us_holidays
-                       WHERE exchange = %s AND EXTRACT(YEAR FROM holiday_date) = %s
-                       ORDER BY holiday_date""",
-                    (exchange, year),
-                )
-            else:
-                cur.execute(
-                    """SELECT exchange, holiday_date::text AS holiday_date,
-                              COALESCE(name, label) AS label,
-                              name, status,
-                              open_time, close_time, source
-                       FROM reference_us_holidays
-                       WHERE exchange = %s ORDER BY holiday_date""",
-                    (exchange,),
-                )
+                where_parts.append("EXTRACT(YEAR FROM holiday_date) = %s")
+                params.append(year)
+            if where_parts:
+                base += " WHERE " + " AND ".join(where_parts)
+            base += " ORDER BY holiday_date, exchange"
+            cur.execute(base, params)
             rows = cur.fetchall()
         return [dict(r) for r in rows]
     except Exception as e:
@@ -1173,8 +1170,8 @@ def get_is_us_trading_day(status_config: dict, date_str: str) -> bool:
         return True
 
 
-def get_market_holidays(status_config: dict, exchange: str = "NYSE", year: Optional[int] = None) -> List[Dict[str, Any]]:
-    """Return list of { exchange, holiday_date, label } from reference_us_holidays. Optional year filter."""
+def get_market_holidays(status_config: dict, exchange: Optional[str] = None, year: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Return list of holidays from reference_us_holidays. exchange=None returns all exchanges."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return []
     try:

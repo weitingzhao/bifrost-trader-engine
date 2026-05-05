@@ -259,16 +259,10 @@ function CatalogTabs({ catalog }: { catalog: { raw_sources?: SepaReadinessCatalo
 function buildLlmText(items: SepaPriceGapItem[], totalGapCount: number, checkedAt: string): string {
   const ts = checkedAt ? new Date(checkedAt).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : '—'
 
-  // Reason breakdown
+  // Reason breakdown (server-computed reason per symbol)
   const reasonCounts: Record<string, number> = {}
   for (const item of items) {
-    const key = item.bar_rows === 0 || item.last_bar_date === null
-      ? 'no bars in 420d window'
-      : item.bar_rows < 240
-      ? 'insufficient bars (< 240 required)'
-      : item.null_close_rows > 0 || item.null_volume_rows > 0
-      ? 'null close or volume data'
-      : 'stale last bar (> 7 days ago)'
+    const key = item.reason || 'unknown'
     reasonCounts[key] = (reasonCounts[key] ?? 0) + 1
   }
   const reasonLines = Object.entries(reasonCounts)
@@ -279,11 +273,25 @@ function buildLlmText(items: SepaPriceGapItem[], totalGapCount: number, checkedA
   // Compact fixed-width table — cap at 200 rows to keep LLM context manageable
   const SHOW = 200
   const sample = items.slice(0, SHOW)
-  const colW = { sym: Math.max(6, ...sample.map(r => r.symbol.length)), bars: 4, date: 10 }
+  const fmtPx = (x: number | null | undefined) =>
+    x == null || Number.isNaN(x) ? '—' : String(Math.round(x * 10000) / 10000)
+  const colW = {
+    sym: Math.max(6, ...sample.map(r => r.symbol.length)),
+    bars: 4,
+    vnd: 10,
+    mx: 10,
+    l420: 10,
+    csd: 10,
+    ssn: 10,
+  }
   const hdr = [
     'SYMBOL'.padEnd(colW.sym),
     'BARS'.padStart(colW.bars),
-    'LAST_BAR'.padEnd(colW.date),
+    'VENDOR_NY'.padEnd(colW.vnd),
+    'MAX_DAILY'.padEnd(colW.mx),
+    'LAST420'.padEnd(colW.l420),
+    'DAY_CLOSE'.padEnd(colW.csd),
+    'SESS_CLOSE'.padEnd(colW.ssn),
     'REASON',
   ].join('  ')
   const sep = '-'.repeat(hdr.length)
@@ -291,7 +299,11 @@ function buildLlmText(items: SepaPriceGapItem[], totalGapCount: number, checkedA
     [
       it.symbol.padEnd(colW.sym),
       String(it.bar_rows).padStart(colW.bars),
-      (it.last_bar_date ?? '—').padEnd(colW.date),
+      (it.vendor_day ?? '—').padEnd(colW.vnd),
+      (it.last_bar_max_date ?? '—').padEnd(colW.mx),
+      (it.last_bar_date ?? '—').padEnd(colW.l420),
+      fmtPx(it.last_stock_day_close).padEnd(colW.csd),
+      fmtPx(it.session_close).padEnd(colW.ssn),
       it.reason,
     ].join('  ')
   ).join('\n')
@@ -304,18 +316,20 @@ function buildLlmText(items: SepaPriceGapItem[], totalGapCount: number, checkedA
 SEPA Price Gap Report
 ==================================================
 Checked at  : ${ts}
-Source      : public.v_sepa_symbol_price_readiness
-              JOIN public.v_sepa_us_equity_universe
-Filter      : price_ready = false
+Source      : public.v_sepa_us_equity_universe
+              LEFT JOIN public.cache_stock_snapshot (last_minute_updated → NY date)
+              LEFT JOIN max(public.stock_day.bar_time) per symbol, source=massive
+              LEFT JOIN public.v_sepa_symbol_price_readiness (fallback)
+Filter      : require cache row + non-null session_close; (vendor date gap + close mismatch) OR (no last_minute_updated AND NOT price_ready); exclude WARRANT
 Total gaps  : ${totalGapCount.toLocaleString()} symbols
 Returned    : ${items.length.toLocaleString()} symbols
-Requirement : ≥ 240 daily bars in 420-day window, source=massive
+Note        : LAST420 = last bar in 420d window; MAX_DAILY = all-time max bar date; CLOSE = latest daily close vs cache.session_close
 
 BREAKDOWN BY REASON
 --------------------------------------------------
 ${reasonLines}
 
-TOP ${Math.min(SHOW, items.length)} SYMBOLS (sorted by bar_rows asc)
+TOP ${Math.min(SHOW, items.length)} SYMBOLS (vendor gaps first, then bar_rows asc)
 --------------------------------------------------
 ${hdr}
 ${sep}
@@ -572,7 +586,9 @@ function GapsDrawer({
           )}
           {!loading && !error && filtered.length === 0 && (
             <div className="sdp-drawer-empty">
-              {searchQ ? 'No symbols match the filter.' : 'No gap symbols found — all universe symbols are price_ready.'}
+              {searchQ
+                ? 'No symbols match the filter.'
+                : 'No gap symbols — every universe symbol either has no cache row, passes vendor/date/close checks, or readiness fallback is clear.'}
             </div>
           )}
           {!loading && !error && filtered.length > 0 && (
@@ -593,7 +609,11 @@ function GapsDrawer({
                   </th>
                   <th>Symbol</th>
                   <th>Bars</th>
-                  <th>Last bar</th>
+                  <th>Vendor NY</th>
+                  <th>Max daily</th>
+                  <th>Last bar (420d)</th>
+                  <th>Day close</th>
+                  <th>Session close</th>
                   <th>Reason</th>
                 </tr>
               </thead>
@@ -617,7 +637,19 @@ function GapsDrawer({
                       </td>
                       <td className="sdp-gap-symbol">{it.symbol}</td>
                       <td className={`sdp-gap-bars${it.bar_rows < 240 ? ' sdp-gap-bars--low' : ''}`}>{it.bar_rows}</td>
+                      <td className="sdp-gap-date">{it.vendor_day ?? '—'}</td>
+                      <td className="sdp-gap-date">{it.last_bar_max_date ?? '—'}</td>
                       <td className="sdp-gap-date">{it.last_bar_date ?? '—'}</td>
+                      <td className="sdp-gap-date">
+                        {it.last_stock_day_close != null && Number.isFinite(it.last_stock_day_close)
+                          ? String(Math.round(it.last_stock_day_close * 10000) / 10000)
+                          : '—'}
+                      </td>
+                      <td className="sdp-gap-date">
+                        {it.session_close != null && Number.isFinite(it.session_close)
+                          ? String(Math.round(it.session_close * 10000) / 10000)
+                          : '—'}
+                      </td>
                       <td className="sdp-gap-reason">{it.reason}</td>
                     </tr>
                   )
@@ -1000,7 +1032,13 @@ function SepaDataReadyPageInner({
   const tickersActive = summary?.tickers_active_count ?? 0
   const priceReady = live?.price_ready ?? 0
   const totalSymbols = live?.total_symbols ?? 0
-  const priceGap = totalSymbols > 0 ? totalSymbols - priceReady : null
+  const vendorFillGap = summary?.stock_day_vendor_fill_gap_count
+  const priceGap =
+    vendorFillGap != null
+      ? vendorFillGap
+      : totalSymbols > 0
+        ? totalSymbols - priceReady
+        : null
   const notesCount = (summary?.notes_breakdown ?? []).reduce((s, r) => s + r.count, 0)
 
   const step1Status: CheckStatus = summaryLoading
@@ -1275,8 +1313,8 @@ function SepaDataReadyPageInner({
               />
               <p className="sdp-step-desc">
                 Batches all <code>v_sepa_us_equity_universe</code> symbols via <code>ticker.any_of</code> (≤250 per
-                request). Stores <code>session</code>, <code>last_minute</code>, and full <code>payload</code> for
-                later ingest lag checks.
+                request). Flattens Massive <code>session</code>, <code>last_minute</code>, and optional{' '}
+                <code>last_trade</code> / <code>last_quote</code> into scalar columns (no jsonb) for SQL joins.
               </p>
               <div className="sdp-step-actions">
                 <button
@@ -1316,10 +1354,10 @@ function SepaDataReadyPageInner({
                     ? `${fmt(priceReady)} / ${fmt(totalSymbols)} price_ready (${fmtPct(priceReady, totalSymbols)})`
                     : null
                 }
-                primaryLabel=" · v_sepa_symbol_price_readiness"
+                primaryLabel=" · cache vs stock_day + readiness fallback"
                 gap={priceGap}
-                gapUnit="symbols missing bars"
-                target="100% price_ready · ≥ 240 bars/symbol in 420d window"
+                gapUnit="symbols need daily fill"
+                target="Vendor NY date from Step 2 cache ≤ last massive daily bar; else readiness rules"
                 note={lastCheckedNote}
               />
 
@@ -1345,8 +1383,17 @@ function SepaDataReadyPageInner({
               </div>
 
               <p className="sdp-step-desc">
-                Celery <code>feed_stocks_aggregate</code> writes <code>source=massive</code> rows.
-                Minimum requirement: 420 calendar days, ≥ 240 bars per symbol.
+                Celery <code>feed_stocks_aggregate</code> writes <code>source=massive</code> rows. The Check gap count
+                uses <code>cache_stock_snapshot.last_minute_updated</code> (America/New_York date) vs{' '}
+                <code>max(stock_day.bar_time)</code>;                 any snapshot-based check requires non-null <code>session_close</code> — if it is empty, that symbol is
+                skipped for Step 3 gaps (no <code>stock_day</code> comparison and no readiness fallback), regardless of
+                whether daily bars exist. After a calendar gap, the latest daily <code>stock_day.close</code> must differ
+                from <code>session_close</code> (beyond a tiny absolute tolerance) to count as a vendor gap — matching
+                closes mean the vendor snapshot already aligns with the last ingested bar.{' '}
+                <code>tickers.instrument_type = WARRANT</code> symbols are excluded. Symbols with **no**{' '}
+                <code>cache_stock_snapshot</code> row are never gaps. If a snapshot row has <code>session_close</code>{' '}
+                but <code>last_minute_updated</code> is missing, the UI falls back to <code>NOT price_ready</code> on the
+                readiness view.
               </p>
               <div className="sdp-step-actions">
                 <button
@@ -1599,6 +1646,18 @@ function SepaDataReadyPageInner({
               ? ` · ${fmtRelativeTime(summary.stock_unified_snapshot_last_fetched_at)}`
               : ''}
           </div>
+        </div>
+
+        <div className="sdp-metric">
+          <div className="sdp-metric-label">Daily fill gaps (Step 3)</div>
+          <div
+            className={`sdp-metric-value ${
+              vendorFillGap != null && vendorFillGap === 0 ? 'sdp-metric-value--accent' : ''
+            }`}
+          >
+            {fmt(vendorFillGap)}
+          </div>
+          <div className="sdp-metric-sub">cache.last_minute_updated (NY) vs max(stock_day)</div>
         </div>
 
         <div className="sdp-metric">

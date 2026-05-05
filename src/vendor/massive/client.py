@@ -727,13 +727,18 @@ class MassiveClient:
         sort: Optional[str] = None,
         order: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """GET /v3/snapshot — cross-asset unified snapshot."""
+        """GET /v3/snapshot — cross-asset unified snapshot.
+
+        Massive rejects ``type`` together with ``ticker.any_of`` (error:
+        "Cannot specify tickers and type"). When ``tickers`` is set, ``asset_type``
+        is omitted; callers rely on explicit symbols or per-result ``type`` in JSON.
+        """
         if not self._api_key:
             return {"results": [], "error": "api key missing"}
         params: Dict[str, Any] = {}
         if tickers:
             params["ticker.any_of"] = tickers
-        if asset_type:
+        elif asset_type:
             params["type"] = asset_type
         if ticker_gte:
             params["ticker.gte"] = ticker_gte

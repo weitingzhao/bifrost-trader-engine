@@ -175,7 +175,7 @@ class StatusReader:
         self._end_read_txn()
         return result
 
-    def get_market_holidays(self, exchange: str = "NYSE", year: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_market_holidays(self, exchange: Optional[str] = None, year: Optional[int] = None) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
         result = market_module.get_market_holidays_conn(self._conn, exchange=exchange, year=year)

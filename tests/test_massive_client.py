@@ -199,6 +199,39 @@ class TestFetchOptionsSnapshotAllPages:
         assert out["results"][1]["details"]["ticker"] == "O:SECOND"
 
 
+class TestFetchUnifiedSnapshot:
+    def test_omits_type_when_tickers_set(self):
+        captured: list[dict | None] = []
+
+        def capture_get(self, path, params=None):
+            captured.append(dict(params or {}))
+            return (200, {"status": "OK", "results": []})
+
+        with patch.object(MassiveClient, "_get", capture_get):
+            _client().fetch_unified_snapshot(
+                tickers="AAPL,MSFT",
+                asset_type="stocks",
+                limit=250,
+            )
+        p = captured[0]
+        assert p.get("ticker.any_of") == "AAPL,MSFT"
+        assert "type" not in p
+        assert p.get("limit") == 250
+
+    def test_sends_type_when_no_tickers(self):
+        captured: list[dict | None] = []
+
+        def capture_get(self, path, params=None):
+            captured.append(dict(params or {}))
+            return (200, {"status": "OK", "results": []})
+
+        with patch.object(MassiveClient, "_get", capture_get):
+            _client().fetch_unified_snapshot(asset_type="stocks", limit=10)
+        p = captured[0]
+        assert p.get("type") == "stocks"
+        assert "ticker.any_of" not in p
+
+
 class TestContractKeyFromReferenceResult:
     def test_builds_key_like_upsert_path(self):
         row = {

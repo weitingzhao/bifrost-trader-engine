@@ -42,6 +42,8 @@ _OVERVIEW_UPSERT_FIELDS = [
     "exchange",
     "list_date",
     "ticker_root",
+    "ticker_suffix",
+    "sic_code",
     "sic_description",
     "market_cap",
     "total_employees",
@@ -51,8 +53,15 @@ _OVERVIEW_UPSERT_FIELDS = [
     "postal_code",
     "phone",
     "description",
+    "homepage_url",
     "icon_url",
     "logo_url",
+    "round_lot",
+    "share_class_shares_outstanding",
+    "weighted_shares_outstanding",
+    "overview_api_request_id",
+    "overview_api_status",
+    "overview_api_count",
     "overview_updated_at",
 ]
 
@@ -177,16 +186,21 @@ def row_from_ticker_list_item(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _detail_fields_from_overview_dict(d: Dict[str, Any]) -> Dict[str, Any]:
-    """Overview-only columns from normalized ticker detail body."""
+def _detail_fields_from_overview_dict(
+    d: Dict[str, Any], *, envelope: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Overview-only columns from normalized ticker ``results`` plus optional top-level envelope."""
     addr = d.get("address") if isinstance(d.get("address"), dict) else {}
     brand = d.get("branding") if isinstance(d.get("branding"), dict) else {}
+    ex = (d.get("exchange") or d.get("primary_exchange") or "").strip() or None
     out: Dict[str, Any] = {
         "sector": _text_or_empty(d.get("sector")),
         "industry": _text_or_empty(d.get("industry")),
-        "exchange": (d.get("exchange") or "").strip() or None,
+        "exchange": ex,
         "list_date": _parse_date(d.get("list_date")),
         "ticker_root": (d.get("ticker_root") or "").strip() or None,
+        "ticker_suffix": (d.get("ticker_suffix") or "").strip() or None,
+        "sic_code": (d.get("sic_code") or "").strip() or None,
         "sic_description": (d.get("sic_description") or "").strip() or None,
         "market_cap": _parse_float(d.get("market_cap")),
         "total_employees": _parse_int(d.get("total_employees")),
@@ -196,8 +210,15 @@ def _detail_fields_from_overview_dict(d: Dict[str, Any]) -> Dict[str, Any]:
         "postal_code": None,
         "phone": (d.get("phone_number") or d.get("phone") or "").strip() or None,
         "description": None,
+        "homepage_url": (d.get("homepage_url") or "").strip() or None,
         "icon_url": None,
         "logo_url": None,
+        "round_lot": _parse_int(d.get("round_lot")),
+        "share_class_shares_outstanding": _parse_float(d.get("share_class_shares_outstanding")),
+        "weighted_shares_outstanding": _parse_float(d.get("weighted_shares_outstanding")),
+        "overview_api_request_id": None,
+        "overview_api_status": None,
+        "overview_api_count": None,
     }
     if isinstance(addr, dict):
         out["address_line1"] = (addr.get("address1") or addr.get("address_line_1") or "").strip() or None
@@ -210,6 +231,12 @@ def _detail_fields_from_overview_dict(d: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(brand, dict):
         out["icon_url"] = (brand.get("icon_url") or "").strip() or None
         out["logo_url"] = (brand.get("logo_url") or "").strip() or None
+    if isinstance(envelope, dict):
+        rid = envelope.get("request_id")
+        out["overview_api_request_id"] = str(rid).strip() if rid is not None and str(rid).strip() else None
+        st = envelope.get("status")
+        out["overview_api_status"] = str(st).strip() if st is not None and str(st).strip() else None
+        out["overview_api_count"] = _parse_int(envelope.get("count"))
     return out
 
 
@@ -223,7 +250,8 @@ def row_from_ticker_detail(body: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[s
     tickers_part = row_from_ticker_list_item(d)
     if not tickers_part:
         return {}, {}
-    det = _detail_fields_from_overview_dict(d)
+    env = body if isinstance(body, dict) else None
+    det = _detail_fields_from_overview_dict(d, envelope=env)
     now = datetime.now(timezone.utc)
     det["overview_updated_at"] = now
     return tickers_part, det
@@ -289,6 +317,8 @@ def upsert_ticker_overview_row(cur: Any, tickers_id: int, cols: Dict[str, Any]) 
         "exchange = COALESCE(EXCLUDED.exchange, ticker_overview.exchange)",
         "list_date = COALESCE(EXCLUDED.list_date, ticker_overview.list_date)",
         "ticker_root = COALESCE(EXCLUDED.ticker_root, ticker_overview.ticker_root)",
+        "ticker_suffix = COALESCE(EXCLUDED.ticker_suffix, ticker_overview.ticker_suffix)",
+        "sic_code = COALESCE(EXCLUDED.sic_code, ticker_overview.sic_code)",
         "sic_description = COALESCE(EXCLUDED.sic_description, ticker_overview.sic_description)",
         "market_cap = COALESCE(EXCLUDED.market_cap, ticker_overview.market_cap)",
         "total_employees = COALESCE(EXCLUDED.total_employees, ticker_overview.total_employees)",
@@ -298,8 +328,15 @@ def upsert_ticker_overview_row(cur: Any, tickers_id: int, cols: Dict[str, Any]) 
         "postal_code = COALESCE(EXCLUDED.postal_code, ticker_overview.postal_code)",
         "phone = COALESCE(EXCLUDED.phone, ticker_overview.phone)",
         "description = COALESCE(EXCLUDED.description, ticker_overview.description)",
+        "homepage_url = COALESCE(EXCLUDED.homepage_url, ticker_overview.homepage_url)",
         "icon_url = COALESCE(EXCLUDED.icon_url, ticker_overview.icon_url)",
         "logo_url = COALESCE(EXCLUDED.logo_url, ticker_overview.logo_url)",
+        "round_lot = COALESCE(EXCLUDED.round_lot, ticker_overview.round_lot)",
+        "share_class_shares_outstanding = COALESCE(EXCLUDED.share_class_shares_outstanding, ticker_overview.share_class_shares_outstanding)",
+        "weighted_shares_outstanding = COALESCE(EXCLUDED.weighted_shares_outstanding, ticker_overview.weighted_shares_outstanding)",
+        "overview_api_request_id = COALESCE(EXCLUDED.overview_api_request_id, ticker_overview.overview_api_request_id)",
+        "overview_api_status = COALESCE(EXCLUDED.overview_api_status, ticker_overview.overview_api_status)",
+        "overview_api_count = COALESCE(EXCLUDED.overview_api_count, ticker_overview.overview_api_count)",
         "overview_updated_at = COALESCE(EXCLUDED.overview_updated_at, ticker_overview.overview_updated_at)",
     ]
     sql = f"""
@@ -323,6 +360,8 @@ def overview_stub_cols_api_not_found() -> Dict[str, Any]:
         "exchange": None,
         "list_date": None,
         "ticker_root": None,
+        "ticker_suffix": None,
+        "sic_code": None,
         "sic_description": None,
         "market_cap": None,
         "total_employees": None,
@@ -332,8 +371,15 @@ def overview_stub_cols_api_not_found() -> Dict[str, Any]:
         "postal_code": None,
         "phone": None,
         "description": None,
+        "homepage_url": None,
         "icon_url": None,
         "logo_url": None,
+        "round_lot": None,
+        "share_class_shares_outstanding": None,
+        "weighted_shares_outstanding": None,
+        "overview_api_request_id": None,
+        "overview_api_status": None,
+        "overview_api_count": None,
         "overview_updated_at": now,
     }
 
@@ -484,9 +530,12 @@ def fetch_ticker_detail_merged(cur: Any, ticker: str) -> Optional[Dict[str, Any]
     cur.execute(
         """
         SELECT t.*, d.sector, d.industry, d.exchange AS detail_exchange, d.list_date, d.ticker_root,
-               d.sic_description, d.market_cap, d.total_employees,
+               d.ticker_suffix, d.sic_code, d.sic_description, d.market_cap, d.total_employees,
                d.address_line1, d.address_city, d.address_state, d.postal_code,
-               d.phone, d.description, d.icon_url, d.logo_url, d.overview_updated_at
+               d.phone, d.description, d.homepage_url, d.icon_url, d.logo_url,
+               d.round_lot, d.share_class_shares_outstanding, d.weighted_shares_outstanding,
+               d.overview_api_request_id, d.overview_api_status, d.overview_api_count,
+               d.overview_updated_at
         FROM tickers t
         LEFT JOIN ticker_overview d ON d.tickers_id = t.tickers_id
         WHERE t.ticker = %s

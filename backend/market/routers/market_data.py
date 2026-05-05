@@ -246,11 +246,11 @@ def get_market_trading_day(
 def get_market_holidays(
     request: Request,
     year: Optional[int] = Query(None, description="Filter by year"),
-    exchange: str = Query("NYSE", description="Exchange (e.g. NYSE)"),
+    exchange: Optional[str] = Query(None, description="Exchange filter (e.g. NYSE). Omit to return all exchanges."),
 ) -> List[Dict[str, Any]]:
-    """Return US market holidays from reference_us_holidays."""
+    """Return US market holidays from reference_us_holidays. exchange omitted = all exchanges."""
     reader = request.app.state.reader
-    return reader.get_market_holidays(exchange=exchange, year=year)
+    return reader.get_market_holidays(exchange=exchange or None, year=year)
 
 
 @router.post("/market/holidays")

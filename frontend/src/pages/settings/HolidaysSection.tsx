@@ -99,15 +99,21 @@ export function HolidaysSection({
               <thead>
                 <tr>
                   <th>Date</th>
+                  <th>Exchange</th>
                   <th>Label</th>
+                  <th>Status</th>
+                  <th>Source</th>
                   <th aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
                 {holidays.map((h) => (
-                  <tr key={h.holiday_date}>
+                  <tr key={`${h.exchange}-${h.holiday_date}`}>
                     <td className="settings-holidays-date-cell">{h.holiday_date}</td>
-                    <td className="settings-holidays-label-cell">{h.label ?? '—'}</td>
+                    <td>{h.exchange}</td>
+                    <td className="settings-holidays-label-cell">{h.label ?? h.name ?? '—'}</td>
+                    <td>{h.status ?? '—'}</td>
+                    <td style={{ fontSize: '0.75rem', opacity: 0.7 }}>{h.source ?? '—'}</td>
                     <td>
                       <button type="button" className="btn-pause" onClick={() => onDeleteHoliday(h.holiday_date)}>
                         Delete

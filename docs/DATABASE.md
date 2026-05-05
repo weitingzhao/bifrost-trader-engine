@@ -398,8 +398,8 @@
 
 ### 2.14.2 表 `ticker_overview`（Ticker Overview 扩展列）
 
-- **用途**：存 `GET /v3/reference/tickers/{ticker}` 返回中的扩展字段（行业、地址、描述、品牌 URL 等）；与 `tickers` 一对一（`tickers_id` PK/FK ON DELETE CASCADE）。历史表名 `ticker_reference_details` 已重命名。
-- **列（节选）**：`sector`、`industry`、`exchange`、`list_date`、`ticker_root`、`sic_description`、`market_cap`、`total_employees`、地址列、`phone`、`description`、`icon_url`、`logo_url`、`overview_updated_at`。
+- **用途**：存 `GET /v3/reference/tickers/{ticker}` 返回中的扩展字段（行业、地址、描述、品牌 URL、官网、SIC 码、手数、流通股数、最近一次 API 信封字段等）；与 `tickers` 一对一（`tickers_id` PK/FK ON DELETE CASCADE）。**标量字段**：`active`、`name`、`market`、`locale`、`primary_exchange`、`type`（→ `instrument_type`）、`cik`、`composite_figi`、`share_class_figi`、`currency_name`、`delisted_utc` 等落在 **`tickers`**；本表存 **其余 `results.*` 与顶层 `request_id` / `status` / `count`**（信封列名 `overview_api_*`）。历史表名 `ticker_reference_details` 已重命名。
+- **列（要点）**：`sector`、`industry`、`exchange`（与 `results.primary_exchange` / `exchange` 对齐写入）、`list_date`、`ticker_root`、`ticker_suffix`、`sic_code`、`sic_description`、`market_cap`、`total_employees`、`address_line1`、`address_city`、`address_state`、`postal_code`、`phone`、`description`、`homepage_url`、`icon_url`、`logo_url`、`round_lot`、`share_class_shares_outstanding`、`weighted_shares_outstanding`、`overview_api_request_id`、`overview_api_status`、`overview_api_count`、`overview_updated_at`。
 
 ### 2.14.3 表 `ticker_types`（类型词典）
 
@@ -418,11 +418,18 @@
 
 ### 2.14.6 表 `cache_stock_snapshot`（Massive 股票 Unified Snapshot 基准）
 
-- **用途**：在大量 **`stock_day`** 日线回补（`feed_stocks_aggregate`）之前，对 `v_sepa_us_equity_universe` 全量股票批量调用 Massive **`GET /v3/snapshot`**（`ticker.any_of`，`type=stocks`），将每只标的的 **`session`**、**`last_minute`** 及完整 **`payload`（jsonb）** 以 **每 symbol 一行** 形式 UPSERT 落库，作为后续「快照时间 vs `stock_day` 最新日」对比（Step 2 逻辑，另行实现）的基准。
+- **用途**：在大量 **`stock_day`** 日线回补（`feed_stocks_aggregate`）之前，对 `v_sepa_us_equity_universe` 全量股票批量调用 Massive **`GET /v3/snapshot`**（仅 **`ticker.any_of`** 逗号分隔批量；**不得**与查询参数 **`type`** 同发，否则接口返回 `Cannot specify tickers and type`），将响应中的 **标量字段** 以 **每 symbol 一行** UPSERT 落库（**无 jsonb 列**，便于与 `tickers` / `stock_day` 等表按列 Join）。作为后续「快照时间 vs `stock_day` 最新日」对比（Step 2 逻辑，另行实现）的基准。
 - **主键**：`symbol` (text)。
-- **列（要点）**：`fetched_at`、`updated_at`（本次刷新批次时间）、`last_minute_updated`（从 `last_minute` 解析的 timestamptz，可空）、`session` / `last_minute`（jsonb）、`payload`（jsonb）、`source`（默认 `massive`）。
+- **列（要点）**：
+  - **批次**：`fetched_at`、`updated_at`（本次刷新写入时间）、`source`（默认 `massive`）。
+  - **元数据**：`snapshot_asset_type`（API `type`，如 `stocks`）、`market_status`、`snapshot_display_name`（公司名）。
+  - **当日 session OHLC 与量能**：`session_open` … `session_late_trading_change_percent`、`session_volume`、`session_decimal_volume`（文本，与 API 一致时可存小数体积字符串）。
+  - **最近一分钟聚合**：`last_minute_open` … `last_minute_transactions`、`last_minute_vwap`、`last_minute_volume`、`last_minute_decimal_volume`。
+  - **最近成交 / 报价（可空）**：`last_trade_price`、`last_trade_size`、`last_trade_exchange`、`last_trade_last_updated_ns`（纳秒时间戳）、`last_trade_conditions`（逗号分隔条件码文本）；`last_quote_bid` / `last_quote_ask`、`last_quote_bid_size` / `last_quote_ask_size`、`last_quote_last_updated_ns`。
+  - **解析时间**：`last_minute_updated`（从 `last_minute.last_updated` / `t` 等解析的 timestamptz，可空）。
 - **索引**：`(fetched_at DESC)`。
 - **填充**：`POST /research/screening/sepa/readiness/stock-unified-snapshot`（实现见 [`src/research/sepa/stock_unified_snapshot_refresh.py`](../src/research/sepa/stock_unified_snapshot_refresh.py)）；或 **SEPA Data Ready** 页 Step 2「Refresh unified snapshots」。单次请求最多约 **250** 个 ticker，全 Universe 分多批顺序请求，批间可休眠限流。
+- **与 Step 3 日线缺口 Check**：**必须有** `cache_stock_snapshot` 行且 **`session_close` 非空**，才参与 Step 3 的 Gap 判定（否则 **不** 对照 `stock_day`、**不** 走 readiness 回退，**不计任何 Gap**）。Vendor：**`last_minute_updated` 转 NY 日历日** 严格晚于 **`stock_day`（`source=massive`）`max(bar_time)`**，且最新日线 **`close` 与 `session_close` 在绝对容差外不相等**（容差见 `_STOCK_DAY_GAP_CLOSE_MATCH_ABS_EPS`）。回退：**`session_close` 非空** 且 **`last_minute_updated` 空** 时，按 240 / 7 / 420 阈值与 readiness 视图同语义（内联聚合，仅对回退子集执行）。**`tickers.instrument_type = WARRANT`（不区分大小写）排除**。**无 snapshot 行 → 永不计 Gap**。性能：两段式 LATERAL —— **`cand_fast`** 用 `bar_time >= now() - 90 天` 快路径（活跃 ticker 命中 ~3-4 个月度分区），**`older_lookup`** 仅对快路径返回 NULL 的少量稀薄交易标的（如 SPAC unit）做一次无窗口 LATERAL 回落，保证「最新一根 bar 的 close」是真正的全历史最新值。实现见 [`src/research/sepa/readiness_snapshot.py`](../src/research/sepa/readiness_snapshot.py) 中 `_STOCK_DAY_VENDOR_GAP_CANDIDATE_SQL` / `get_sepa_price_gap_*` 与 `stock_day_vendor_fill_gap_count`。
 
 **SEPA Data Ready 推荐顺序（与 UI Step 编号一致）**：Step 1（`tickers` + `reference_us_holidays`）→ **Step 2（本表）** → Step 3（`stock_day` 回补）→ Step 4（`sepa_universe_readiness_daily`）→ Step 5（缺口修复与复核）。
 
@@ -1600,7 +1607,14 @@ python scripts/db/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-04-29 SEPA 数据准备层 | 新增表 `sepa_universe_readiness_daily`（§2.14.7）；视图 `v_sepa_us_equity_universe`、`v_sepa_symbol_price_readiness`、`v_sepa_symbol_fund_cache_readiness`（§2.14.8，后者在 `research_sepa_fundamentals_cache` 存在时创建）。运维快照脚本 `scripts/db/sepa_universe_readiness_snapshot.sql`。由 `pg_ddl` / `db_refresh_schema` 创建。 | 研究 / SEPA |
 | 2026-04-29 SEPA Data Ready UI | §2.14.7 增补：快照可由 Research API / UI 与 `scripts/db/run_sepa_readiness_snapshot.py` 触发；`GET /research/screening/sepa/readiness/summary` 供前端 **SEPA Data Ready** 页展示 KPI。无新表。 | 研究 / SEPA |
 | 2026-04-29 SEPA cache_stock_snapshot | 新增表 `cache_stock_snapshot`（§2.14.6）；`POST /research/screening/sepa/readiness/stock-unified-snapshot`；SEPA Data Ready Step 2。 | 研究 / SEPA |
+| 2026-04-30 cache_stock_snapshot 标量化 | 表 `cache_stock_snapshot` 去掉 `session` / `last_minute` / `payload` jsonb，改为 **仅标量列**（session / last_minute / last_trade / last_quote 打平）；`db_refresh_schema` 对已有库 `ADD COLUMN IF NOT EXISTS` + `DROP COLUMN IF EXISTS` 迁移。§2.14.6。 | 研究 / SEPA |
+| 2026-04-30 SEPA Step 3 缺口判定 | `get_sepa_price_gap_details` / `get_sepa_price_gap_symbols` 与 summary 字段 `stock_day_vendor_fill_gap_count`：`last_minute_updated`（NY 日）对比 `max(stock_day.bar_time)`，严格晚于才计 vendor 缺口；无时间戳时回退 `NOT price_ready`。§2.14.6。 | 研究 / SEPA |
+| 2026-04-30 SEPA Step 3 缺口收紧 | vendor 日期缺口后再比对 **最新 `stock_day.close` 与 `cache_stock_snapshot.session_close`**（绝对容差）；**`session_close` 为空则不计 vendor 缺口**；**无 `cache_stock_snapshot` 行则不计任何 Gap**；**排除 `tickers.instrument_type = WARRANT`**。§2.14.6。 | 研究 / SEPA |
+| 2026-04-30 SEPA Step 3 session_close 统一 | readiness **回退** 缺口同样要求 **`session_close` 非空**；为空则 vendor 与回退均不计 Gap（与「有 snapshot 才检查」一致）。§2.14.6。 | 研究 / SEPA |
+| 2026-05-04 SEPA Step 3 SQL 优化 | `_STOCK_DAY_VENDOR_GAP_CANDIDATE_SQL` 重写为单层非物化 `cand`：以 `cache_stock_snapshot` PK 驱动 hash join `tickers/v_sepa_us_equity_universe`（warrant 在此过滤）；`stock_day` 用 LATERAL + LIMIT 1 + `bar_time >= now() - 90 天` 利用 `(symbol, bar_time DESC)` 索引并按月分区裁剪；readiness 回退聚合通过内联 JOIN 仅对 `last_minute_updated IS NULL` 子集执行；`SET LOCAL jit = off`。Dev 库实测 `count` 18s → 0.86s，`details` >60s → 0.77s。§2.14.6。 | 研究 / SEPA |
+| 2026-05-05 SEPA Step 3 两段式 LATERAL | `_STOCK_DAY_VENDOR_GAP_CANDIDATE_SQL` 改为 `cand_fast`（90d 快路径）+ `older_lookup`（仅对快路径 NULL 的子集做无窗口 LATERAL）+ `cand` 三段式 `MATERIALIZED` CTE。修复了 90 天裁剪导致 90+ 天没新 bar 的 SPAC unit（如 CHPGU，最新 bar 99 天前 close=10.29 与 `session_close=10.29` 一致）被误判为 Gap。性能 1.0–1.6s。§2.14.6。 | 研究 / SEPA |
 | 2026-05-04 reference_us_holidays 扩展 + Massive 自动同步 | §2.22 表 `reference_us_holidays` 新增列：`name`、`status`（closed / early-close）、`open_time`、`close_time`、`source`（manual / massive）、`updated_at`；主键仍为 (exchange, holiday_date)，旧 `label` 列保留。新增端点 `POST /research/screening/sepa/readiness/sync-holidays`，由 SEPA Data Ready 页 Step 1「Sync All Tickers」并行触发，调用 Massive REST `GET /v1/marketstatus/upcoming` upsert 到本表（`source='massive'`）。Polygon 该端点返回**裸 JSON 数组**，`MassiveClient.fetch_market_holidays` 已规范化为 `{"results":[...]}` 信封以便复用调用方解析。`stock_day_gap.py`、`get_sepa_grouped_backfill_dates` 升级 holiday 过滤：仅排除 `status IS NULL OR status='closed'`，早收盘日仍期望有 bar。`pg_ddl` `ADD COLUMN IF NOT EXISTS` 自动迁移已有库。 | 研究 / SEPA |
+| 2026-05-04 `ticker_overview` 对齐 Massive Ticker Overview | §2.14.2：新增 `ticker_suffix`、`sic_code`、`homepage_url`、`round_lot`、`share_class_shares_outstanding`、`weighted_shares_outstanding`、`overview_api_request_id`、`overview_api_status`、`overview_api_count`；写入路径 `row_from_ticker_detail` / `upsert_ticker_overview_row` 与合并查询 `fetch_ticker_detail_merged` 同步；`exchange` 映射补充 `primary_exchange`。 | 研究 / Massive |
 
 ---
 

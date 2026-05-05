@@ -69,7 +69,7 @@ export function MassiveStockCoveragePage({ status }: MassiveStockCoveragePagePro
     setHolidayMsg({ text: '', isErr: false })
     try {
       const yearNum = holidaysYear === '' ? undefined : parseInt(holidaysYear, 10)
-      const list = await fetchMarketHolidays(Number.isFinite(yearNum) ? yearNum : undefined, 'NYSE')
+      const list = await fetchMarketHolidays(Number.isFinite(yearNum) ? yearNum : undefined)
       setHolidays(list)
     } catch (e) {
       setHolidayMsg({ text: (e as Error).message, isErr: true })

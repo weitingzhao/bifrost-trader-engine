@@ -57,6 +57,11 @@ export interface MarketHolidayRow {
   exchange: string
   holiday_date: string
   label: string | null
+  name?: string | null
+  status?: string | null
+  source?: string | null
+  open_time?: string | null
+  close_time?: string | null
 }
 
 export async function fetchMarketHolidays(year?: number, exchange?: string): Promise<MarketHolidayRow[]> {

@@ -61,6 +61,11 @@ export interface SepaReadinessSummaryResponse {
   /** Rows in public.cache_stock_snapshot (Massive unified /v3/snapshot); null if table missing. */
   stock_unified_snapshot_row_count?: number | null
   stock_unified_snapshot_last_fetched_at?: string | null
+  /**
+   * Step 3 stock_day gap count: vendor NY date from cache.last_minute_updated vs max(stock_day);
+   * fallback to NOT price_ready when last_minute_updated is null. Null if query failed.
+   */
+  stock_day_vendor_fill_gap_count?: number | null
 }
 
 export async function fetchSepaReadinessSummary(): Promise<SepaReadinessSummaryResponse> {
@@ -142,6 +147,14 @@ export interface SepaPriceGapItem {
   last_bar_date: string | null
   null_close_rows: number
   null_volume_rows: number
+  /** NY calendar date from cache_stock_snapshot.last_minute_updated (vendor latest bar day). */
+  vendor_day?: string | null
+  /** max(stock_day.bar_time) for source=massive (all history). */
+  last_bar_max_date?: string | null
+  /** Latest massive daily bar close (most recent bar_time). */
+  last_stock_day_close?: number | null
+  /** Unified snapshot session close (same symbol). */
+  session_close?: number | null
   reason: string
 }
 

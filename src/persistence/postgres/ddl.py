@@ -836,6 +836,8 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 exchange text,
                 list_date date,
                 ticker_root text,
+                ticker_suffix text,
+                sic_code text,
                 sic_description text,
                 market_cap double precision,
                 total_employees integer,
@@ -845,11 +847,43 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 postal_code text,
                 phone text,
                 description text,
+                homepage_url text,
                 icon_url text,
                 logo_url text,
+                round_lot bigint,
+                share_class_shares_outstanding double precision,
+                weighted_shares_outstanding double precision,
+                overview_api_request_id text,
+                overview_api_status text,
+                overview_api_count integer,
                 overview_updated_at timestamptz
             )
             """
+        )
+        cur.execute(
+            "ALTER TABLE ticker_overview ADD COLUMN IF NOT EXISTS ticker_suffix text"
+        )
+        cur.execute("ALTER TABLE ticker_overview ADD COLUMN IF NOT EXISTS sic_code text")
+        cur.execute(
+            "ALTER TABLE ticker_overview ADD COLUMN IF NOT EXISTS homepage_url text"
+        )
+        cur.execute(
+            "ALTER TABLE ticker_overview ADD COLUMN IF NOT EXISTS round_lot bigint"
+        )
+        cur.execute(
+            "ALTER TABLE ticker_overview ADD COLUMN IF NOT EXISTS share_class_shares_outstanding double precision"
+        )
+        cur.execute(
+            "ALTER TABLE ticker_overview ADD COLUMN IF NOT EXISTS weighted_shares_outstanding double precision"
+        )
+        cur.execute(
+            "ALTER TABLE ticker_overview ADD COLUMN IF NOT EXISTS overview_api_request_id text"
+        )
+        cur.execute(
+            "ALTER TABLE ticker_overview ADD COLUMN IF NOT EXISTS overview_api_status text"
+        )
+        cur.execute(
+            "ALTER TABLE ticker_overview ADD COLUMN IF NOT EXISTS overview_api_count integer"
         )
         cur.execute(
             """
@@ -2593,14 +2627,89 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 fetched_at timestamptz NOT NULL DEFAULT now(),
                 updated_at timestamptz NOT NULL DEFAULT now(),
                 last_minute_updated timestamptz NULL,
-                session jsonb NULL,
-                last_minute jsonb NULL,
-                payload jsonb NOT NULL,
                 source text NOT NULL DEFAULT 'massive',
+                snapshot_asset_type text NULL,
+                market_status text NULL,
+                snapshot_display_name text NULL,
+                session_open double precision NULL,
+                session_high double precision NULL,
+                session_low double precision NULL,
+                session_close double precision NULL,
+                session_previous_close double precision NULL,
+                session_volume double precision NULL,
+                session_decimal_volume text NULL,
+                session_change double precision NULL,
+                session_change_percent double precision NULL,
+                session_regular_trading_change double precision NULL,
+                session_regular_trading_change_percent double precision NULL,
+                session_early_trading_change double precision NULL,
+                session_early_trading_change_percent double precision NULL,
+                session_late_trading_change double precision NULL,
+                session_late_trading_change_percent double precision NULL,
+                last_minute_open double precision NULL,
+                last_minute_high double precision NULL,
+                last_minute_low double precision NULL,
+                last_minute_close double precision NULL,
+                last_minute_vwap double precision NULL,
+                last_minute_volume double precision NULL,
+                last_minute_decimal_volume text NULL,
+                last_minute_transactions bigint NULL,
+                last_trade_price double precision NULL,
+                last_trade_size bigint NULL,
+                last_trade_exchange integer NULL,
+                last_trade_last_updated_ns bigint NULL,
+                last_trade_conditions text NULL,
+                last_quote_bid double precision NULL,
+                last_quote_ask double precision NULL,
+                last_quote_bid_size bigint NULL,
+                last_quote_ask_size bigint NULL,
+                last_quote_last_updated_ns bigint NULL,
                 PRIMARY KEY (symbol)
             )
             """
         )
+        for _css_alter in (
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS snapshot_asset_type text",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS market_status text",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS snapshot_display_name text",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS session_open double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS session_high double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS session_low double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS session_close double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS session_previous_close double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS session_volume double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS session_decimal_volume text",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS session_change double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS session_change_percent double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS session_regular_trading_change double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS session_regular_trading_change_percent double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS session_early_trading_change double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS session_early_trading_change_percent double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS session_late_trading_change double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS session_late_trading_change_percent double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_minute_open double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_minute_high double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_minute_low double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_minute_close double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_minute_vwap double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_minute_volume double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_minute_decimal_volume text",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_minute_transactions bigint",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_trade_price double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_trade_size bigint",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_trade_exchange integer",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_trade_last_updated_ns bigint",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_trade_conditions text",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_quote_bid double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_quote_ask double precision",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_quote_bid_size bigint",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_quote_ask_size bigint",
+            "ALTER TABLE public.cache_stock_snapshot ADD COLUMN IF NOT EXISTS last_quote_last_updated_ns bigint",
+        ):
+            cur.execute(_css_alter)
+        cur.execute("ALTER TABLE public.cache_stock_snapshot DROP COLUMN IF EXISTS session")
+        cur.execute("ALTER TABLE public.cache_stock_snapshot DROP COLUMN IF EXISTS last_minute")
+        cur.execute("ALTER TABLE public.cache_stock_snapshot DROP COLUMN IF EXISTS payload")
         cur.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_cache_stock_snapshot_fetched
