@@ -281,21 +281,34 @@
 - **索引**：`(account_id, ts DESC)`，供按账户与时间范围查询净资金流。
 - **读取**：`servers/reader.get_net_cash_flow(since_ts, until_ts, account_id)` 对本表 SUM(amount)；`get_transactions(...)` 返回明细供 Performance 页展示；GET /performance 的 net_cash_flow、capital_base 使用本表数据。
 
-### 2.22 表 `reference_us_holidays`（美股交易日历：NYSE 休市日）
+### 2.22 表 `reference_us_holidays`（美股交易日历：NYSE 休市日 / 早收盘日）
 
-- **用途**：存**美股（NYSE）休市日**，供 GET /market/trading-day 判断某日是否为交易日；Data 页据此仅在交易日将「(end)」标黄（需 Pull 时）。数据来源为美股休市日历（配置或外部数据源）。
-- **写入**：通过 **Settings 页「US market holidays (NYSE)」** 或 API POST /market/holidays 添加/删除；亦可手动 INSERT。每年 NYSE 公布日历时在 Settings 中追加新年度。
+- **用途**：存**美股（NYSE/NASDAQ 等）休市与早收盘日**，供 GET /market/trading-day 判断某日是否为交易日；K 线 gap 检测（`stock_day_gap`、`get_sepa_grouped_backfill_dates`）据此排除休市日，避免假日被误判为缺数据。
+- **写入**：
+  - 自动：**SEPA Data Ready 页 Step 1**「Sync All Tickers」会同时调用 Massive REST `GET /v1/marketstatus/upcoming`，将返回结果 upsert 到本表，`source='massive'`；Massive 返回的 `name`、`status`、`open`、`close` 完整保留。
+  - 手动：**Settings 页「US market holidays (NYSE)」** 或 API POST /market/holidays 添加/删除（`source='manual'`），用于历史日期回填或自定义假日。
+  - 历史种子：`scripts/db/reference_us_holidays_nyse_2020_2024.sql`（手动行）。
 - **列**：
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
-| exchange | text NOT NULL | 交易所，默认 'NYSE' |
+| exchange | text NOT NULL | 交易所，默认 'NYSE'；Massive 返回的 `exchange`（NYSE / NASDAQ / OTC）原样写入 |
 | holiday_date | date NOT NULL | 休市日期 |
-| label | text | 可选说明（如 New Year's Day） |
-| created_at | timestamptz | 写入时间（默认 now()） |
+| label | text | 兼容旧字段，与 `name` 同值；现有手动 SQL 仍写 `label` |
+| name | text | 假日名称（Massive `name`，如 "Thanksgiving Day"） |
+| status | text | `closed`（全天闭市）｜ `early-close`（早收盘，如感恩节后周五）；NULL 视为 `closed`（兼容旧手动行） |
+| open_time | timestamptz | 仅 `early-close` 行非空（Massive `open` ISO timestamp） |
+| close_time | timestamptz | 仅 `early-close` 行非空（Massive `close` ISO timestamp） |
+| source | text NOT NULL | `manual`（手动写入）｜ `massive`（Massive REST 同步） |
+| updated_at | timestamptz | 上次写入时间（每次 upsert 更新） |
+| created_at | timestamptz | 首次写入时间（默认 now()） |
 
-- **主键**：**(exchange, holiday_date)**。
-- **读取**：`servers/reader.get_is_us_trading_day(status_config, date_str)` 先判断周末再查本表；GET /market/trading-day 供前端 Data 页使用。
+- **主键**：**(exchange, holiday_date)**。同一日期 NYSE/NASDAQ 各占一行。
+- **读取**：
+  - `servers/reader.get_is_us_trading_day(status_config, date_str)` 先判断周末再查本表（任何 `status` 都视为非交易日）。
+  - K 线 gap：`src/vendor/massive/stock_day_gap.py`、`src/research/sepa/readiness_snapshot.get_sepa_grouped_backfill_dates` 仅排除 `status IS NULL OR status='closed'` 的行，**`early-close` 仍当作交易日**期望有 bar。
+  - GET /market/trading-day 供前端 Data 页使用。
+- **Sync 端点**：`POST /research/screening/sepa/readiness/sync-holidays` —— SEPA 页 Step 1 触发。
 
 ### 2.23 表 `settings_ib_flex`（Performance Phase 0：IB Flex 配置，Token 在 settings）
 
@@ -403,15 +416,25 @@
 - **用途**：全市场 All Tickers 分页游标等状态；`sync_kind` 为主键（如 `universe_tickers`）。历史表名 `job_stock_reference_state` 已迁移。
 - **列**：`sync_kind` (text PK)、`last_cursor` (text)、`status` (text)、`updated_at` (timestamptz)。
 
-### 2.14.6 表 `sepa_universe_readiness_daily`（SEPA 全量扫描：数据准备日快照）
+### 2.14.6 表 `cache_stock_snapshot`（Massive 股票 Unified Snapshot 基准）
+
+- **用途**：在大量 **`stock_day`** 日线回补（`feed_stocks_aggregate`）之前，对 `v_sepa_us_equity_universe` 全量股票批量调用 Massive **`GET /v3/snapshot`**（`ticker.any_of`，`type=stocks`），将每只标的的 **`session`**、**`last_minute`** 及完整 **`payload`（jsonb）** 以 **每 symbol 一行** 形式 UPSERT 落库，作为后续「快照时间 vs `stock_day` 最新日」对比（Step 2 逻辑，另行实现）的基准。
+- **主键**：`symbol` (text)。
+- **列（要点）**：`fetched_at`、`updated_at`（本次刷新批次时间）、`last_minute_updated`（从 `last_minute` 解析的 timestamptz，可空）、`session` / `last_minute`（jsonb）、`payload`（jsonb）、`source`（默认 `massive`）。
+- **索引**：`(fetched_at DESC)`。
+- **填充**：`POST /research/screening/sepa/readiness/stock-unified-snapshot`（实现见 [`src/research/sepa/stock_unified_snapshot_refresh.py`](../src/research/sepa/stock_unified_snapshot_refresh.py)）；或 **SEPA Data Ready** 页 Step 2「Refresh unified snapshots」。单次请求最多约 **250** 个 ticker，全 Universe 分多批顺序请求，批间可休眠限流。
+
+**SEPA Data Ready 推荐顺序（与 UI Step 编号一致）**：Step 1（`tickers` + `reference_us_holidays`）→ **Step 2（本表）** → Step 3（`stock_day` 回补）→ Step 4（`sepa_universe_readiness_daily`）→ Step 5（缺口修复与复核）。
+
+### 2.14.7 表 `sepa_universe_readiness_daily`（SEPA 全量扫描：数据准备日快照）
 
 - **用途**：在跑 SEPA Phase4 / 全市场批扫前，将「参考 Universe（`tickers`）」与「行情是否满足 `stock_day` 窗口」固化成**按日一行 per symbol** 的快照，便于补数编排与缺口查询。与 SEPA 引擎读数路径一致：`price_source` 默认 **`massive`**，与 `get_stock_day_series_for_sepa` / `get_stock_day_close_series_for_crs` 的 `source` 筛选对齐。
 - **主键**：`PRIMARY KEY (as_of_date, symbol, universe_rule_version, price_source)`。
 - **外键**：`tickers_id` → `tickers(tickers_id)` ON DELETE SET NULL。
 - **列（要点）**：`included_in_universe`（是否落在 `v_sepa_us_equity_universe`）、`bar_count_lookback`、`first_bar_date`、`last_bar_date`、`null_close_rows`、`null_volume_rows`、`price_ready`、`fund_cache_present`、`fund_cache_expire_at`（与 `research_sepa_fundamentals_cache` 有效行左连，可选）、`notes`、`computed_at`。
-- **填充**：不由守护进程自动写；运维在日线补数完成后可任选其一：**Research UI** → **SEPA Data Ready** → **Refresh snapshot**（`POST /research/screening/sepa/readiness/snapshot`，逻辑见 [`src/research/sepa/readiness_snapshot.py`](../src/research/sepa/readiness_snapshot.py)）；或 CLI `python scripts/db/run_sepa_readiness_snapshot.py`。原 `scripts/db/sepa_universe_readiness_snapshot.sql` 仅保留说明指向上述真源。阈值（回溯日历天数、最少 bar 数、允许 stale 天数）在 Python 模块内与视图定义对齐可调。
+- **填充**：不由守护进程自动写；建议在 **Step 3（`stock_day` 回补）** 之后执行：**Research UI** → **SEPA Data Ready** → Step 4 **Refresh snapshot**（`POST /research/screening/sepa/readiness/snapshot`，逻辑见 [`src/research/sepa/readiness_snapshot.py`](../src/research/sepa/readiness_snapshot.py)）；或 CLI `python scripts/db/run_sepa_readiness_snapshot.py`。原 `scripts/db/sepa_universe_readiness_snapshot.sql` 仅保留说明指向上述真源。阈值（回溯日历天数、最少 bar 数、允许 stale 天数）在 Python 模块内与视图定义对齐可调。
 
-### 2.14.7 视图 `v_sepa_us_equity_universe` / `v_sepa_symbol_price_readiness` / `v_sepa_symbol_fund_cache_readiness`
+### 2.14.8 视图 `v_sepa_us_equity_universe` / `v_sepa_symbol_price_readiness` / `v_sepa_symbol_fund_cache_readiness`
 
 - **`v_sepa_us_equity_universe`**：`tickers` LEFT JOIN `ticker_overview`；默认过滤 `active = true`、`locale = 'us'`、`market = 'stocks'`（大小写不敏感）。**生产前请用 Dev 库对 `market` / `locale` / `instrument_type` 做 `DISTINCT` 校准**，必要时收紧 `instrument_type` 或排除 `delisted_utc` 非空行，避免 Universe 与业务定义不一致。
 - **`v_sepa_symbol_price_readiness`**：对 `stock_day` 在固定窗口（当前为 **最近 420 个日历日至 `CURRENT_DATE`**、`source = 'massive'`）按 symbol 聚合；`price_ready` 条件为：bar 数 ≥ 阈值、最新 `bar_time` 不超过允许陈旧天数、窗口内无 `close`/`volume` 为 NULL 的行。阈值写死在视图定义中；若与 Phase4 `lookback_days` 分歧，应同步改视图或改为参数化表/MV（后续迭代）。
@@ -1574,8 +1597,10 @@ python scripts/db/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-04-19 Massive ticker types 任务 kind 合并更名 | `job_massive_backfill.kind`：`ticker_reference_ticker_types` 与 `ticker_reference_instrument_types` / `stock_reference_instrument_types` 合并规范名为 **`feed_stocks_tickers_types`**；`normalize_ticker_ref_kind` 将旧名映射至新名；路由仍为 `massive_stocks` / `massive_stocks_high`。§2.14 / §2.16。 | Massive |
 | 2026-04-19 Massive 股票公司行动任务 kind 更名与 API | `job_massive_backfill.kind`：公司行动同步（dividends / splits / IPOs / ticker events → `massive_corporate_action`）规范名为 **`feed_stocks_corporate_action`**；`normalize_ticker_ref_kind` 将 `corporate_action` 映射至新名；REST 使用 `GET /stocks/v1/dividends`、`GET /stocks/v1/splits`（替代已弃用的 v3 reference），并补充 `GET /v3/reference/ipos`、`GET /v3/reference/tickers/{ticker}/events`。§2.16。 | Massive |
 | 2026-04-20 K 线表 RANGE 分区（时序） | `stock_day`、`stock_min`、`option_day`、`option_min` 改为 `PARTITION BY RANGE (bar_time)`（`stock_day` 分区键为 `date`），按月子分区 + DEFAULT 分区；业务主键与 `ON CONFLICT` 目标一致（`stock_day`/`stock_min` 去掉 surrogate `id`）；`option_day_id` / `option_min_id` 保留为序列列。存量堆表由 `db_refresh_schema`（`pg_ddl`）自动迁移。`option_contracts` 不变。§2.13–§2.16。 | 研究 / 运维 |
-| 2026-04-29 SEPA 数据准备层 | 新增表 `sepa_universe_readiness_daily`（§2.14.6）；视图 `v_sepa_us_equity_universe`、`v_sepa_symbol_price_readiness`、`v_sepa_symbol_fund_cache_readiness`（§2.14.7，后者在 `research_sepa_fundamentals_cache` 存在时创建）。运维快照脚本 `scripts/db/sepa_universe_readiness_snapshot.sql`。由 `pg_ddl` / `db_refresh_schema` 创建。 | 研究 / SEPA |
-| 2026-04-29 SEPA Data Ready UI | §2.14.6 增补：快照可由 Research API / UI 与 `scripts/db/run_sepa_readiness_snapshot.py` 触发；`GET /research/screening/sepa/readiness/summary` 供前端 **SEPA Data Ready** 页展示 KPI。无新表。 | 研究 / SEPA |
+| 2026-04-29 SEPA 数据准备层 | 新增表 `sepa_universe_readiness_daily`（§2.14.7）；视图 `v_sepa_us_equity_universe`、`v_sepa_symbol_price_readiness`、`v_sepa_symbol_fund_cache_readiness`（§2.14.8，后者在 `research_sepa_fundamentals_cache` 存在时创建）。运维快照脚本 `scripts/db/sepa_universe_readiness_snapshot.sql`。由 `pg_ddl` / `db_refresh_schema` 创建。 | 研究 / SEPA |
+| 2026-04-29 SEPA Data Ready UI | §2.14.7 增补：快照可由 Research API / UI 与 `scripts/db/run_sepa_readiness_snapshot.py` 触发；`GET /research/screening/sepa/readiness/summary` 供前端 **SEPA Data Ready** 页展示 KPI。无新表。 | 研究 / SEPA |
+| 2026-04-29 SEPA cache_stock_snapshot | 新增表 `cache_stock_snapshot`（§2.14.6）；`POST /research/screening/sepa/readiness/stock-unified-snapshot`；SEPA Data Ready Step 2。 | 研究 / SEPA |
+| 2026-05-04 reference_us_holidays 扩展 + Massive 自动同步 | §2.22 表 `reference_us_holidays` 新增列：`name`、`status`（closed / early-close）、`open_time`、`close_time`、`source`（manual / massive）、`updated_at`；主键仍为 (exchange, holiday_date)，旧 `label` 列保留。新增端点 `POST /research/screening/sepa/readiness/sync-holidays`，由 SEPA Data Ready 页 Step 1「Sync All Tickers」并行触发，调用 Massive REST `GET /v1/marketstatus/upcoming` upsert 到本表（`source='massive'`）。Polygon 该端点返回**裸 JSON 数组**，`MassiveClient.fetch_market_holidays` 已规范化为 `{"results":[...]}` 信封以便复用调用方解析。`stock_day_gap.py`、`get_sepa_grouped_backfill_dates` 升级 holiday 过滤：仅排除 `status IS NULL OR status='closed'`，早收盘日仍期望有 bar。`pg_ddl` `ADD COLUMN IF NOT EXISTS` 自动迁移已有库。 | 研究 / SEPA |
 
 ---
 

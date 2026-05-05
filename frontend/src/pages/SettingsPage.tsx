@@ -5,11 +5,7 @@ import {
   postIbConfig,
   postSetHeartbeatInterval,
   postFlexConfig,
-  fetchMarketHolidays,
-  postMarketHoliday,
-  deleteMarketHoliday,
   fetchMassiveStatus,
-  type MarketHolidayRow,
   type MassiveStatusResponse,
 } from '../api'
 import { postAccountSyncSetHeartbeatInterval } from '../api/monitor/accountSync'
@@ -84,7 +80,6 @@ import { SettingsSectionIcon } from './settings/SettingsSectionIcon'
 import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
 import { HeartbeatSection } from './settings/HeartbeatSection'
 import { IbConnectionSection } from './settings/IbConnectionSection'
-import { HolidaysSection } from './settings/HolidaysSection'
 import { DataPage } from './DataPage'
 import { FeedMassiveCommonPage } from './FeedMassiveCommonPage'
 import { FeedMassiveOptionPage } from './FeedMassiveOptionPage'
@@ -189,14 +184,6 @@ export function SettingsPage({
   const [ibConfigInitialized, setIbConfigInitialized] = useState(false)
   const [heartbeatInitialized, setHeartbeatInitialized] = useState(false)
 
-  const currentYear = new Date().getFullYear()
-  // US market holidays (NYSE) — default to current year to save space
-  const [holidays, setHolidays] = useState<MarketHolidayRow[]>([])
-  const [holidaysYear, setHolidaysYear] = useState<string>(() => String(currentYear))
-  const [holidaysLoading, setHolidaysLoading] = useState(false)
-  const [holidayMsg, setHolidayMsg] = useState({ text: '', isErr: false })
-  const [addDate, setAddDate] = useState('')
-  const [addLabel, setAddLabel] = useState('')
   const [flexHostToken, setFlexHostToken] = useState('')
   const [flexSecondaryToken, setFlexSecondaryToken] = useState('')
   const [flexAccounts, setFlexAccounts] = useState<FlexAccountItem[]>(getDefaultFlexRows)
@@ -268,25 +255,6 @@ export function SettingsPage({
       setHeartbeatInitialized(true)
     }
   }, [status?.daemon?.heartbeat?.heartbeat_interval_sec, heartbeatInitialized])
-
-  const loadHolidays = async () => {
-    setHolidaysLoading(true)
-    setHolidayMsg({ text: '', isErr: false })
-    try {
-      const yearNum = holidaysYear === '' ? undefined : parseInt(holidaysYear, 10)
-      const list = await fetchMarketHolidays(Number.isFinite(yearNum) ? yearNum : undefined, 'NYSE')
-      setHolidays(list)
-    } catch (e) {
-      setHolidayMsg({ text: (e as Error).message, isErr: true })
-      setHolidays([])
-    } finally {
-      setHolidaysLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    loadHolidays()
-  }, [holidaysYear])
 
   const hashToSectionId = (hash: string) => {
     const h = hash ? hash.slice(1) : ''
@@ -601,34 +569,6 @@ export function SettingsPage({
     syncFromHash()
     return () => window.removeEventListener('hashchange', syncFromHash)
   }, [])
-
-  const onAddHoliday = async () => {
-    const d = addDate.trim().slice(0, 10)
-    if (!d) {
-      setHolidayMsg({ text: 'Enter a date.', isErr: true })
-      return
-    }
-    setHolidayMsg({ text: '', isErr: false })
-    try {
-      await postMarketHoliday({ date: d, label: addLabel.trim() || undefined, exchange: 'NYSE' })
-      setAddDate('')
-      setAddLabel('')
-      setHolidayMsg({ text: 'Holiday added.', isErr: false })
-      loadHolidays()
-    } catch (e) {
-      setHolidayMsg({ text: (e as Error).message, isErr: true })
-    }
-  }
-
-  const onDeleteHoliday = async (dateStr: string) => {
-    try {
-      await deleteMarketHoliday(dateStr, 'NYSE')
-      setHolidayMsg({ text: '', isErr: false })
-      loadHolidays()
-    } catch (e) {
-      setHolidayMsg({ text: (e as Error).message, isErr: true })
-    }
-  }
 
   const onSave = async () => {
     setMsg({ text: 'Saving…', isErr: false })
@@ -1413,21 +1353,6 @@ export function SettingsPage({
               flexAccounts={flexAccounts}
               setFlexAccounts={setFlexAccounts}
               activeSubId={activeSubId}
-            />
-            <HolidaysSection
-              currentYear={currentYear}
-              holidays={holidays}
-              holidaysYear={holidaysYear}
-              setHolidaysYear={setHolidaysYear}
-              holidaysLoading={holidaysLoading}
-              loadHolidays={loadHolidays}
-              addDate={addDate}
-              setAddDate={setAddDate}
-              addLabel={addLabel}
-              setAddLabel={setAddLabel}
-              holidayMsg={holidayMsg}
-              onAddHoliday={onAddHoliday}
-              onDeleteHoliday={onDeleteHoliday}
             />
           </div>
         </div>

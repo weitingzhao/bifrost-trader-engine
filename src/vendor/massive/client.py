@@ -1753,14 +1753,28 @@ class MassiveClient:
         return data if isinstance(data, dict) else {"results": []}
 
     def fetch_market_holidays(self) -> Dict[str, Any]:
-        """GET /v3/reference/market/holidays — upcoming market holidays."""
+        """GET /v1/marketstatus/upcoming — upcoming market holidays.
+
+        Polygon returns a bare JSON array (e.g. ``[{"exchange": "NYSE", ...}]``),
+        not a ``{"results": [...]}`` envelope. Normalize to the envelope shape so
+        callers can keep using ``data["results"]`` consistently.
+        """
         if not self._api_key:
             return {"results": [], "error": "api key missing"}
-        status, data = self._get("/v3/reference/market/holidays")
+        status, data = self._get("/v1/marketstatus/upcoming")
         if status >= 400:
             err = data.get("error", data) if isinstance(data, dict) else str(data)
             return {"results": [], "error": err}
-        return data if isinstance(data, dict) else {"results": []}
+        if isinstance(data, list):
+            return {"results": data}
+        if isinstance(data, dict):
+            if "results" in data:
+                return data
+            # Some tiers wrap under different keys; accept any list value.
+            for v in data.values():
+                if isinstance(v, list):
+                    return {"results": v}
+        return {"results": []}
 
     def fetch_market_status(self) -> Dict[str, Any]:
         """GET /v1/marketstatus/now — current trading status."""

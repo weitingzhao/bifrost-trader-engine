@@ -11,6 +11,7 @@ from src.research.sepa.readiness_snapshot import (
     get_sepa_price_gap_symbols,
     run_sepa_universe_readiness_snapshot,
 )
+from src.research.sepa.stock_unified_snapshot_refresh import run_refresh_cache_stock_unified_snapshots
 
 router = APIRouter(tags=["research"])
 
@@ -35,6 +36,17 @@ def post_sepa_readiness_snapshot(request: Request) -> Dict[str, Any]:
     return run_sepa_universe_readiness_snapshot(db)
 
 
+@router.post("/research/screening/sepa/readiness/stock-unified-snapshot")
+def post_sepa_stock_unified_snapshot(request: Request) -> Dict[str, Any]:
+    """Batch GET /v3/snapshot (stocks) for v_sepa_us_equity_universe; UPSERT cache_stock_snapshot."""
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    reader = getattr(request.app.state, "reader", None)
+    merged_config = reader._config if reader else {}
+    return run_refresh_cache_stock_unified_snapshots(db, merged_config)
+
+
 @router.get("/research/screening/sepa/readiness/price-gaps")
 def get_sepa_price_gaps(request: Request) -> Dict[str, Any]:
     """Return detailed per-symbol gap list for symbols in the SEPA universe that are NOT price_ready."""
@@ -45,8 +57,15 @@ def get_sepa_price_gaps(request: Request) -> Dict[str, Any]:
 
 
 @router.post("/research/screening/sepa/readiness/backfill-price-gaps")
-def post_sepa_backfill_price_gaps(request: Request) -> Dict[str, Any]:
-    """Fan-out daily_smart Celery jobs for all universe symbols that are NOT price_ready."""
+def post_sepa_backfill_price_gaps(
+    request: Request,
+    body: Dict[str, Any] = Body(default={}),
+) -> Dict[str, Any]:
+    """Fan-out daily_smart Celery jobs for universe symbols that are NOT price_ready.
+
+    If body.symbols is provided (list of ticker strings), only those symbols are backfilled.
+    Otherwise all gap symbols are queried from the DB (default bulk behaviour).
+    """
     from src.massive.celery_queues import celery_queue_for_massive_job
     from src.massive.tasks import run_massive_job
     from src.vendor.massive.reader import (
@@ -58,12 +77,18 @@ def post_sepa_backfill_price_gaps(request: Request) -> Dict[str, Any]:
     if not db:
         return {"ok": False, "error": "PostgreSQL not configured"}
 
-    gap_result = get_sepa_price_gap_symbols(db, batch_size=50)
-    if not gap_result.get("ok"):
-        return gap_result
-
-    gap_count: int = gap_result["gap_count"]
-    batches: list = gap_result["batches"]
+    custom_symbols: list = body.get("symbols") or []
+    if custom_symbols:
+        batch_size = 50
+        symbols = [str(s).strip().upper() for s in custom_symbols if s]
+        batches: list = [symbols[i : i + batch_size] for i in range(0, len(symbols), batch_size)]
+        gap_count: int = len(symbols)
+    else:
+        gap_result = get_sepa_price_gap_symbols(db, batch_size=50)
+        if not gap_result.get("ok"):
+            return gap_result
+        gap_count = gap_result["gap_count"]
+        batches = gap_result["batches"]
 
     if not batches:
         return {
@@ -109,6 +134,24 @@ def post_sepa_backfill_price_gaps(request: Request) -> Dict[str, Any]:
         "job_ids": job_ids,
         **({"errors": dispatch_errors} if dispatch_errors else {}),
     }
+
+
+@router.post("/research/screening/sepa/readiness/sync-holidays")
+def post_sepa_sync_holidays(request: Request) -> Dict[str, Any]:
+    """Pull market holidays from Massive REST and upsert into reference_us_holidays.
+
+    Triggered alongside Step 1 (Sync All Tickers) on the SEPA Data Ready page so
+    downstream gap detection can exclude NYSE closed days.
+    """
+    from src.vendor.massive.holidays_sync import sync_market_holidays_from_massive
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = getattr(reader, "_config", None) if reader else None
+    return sync_market_holidays_from_massive(db, cfg=cfg)
 
 
 @router.post("/research/screening/sepa/readiness/backfill-grouped-history")

@@ -20,7 +20,6 @@ export const STATUS_SECTIONS = [{ id: 'settings-daemon', label: 'Daemon', icon: 
 export const CONFIG_SECTIONS = [
   { id: 'settings-heartbeat', label: 'Daemon App', icon: 'heartbeat' as const },
   { id: 'settings-ib-connection', label: 'IB Configure', icon: 'plug' as const },
-  { id: 'settings-holidays', label: 'US market holidays', icon: 'calendar' as const },
 ] as const
 
 /** Legacy hash before Overview was split; Settings redirects to summary. */

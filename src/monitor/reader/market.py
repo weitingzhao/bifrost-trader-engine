@@ -28,7 +28,10 @@ def get_is_us_trading_day_conn(conn: Any, date_str: str) -> bool:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT 1 FROM reference_us_holidays WHERE exchange = 'NYSE' AND holiday_date = %s LIMIT 1",
+                """SELECT 1 FROM reference_us_holidays
+                   WHERE exchange = 'NYSE' AND holiday_date = %s
+                     AND (status IS NULL OR status = 'closed')
+                   LIMIT 1""",
                 (d,),
             )
             row = cur.fetchone()
@@ -46,15 +49,23 @@ def get_market_holidays_conn(
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             if year is not None:
                 cur.execute(
-                    """SELECT exchange, holiday_date::text AS holiday_date, label
-                       FROM reference_us_holidays WHERE exchange = %s AND EXTRACT(YEAR FROM holiday_date) = %s
+                    """SELECT exchange, holiday_date::text AS holiday_date,
+                              COALESCE(name, label) AS label,
+                              name, status,
+                              open_time, close_time, source
+                       FROM reference_us_holidays
+                       WHERE exchange = %s AND EXTRACT(YEAR FROM holiday_date) = %s
                        ORDER BY holiday_date""",
                     (exchange, year),
                 )
             else:
                 cur.execute(
-                    """SELECT exchange, holiday_date::text AS holiday_date, label
-                       FROM reference_us_holidays WHERE exchange = %s ORDER BY holiday_date""",
+                    """SELECT exchange, holiday_date::text AS holiday_date,
+                              COALESCE(name, label) AS label,
+                              name, status,
+                              open_time, close_time, source
+                       FROM reference_us_holidays
+                       WHERE exchange = %s ORDER BY holiday_date""",
                     (exchange,),
                 )
             rows = cur.fetchall()

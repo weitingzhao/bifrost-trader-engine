@@ -1,8 +1,12 @@
 """Compare stock_day coverage against a NYSE-oriented trading-day calendar in PostgreSQL.
 
 ``ref`` is ``generate_series`` from the symbol's effective start through the cap date,
-excluding weekends and dates in ``public.reference_us_holidays`` where ``exchange = 'NYSE'``.
-Keep that table complete (see ``scripts/db/reference_us_holidays_nyse_2020_2024.sql`` for backfill).
+excluding weekends and full-closure rows in ``public.reference_us_holidays``
+(``exchange='NYSE'`` AND ``status IS NULL OR status='closed'``). Early-close days
+(``status='early-close'``) are still expected to have a daily bar.
+
+Holiday rows are populated by the SEPA Data Ready page Step 1 (Massive sync) and
+the legacy seed ``scripts/db/reference_us_holidays_nyse_2020_2024.sql``.
 """
 
 from __future__ import annotations
@@ -36,7 +40,9 @@ def _gap_ctes_sql(ref_end_sql: str, cap_filter_sql: str) -> str:
           ) AS s
           WHERE EXTRACT(DOW FROM s::date) NOT IN (0, 6)
             AND s::date NOT IN (
-              SELECT holiday_date FROM reference_us_holidays WHERE exchange = 'NYSE'
+              SELECT holiday_date FROM reference_us_holidays
+              WHERE exchange = 'NYSE'
+                AND (status IS NULL OR status = 'closed')
             )
         ),
         covered AS (

@@ -163,6 +163,7 @@ export function FeedMassiveCommonPage({
   const [moHolBusy, setMoHolBusy] = useState(false)
   const [moHolErr, setMoHolErr] = useState<string | null>(null)
   const [moHolData, setMoHolData] = useState<MassiveMarketHolidaysResponse | null>(null)
+
   const [moStatusBusy, setMoStatusBusy] = useState(false)
   const [moStatusErr, setMoStatusErr] = useState<string | null>(null)
   const [moStatusData, setMoStatusData] = useState<Record<string, unknown> | null>(null)
@@ -708,7 +709,7 @@ export function FeedMassiveCommonPage({
                   <div className="feed-massive-agg-tab-panel" role="tabpanel">
                     <div className="feed-massive-agg-sub-doc">
                       <p><strong>Use case:</strong> Retrieve upcoming market holidays from the official API and compare with locally stored holidays. Helps verify that the local holiday calendar is in sync with the market schedule.</p>
-                      <p className="feed-massive-agg-sub-endpoint"><code>REST: GET /v3/reference/market/holidays</code></p>
+                      <p className="feed-massive-agg-sub-endpoint"><code>REST: GET /v1/marketstatus/upcoming</code></p>
                     </div>
                     <div style={{ marginTop: 'var(--space-3)' }}>
                       <button type="button" className="btn btn-secondary" disabled={moHolBusy || !configured} onClick={runMoHolidays}>

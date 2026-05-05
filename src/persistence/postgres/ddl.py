@@ -2025,10 +2025,29 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 exchange text NOT NULL DEFAULT 'NYSE',
                 holiday_date date NOT NULL,
                 label text,
+                name text,
+                status text,
+                open_time timestamptz,
+                close_time timestamptz,
+                source text NOT NULL DEFAULT 'manual',
+                updated_at timestamptz DEFAULT now(),
                 created_at timestamptz DEFAULT now(),
                 PRIMARY KEY (exchange, holiday_date)
             )
             """
+        )
+        cur.execute("ALTER TABLE reference_us_holidays ADD COLUMN IF NOT EXISTS name text")
+        cur.execute("ALTER TABLE reference_us_holidays ADD COLUMN IF NOT EXISTS status text")
+        cur.execute("ALTER TABLE reference_us_holidays ADD COLUMN IF NOT EXISTS open_time timestamptz")
+        cur.execute("ALTER TABLE reference_us_holidays ADD COLUMN IF NOT EXISTS close_time timestamptz")
+        cur.execute(
+            "ALTER TABLE reference_us_holidays ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'manual'"
+        )
+        cur.execute(
+            "ALTER TABLE reference_us_holidays ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now()"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reference_us_holidays_status ON reference_us_holidays (exchange, status)"
         )
         _log("settings_ib_flex")
         _log_table("settings_ib_flex", "IB Flex query config")
@@ -2560,6 +2579,32 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_sepa_urd_asof_symbol
             ON public.sepa_universe_readiness_daily (symbol)
+            """
+        )
+
+        _log_table(
+            "cache_stock_snapshot",
+            "Massive GET /v3/snapshot (stocks) per-symbol session/last_minute cache for SEPA Data Ready baseline",
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS public.cache_stock_snapshot (
+                symbol text NOT NULL,
+                fetched_at timestamptz NOT NULL DEFAULT now(),
+                updated_at timestamptz NOT NULL DEFAULT now(),
+                last_minute_updated timestamptz NULL,
+                session jsonb NULL,
+                last_minute jsonb NULL,
+                payload jsonb NOT NULL,
+                source text NOT NULL DEFAULT 'massive',
+                PRIMARY KEY (symbol)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_cache_stock_snapshot_fetched
+            ON public.cache_stock_snapshot (fetched_at DESC)
             """
         )
 

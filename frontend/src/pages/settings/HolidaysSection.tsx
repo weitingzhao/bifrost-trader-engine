@@ -49,7 +49,7 @@ export function HolidaysSection({
               aria-label="Filter holidays by year"
             >
               <option value="">All</option>
-              {[currentYear - 1, currentYear, currentYear + 1, currentYear + 2].map((y) => (
+              {Array.from({ length: currentYear + 2 - 2020 + 1 }, (_, i) => 2020 + i).map((y) => (
                 <option key={y} value={String(y)}>{y}</option>
               ))}
             </select>

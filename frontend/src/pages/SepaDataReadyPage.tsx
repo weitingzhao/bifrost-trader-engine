@@ -5,10 +5,13 @@ import {
   fetchSepaPriceGaps,
   postSepaGroupedHistoryBackfill,
   postSepaReadinessSnapshot,
+  postSepaStockUnifiedSnapshot,
   postSepaPriceGapBackfill,
+  postSepaSyncHolidays,
   type SepaReadinessCatalogEntry,
   type SepaReadinessSummaryResponse,
   type SepaPriceGapItem,
+  type SepaSyncHolidaysResponse,
 } from '../api/research/sepaReadiness'
 import { fetchQueueSummary, type QueueSummaryRow } from '../api/ops/ops'
 import { formatQueueLabel } from '../utils/celeryQueueLabels'
@@ -54,6 +57,7 @@ function fmtRelativeTime(iso: string | null | undefined): string {
 function sourceTag(entry: SepaReadinessCatalogEntry): { label: string; cls: string } {
   const obj = entry.object.toLowerCase()
   if (obj.includes('sepa_universe_readiness_daily')) return { label: 'SNAPSHOT', cls: 'sdp-source-tag--snapshot' }
+  if (obj.includes('cache_stock_snapshot')) return { label: 'CACHE', cls: 'sdp-source-tag--snapshot' }
   if (obj.startsWith('public.v_') || obj.startsWith('v_')) return { label: 'VIEW', cls: 'sdp-source-tag--view' }
   return { label: 'TABLE', cls: 'sdp-source-tag--table' }
 }
@@ -344,6 +348,10 @@ interface GapsDrawerProps {
   backfillBusy: boolean
   backfillMsg: string | null
   backfillOk: boolean | null
+  onRunBackfillSelected: (symbols: string[]) => void
+  backfillSelectedBusy: boolean
+  backfillSelectedMsg: string | null
+  backfillSelectedOk: boolean | null
 }
 
 function GapsDrawer({
@@ -354,6 +362,10 @@ function GapsDrawer({
   backfillBusy,
   backfillMsg,
   backfillOk,
+  onRunBackfillSelected,
+  backfillSelectedBusy,
+  backfillSelectedMsg,
+  backfillSelectedOk,
 }: GapsDrawerProps) {
   const [items, setItems] = useState<SepaPriceGapItem[]>([])
   const [totalGapCount, setTotalGapCount] = useState<number | null>(null)
@@ -362,12 +374,14 @@ function GapsDrawer({
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
   const [searchQ, setSearchQ] = useState('')
+  const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(new Set())
   const checkedAtRef = useRef<string>('')
 
   useEffect(() => {
     if (!open) return
     setLoading(true)
     setError(null)
+    setSelectedSymbols(new Set())
     checkedAtRef.current = new Date().toISOString()
     fetchSepaPriceGaps()
       .then((res) => {
@@ -385,6 +399,37 @@ function GapsDrawer({
   const filtered = searchQ.trim()
     ? items.filter((it) => it.symbol.toLowerCase().includes(searchQ.trim().toLowerCase()))
     : items
+
+  const allFilteredSelected =
+    filtered.length > 0 && filtered.every((it) => selectedSymbols.has(it.symbol))
+  const someFilteredSelected = filtered.some((it) => selectedSymbols.has(it.symbol))
+
+  const toggleSymbol = (symbol: string) => {
+    setSelectedSymbols((prev) => {
+      const next = new Set(prev)
+      if (next.has(symbol)) next.delete(symbol)
+      else next.add(symbol)
+      return next
+    })
+  }
+
+  const toggleAllFiltered = () => {
+    setSelectedSymbols((prev) => {
+      const next = new Set(prev)
+      if (allFilteredSelected) {
+        filtered.forEach((it) => next.delete(it.symbol))
+      } else {
+        filtered.forEach((it) => next.add(it.symbol))
+      }
+      return next
+    })
+  }
+
+  const handleBackfillSelected = () => {
+    const syms = Array.from(selectedSymbols)
+    if (syms.length === 0) return
+    onRunBackfillSelected(syms)
+  }
 
   const handleCopyLlm = async () => {
     const text = buildLlmText(items, totalGapCount ?? items.length, checkedAtRef.current)
@@ -455,10 +500,24 @@ function GapsDrawer({
             type="button"
             className="sdp-btn-primary"
             onClick={onRunBackfill}
-            disabled={backfillBusy || priceGap === 0}
+            disabled={backfillBusy || backfillSelectedBusy || priceGap === 0}
+            title="Backfill all gap symbols (bulk)"
           >
-            {backfillBusy ? 'Dispatching…' : 'Backfill gaps (per-symbol)'}
+            {backfillBusy ? 'Dispatching…' : 'Backfill all gaps'}
           </button>
+          {selectedSymbols.size > 0 && (
+            <button
+              type="button"
+              className="sdp-btn-backfill-selected"
+              onClick={handleBackfillSelected}
+              disabled={backfillSelectedBusy || backfillBusy}
+              title={`Backfill ${selectedSymbols.size} selected symbol${selectedSymbols.size === 1 ? '' : 's'}`}
+            >
+              {backfillSelectedBusy
+                ? 'Dispatching…'
+                : `Backfill selected (${selectedSymbols.size.toLocaleString()})`}
+            </button>
+          )}
           <button
             type="button"
             className={`sdp-btn-copy-llm${copied ? ' sdp-btn-copy-llm--ok' : copyError ? ' sdp-btn-copy-llm--err' : ''}`}
@@ -472,6 +531,11 @@ function GapsDrawer({
         {backfillMsg && (
           <div className={`sdp-feedback sdp-msg--${backfillOk ? 'ok' : 'err'}`} style={{ margin: '0 var(--space-4) var(--space-2)' }}>
             {backfillMsg}
+          </div>
+        )}
+        {backfillSelectedMsg && (
+          <div className={`sdp-feedback sdp-msg--${backfillSelectedOk ? 'ok' : 'err'}`} style={{ margin: '0 var(--space-4) var(--space-2)' }}>
+            {backfillSelectedMsg}
           </div>
         )}
 
@@ -515,6 +579,18 @@ function GapsDrawer({
             <table className="sdp-gap-table">
               <thead>
                 <tr>
+                  <th className="sdp-gap-col-check">
+                    <input
+                      type="checkbox"
+                      className="sdp-gap-checkbox"
+                      checked={allFilteredSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected
+                      }}
+                      onChange={toggleAllFiltered}
+                      aria-label="Select all filtered symbols"
+                    />
+                  </th>
                   <th>Symbol</th>
                   <th>Bars</th>
                   <th>Last bar</th>
@@ -522,14 +598,30 @@ function GapsDrawer({
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((it) => (
-                  <tr key={it.symbol}>
-                    <td className="sdp-gap-symbol">{it.symbol}</td>
-                    <td className={`sdp-gap-bars${it.bar_rows < 240 ? ' sdp-gap-bars--low' : ''}`}>{it.bar_rows}</td>
-                    <td className="sdp-gap-date">{it.last_bar_date ?? '—'}</td>
-                    <td className="sdp-gap-reason">{it.reason}</td>
-                  </tr>
-                ))}
+                {filtered.map((it) => {
+                  const checked = selectedSymbols.has(it.symbol)
+                  return (
+                    <tr
+                      key={it.symbol}
+                      className={checked ? 'sdp-gap-row--selected' : ''}
+                      onClick={() => toggleSymbol(it.symbol)}
+                    >
+                      <td className="sdp-gap-col-check" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          className="sdp-gap-checkbox"
+                          checked={checked}
+                          onChange={() => toggleSymbol(it.symbol)}
+                          aria-label={`Select ${it.symbol}`}
+                        />
+                      </td>
+                      <td className="sdp-gap-symbol">{it.symbol}</td>
+                      <td className={`sdp-gap-bars${it.bar_rows < 240 ? ' sdp-gap-bars--low' : ''}`}>{it.bar_rows}</td>
+                      <td className="sdp-gap-date">{it.last_bar_date ?? '—'}</td>
+                      <td className="sdp-gap-reason">{it.reason}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           )}
@@ -566,7 +658,16 @@ function SepaDataReadyPageInner({
   const [snapshotMsg, setSnapshotMsg] = useState<string | null>(null)
   const [snapshotOk, setSnapshotOk] = useState<boolean | null>(null)
 
+  const [unifiedSnapBusy, setUnifiedSnapBusy] = useState(false)
+  const [unifiedSnapMsg, setUnifiedSnapMsg] = useState<string | null>(null)
+  const [unifiedSnapOk, setUnifiedSnapOk] = useState<boolean | null>(null)
+
   const [universeErr, setUniverseErr] = useState<string | null>(null)
+
+  const [holidaysSyncBusy, setHolidaysSyncBusy] = useState(false)
+  const [holidaysSyncMsg, setHolidaysSyncMsg] = useState<string | null>(null)
+  const [holidaysSyncOk, setHolidaysSyncOk] = useState<boolean | null>(null)
+  const [holidaysSyncResult, setHolidaysSyncResult] = useState<SepaSyncHolidaysResponse | null>(null)
 
   const [groupedHistoryBusy, setGroupedHistoryBusy] = useState(false)
   const [groupedHistoryMsg, setGroupedHistoryMsg] = useState<string | null>(null)
@@ -579,6 +680,10 @@ function SepaDataReadyPageInner({
   const [fixGapsBusy, setFixGapsBusy] = useState(false)
   const [fixGapsMsg, setFixGapsMsg] = useState<string | null>(null)
   const [fixGapsOk, setFixGapsOk] = useState<boolean | null>(null)
+
+  const [selectedGapBusy, setSelectedGapBusy] = useState(false)
+  const [selectedGapMsg, setSelectedGapMsg] = useState<string | null>(null)
+  const [selectedGapOk, setSelectedGapOk] = useState<boolean | null>(null)
 
   const [hasChecked, setHasChecked] = useState(false)
 
@@ -653,14 +758,86 @@ function SepaDataReadyPageInner({
     }
   }
 
+  const runUnifiedStockSnapshot = async () => {
+    setUnifiedSnapBusy(true)
+    setUnifiedSnapMsg(null)
+    setUnifiedSnapOk(null)
+    try {
+      const res = await postSepaStockUnifiedSnapshot()
+      if (!res.ok) {
+        setUnifiedSnapMsg(res.error ?? 'Unified snapshot refresh failed')
+        setUnifiedSnapOk(false)
+        return
+      }
+      const parts = [
+        res.message,
+        `symbols_total=${fmt(res.symbols_total)} chunks=${fmt(res.chunks)} rows_upserted=${fmt(res.rows_upserted)} elapsed=${fmt(res.elapsed_ms)}ms`,
+      ]
+      if (res.errors && res.errors.length > 0) {
+        parts.push(`errors: ${res.errors.slice(0, 3).join(' · ')}`)
+      }
+      setUnifiedSnapMsg(parts.filter(Boolean).join(' — '))
+      setUnifiedSnapOk(true)
+      await loadSummary()
+    } catch (e) {
+      setUnifiedSnapMsg(e instanceof Error ? e.message : 'Unified snapshot refresh failed')
+      setUnifiedSnapOk(false)
+    } finally {
+      setUnifiedSnapBusy(false)
+    }
+  }
+
+  const runHolidaysSync = useCallback(async (): Promise<SepaSyncHolidaysResponse> => {
+    setHolidaysSyncBusy(true)
+    setHolidaysSyncMsg(null)
+    setHolidaysSyncOk(null)
+    try {
+      const res = await postSepaSyncHolidays()
+      setHolidaysSyncResult(res)
+      if (!res.ok) {
+        setHolidaysSyncMsg(res.error ?? 'Holidays sync failed')
+        setHolidaysSyncOk(false)
+        return res
+      }
+      const fetched = res.fetched ?? 0
+      const inserted = res.inserted ?? 0
+      const updated = res.updated ?? 0
+      const skipped = res.skipped ?? 0
+      setHolidaysSyncMsg(
+        `Holidays synced — fetched ${fmt(fetched)}, inserted ${fmt(inserted)}, updated ${fmt(updated)}` +
+          (skipped > 0 ? `, skipped ${fmt(skipped)}` : ''),
+      )
+      setHolidaysSyncOk(true)
+      return res
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Holidays sync failed'
+      setHolidaysSyncMsg(msg)
+      setHolidaysSyncOk(false)
+      return { ok: false, error: msg }
+    } finally {
+      setHolidaysSyncBusy(false)
+    }
+  }, [])
+
   const runUniverseEnqueue = async () => {
     setUniverseErr(null)
-    const res = await refJobSession.enqueueTickerReferenceJob(
-      'feed_stocks_tickers_reference_universe',
-      { full_universe: true, limit: 1000, sort: 'ticker', order: 'asc' },
-      'high',
-    )
-    if (!res.ok) setUniverseErr(res.error ?? 'Enqueue failed')
+    const [tickerRes, holidaysRes] = await Promise.all([
+      refJobSession.enqueueTickerReferenceJob(
+        'feed_stocks_tickers_reference_universe',
+        { full_universe: true, limit: 1000, sort: 'ticker', order: 'asc' },
+        'high',
+      ),
+      runHolidaysSync(),
+    ])
+    const tickerErr = !tickerRes.ok ? (tickerRes.error ?? 'Ticker enqueue failed') : null
+    const holidayErr = !holidaysRes.ok ? (holidaysRes.error ?? 'Holidays sync failed') : null
+    const combined = [
+      tickerErr ? `Tickers: ${tickerErr}` : null,
+      holidayErr ? `Holidays: ${holidayErr}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ')
+    if (combined) setUniverseErr(combined)
   }
 
   const runGroupedHistoryBackfill = async () => {
@@ -734,6 +911,39 @@ function SepaDataReadyPageInner({
     }
   }
 
+  const runPriceGapBackfillSelected = async (symbols: string[]) => {
+    setSelectedGapBusy(true)
+    setSelectedGapMsg(null)
+    setSelectedGapOk(null)
+    try {
+      const res = await postSepaPriceGapBackfill(symbols)
+      if (!res.ok) {
+        setSelectedGapMsg(res.error ?? 'Backfill failed')
+        setSelectedGapOk(false)
+        return
+      }
+      if (res.message) {
+        setSelectedGapMsg(res.message)
+        setSelectedGapOk(true)
+        return
+      }
+      const gapCount = res.gap_count ?? 0
+      const chunks = res.chunks ?? 0
+      setSelectedGapMsg(`Dispatched ${fmt(chunks)} tasks for ${fmt(gapCount)} selected symbols.`)
+      setSelectedGapOk(true)
+      if (res.job_ids && res.job_ids.length > 0) {
+        refJobSession.trackStockOhlcSyncJob({ job_id: res.job_ids[0] })
+      } else {
+        refJobSession.openJobsSheet()
+      }
+    } catch (e) {
+      setSelectedGapMsg(e instanceof Error ? e.message : 'Backfill failed')
+      setSelectedGapOk(false)
+    } finally {
+      setSelectedGapBusy(false)
+    }
+  }
+
   const runFixGaps = async () => {
     setFixGapsBusy(true)
     setFixGapsMsg(null)
@@ -803,7 +1013,34 @@ function SepaDataReadyPageInner({
     ? 'error'
     : 'unknown'
 
-  const step2Status: CheckStatus = summaryLoading
+  const holidaysSummary = summary?.holidays_summary
+  const holidaysTotal = holidaysSummary?.total ?? 0
+  const holidaysMassive = holidaysSummary?.massive_count ?? 0
+  const holidaysSeed = holidaysSummary?.seed_count ?? 0
+  const holidaysEarlyClose = holidaysSummary?.early_close_count ?? 0
+  const holidaysLastSync = holidaysSummary?.last_massive_sync ?? null
+  const holidaysLatest = holidaysSummary?.latest_date ?? null
+  const holidaysEarliest = holidaysSummary?.earliest_date ?? null
+  const holidaysStatus: CheckStatus = summaryLoading
+    ? 'loading'
+    : holidaysTotal >= 100
+    ? 'ok'
+    : holidaysTotal > 0
+    ? 'warn'
+    : summary
+    ? 'error'
+    : 'unknown'
+
+  const unifiedSnapRows = summary?.stock_unified_snapshot_row_count
+  const unifiedSnapStatus: CheckStatus = summaryLoading
+    ? 'loading'
+    : unifiedSnapRows != null && unifiedSnapRows > 0
+    ? 'ok'
+    : summary && universeCount > 0
+    ? 'warn'
+    : 'unknown'
+
+  const barStepStatus: CheckStatus = summaryLoading
     ? 'loading'
     : priceGap === 0
     ? 'ok'
@@ -813,7 +1050,7 @@ function SepaDataReadyPageInner({
     ? 'error'
     : 'unknown'
 
-  const step3Status: CheckStatus = summaryLoading
+  const matSnapshotStepStatus: CheckStatus = summaryLoading
     ? 'loading'
     : summary?.snapshot_populated === true
     ? 'ok'
@@ -821,7 +1058,7 @@ function SepaDataReadyPageInner({
     ? 'error'
     : 'unknown'
 
-  const step4Status: CheckStatus = summaryLoading
+  const reviewStepStatus: CheckStatus = summaryLoading
     ? 'loading'
     : notesCount === 0 && summary?.snapshot_populated
     ? 'ok'
@@ -830,9 +1067,10 @@ function SepaDataReadyPageInner({
     : 'unknown'
 
   const step1Done = universeCount > 0
-  const step2Done = (live?.total_symbols ?? 0) > 0
-  const step3Done = summary?.snapshot_populated === true
-  const step4Done = step3Done && (snap?.price_ready ?? 0) > 0
+  const unifiedSnapDone = (unifiedSnapRows ?? 0) > 0
+  const barStepDone = (live?.total_symbols ?? 0) > 0
+  const matSnapshotStepDone = summary?.snapshot_populated === true
+  const reviewStepDone = matSnapshotStepDone && (snap?.price_ready ?? 0) > 0
 
   const lastCheckedNote = summaryLoadedAtRef.current
     ? `Checked ${fmtRelativeTime(summaryLoadedAtRef.current)}`
@@ -854,47 +1092,117 @@ function SepaDataReadyPageInner({
 
         <div className="sdp-step-list">
 
-          {/* Step 1 — Tickers Universe */}
+          {/* Step 1 — Tickers Universe + Market Holidays */}
           <div className={`sdp-step ${step1Done ? 'sdp-step--done' : ''}`}>
             <div className="sdp-step-num">1</div>
             <div className="sdp-step-body">
-              <div className="sdp-step-label">Sync All Tickers into <code>public.tickers</code></div>
-              <StepCheckStrip
-                hasChecked={hasChecked}
-                loading={summaryLoading && !summary}
-                status={step1Status}
-                primary={`${fmt(universeCount)} equity universe`}
-                primaryLabel=" · v_sepa_us_equity_universe"
-                secondary={tickersActive > 0 ? `${fmt(tickersActive)} active US stocks in DB` : null}
-                gap={universeCount < 100 ? universeCount : null}
-                gapUnit="tickers"
-                target="≥ 5,000 active US equity symbols"
-                note={
-                  summary?.tickers_last_synced_at
-                    ? `Last synced ${fmtRelativeTime(summary.tickers_last_synced_at)}`
-                    : lastCheckedNote
-                }
-              />
-              <p className="sdp-step-desc">
-                Populates the reference universe table from the Massive REST API.
-                Requires Celery workers on <code>stocks_massive</code> queue.
-              </p>
+              <div className="sdp-step-label">
+                Sync All Tickers + Market Holidays into{' '}
+                <code>public.tickers</code> &amp; <code>public.reference_us_holidays</code>
+              </div>
+
+              <div className="sdp-step-twin-grid">
+                {/* Tickers track */}
+                <div className="sdp-step-twin-card">
+                  <div className="sdp-step-twin-title">
+                    <span className="sdp-step-twin-tag sdp-step-twin-tag--tickers">TICKERS</span>
+                    <code>public.tickers</code>
+                  </div>
+                  <StepCheckStrip
+                    hasChecked={hasChecked}
+                    loading={summaryLoading && !summary}
+                    status={step1Status}
+                    primary={`${fmt(universeCount)} equity universe`}
+                    primaryLabel=" · v_sepa_us_equity_universe"
+                    secondary={tickersActive > 0 ? `${fmt(tickersActive)} active US stocks in DB` : null}
+                    gap={universeCount < 100 ? universeCount : null}
+                    gapUnit="tickers"
+                    target="≥ 5,000 active US equity symbols"
+                    note={
+                      summary?.tickers_last_synced_at
+                        ? `Last synced ${fmtRelativeTime(summary.tickers_last_synced_at)}`
+                        : lastCheckedNote
+                    }
+                  />
+                  <p className="sdp-step-desc">
+                    Reference universe from Massive REST{' '}
+                    <code>/v3/reference/tickers</code>. Celery queue{' '}
+                    <code>stocks_massive</code>.
+                  </p>
+                </div>
+
+                {/* Holidays track */}
+                <div className="sdp-step-twin-card">
+                  <div className="sdp-step-twin-title">
+                    <span className="sdp-step-twin-tag sdp-step-twin-tag--holidays">HOLIDAYS</span>
+                    <code>public.reference_us_holidays</code>
+                  </div>
+                  <StepCheckStrip
+                    hasChecked={hasChecked}
+                    loading={summaryLoading && !summary}
+                    status={holidaysStatus}
+                    primary={
+                      holidaysTotal > 0
+                        ? `${fmt(holidaysTotal)} holidays · ${fmt(holidaysMassive)} from Massive · ${fmt(holidaysSeed)} seeded`
+                        : 'No holidays loaded'
+                    }
+                    primaryLabel=" · all exchanges"
+                    secondary={
+                      holidaysEarlyClose > 0
+                        ? `${fmt(holidaysEarlyClose)} early-close days`
+                        : null
+                    }
+                    target="Seed 2020-2027 + Massive upcoming (~12 months)"
+                    note={
+                      holidaysLastSync
+                        ? `Massive sync ${fmtRelativeTime(holidaysLastSync)}` +
+                          (holidaysEarliest && holidaysLatest
+                            ? ` · ${holidaysEarliest} → ${holidaysLatest}`
+                            : '')
+                        : holidaysEarliest && holidaysLatest
+                        ? `${holidaysEarliest} → ${holidaysLatest}`
+                        : lastCheckedNote
+                    }
+                  />
+                  <p className="sdp-step-desc">
+                    Seeds NYSE/NASDAQ federal closures 2020-2027, then pulls{' '}
+                    <code>/v1/marketstatus/upcoming</code> for early-close timing.
+                    Used by K-line gap detection to skip closed days.
+                  </p>
+                </div>
+              </div>
+
               <div className="sdp-step-actions">
                 <button
                   type="button"
                   className="sdp-btn-check sdp-btn-check--sky"
                   onClick={handleCheck}
                   disabled={summaryLoading}
+                  title="Reload counts for both tickers and holidays"
                 >
-                  {summaryLoading ? 'Checking…' : 'Check'}
+                  {summaryLoading ? 'Checking…' : 'Check both'}
                 </button>
                 <button
                   type="button"
                   className="sdp-btn-primary"
                   onClick={() => void runUniverseEnqueue()}
-                  disabled={anyJobBusy}
+                  disabled={anyJobBusy || holidaysSyncBusy}
+                  title="Enqueue ticker universe sync (Celery) and run Massive holidays sync in parallel"
                 >
-                  {universeBusy ? 'Enqueueing…' : 'Enqueue ticker universe sync'}
+                  {universeBusy
+                    ? 'Enqueueing tickers…'
+                    : holidaysSyncBusy
+                    ? 'Syncing both…'
+                    : 'Sync tickers + holidays'}
+                </button>
+                <button
+                  type="button"
+                  className="sdp-btn-secondary"
+                  onClick={() => void runHolidaysSync()}
+                  disabled={holidaysSyncBusy}
+                  title="Pull NYSE/NASDAQ holidays from Massive REST + apply embedded seed"
+                >
+                  {holidaysSyncBusy ? 'Syncing…' : 'Holidays only'}
                 </button>
                 {activeJobCount > 0 && (
                   <span className="ref-jobs-active-pill" aria-live="polite">
@@ -914,21 +1222,95 @@ function SepaDataReadyPageInner({
                   </button>
                 )}
               </div>
+              {holidaysSyncMsg != null && (
+                <div className={`sdp-feedback sdp-msg--${holidaysSyncOk ? 'ok' : 'err'}`}>
+                  {holidaysSyncMsg}
+                  {holidaysSyncResult?.total_in_table != null && holidaysSyncOk && (
+                    <span className="sdp-check-secondary" style={{ marginLeft: 'var(--space-2)' }}>
+                      total in table: {fmt(holidaysSyncResult.total_in_table)}
+                    </span>
+                  )}
+                  {holidaysSyncResult?.massive_error && holidaysSyncOk && (
+                    <span className="sdp-check-secondary" style={{ marginLeft: 'var(--space-2)', color: 'var(--color-warn)' }}>
+                      Massive: {holidaysSyncResult.massive_error}
+                    </span>
+                  )}
+                  {holidaysSyncResult?.synced_at && holidaysSyncOk && (
+                    <span className="sdp-check-secondary" style={{ marginLeft: 'var(--space-2)' }}>
+                      at {new Date(holidaysSyncResult.synced_at).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+              )}
               {universeErr != null && (
                 <div className="sdp-feedback sdp-msg--err">{universeErr}</div>
               )}
             </div>
           </div>
 
-          {/* Step 2 — Stock Day Bars */}
-          <div className={`sdp-step ${step2Done ? 'sdp-step--done' : ''}`}>
+          {/* Step 2 — Massive unified stock snapshot baseline (before stock_day backfill) */}
+          <div className={`sdp-step ${unifiedSnapDone ? 'sdp-step--done' : ''}`}>
             <div className="sdp-step-num">2</div>
+            <div className="sdp-step-body">
+              <div className="sdp-step-label">
+                Refresh <code>public.cache_stock_snapshot</code> (Massive <code>GET /v3/snapshot</code>, stocks)
+              </div>
+              <StepCheckStrip
+                hasChecked={hasChecked}
+                loading={summaryLoading && !summary}
+                status={unifiedSnapStatus}
+                primary={
+                  unifiedSnapRows != null && unifiedSnapRows > 0
+                    ? `${fmt(unifiedSnapRows)} symbols cached`
+                    : 'No unified snapshot rows yet'
+                }
+                primaryLabel=" · cache_stock_snapshot"
+                secondary={
+                  summary?.stock_unified_snapshot_last_fetched_at
+                    ? `Last fetch ${fmtRelativeTime(summary.stock_unified_snapshot_last_fetched_at)}`
+                    : null
+                }
+                target="Run once after Step 1 before heavy stock_day backfill"
+                note={lastCheckedNote}
+              />
+              <p className="sdp-step-desc">
+                Batches all <code>v_sepa_us_equity_universe</code> symbols via <code>ticker.any_of</code> (≤250 per
+                request). Stores <code>session</code>, <code>last_minute</code>, and full <code>payload</code> for
+                later ingest lag checks.
+              </p>
+              <div className="sdp-step-actions">
+                <button
+                  type="button"
+                  className="sdp-btn-check sdp-btn-check--sky"
+                  onClick={handleCheck}
+                  disabled={summaryLoading}
+                >
+                  {summaryLoading ? 'Checking…' : 'Check'}
+                </button>
+                <button
+                  type="button"
+                  className="sdp-btn-primary"
+                  onClick={() => void runUnifiedStockSnapshot()}
+                  disabled={unifiedSnapBusy || anyJobBusy}
+                >
+                  {unifiedSnapBusy ? 'Refreshing…' : 'Refresh unified snapshots'}
+                </button>
+              </div>
+              {unifiedSnapMsg != null && (
+                <div className={`sdp-feedback sdp-msg--${unifiedSnapOk ? 'ok' : 'err'}`}>{unifiedSnapMsg}</div>
+              )}
+            </div>
+          </div>
+
+          {/* Step 3 — Stock Day Bars */}
+          <div className={`sdp-step ${barStepDone ? 'sdp-step--done' : ''}`}>
+            <div className="sdp-step-num">3</div>
             <div className="sdp-step-body">
               <div className="sdp-step-label">Backfill <code>public.stock_day</code> bars</div>
               <StepCheckStrip
                 hasChecked={hasChecked}
                 loading={summaryLoading && !summary}
-                status={step2Status}
+                status={barStepStatus}
                 primary={
                   totalSymbols > 0
                     ? `${fmt(priceReady)} / ${fmt(totalSymbols)} price_ready (${fmtPct(priceReady, totalSymbols)})`
@@ -992,12 +1374,12 @@ function SepaDataReadyPageInner({
                 </button>
                 <button
                   type="button"
-                  className={`sdp-btn-gaps${step2Status === 'ok' ? ' sdp-btn-gaps--ok' : priceGap != null && priceGap > 0 ? ' sdp-btn-gaps--warn' : ''}`}
+                  className={`sdp-btn-gaps${barStepStatus === 'ok' ? ' sdp-btn-gaps--ok' : priceGap != null && priceGap > 0 ? ' sdp-btn-gaps--warn' : ''}`}
                   onClick={() => setGapsDrawerOpen(true)}
-                  disabled={step2Status === 'ok' || !hasChecked}
+                  disabled={barStepStatus === 'ok' || !hasChecked}
                   title="View per-symbol gap details and LLM-ready report"
                 >
-                  {step2Status === 'ok'
+                  {barStepStatus === 'ok'
                     ? '✓ All price_ready'
                     : priceGap != null && priceGap > 0
                     ? `Gaps (${fmt(priceGap)}) →`
@@ -1018,15 +1400,15 @@ function SepaDataReadyPageInner({
             </div>
           </div>
 
-          {/* Step 3 — Readiness Snapshot */}
-          <div className={`sdp-step ${step3Done ? 'sdp-step--done' : 'sdp-step--active'}`}>
-            <div className="sdp-step-num">3</div>
+          {/* Step 4 — Readiness Snapshot */}
+          <div className={`sdp-step ${matSnapshotStepDone ? 'sdp-step--done' : 'sdp-step--active'}`}>
+            <div className="sdp-step-num">4</div>
             <div className="sdp-step-body">
               <div className="sdp-step-label">Refresh readiness snapshot</div>
               <StepCheckStrip
                 hasChecked={hasChecked}
                 loading={summaryLoading && !summary}
-                status={step3Status}
+                status={matSnapshotStepStatus}
                 primary={
                   summary?.snapshot_populated === true
                     ? `${fmt(snap?.price_ready)} / ${fmt(snap?.included_in_universe)} price_ready today`
@@ -1044,7 +1426,7 @@ function SepaDataReadyPageInner({
               />
               <p className="sdp-step-desc">
                 Materializes <code>sepa_universe_readiness_daily</code> for today by joining the universe view, bar counts,
-                and optional fundamentals cache. Run after daily bar backfill is complete.
+                and optional fundamentals cache. Run after Step 3 (stock_day backfill) completes.
               </p>
               <div className="sdp-step-actions">
                 <button
@@ -1070,18 +1452,18 @@ function SepaDataReadyPageInner({
             </div>
           </div>
 
-          {/* Step 4 — Review & Fix */}
-          <div className={`sdp-step ${step4Done ? 'sdp-step--done' : ''}`}>
-            <div className="sdp-step-num">4</div>
+          {/* Step 5 — Review & Fix */}
+          <div className={`sdp-step ${reviewStepDone ? 'sdp-step--done' : ''}`}>
+            <div className="sdp-step-num">5</div>
             <div className="sdp-step-body">
               <div className="sdp-step-label">Review metrics &amp; fix gaps</div>
               <StepCheckStrip
                 hasChecked={hasChecked}
                 loading={summaryLoading && !summary}
-                status={step4Status}
+                status={reviewStepStatus}
                 primary={
                   !summary?.snapshot_populated
-                    ? 'Snapshot not yet populated — run Step 3 first'
+                    ? 'Snapshot not yet populated — run Step 4 first'
                     : notesCount === 0
                     ? 'All universe symbols are price_ready'
                     : `${fmt(notesCount)} universe symbols not price_ready`
@@ -1098,7 +1480,7 @@ function SepaDataReadyPageInner({
               />
               <p className="sdp-step-desc">
                 Check the readiness metrics below. Symbols where <code>price_ready = false</code> appear in
-                the Notes breakdown with the failure reason. Use <em>Fix Gaps</em> to re-backfill those symbols, then re-run Step 3.
+                the Notes breakdown with the failure reason. Use <em>Fix Gaps</em> to re-backfill those symbols, then re-run Step 4.
               </p>
               <div className="sdp-step-actions">
                 <button
@@ -1114,7 +1496,7 @@ function SepaDataReadyPageInner({
                   className="sdp-btn-primary"
                   onClick={() => void runFixGaps()}
                   disabled={fixGapsBusy || !summary?.snapshot_populated}
-                  title={!summary?.snapshot_populated ? 'Run Step 3 first to populate the snapshot' : undefined}
+                  title={!summary?.snapshot_populated ? 'Run Step 4 first to populate the snapshot' : undefined}
                 >
                   {fixGapsBusy ? 'Fixing…' : 'Fix Gaps'}
                 </button>
@@ -1197,7 +1579,7 @@ function SepaDataReadyPageInner({
 
       {snapshotEmpty && (
         <div className="sdp-warn-banner">
-          ⚠ Snapshot table is empty for today — run Step 3 (Refresh snapshot) to populate it.
+          ⚠ Snapshot table is empty for today — run Step 4 (Refresh snapshot) to populate it.
         </div>
       )}
 
@@ -1206,6 +1588,17 @@ function SepaDataReadyPageInner({
           <div className="sdp-metric-label">Universe</div>
           <div className="sdp-metric-value">{fmt(summary?.universe_count)}</div>
           <div className="sdp-metric-sub">v_sepa_us_equity_universe</div>
+        </div>
+
+        <div className="sdp-metric">
+          <div className="sdp-metric-label">Unified snapshot rows</div>
+          <div className="sdp-metric-value">{fmt(summary?.stock_unified_snapshot_row_count ?? null)}</div>
+          <div className="sdp-metric-sub">
+            cache_stock_snapshot
+            {summary?.stock_unified_snapshot_last_fetched_at
+              ? ` · ${fmtRelativeTime(summary.stock_unified_snapshot_last_fetched_at)}`
+              : ''}
+          </div>
         </div>
 
         <div className="sdp-metric">
@@ -1349,6 +1742,10 @@ function SepaDataReadyPageInner({
         backfillBusy={priceGapBusy}
         backfillMsg={priceGapMsg}
         backfillOk={priceGapOk}
+        onRunBackfillSelected={(syms) => void runPriceGapBackfillSelected(syms)}
+        backfillSelectedBusy={selectedGapBusy}
+        backfillSelectedMsg={selectedGapMsg}
+        backfillSelectedOk={selectedGapOk}
       />
     </div>
   )
