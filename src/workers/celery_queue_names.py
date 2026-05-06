@@ -191,8 +191,8 @@ def build_broker_queue_labels_from_worker_profiles(config: Optional[dict]) -> Di
     return out
 
 
-# Default Celery pool for Massive-only worker profiles (options_*, stocks_massive*): prefork with this concurrency.
-DEFAULT_MASSIVE_WORKER_CONCURRENCY: Final[int] = 4
+# Default prefork child count when YAML omits ``massive_worker_concurrency`` (Massive profiles default to ``solo``).
+DEFAULT_MASSIVE_WORKER_CONCURRENCY: Final[int] = 1
 
 
 def build_celery_worker_pool_argv(

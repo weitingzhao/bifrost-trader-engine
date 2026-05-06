@@ -380,32 +380,26 @@ async def ops_retry_failed_massive_jobs(
     ),
     limit: int = Query(200, ge=1, le=2000, description="Max failed jobs to reset (oldest first)"),
 ) -> Any:
-    """Reset failed Massive jobs to pending and re-submit Celery tasks (same job IDs)."""
+    """Reset failed Massive jobs to pending and broker-dispatch up to ``massive_pending_dispatch_inflight_cap`` tasks per queue slice (remaining stay DB-pending until workers finish)."""
     denied = _require_role(request, "operator")
     if denied:
         return denied
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return {"ok": False, "error": "No DB", "reset": 0, "enqueued": 0, "enqueue_errors": []}
-    from src.massive.tasks import reenqueue_massive_job_from_row
     from src.vendor.massive.reader import reset_failed_job_massive_backfill_batch
 
     rows = reset_failed_job_massive_backfill_batch(control_via_db, celery_queue, limit)
-    enqueued = 0
-    enqueue_errors: List[Dict[str, str]] = []
-    for row in rows:
-        ok, err = reenqueue_massive_job_from_row(control_via_db, row)
-        if ok:
-            enqueued += 1
-        else:
-            enqueue_errors.append(
-                {"job_id": str(row.get("job_massive_backfill_id", "")), "error": err or "unknown"},
-            )
+    # Throttled broker dispatch: keep at most ``massive_pending_dispatch_inflight_cap`` messages
+    # per queue slice; remaining rows stay DB-pending until workers finish and top up.
+    from src.massive.pending_dispatch import dispatch_pending_massive_topup
+
+    enqueued = dispatch_pending_massive_topup(control_via_db, celery_queue)
     return {
         "ok": True,
         "reset": len(rows),
         "enqueued": enqueued,
-        "enqueue_errors": enqueue_errors,
+        "enqueue_errors": [],
     }
 
 

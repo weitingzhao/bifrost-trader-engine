@@ -125,6 +125,41 @@ def update_job_massive_backfill_celery_task_id(
         return False
 
 
+def release_massive_job_to_pending_for_redispatch(status_config: dict, job_id: int) -> bool:
+    """Set row back to ``pending``, clear broker id and result (transient DB / worker issues).
+
+    Used when a Celery task could not complete so ``dispatch_pending_massive_topup`` can submit a new message.
+    """
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    try:
+        jid = int(job_id)
+    except (TypeError, ValueError):
+        return False
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE job_massive_backfill
+                    SET status = 'pending', celery_task_id = NULL, result = NULL, updated_at = now()
+                    WHERE job_massive_backfill_id = %s
+                      AND status IN ('pending', 'running')
+                    """,
+                    (jid,),
+                )
+                n = cur.rowcount
+            conn.commit()
+            return bool(n and n > 0)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("release_massive_job_to_pending_for_redispatch failed: %s", e)
+        return False
+
+
 def get_job_massive_backfill(status_config: dict, job_id: Any) -> Optional[Dict[str, Any]]:
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return None

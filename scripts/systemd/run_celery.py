@@ -17,12 +17,12 @@ Before starting, kills any existing Celery worker process for this app (same scr
 so the port/process is not left occupied.
 
 ``--pool`` / concurrency: **stocks_ib** profile and the legacy no-``--instance`` worker use ``--pool=solo`` (one IB connection per process, reliable Stop).
-Massive profiles (``options_massive*``, ``stocks_massive*``) use ``--pool=prefork`` with concurrency from ``ops.celery.massive_worker_concurrency`` or per-profile ``concurrency`` (see ``src.workers.celery_queue_names.build_celery_worker_pool_argv``).
+Massive profiles (``options_massive*``, ``stocks_massive*``) default to ``--pool=solo`` (one job per instance); use ``pool: prefork`` + ``concurrency:`` in YAML for multi-task per process (see ``build_celery_worker_pool_argv``).
 
 Massive options only (typical):
-  celery -A src.workers.celery_app worker -l info -Q options_massive --pool=prefork --concurrency=4
+  celery -A src.workers.celery_app worker -l info -Q options_massive --pool=solo
 Stock reference only:
-  celery -A src.workers.celery_app worker -l info -Q stocks_massive --pool=prefork --concurrency=4
+  celery -A src.workers.celery_app worker -l info -Q stocks_massive --pool=solo
 IB bars only (solo):
   celery -A src.workers.celery_app worker -l info -Q stocks_ib --pool=solo
 

@@ -187,7 +187,8 @@ def reenqueue_bars_backfill_from_row(control_via_db: Any, row: Dict[str, Any]) -
             task_id=str(jid),
         )
     except Exception as e:
-        logger.exception("Celery re-enqueue failed job_id=%s: %s", jid, e)
-        update_job_bars_backfill_result(control_via_db, jid, "failed", {"ok": False, "error": str(e)})
+        # Don't revert the job to failed — leave it as pending so the user can
+        # retry again later or a Worker can pick it up once started.
+        logger.exception("Celery re-enqueue failed job_id=%s (job stays pending): %s", jid, e)
         return False, str(e)
     return True, None

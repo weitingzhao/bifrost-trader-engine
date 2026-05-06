@@ -1004,6 +1004,7 @@ def _apply_feed_stocks_corporate_actions(
 @app.task(bind=True, name="src.massive.tasks.run_massive_job")
 def run_massive_job(self, job_id: int) -> Dict[str, Any]:
     """Execute one job_massive_backfill row."""
+    dispatch_qname: Optional[str] = None
     from src.app.config import read_config
     from src.vendor.massive.client import MassiveClient
     from src.vendor.massive.config import get_massive_settings
@@ -1027,11 +1028,6 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
         normalize_ticker_ref_kind(str((job.get("kind") or "")).strip())
     ).strip().lower()
 
-    ms = get_massive_settings(config)
-    client = MassiveClient(ms["api_key"], ms["rest_base"])
-    if not client.configured and kind not in ("trim_jobs", "report_option_max_pain"):
-        update_job_massive_backfill_result(status_cfg, job_id, "failed", {"ok": False, "error": "Massive API key not configured"})
-        return {"ok": False, "error": "no api key"}
     payload = job.get("payload")
     if isinstance(payload, str):
         try:
@@ -1041,11 +1037,28 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         payload = {}
 
-    update_job_massive_backfill_result(status_cfg, job_id, "running", None)
+    from src.massive.celery_queues import celery_queue_for_massive_job
+
+    priority_high = str(payload.get("priority") or "").strip().lower() == "high"
+    dispatch_qname = celery_queue_for_massive_job(kind, priority_high=priority_high)
+
+    ms = get_massive_settings(config)
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    if not client.configured and kind not in ("trim_jobs", "report_option_max_pain"):
+        update_job_massive_backfill_result(status_cfg, job_id, "failed", {"ok": False, "error": "Massive API key not configured"})
+        try:
+            from src.massive.pending_dispatch import dispatch_pending_massive_topup
+
+            dispatch_pending_massive_topup(status_cfg, dispatch_qname)
+        except Exception:
+            logger.exception("dispatch_pending_massive_topup after no-api-key job_id=%s", job_id)
+        return {"ok": False, "error": "no api key"}
 
     try:
         params = _get_conn_params(status_cfg)
         conn = psycopg2.connect(**params)
+        # Only mark running after DB is reachable — avoids ``running`` -> ``failed`` on long connect timeouts.
+        update_job_massive_backfill_result(status_cfg, job_id, "running", None)
         try:
             # SEPA fundamentals → PostgreSQL (dispatch first; SSOT: FEED_STOCKS_FINANCIALS_KINDS).
             from src.massive.celery_queues import FEED_STOCKS_FINANCIALS_KINDS
@@ -2613,7 +2626,12 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                     return result
 
-            raise ValueError(f"unknown kind: {kind}")
+            from src.massive.celery_queues import MASSIVE_STOCKS_QUEUE_KINDS
+            all_known = sorted(MASSIVE_STOCKS_QUEUE_KINDS)
+            raise ValueError(
+                f"unknown kind: {kind!r} — worker may be running stale code. "
+                f"Known stock kinds: {all_known}. Restart Celery workers after git pull."
+            )
         except Exception as e:
             conn.rollback()
             logger.exception("run_massive_job failed: %s", e)
@@ -2623,10 +2641,29 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
         finally:
             conn.close()
     except Exception as e:
+        from src.vendor.massive.reader import release_massive_job_to_pending_for_redispatch
+
+        transient = isinstance(e, (psycopg2.OperationalError, psycopg2.InterfaceError))
+        if transient:
+            logger.warning(
+                "run_massive_job transient DB error job_id=%s (row left pending for redispatch): %s",
+                job_id,
+                e,
+            )
+            release_massive_job_to_pending_for_redispatch(status_cfg, job_id)
+            return {"ok": False, "error": str(e), "retry": "pending_redispatch"}
         logger.exception("run_massive_job outer: %s", e)
         err = {"ok": False, "error": str(e)}
         update_job_massive_backfill_result(status_cfg, job_id, "failed", err)
         return err
+    finally:
+        if dispatch_qname:
+            try:
+                from src.massive.pending_dispatch import dispatch_pending_massive_topup
+
+                dispatch_pending_massive_topup(status_cfg, dispatch_qname)
+            except Exception:
+                logger.exception("dispatch_pending_massive_topup after job_id=%s", job_id)
 
 
 def _enqueue_massive_job(kind: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -2649,6 +2686,12 @@ def _enqueue_massive_job(kind: str, payload: Optional[Dict[str, Any]] = None) ->
     queue_name = celery_queue_for_massive_job(kind, priority_high=False)
     async_result = run_massive_job.apply_async(args=[jid], queue=queue_name)
     update_job_massive_backfill_celery_task_id(config, jid, async_result.id)
+    try:
+        from src.massive.pending_dispatch import dispatch_pending_massive_topup
+
+        dispatch_pending_massive_topup(config, queue_name)
+    except Exception:
+        logger.debug("dispatch_pending_massive_topup after _enqueue_massive_job", exc_info=True)
     return {"ok": True, "job_id": jid, "celery_task_id": async_result.id}
 
 
@@ -2803,11 +2846,8 @@ def reenqueue_massive_job_from_row(control_via_db: dict, row: Dict[str, Any]) ->
         async_result = run_massive_job.apply_async(args=[jid], queue=qname)
         update_job_massive_backfill_celery_task_id(control_via_db, jid, async_result.id)
     except Exception as e:
-        logger.exception("reenqueue_massive_job_from_row job_id=%s: %s", jid, e)
-        from src.vendor.massive.reader import update_job_massive_backfill_result
-
-        update_job_massive_backfill_result(
-            control_via_db, jid, "failed", {"ok": False, "error": str(e)},
-        )
+        # Don't revert the job to failed — leave it as pending so the user can
+        # retry again later or a Worker can pick it up once started.
+        logger.exception("reenqueue_massive_job_from_row job_id=%s enqueue failed (job stays pending): %s", jid, e)
         return False, str(e)
     return True, None
