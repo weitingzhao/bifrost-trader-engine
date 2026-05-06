@@ -145,16 +145,33 @@ export function ingestRedisHealthLamp(
     if (m == null) {
       return { lamp: 'gray', title: 'Massive block missing from /status socket (Redis meta unavailable).' }
     }
-    if (ingestRedisTruthyConnected(m.ws_connected)) {
-      return {
-        lamp: 'green',
-        title: 'Massive WS ingest healthy (Redis bifrost:health:ws_massive_option, connected).',
-      }
-    }
     if (m.ws_connected === null || m.ws_connected === undefined) {
       return {
         lamp: 'gray',
         title: 'Massive WS not reported (no Redis URL or empty meta in /status).',
+      }
+    }
+    // Health hash staleness — service heartbeat (30s) should keep last_msg_age_s well below 90s.
+    // If stale, the service process is frozen or crashed even if ws_connected is still True from old data.
+    const msgAge = typeof m.last_msg_age_s === 'number' && Number.isFinite(m.last_msg_age_s)
+      ? m.last_msg_age_s
+      : null
+    if (msgAge !== null && msgAge > 180) {
+      return {
+        lamp: 'red',
+        title: `Massive WS health hash not updated for ${Math.floor(msgAge)}s — service likely crashed or frozen (bifrost:health:ws_massive_option).`,
+      }
+    }
+    if (msgAge !== null && msgAge > 90) {
+      return {
+        lamp: 'yellow',
+        title: `Massive WS health hash stale (${Math.floor(msgAge)}s) — service heartbeat not updating. Check run_massive_ws.py.`,
+      }
+    }
+    if (ingestRedisTruthyConnected(m.ws_connected)) {
+      return {
+        lamp: 'green',
+        title: 'Massive WS ingest healthy (Redis bifrost:health:ws_massive_option, connected).',
       }
     }
     return { lamp: 'red', title: 'Massive WS not connected (Redis bifrost:health:ws_massive_option).' }

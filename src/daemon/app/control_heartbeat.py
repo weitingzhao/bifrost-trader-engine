@@ -5,12 +5,27 @@ import logging
 import time
 from typing import Any, Optional
 
+from src.bifrost.ops_lease import maintain_health_host, ops_profile_from_config
+from src.bifrost.redis_health_keys import BIFROST_HEALTH_DAEMON_TRADING_ENGINE
 from src.daemon.fsm.daemon_fsm import DaemonState
 
 logger = logging.getLogger(__name__)
 
 # Chunked sleep so DB-written `stop` is visible within ~1s instead of up to full heartbeat interval.
 HEARTBEAT_SLEEP_CHUNK_SEC = 1.0
+
+
+def _maintain_trading_engine_host(app: Any) -> None:
+    """Restore bifrost_ops_control_host on the trading engine health hash if lost (e.g. Redis restart)."""
+    rq = getattr(app, "_redis_quotes_reader", None)
+    if rq is None or not rq.available:
+        return
+    r = rq.redis_client
+    if r is None:
+        return
+    cfg = getattr(app, "config", None) or getattr(app, "_config", None) or {}
+    ops_profile = ops_profile_from_config(cfg)
+    maintain_health_host(r, BIFROST_HEALTH_DAEMON_TRADING_ENGINE, ops_profile)
 
 
 def poll_control(app: Any) -> Optional[str]:
@@ -244,6 +259,7 @@ async def heartbeat(app: Any) -> None:
                     mock_hedging=getattr(app, "mock_hedging", True),
                     **listener_heartbeat_kwargs(app),
                 )
+            _maintain_trading_engine_host(app)
 
         await app._refresh_ticker_subscriptions()
         if app._status_sink and hasattr(app._status_sink, "write_daemon_subscribed_tickers"):

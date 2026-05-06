@@ -207,7 +207,7 @@ def upsert_income_statement_rows(
         cik, source, fetched_at
     ) VALUES (
         %s,%s,%s,%s,%s,%s,
-        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now()
+        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now()
     )
     ON CONFLICT (symbol, timeframe, period_end, source) DO UPDATE SET
         filing_date = EXCLUDED.filing_date,

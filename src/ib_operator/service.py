@@ -12,7 +12,7 @@ import redis
 
 from src.app.config import get_effective_ib_config
 from src.bifrost.message_center import IbConnectionStatusTracker
-from src.bifrost.ops_lease import maintain_service_ops_lease, ops_profile_from_config
+from src.bifrost.ops_lease import maintain_health_host, ops_profile_from_config
 from src.bifrost.redis_health_keys import HEALTH_HASH_TTL_SEC
 from src.ib.connection_policy import operator_effective_health_refresh_sec
 from src.ib_operator.config import effective_ib_operator_settings
@@ -348,7 +348,7 @@ def run_ib_operator_loop(
                 last_service_heartbeat_at=last_service_heartbeat_at,
                 service_heartbeat_reconnect_in_progress="",
             )
-            maintain_service_ops_lease(r, "ib_operator", ops_profile)
+            maintain_health_host(r, health_key, ops_profile)
 
         entries = []
         try:

@@ -122,7 +122,8 @@ REDIS_PUB_CHANNEL = "massive:channel"
 REDIS_KEY_TTL = 300
 
 QUEUE_MAX = 10_000
-HEARTBEAT_TIMEOUT = 30
+HEARTBEAT_TIMEOUT = 120  # options WS can be quiet for extended periods; 30s caused unnecessary reconnects
+HEALTH_HEARTBEAT_INTERVAL_SEC = 30  # independent health hash refresh regardless of WS session state
 RECONNECT_BASE = 1.0
 RECONNECT_MAX = 60.0
 WATCHLIST_POLL_SEC = 60
@@ -318,45 +319,36 @@ class MassiveWsIngest:
         self._stop = asyncio.Event()
         self._reconnects = 0
         self._msg_count = 0
+        self._ws_connected = False  # tracked for background health heartbeat
         self._current_symbols: Set[str] = set()
         self._current_channels: str = ""
-        from src.bifrost.ops_lease import ops_profile_from_config
+        from src.bifrost.ops_lease import ops_profile_from_config, maintain_health_host
         self._ops_profile = ops_profile_from_config(cfg)
+        self._maintain_health_host = lambda: maintain_health_host(
+            self._rds, REDIS_META_STATUS, self._ops_profile
+        )
 
     def _heartbeat_ops_lease(self) -> None:
-        """Refresh bifrost_ops_control_updated_at every heartbeat so the frontend countdown resets.
+        self._maintain_health_host()
 
-        Two paths:
-        - Lease present (written by Ops START): only touch updated_at — no profile needed.
-        - Lease cleared (orphan detection): restore all three fields — requires _ops_profile.
+    async def _health_heartbeat_loop(self) -> None:
+        """Independent health heartbeat: refresh Redis hash every 30s regardless of WS session state.
+
+        Decoupled from _watchlist_refresh_loop (which only runs inside an active WS session) so
+        the service heartbeat badge stays fresh during reconnect and quiet-market periods.
         """
-        try:
-            from backend.ops.market_ingest_control_env import (
-                BIFROST_OPS_CONTROL_ENV_FIELD,
-                BIFROST_OPS_CONTROL_HOST_FIELD,
-                BIFROST_OPS_CONTROL_UPDATED_AT_FIELD,
-                control_hostname,
-            )
-            now = time.time()
-            existing = self._rds.hget(REDIS_META_STATUS, BIFROST_OPS_CONTROL_ENV_FIELD)
-            if existing:
-                # Lease is alive — just advance the timestamp so the countdown resets.
-                self._rds.hset(REDIS_META_STATUS, BIFROST_OPS_CONTROL_UPDATED_AT_FIELD, str(now))
-                logger.debug("ops_lease: heartbeat updated_at on %s", REDIS_META_STATUS)
-            elif self._ops_profile:
-                # Lease was cleared (orphan detection recovery) — restore all three fields.
-                hostname = control_hostname()
-                self._rds.hset(REDIS_META_STATUS, mapping={
-                    BIFROST_OPS_CONTROL_ENV_FIELD: self._ops_profile,
-                    BIFROST_OPS_CONTROL_HOST_FIELD: hostname,
-                    BIFROST_OPS_CONTROL_UPDATED_AT_FIELD: str(now),
-                })
-                logger.info(
-                    "ops_lease: restored bifrost_ops_control_env on %s → %s @ %s",
-                    REDIS_META_STATUS, self._ops_profile, hostname,
+        while not self._stop.is_set():
+            try:
+                self._redis_writer.update_status(
+                    self._ws_connected, time.time(), self._reconnects, self._msg_count
                 )
-        except Exception as e:
-            logger.debug("_heartbeat_ops_lease: %s", e)
+                self._maintain_health_host()
+            except Exception as e:
+                logger.debug("health heartbeat: %s", e)
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=HEALTH_HEARTBEAT_INTERVAL_SEC)
+            except asyncio.TimeoutError:
+                pass
 
     async def run(self) -> None:
         loop = asyncio.get_event_loop()
@@ -366,24 +358,33 @@ class MassiveWsIngest:
         logger.info("Massive WS ingest starting (tier=%s, trades=%s)",
                      self._massive["tier"], self._massive["trades_enabled"])
 
-        while not self._stop.is_set():
-            try:
-                await self._connect_and_consume()
-            except Exception as e:
-                logger.error("WS connection error: %s", e)
+        health_task = asyncio.create_task(self._health_heartbeat_loop())
+        try:
+            while not self._stop.is_set():
+                try:
+                    await self._connect_and_consume()
+                except Exception as e:
+                    logger.error("WS connection error: %s", e)
 
-            if self._stop.is_set():
-                break
+                if self._stop.is_set():
+                    break
 
-            self._reconnects += 1
-            delay = min(RECONNECT_BASE * (2 ** min(self._reconnects - 1, 6)), RECONNECT_MAX)
-            logger.info("Reconnecting in %.1fs (attempt %d)…", delay, self._reconnects)
-            self._redis_writer.update_status(False, time.time(), self._reconnects, self._msg_count)
+                self._ws_connected = False
+                self._reconnects += 1
+                delay = min(RECONNECT_BASE * (2 ** min(self._reconnects - 1, 6)), RECONNECT_MAX)
+                logger.info("Reconnecting in %.1fs (attempt %d)…", delay, self._reconnects)
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=delay)
+                except asyncio.TimeoutError:
+                    pass
+        finally:
+            health_task.cancel()
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=delay)
-            except asyncio.TimeoutError:
+                await health_task
+            except (asyncio.CancelledError, Exception):
                 pass
 
+        self._ws_connected = False
         self._redis_writer.update_status(False, time.time(), self._reconnects, self._msg_count)
         logger.info("Massive WS ingest stopped (total messages: %d, reconnects: %d)",
                      self._msg_count, self._reconnects)
@@ -442,6 +443,7 @@ class MassiveWsIngest:
                 await ws.send(json.dumps({"action": "subscribe", "params": channels}))
                 logger.info("Subscribed: %s", channels[:200])
                 self._redis_writer.set_subscriptions(set(channels.split(",")))
+                self._ws_connected = True
                 self._redis_writer.update_status(True, time.time(), self._reconnects, self._msg_count)
                 self._heartbeat_ops_lease()
                 self._reconnects = 0
@@ -465,6 +467,8 @@ class MassiveWsIngest:
 
         except Exception as e:
             logger.warning("WS session ended: %s", e)
+        finally:
+            self._ws_connected = False
 
     async def _recv_loop(self, ws, queue: asyncio.Queue) -> None:
         while not self._stop.is_set():

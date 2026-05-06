@@ -792,14 +792,16 @@ function ServiceRow(props: {
             ) : null}
           </div>
         ) : null}
-        {/* Massive WS: service heartbeat countdown (~Ns until next _watchlist_refresh_loop tick) */}
+        {/* Massive WS: service heartbeat countdown (~Ns until next _health_heartbeat_loop tick) */}
         {svc.id === 'massive_ws' ? (() => {
           const updAt = svc.redis_control_updated_at
           if (updAt == null || !Number.isFinite(updAt) || updAt <= 0) return null
-          const HEARTBEAT_PERIOD = 60
-          const leaseAgeS = Math.max(0, Date.now() / 1000 - updAt + elapsed)
+          const HEARTBEAT_PERIOD = 30  // matches HEALTH_HEARTBEAT_INTERVAL_SEC in run_massive_ws.py
+          // Date.now() / 1000 is re-evaluated each render (setTick fires every 1s), so elapsed
+          // must NOT be added here — doing so would double-count and make the age grow 2× faster.
+          const leaseAgeS = Math.max(0, Date.now() / 1000 - updAt)
           const nextInS   = Math.max(0, HEARTBEAT_PERIOD - leaseAgeS)
-          const overdue   = leaseAgeS > HEARTBEAT_PERIOD + 10   // > 70s — heartbeat late
+          const overdue   = leaseAgeS > HEARTBEAT_PERIOD + 10   // > 40s — heartbeat late
           const critical  = leaseAgeS > 120                      // orphan-detection threshold
           const isSoon    = !overdue && nextInS <= 2
           const bg     = critical ? 'rgba(239,68,68,0.18)'   : overdue ? 'rgba(234,179,8,0.18)'   : isSoon ? 'rgba(59,130,246,0.2)'  : 'rgba(148,163,184,0.2)'
@@ -809,7 +811,7 @@ function ServiceRow(props: {
           const tipText = critical
             ? 'Service heartbeat overdue (>120s) — orphan detection threshold reached; HOST may be cleared.'
             : overdue
-              ? 'Service heartbeat late (expected every 60s). Health hash may go stale.'
+              ? 'Service heartbeat late (expected every 30s). Health hash may go stale.'
               : 'Next service heartbeat tick. Health hash (updated_at + connected) refreshed each tick.'
           return (
             <div

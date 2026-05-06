@@ -291,11 +291,12 @@ class IbIngestorApp:
         self._cfg = cfg
         self._st = _ingest_settings(cfg)
         self._rds = _redis_client(cfg)
-        from src.bifrost.ops_lease import ops_profile_from_config, maintain_service_ops_lease
+        from src.bifrost.ops_lease import ops_profile_from_config, maintain_health_host
         from src.vendor.ib_ingestor.writer import IbIngestorRedisWriter
+        from src.vendor.ib_ingestor.redis_keys import IB_INGESTER_META_HEALTH
 
         self._ops_profile = ops_profile_from_config(cfg)
-        self._maintain_ops_lease = lambda: maintain_service_ops_lease(self._rds, "ib_ingestor", self._ops_profile)
+        self._maintain_ops_lease = lambda: maintain_health_host(self._rds, IB_INGESTER_META_HEALTH, self._ops_profile)
         self._writer = IbIngestorRedisWriter(self._rds)
         self._status_tracker = IbConnectionStatusTracker(self._rds, service="ib_ingestor")
         self._stop = asyncio.Event()

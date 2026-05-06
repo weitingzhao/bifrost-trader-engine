@@ -120,30 +120,23 @@ async def _sleep_account_sync_interruptible(app: Any, total_sec: float, diff: An
     return False
 
 
-def _write_redis_health(r: Any, *, alive: bool, last_sync_version: int, stream_lag: int) -> None:
+def _write_redis_health(
+    r: Any, *, alive: bool, last_sync_version: int, stream_lag: int, ops_profile: Any = None
+) -> None:
     from src.daemon.account_sync.redis_keys import ACCOUNT_SYNC_HEALTH_KEY
-
-    # Preserve Ops market-ingest lease fields on the same hash (HSET subset does not delete others).
-    _OPS_FIELDS = ("bifrost_ops_control_env", "bifrost_ops_control_host")
+    from src.bifrost.ops_lease import maintain_health_host
 
     try:
-        preserve: dict[str, str] = {}
-        for fld in _OPS_FIELDS:
-            raw = r.hget(ACCOUNT_SYNC_HEALTH_KEY, fld)
-            if raw is None:
-                continue
-            if isinstance(raw, bytes):
-                raw = raw.decode("utf-8", errors="replace")
-            preserve[fld] = str(raw)
-
-        mapping = {
+        # HSET only updates the specified fields; other fields (bifrost_ops_control_*) are
+        # preserved automatically — no manual read-back needed.
+        r.hset(ACCOUNT_SYNC_HEALTH_KEY, mapping={
             "alive": "1" if alive else "0",
             "last_sync_version": str(last_sync_version),
             "stream_lag": str(stream_lag),
             "updated_at": str(time.time()),
-        }
-        mapping.update(preserve)
-        r.hset(ACCOUNT_SYNC_HEALTH_KEY, mapping=mapping)
+        })
+        # Restore HOST if lost (e.g. after Redis restart); no-op when HOST is present.
+        maintain_health_host(r, ACCOUNT_SYNC_HEALTH_KEY, ops_profile)
     except Exception as e:
         logger.debug("write_redis_health: %s", e)
 
@@ -151,11 +144,13 @@ def _write_redis_health(r: Any, *, alive: bool, last_sync_version: int, stream_l
 async def heartbeat_loop(app: Any) -> None:
     """Main heartbeat: XREADGROUP → diff → write heartbeat + health."""
     from src.daemon.account_sync.stream_consumer import AccountStreamConsumer
+    from src.bifrost.ops_lease import ops_profile_from_config
 
     consumer = AccountStreamConsumer(app.redis)
     consumer.ensure_group()
     diff = app.diff_engine
     last_version = 0
+    ops_profile = ops_profile_from_config(getattr(app, "_cfg", {}))
 
     while app.running:
         cmd = _poll_control(app.pg_conn)
@@ -170,7 +165,7 @@ async def heartbeat_loop(app: Any) -> None:
             if await _sleep_account_sync_interruptible(app, interval_sec, diff):
                 return
             _write_heartbeat(app.pg_conn, last_sync_version=last_version, stream_lag=0)
-            _write_redis_health(app.redis, alive=True, last_sync_version=last_version, stream_lag=0)
+            _write_redis_health(app.redis, alive=True, last_sync_version=last_version, stream_lag=0, ops_profile=ops_profile)
             continue
 
         remaining_sec = float(interval_sec)
@@ -209,4 +204,4 @@ async def heartbeat_loop(app: Any) -> None:
             open_orders_synced=diff.open_orders_synced,
             stream_lag=stream_lag,
         )
-        _write_redis_health(app.redis, alive=True, last_sync_version=last_version, stream_lag=stream_lag)
+        _write_redis_health(app.redis, alive=True, last_sync_version=last_version, stream_lag=stream_lag, ops_profile=ops_profile)

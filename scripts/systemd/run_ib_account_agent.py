@@ -184,11 +184,12 @@ class IbAccountAgentApp:
     def __init__(self, cfg: dict) -> None:
         self._cfg = cfg
         self._rds = _redis_client(cfg)
-        from src.bifrost.ops_lease import ops_profile_from_config, maintain_service_ops_lease
+        from src.bifrost.ops_lease import ops_profile_from_config, maintain_health_host
         from src.vendor.ib_account_agent.writer import IbAccountAgentRedisWriter
+        from src.vendor.ib_account_agent.redis_keys import IB_ACCOUNT_AGENT_META_HEALTH
 
         self._ops_profile = ops_profile_from_config(cfg)
-        self._maintain_ops_lease = lambda: maintain_service_ops_lease(self._rds, "ib_account_agent", self._ops_profile)
+        self._maintain_ops_lease = lambda: maintain_health_host(self._rds, IB_ACCOUNT_AGENT_META_HEALTH, self._ops_profile)
         self._writer = IbAccountAgentRedisWriter(self._rds)
         self._status_tracker = IbConnectionStatusTracker(self._rds, service="ib_account_agent")
         self._stop = asyncio.Event()

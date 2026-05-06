@@ -267,6 +267,11 @@ class RedisQuotesReader:
     def available(self) -> bool:
         return self._available and self._client is not None
 
+    @property
+    def redis_client(self) -> Any:
+        """Raw Redis client, or None if not connected. Used for health-hash writes."""
+        return self._client
+
     def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Latest STK quote: prefer IB Ingestor tick key, then legacy ``quote:{symbol}``."""
         if not self._client:

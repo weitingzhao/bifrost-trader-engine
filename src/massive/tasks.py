@@ -1022,7 +1022,10 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
         return {"ok": False, "error": "job not found"}
     from src.persistence.postgres.ticker_reference import normalize_ticker_ref_kind
 
-    kind = normalize_ticker_ref_kind((job.get("kind") or "").strip())
+    # Coerce to plain ASCII str (DB / clients may pass non-str or odd whitespace).
+    kind = str(
+        normalize_ticker_ref_kind(str((job.get("kind") or "")).strip())
+    ).strip().lower()
 
     ms = get_massive_settings(config)
     client = MassiveClient(ms["api_key"], ms["rest_base"])
@@ -1044,6 +1047,27 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
         params = _get_conn_params(status_cfg)
         conn = psycopg2.connect(**params)
         try:
+            # SEPA fundamentals → PostgreSQL (dispatch first; SSOT: FEED_STOCKS_FINANCIALS_KINDS).
+            from src.massive.celery_queues import FEED_STOCKS_FINANCIALS_KINDS
+
+            if kind in FEED_STOCKS_FINANCIALS_KINDS:
+                from src.research.sepa import financials_data as _fd_massive_fin
+
+                _fin_runners: Dict[str, Any] = {
+                    "feed_stocks_income_statements": _fd_massive_fin.run_feed_stocks_income_statements_job,
+                    "feed_stocks_balance_sheets": _fd_massive_fin.run_feed_stocks_balance_sheets_job,
+                    "feed_stocks_cash_flows": _fd_massive_fin.run_feed_stocks_cash_flows_job,
+                    "feed_stocks_ratios": _fd_massive_fin.run_feed_stocks_ratios_job,
+                    "feed_stocks_short_interest": _fd_massive_fin.run_feed_stocks_short_interest_job,
+                    "feed_stocks_short_volume": _fd_massive_fin.run_feed_stocks_short_volume_job,
+                }
+                _fin_fn = _fin_runners.get(kind)
+                if _fin_fn is None:
+                    raise ValueError(f"no fundamentals runner for kind: {kind}")
+                result = _fin_fn(conn, client, payload)
+                update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                return result
+
             if kind == "feed_option_snapshots":
                 # Align with other kinds: payload.mode; snapshot_type kept as legacy alias.
                 snap_mode = (payload.get("mode") or payload.get("snapshot_type") or "chain").strip().lower()
@@ -1904,40 +1928,6 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 count = _apply_feed_stocks_corporate_actions(conn, client, sym)
                 conn.commit()
                 result = {"ok": True, "kind": kind, "rows_upserted": count}
-                update_job_massive_backfill_result(status_cfg, job_id, "done", result)
-                return result
-
-            if kind in (
-                "feed_stocks_income_statements",
-                "feed_stocks_balance_sheets",
-                "feed_stocks_cash_flows",
-                "feed_stocks_ratios",
-                "feed_stocks_short_interest",
-                "feed_stocks_short_volume",
-            ):
-                from src.research.sepa.financials_data import (
-                    run_feed_stocks_balance_sheets_job,
-                    run_feed_stocks_cash_flows_job,
-                    run_feed_stocks_income_statements_job,
-                    run_feed_stocks_ratios_job,
-                    run_feed_stocks_short_interest_job,
-                    run_feed_stocks_short_volume_job,
-                )
-
-                if kind == "feed_stocks_income_statements":
-                    result = run_feed_stocks_income_statements_job(conn, client, payload)
-                elif kind == "feed_stocks_balance_sheets":
-                    result = run_feed_stocks_balance_sheets_job(conn, client, payload)
-                elif kind == "feed_stocks_cash_flows":
-                    result = run_feed_stocks_cash_flows_job(conn, client, payload)
-                elif kind == "feed_stocks_ratios":
-                    result = run_feed_stocks_ratios_job(conn, client, payload)
-                elif kind == "feed_stocks_short_interest":
-                    result = run_feed_stocks_short_interest_job(conn, client, payload)
-                elif kind == "feed_stocks_short_volume":
-                    result = run_feed_stocks_short_volume_job(conn, client, payload)
-                else:
-                    raise ValueError(f"unknown fundamentals feed kind: {kind}")
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 
