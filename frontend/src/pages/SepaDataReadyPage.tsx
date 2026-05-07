@@ -367,6 +367,9 @@ const RUNBOOK_STAGE_LAYOUT: ReadonlyArray<{
   },
 ]
 
+/** All run book step IDs — one readiness summary fetch covers every step. */
+const ALL_SEPA_RUNBOOK_STEP_IDS: readonly SepaRunStep[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
 function StepCheckStrip({
   hasChecked = true,
   loading,
@@ -395,7 +398,7 @@ function StepCheckStrip({
       <div className="sdp-check-strip sdp-check-strip--notchecked">
         <div className="sdp-check-row">
           <span className="sdp-check-dot sdp-check-dot--unknown" />
-          <span className="sdp-check-text sdp-check-text--dim">Click Check to verify data readiness</span>
+          <span className="sdp-check-text sdp-check-text--dim">Use Check in the run book header to verify</span>
         </div>
       </div>
     )
@@ -1845,47 +1848,6 @@ function finGapOk(n: number | null | undefined): boolean {
   return n != null && n === 0
 }
 
-function stepOkFromResponse(stepId: number, res: SepaReadinessSummaryResponse): boolean {
-  const universeCount = res.universe_count ?? 0
-  const holidaysTotal = res.holidays_summary?.total ?? 0
-  const unifiedSnapRows = res.stock_unified_snapshot_row_count ?? 0
-  const live = res.price_readiness_live
-  const totalSymbols = live?.total_symbols ?? 0
-  const priceReady = live?.price_ready ?? 0
-  const vendorFillGap = res.stock_day_vendor_fill_gap_count
-  const priceGap = vendorFillGap != null ? vendorFillGap : totalSymbols > 0 ? totalSymbols - priceReady : null
-  const notesCount = (res.notes_breakdown ?? []).reduce((s, r) => s + r.count, 0)
-  const fundValid = res.fund_cache_valid_count ?? 0
-  switch (stepId) {
-    case 1:
-      return universeCount > 5000 && holidaysTotal >= 100
-    case 2:
-      return unifiedSnapRows > 0
-    case 3:
-      return priceGap === 0
-    case 4:
-      return finGapOk(res.income_statements_gap_count)
-    case 5:
-      return finGapOk(res.balance_sheets_gap_count)
-    case 6:
-      return finGapOk(res.cash_flows_gap_count)
-    case 7:
-      return finGapOk(res.ratios_gap_count)
-    case 8:
-      return finGapOk(res.short_interest_gap_count)
-    case 9:
-      return finGapOk(res.short_volume_gap_count)
-    case 10:
-      return fundValid > 0 && universeCount > 0 && fundValid / universeCount >= 0.5
-    case 11:
-      return res.snapshot_populated === true
-    case 12:
-      return notesCount === 0 && res.snapshot_populated === true
-    default:
-      return false
-  }
-}
-
 // ── Inner Page ────────────────────────────────────────────────────────────────
 
 /** Inner page: consumes MassiveRefJobSessionContext for job tracking. */
@@ -1940,7 +1902,6 @@ function SepaDataReadyPageInner({
   const [selectedGapOk, setSelectedGapOk] = useState<boolean | null>(null)
 
   const [checkedSteps, setCheckedSteps] = useState<Set<number>>(new Set())
-  const [checkingStep, setCheckingStep] = useState<number | null>(null)
 
   const [gapsDrawerOpen, setGapsDrawerOpen] = useState(false)
   const [dataSupportChecked, setDataSupportChecked] = useState(false)
@@ -1962,31 +1923,23 @@ function SepaDataReadyPageInner({
   const [queuesErr, setQueuesErr] = useState<string | null>(null)
   const [queuesLoading, setQueuesLoading] = useState(false)
 
-  const loadSummary = useCallback(
-    async (opts?: { showGlobalLoading?: boolean }): Promise<SepaReadinessSummaryResponse | null> => {
-      const showGlobalLoading = opts?.showGlobalLoading !== false
-      if (showGlobalLoading) {
-        setSummaryLoading(true)
-      }
-      setSummaryErr(null)
-      try {
-        const res = await fetchSepaReadinessSummary()
-        setSummary(res)
-        summaryLoadedAtRef.current = new Date().toISOString()
-        if (!res.ok) setSummaryErr(res.error ?? 'Summary failed')
-        return res
-      } catch (e) {
-        setSummaryErr(e instanceof Error ? e.message : 'Summary failed')
-        setSummary(null)
-        return null
-      } finally {
-        if (showGlobalLoading) {
-          setSummaryLoading(false)
-        }
-      }
-    },
-    [],
-  )
+  const loadSummary = useCallback(async (): Promise<SepaReadinessSummaryResponse | null> => {
+    setSummaryLoading(true)
+    setSummaryErr(null)
+    try {
+      const res = await fetchSepaReadinessSummary()
+      setSummary(res)
+      summaryLoadedAtRef.current = new Date().toISOString()
+      if (!res.ok) setSummaryErr(res.error ?? 'Summary failed')
+      return res
+    } catch (e) {
+      setSummaryErr(e instanceof Error ? e.message : 'Summary failed')
+      setSummary(null)
+      return null
+    } finally {
+      setSummaryLoading(false)
+    }
+  }, [])
 
   const loadQueues = useCallback(async () => {
     setQueuesLoading(true)
@@ -2007,25 +1960,17 @@ function SepaDataReadyPageInner({
     }
   }, [])
 
-  const handleCheckStep = useCallback(async (stepId: number) => {
-    setCheckingStep(stepId)
-    setCheckedSteps((prev) => new Set([...prev, stepId]))
-    try {
-      // Per-step Check must not flip global summaryLoading — that would mark every runbook step as "loading".
-      const res = await loadSummary({ showGlobalLoading: false })
-      void loadQueues()
-      if (res?.ok && stepOkFromResponse(stepId, res) && stepId < 12) {
-        setActiveRunStep((stepId + 1) as SepaRunStep)
-      }
-    } finally {
-      setCheckingStep(null)
+  const handleRunbookReadinessCheck = useCallback(async () => {
+    const res = await loadSummary()
+    void loadQueues()
+    if (res !== null) {
+      setCheckedSteps(new Set<number>(ALL_SEPA_RUNBOOK_STEP_IDS))
     }
   }, [loadSummary, loadQueues])
 
   const handleReload = useCallback(() => {
-    void loadSummary()
-    void loadQueues()
-  }, [loadSummary, loadQueues])
+    void handleRunbookReadinessCheck()
+  }, [handleRunbookReadinessCheck])
 
   const runSnapshot = async () => {
     setSnapshotBusy(true)
@@ -2473,10 +2418,7 @@ function SepaDataReadyPageInner({
         : null
   const notesCount = (summary?.notes_breakdown ?? []).reduce((s, r) => s + r.count, 0)
 
-  /** True while full reload or a single-step Check is fetching summary (blocks concurrent checks). */
-  const readinessFetchBusy = summaryLoading || checkingStep != null
-
-  const step1Status: CheckStatus = summaryLoading || checkingStep === 1
+  const step1Status: CheckStatus = summaryLoading
     ? 'loading'
     : universeCount > 5000
     ? 'ok'
@@ -2494,7 +2436,7 @@ function SepaDataReadyPageInner({
   const holidaysLastSync = holidaysSummary?.last_massive_sync ?? null
   const holidaysLatest = holidaysSummary?.latest_date ?? null
   const holidaysEarliest = holidaysSummary?.earliest_date ?? null
-  const holidaysStatus: CheckStatus = summaryLoading || checkingStep === 1
+  const holidaysStatus: CheckStatus = summaryLoading
     ? 'loading'
     : holidaysTotal >= 100
     ? 'ok'
@@ -2505,7 +2447,7 @@ function SepaDataReadyPageInner({
     : 'unknown'
 
   const unifiedSnapRows = summary?.stock_unified_snapshot_row_count
-  const unifiedSnapStatus: CheckStatus = summaryLoading || checkingStep === 2
+  const unifiedSnapStatus: CheckStatus = summaryLoading
     ? 'loading'
     : unifiedSnapRows != null && unifiedSnapRows > 0
     ? 'ok'
@@ -2513,7 +2455,7 @@ function SepaDataReadyPageInner({
     ? 'warn'
     : 'unknown'
 
-  const barStepStatus: CheckStatus = summaryLoading || checkingStep === 3
+  const barStepStatus: CheckStatus = summaryLoading
     ? 'loading'
     : priceGap === 0
     ? 'ok'
@@ -2523,7 +2465,7 @@ function SepaDataReadyPageInner({
     ? 'error'
     : 'unknown'
 
-  const matSnapshotStepStatus: CheckStatus = summaryLoading || checkingStep === 11
+  const matSnapshotStepStatus: CheckStatus = summaryLoading
     ? 'loading'
     : summary?.snapshot_populated === true
     ? 'ok'
@@ -2538,14 +2480,14 @@ function SepaDataReadyPageInner({
   const shortIntGap = summary?.short_interest_gap_count
   const shortVolGap = summary?.short_volume_gap_count
 
-  const incomeFinStatus = gapCountCheckStatus(summaryLoading || checkingStep === 4, incomeGap)
-  const balanceFinStatus = gapCountCheckStatus(summaryLoading || checkingStep === 5, balanceGap)
-  const cashFinStatus = gapCountCheckStatus(summaryLoading || checkingStep === 6, cashGap)
-  const ratiosFinStatus = gapCountCheckStatus(summaryLoading || checkingStep === 7, ratiosGap)
-  const shortIntFinStatus = gapCountCheckStatus(summaryLoading || checkingStep === 8, shortIntGap)
-  const shortVolFinStatus = gapCountCheckStatus(summaryLoading || checkingStep === 9, shortVolGap)
+  const incomeFinStatus = gapCountCheckStatus(summaryLoading, incomeGap)
+  const balanceFinStatus = gapCountCheckStatus(summaryLoading, balanceGap)
+  const cashFinStatus = gapCountCheckStatus(summaryLoading, cashGap)
+  const ratiosFinStatus = gapCountCheckStatus(summaryLoading, ratiosGap)
+  const shortIntFinStatus = gapCountCheckStatus(summaryLoading, shortIntGap)
+  const shortVolFinStatus = gapCountCheckStatus(summaryLoading, shortVolGap)
 
-  const reviewStepStatus: CheckStatus = summaryLoading || checkingStep === 12
+  const reviewStepStatus: CheckStatus = summaryLoading
     ? 'loading'
     : notesCount === 0 && summary?.snapshot_populated
     ? 'ok'
@@ -2561,7 +2503,7 @@ function SepaDataReadyPageInner({
 
   const fundCacheValid = summary?.fund_cache_valid_count ?? 0
   const fundCacheViewExists = summary?.fund_cache_view_exists
-  const fundStepStatus: CheckStatus = summaryLoading || checkingStep === 10
+  const fundStepStatus: CheckStatus = summaryLoading
     ? 'loading'
     : fundCacheViewExists === false
     ? 'error'
@@ -2738,7 +2680,18 @@ function SepaDataReadyPageInner({
 
       {/* ── Step Actions Panel ─────────────────────────────────────────── */}
       <div className="sdp-actions-card">
-        <div className="sdp-actions-title">Run book</div>
+        <div className="sdp-runbook-actions-head">
+          <div className="sdp-actions-title">Run book</div>
+          <button
+            type="button"
+            className="sdp-btn-check sdp-btn-check--sky"
+            onClick={() => void handleRunbookReadinessCheck()}
+            disabled={summaryLoading}
+            title="Refresh readiness summary for all run book steps"
+          >
+            {summaryLoading ? 'Checking…' : 'Check'}
+          </button>
+        </div>
 
         <div className="sdp-runbook-layout">
         <div className="sdp-runbook-main">
@@ -2840,15 +2793,6 @@ function SepaDataReadyPageInner({
               <div className="sdp-step-actions">
                 <button
                   type="button"
-                  className="sdp-btn-check sdp-btn-check--sky"
-                  onClick={() => void handleCheckStep(1)}
-                  disabled={readinessFetchBusy}
-                  title="Check tickers and holidays data readiness"
-                >
-                  {checkingStep === 1 ? 'Checking…' : 'Check'}
-                </button>
-                <button
-                  type="button"
                   className="sdp-btn-primary"
                   onClick={() => void runUniverseEnqueue()}
                   disabled={anyJobBusy || holidaysSyncBusy}
@@ -2932,14 +2876,6 @@ function SepaDataReadyPageInner({
               <div className="sdp-step-actions">
                 <button
                   type="button"
-                  className="sdp-btn-check sdp-btn-check--sky"
-                  onClick={() => void handleCheckStep(2)}
-                  disabled={readinessFetchBusy}
-                >
-                  {checkingStep === 2 ? 'Checking…' : 'Check'}
-                </button>
-                <button
-                  type="button"
                   className="sdp-btn-primary"
                   onClick={() => void runUnifiedStockSnapshot()}
                   disabled={unifiedSnapBusy || anyJobBusy}
@@ -2987,8 +2923,8 @@ function SepaDataReadyPageInner({
               </div>
 
               <p className="sdp-step-desc">
-                Celery <code>feed_stocks_aggregate</code> writes <code>source=massive</code> rows. The Check gap count
-                uses <code>cache_stock_snapshot.last_minute_updated</code> (America/New_York date) vs{' '}
+                Celery <code>feed_stocks_aggregate</code> writes <code>source=massive</code> rows. The readiness summary
+                gap count uses <code>cache_stock_snapshot.last_minute_updated</code> (America/New_York date) vs{' '}
                 <code>max(stock_day.bar_time)</code>;                 any snapshot-based check requires non-null <code>session_close</code> — if it is empty, that symbol is
                 skipped for Step 3 gaps (no <code>stock_day</code> comparison and no readiness fallback), regardless of
                 whether daily bars exist. After a calendar gap, the latest daily <code>stock_day.close</code> must differ
@@ -3000,14 +2936,6 @@ function SepaDataReadyPageInner({
                 readiness view.
               </p>
               <div className="sdp-step-actions">
-                <button
-                  type="button"
-                  className="sdp-btn-check sdp-btn-check--violet"
-                  onClick={() => void handleCheckStep(3)}
-                  disabled={readinessFetchBusy}
-                >
-                  {checkingStep === 3 ? 'Checking…' : 'Check'}
-                </button>
                 <button
                   type="button"
                   className="sdp-btn-primary"
@@ -3070,14 +2998,6 @@ function SepaDataReadyPageInner({
               <div className="sdp-step-actions">
                 <button
                   type="button"
-                  className="sdp-btn-check sdp-btn-check--amber"
-                  onClick={() => void handleCheckStep(4)}
-                  disabled={readinessFetchBusy}
-                >
-                  {checkingStep === 4 ? 'Checking…' : 'Check'}
-                </button>
-                <button
-                  type="button"
                   className="sdp-btn-primary"
                   onClick={() => void runFinBackfillAllForKind('income')}
                   disabled={finAllBusy}
@@ -3127,9 +3047,6 @@ function SepaDataReadyPageInner({
                 Same Supported/Partial gap scope as Step 4: <code>{FIN_STMT_GAP_INSTRUMENT_CODES.join(', ')}</code>.
               </p>
               <div className="sdp-step-actions">
-                <button type="button" className="sdp-btn-check sdp-btn-check--amber" onClick={() => void handleCheckStep(5)} disabled={readinessFetchBusy}>
-                  {checkingStep === 5 ? 'Checking…' : 'Check'}
-                </button>
                 <button
                   type="button"
                   className="sdp-btn-primary"
@@ -3184,9 +3101,6 @@ function SepaDataReadyPageInner({
                 scope as Step 4: <code>{FIN_STMT_GAP_INSTRUMENT_CODES.join(', ')}</code>.
               </p>
               <div className="sdp-step-actions">
-                <button type="button" className="sdp-btn-check sdp-btn-check--amber" onClick={() => void handleCheckStep(6)} disabled={readinessFetchBusy}>
-                  {checkingStep === 6 ? 'Checking…' : 'Check'}
-                </button>
                 <button
                   type="button"
                   className="sdp-btn-primary"
@@ -3231,9 +3145,6 @@ function SepaDataReadyPageInner({
                 Supported/Partial gap scope as Step 4: <code>{FIN_STMT_GAP_INSTRUMENT_CODES.join(', ')}</code>.
               </p>
               <div className="sdp-step-actions">
-                <button type="button" className="sdp-btn-check sdp-btn-check--amber" onClick={() => void handleCheckStep(7)} disabled={readinessFetchBusy}>
-                  {checkingStep === 7 ? 'Checking…' : 'Check'}
-                </button>
                 <button
                   type="button"
                   className="sdp-btn-primary"
@@ -3276,9 +3187,6 @@ function SepaDataReadyPageInner({
                 <code>GET /stocks/v1/short-interest</code> — recent settlement dates per symbol.
               </p>
               <div className="sdp-step-actions">
-                <button type="button" className="sdp-btn-check sdp-btn-check--amber" onClick={() => void handleCheckStep(8)} disabled={readinessFetchBusy}>
-                  {checkingStep === 8 ? 'Checking…' : 'Check'}
-                </button>
                 <button
                   type="button"
                   className="sdp-btn-primary"
@@ -3321,9 +3229,6 @@ function SepaDataReadyPageInner({
                 <code>GET /stocks/v1/short-volume</code> — recent trade dates and short volume ratio.
               </p>
               <div className="sdp-step-actions">
-                <button type="button" className="sdp-btn-check sdp-btn-check--amber" onClick={() => void handleCheckStep(9)} disabled={readinessFetchBusy}>
-                  {checkingStep === 9 ? 'Checking…' : 'Check'}
-                </button>
                 <button
                   type="button"
                   className="sdp-btn-primary"
@@ -3387,14 +3292,6 @@ function SepaDataReadyPageInner({
               <div className="sdp-step-actions">
                 <button
                   type="button"
-                  className="sdp-btn-check sdp-btn-check--violet"
-                  onClick={() => void handleCheckStep(10)}
-                  disabled={readinessFetchBusy}
-                >
-                  {checkingStep === 10 ? 'Checking…' : 'Check'}
-                </button>
-                <button
-                  type="button"
                   className="sdp-btn-primary"
                   onClick={() => void runFundamentalsBackfill()}
                   disabled={fundBackfillBusy || universeCount === 0}
@@ -3425,14 +3322,6 @@ function SepaDataReadyPageInner({
               <div className="sdp-step-actions">
                 <button
                   type="button"
-                  className="sdp-btn-check sdp-btn-check--amber"
-                  onClick={() => void handleCheckStep(11)}
-                  disabled={readinessFetchBusy}
-                >
-                  {checkingStep === 11 ? 'Checking…' : 'Check'}
-                </button>
-                <button
-                  type="button"
                   className="sdp-btn-primary"
                   onClick={() => void runSnapshot()}
                   disabled={snapshotBusy}
@@ -3460,14 +3349,6 @@ function SepaDataReadyPageInner({
                 the Notes breakdown with the failure reason. Use <em>Fix Gaps</em> to re-backfill those symbols, then re-run Step 11.
               </p>
               <div className="sdp-step-actions">
-                <button
-                  type="button"
-                  className="sdp-btn-check sdp-btn-check--teal"
-                  onClick={() => void handleCheckStep(12)}
-                  disabled={readinessFetchBusy}
-                >
-                  {checkingStep === 12 ? 'Checking…' : 'Check'}
-                </button>
                 <button
                   type="button"
                   className="sdp-btn-primary"
@@ -3514,9 +3395,9 @@ function SepaDataReadyPageInner({
             type="button"
             className="sdp-btn-ghost"
             onClick={handleReload}
-            disabled={readinessFetchBusy}
+            disabled={summaryLoading}
           >
-            {summaryLoading ? 'Reloading…' : checkingStep != null ? 'Checking…' : '↻ Reload all'}
+            {summaryLoading ? 'Reloading…' : '↻ Reload all'}
           </button>
           {refJobSession.refJobItems.length > 0 && (
             <button
@@ -3596,7 +3477,7 @@ function SepaDataReadyPageInner({
                 {!collapsedResultStages.has(stage.id) && <div className="sdp-results-stage-entries">
                   {stage.steps.map((s) => {
                     const isChecked = checkedSteps.has(s.id)
-                    const isLoading = checkingStep === s.id
+                    const isLoading = summaryLoading
                     return (
                 <div
                   key={s.id}
@@ -3617,7 +3498,7 @@ function SepaDataReadyPageInner({
                   {isLoading ? (
                     <div className="sdp-result-idle">Checking…</div>
                   ) : !isChecked ? (
-                    <div className="sdp-result-idle">Click Check to verify</div>
+                    <div className="sdp-result-idle">Use Check in the run book header above</div>
                   ) : (
                     <div className="sdp-result-content">
                       {s.id === 1 && (
@@ -4091,7 +3972,7 @@ function SepaDataReadyPageInner({
             type="button"
             className="sdp-btn-ghost"
             onClick={() => void loadSummary()}
-            disabled={readinessFetchBusy}
+            disabled={summaryLoading}
           >
             Refresh
           </button>

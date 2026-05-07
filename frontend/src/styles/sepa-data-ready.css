@@ -34,6 +34,20 @@
   margin: 0 0 var(--space-4);
 }
 
+.sdp-runbook-actions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.sdp-runbook-actions-head .sdp-actions-title {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+
 /* Compact horizontal runbook stepper */
 .sdp-fin-runbook-msg {
   margin-top: var(--space-3);
