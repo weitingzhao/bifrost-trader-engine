@@ -19,7 +19,6 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from src.massive.celery_queues import celery_queue_for_massive_job
 from src.massive.massive_job_goal import describe_massive_job_goal
 from src.vendor.massive.client import _as_error_str
 
@@ -3134,9 +3133,10 @@ def get_instrument_types_db(
 @router.post("/research/massive/jobs/ticker-reference")
 @router.post("/research/massive/jobs/stock-reference")
 def post_jobs_ticker_reference(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """Enqueue ticker reference Celery job (canonical ``feed_stocks_tickers_*`` kinds; legacy ``ticker_reference_*`` / ``stock_reference_*`` normalized)."""
-    from src.vendor.massive.config import get_massive_settings
+    """Enqueue ticker reference Celery job via ``apply_async``."""
+    from src.massive.celery_queues import celery_queue_for_massive_job
     from src.massive.tasks import run_massive_job
+    from src.vendor.massive.config import get_massive_settings
     from src.vendor.massive.reader import insert_job_massive_backfill, update_job_massive_backfill_celery_task_id
     from src.persistence.postgres.ticker_reference import normalize_ticker_ref_kind
 
@@ -3175,9 +3175,7 @@ def post_jobs_ticker_reference(request: Request, body: Dict[str, Any] = Body(...
     try:
         priority_high = str(body.get("priority") or "").strip().lower() == "high"
         queue_name = celery_queue_for_massive_job(kind, priority_high=priority_high)
-        async_result = run_massive_job.apply_async(
-            args=[jid], task_id=str(jid), queue=queue_name
-        )
+        async_result = run_massive_job.apply_async(args=[jid], task_id=str(jid), queue=queue_name)
         update_job_massive_backfill_celery_task_id(db, jid, async_result.id)
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -3386,9 +3384,10 @@ def get_massive_hist_trades(
 
 @router.post("/research/massive/sync")
 def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """Enqueue Celery job (queue depends on kind: options → options_massive/*_high, ticker ref → stocks_massive*)."""
-    from src.vendor.massive.config import get_massive_settings
+    """Enqueue Celery job via ``apply_async`` (queue depends on kind)."""
+    from src.massive.celery_queues import celery_queue_for_massive_job
     from src.massive.tasks import run_massive_job
+    from src.vendor.massive.config import get_massive_settings
     from src.vendor.massive.reader import insert_job_massive_backfill, update_job_massive_backfill_celery_task_id
     from src.persistence.postgres.ticker_reference import normalize_ticker_ref_kind
 
@@ -3560,8 +3559,6 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
                         "message": "No row-gap targets for this symbol.",
                     }
 
-                priority_high = str(body.get("priority") or "").strip().lower() == "high"
-                queue_name = celery_queue_for_massive_job(kind, priority_high=priority_high)
                 job_ids: List[str] = []
                 n_chunks = len(chunks)
                 for idx, chunk in enumerate(chunks):
@@ -3580,9 +3577,9 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
                         job_ids.append(str(jid))
                         continue
                     try:
-                        async_result = run_massive_job.apply_async(
-                            args=[jid], task_id=str(jid), queue=queue_name
-                        )
+                        priority_high = str(body.get("priority") or "").strip().lower() == "high"
+                        queue_name = celery_queue_for_massive_job(kind, priority_high=priority_high)
+                        async_result = run_massive_job.apply_async(args=[jid], task_id=str(jid), queue=queue_name)
                         update_job_massive_backfill_celery_task_id(db, jid, async_result.id)
                     except Exception as e:
                         return {"ok": False, "error": str(e), "job_ids": job_ids}
@@ -3605,9 +3602,7 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
     try:
         priority_high = str(body.get("priority") or "").strip().lower() == "high"
         queue_name = celery_queue_for_massive_job(kind, priority_high=priority_high)
-        async_result = run_massive_job.apply_async(
-            args=[jid], task_id=str(jid), queue=queue_name
-        )
+        async_result = run_massive_job.apply_async(args=[jid], task_id=str(jid), queue=queue_name)
         update_job_massive_backfill_celery_task_id(db, jid, async_result.id)
     except Exception as e:
         return {"ok": False, "error": str(e)}

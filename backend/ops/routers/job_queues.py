@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -380,7 +381,7 @@ async def ops_retry_failed_massive_jobs(
     ),
     limit: int = Query(200, ge=1, le=2000, description="Max failed jobs to reset (oldest first)"),
 ) -> Any:
-    """Reset failed Massive jobs to pending and broker-dispatch up to ``massive_pending_dispatch_inflight_cap`` tasks per queue slice (remaining stay DB-pending until workers finish)."""
+    """Reset failed Massive jobs to ``pending`` and broker-top-up Celery dispatch up to ``massive_pending_dispatch_inflight_cap``."""
     denied = _require_role(request, "operator")
     if denied:
         return denied
@@ -390,8 +391,6 @@ async def ops_retry_failed_massive_jobs(
     from src.vendor.massive.reader import reset_failed_job_massive_backfill_batch
 
     rows = reset_failed_job_massive_backfill_batch(control_via_db, celery_queue, limit)
-    # Throttled broker dispatch: keep at most ``massive_pending_dispatch_inflight_cap`` messages
-    # per queue slice; remaining rows stay DB-pending until workers finish and top up.
     from src.massive.pending_dispatch import dispatch_pending_massive_topup
 
     enqueued = dispatch_pending_massive_topup(control_via_db, celery_queue)
@@ -405,25 +404,71 @@ async def ops_retry_failed_massive_jobs(
 
 @router.post("/ops/research/massive/jobs/{job_id}/retry")
 async def ops_retry_one_massive_job(request: Request, job_id: str) -> Any:
-    """Reset one failed Massive job to pending and re-submit its Celery task (same job ID)."""
+    """Reset one failed Massive job to ``pending`` and ``apply_async`` to the broker."""
     denied = _require_role(request, "operator")
     if denied:
         return denied
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return {"ok": False, "error": "No DB"}
+    from src.massive.celery_queues import celery_queue_for_massive_job
+    from src.massive.pending_dispatch import dispatch_pending_massive_topup
     from src.massive.tasks import reenqueue_massive_job_from_row
-    from src.vendor.massive.reader import reset_failed_job_massive_backfill_one
+    from src.persistence.postgres.ticker_reference import normalize_ticker_ref_kind
+    from src.vendor.massive.reader import (
+        get_job_massive_backfill,
+        reset_failed_job_massive_backfill_one,
+        update_job_massive_backfill_result,
+    )
 
     row = reset_failed_job_massive_backfill_one(control_via_db, job_id)
     if row is None:
         return {"ok": False, "error": "Job not found or not in failed status"}
+    jid = row.get("job_massive_backfill_id")
+
     ok, err = reenqueue_massive_job_from_row(control_via_db, row)
     if not ok:
-        return {"ok": False, "error": err or "Re-enqueue failed"}
-    from src.vendor.massive.reader import get_job_massive_backfill
+        try:
+            jid_i = int(jid)
+        except (TypeError, ValueError):
+            jid_i = int(job_id)
+        update_job_massive_backfill_result(
+            control_via_db,
+            jid_i,
+            "failed",
+            {
+                "ok": False,
+                "error": "Celery enqueue failed — task was not published to the broker.",
+                "detail": err or "unknown",
+            },
+        )
+        fresh_bad = get_job_massive_backfill(control_via_db, jid_i)
+        return {
+            "ok": False,
+            "error": err or "Re-enqueue failed",
+            "job": _massive_job_to_api(dict(fresh_bad)) if fresh_bad else None,
+        }
+    try:
+        kind = normalize_ticker_ref_kind(str(row.get("kind") or "").strip())
+        payload = row.get("payload") or {}
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError:
+                payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        qh = str(payload.get("priority") or "").strip().lower() == "high"
+        qname = celery_queue_for_massive_job(kind, priority_high=qh)
+        dispatch_pending_massive_topup(control_via_db, qname)
+    except Exception:
+        logger.debug("dispatch_pending_massive_topup after single-job retry failed", exc_info=True)
 
-    fresh = get_job_massive_backfill(control_via_db, job_id)
+    try:
+        jid_i = int(jid)
+    except (TypeError, ValueError):
+        jid_i = int(job_id)
+    fresh = get_job_massive_backfill(control_via_db, jid_i)
     if fresh is None:
         return {"ok": True, "job": _massive_job_to_api(dict(row))}
     return {"ok": True, "job": _massive_job_to_api(dict(fresh))}

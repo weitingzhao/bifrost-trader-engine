@@ -104,7 +104,7 @@ def post_sepa_backfill_price_gaps(
     job_ids: list = []
     dispatch_errors: list = []
 
-    for batch in batches:
+    for idx, batch in enumerate(batches):
         payload: Dict[str, Any] = {
             "mode": "custom_bars",
             "sync_all_periods": True,
@@ -120,10 +120,9 @@ def post_sepa_backfill_price_gaps(
                 dispatch_errors.append("insert_job returned None for a batch")
                 continue
             if not deduplicated:
-                async_result = run_massive_job.apply_async(
-                    args=[jid], task_id=str(jid), queue=queue_name
-                )
-                update_job_massive_backfill_celery_task_id(db, jid, async_result.id)
+                countdown = min(float(idx) * 0.35, 120.0)
+                ar = run_massive_job.apply_async(args=[jid], queue=queue_name, countdown=countdown)
+                update_job_massive_backfill_celery_task_id(db, jid, ar.id)
             job_ids.append(str(jid))
         except Exception as exc:
             dispatch_errors.append(str(exc))
@@ -312,7 +311,7 @@ def post_sepa_backfill_grouped_history(
     job_ids: list = []
     dispatch_errors: list = []
 
-    for date_str in missing_dates:
+    for idx, date_str in enumerate(missing_dates):
         payload: Dict[str, Any] = {
             "mode": "daily_market_summary",
             "date": date_str,
@@ -324,7 +323,8 @@ def post_sepa_backfill_grouped_history(
                 dispatch_errors.append(f"insert failed for {date_str}")
                 continue
             if not deduplicated:
-                ar = run_massive_job.apply_async(args=[jid], task_id=str(jid), queue=queue_name)
+                countdown = min(float(idx) * 0.35, 120.0)
+                ar = run_massive_job.apply_async(args=[jid], queue=queue_name, countdown=countdown)
                 update_job_massive_backfill_celery_task_id(db, jid, ar.id)
             job_ids.append(str(jid))
         except Exception as exc:
@@ -346,7 +346,7 @@ def _post_sepa_financials_backfill(
     *,
     kind: str,
 ) -> Dict[str, Any]:
-    """Enqueue Celery ``run_massive_job`` for a fundamentals feed kind (symbol batches)."""
+    """Insert ``job_massive_backfill`` rows and ``apply_async`` for a fundamentals feed kind."""
     import psycopg2
     from psycopg2.extras import RealDictCursor
 
@@ -398,7 +398,7 @@ def _post_sepa_financials_backfill(
     queue_name = celery_queue_for_massive_job(kind, priority_high=False)
     job_ids: list = []
     dispatch_errors: list = []
-    for batch in batches:
+    for idx, batch in enumerate(batches):
         payload: Dict[str, Any] = {"symbols": batch, "throttle_sec": float(body.get("throttle_sec") or 0.22)}
         if kind == "feed_stocks_ratios" and "use_v1_endpoint" in body:
             payload["use_v1_endpoint"] = bool(body.get("use_v1_endpoint"))
@@ -408,7 +408,8 @@ def _post_sepa_financials_backfill(
                 dispatch_errors.append("insert_job returned None for a batch")
                 continue
             if not deduplicated:
-                ar = run_massive_job.apply_async(args=[jid], task_id=str(jid), queue=queue_name)
+                countdown = min(float(idx) * 0.35, 120.0)
+                ar = run_massive_job.apply_async(args=[jid], queue=queue_name, countdown=countdown)
                 update_job_massive_backfill_celery_task_id(db, jid, ar.id)
             job_ids.append(str(jid))
         except Exception as exc:

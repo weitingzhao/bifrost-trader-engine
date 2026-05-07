@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import errno
+import http.client
 import json
 import logging
 import re
@@ -15,6 +17,33 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
+
+# urllib may raise http.client.RemoteDisconnected (ConnectionError), IncompleteRead (HTTPException),
+# ssl.SSLError, etc. under parallel load or truncated bodies.
+_GET_TRANSIENT_RETRIES = 5
+_GET_TRANSIENT_BASE_SLEEP_SEC = 0.4
+_GET_TRANSIENT_EXC_TYPES = (
+    URLError,
+    TimeoutError,
+    ConnectionError,
+    ssl.SSLError,
+    http.client.HTTPException,
+)
+_OSError_retry_errno = frozenset(
+    {
+        errno.ECONNRESET,
+        errno.EPIPE,
+        errno.ETIMEDOUT,
+        errno.ENETUNREACH,
+        errno.EHOSTUNREACH,
+        errno.ECONNABORTED,
+        errno.ENETDOWN,
+        errno.ENOTCONN,
+        errno.EAGAIN,
+        getattr(errno, "EWOULDBLOCK", errno.EAGAIN),
+    }
+)
+
 
 DEFAULT_REST_BASE = "https://api.polygon.io"
 
@@ -152,56 +181,93 @@ class MassiveClient:
         url = f"{self._base}{path}"
         return f"{url}?{urlencode(q)}" if q else url
 
-    def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Tuple[int, Any]:
-        """Return (http_status, parsed_json_or_none)."""
+    def _get(
+        self,
+        path: str,
+        params: Optional[Dict[str, Any]] = None,
+        *,
+        timeout_sec: float = 60.0,
+    ) -> Tuple[int, Any]:
+        """Return (http_status, parsed_json_or_none). Retries transient TCP / TLS / truncated-body errors."""
         q = dict(params or {})
         q["apiKey"] = self._api_key
         url = f"{self._base}{path}"
         if q:
             url = f"{url}?{urlencode(q)}"
-        req = Request(url, headers={"Accept": "application/json"}, method="GET")
-        try:
-            with urlopen(req, timeout=60, context=self._ssl) as resp:
-                body = resp.read().decode("utf-8", errors="replace")
-                status = getattr(resp, "status", 200) or 200
-                try:
-                    return int(status), json.loads(body)
-                except json.JSONDecodeError:
-                    return int(status), {"raw": body[:500]}
-        except HTTPError as e:
+        last_transient: Optional[BaseException] = None
+        for attempt in range(_GET_TRANSIENT_RETRIES):
+            req = Request(url, headers={"Accept": "application/json"}, method="GET")
             try:
-                body = e.read().decode("utf-8", errors="replace")
-                return e.code, json.loads(body)
-            except Exception:
-                return e.code, {"error": str(e)}
-        except URLError as e:
-            logger.warning("MassiveClient _get URLError: %s", e)
-            return 0, {"error": str(e)}
+                with urlopen(req, timeout=timeout_sec, context=self._ssl) as resp:
+                    body = resp.read().decode("utf-8", errors="replace")
+                    status = getattr(resp, "status", 200) or 200
+                    try:
+                        return int(status), json.loads(body)
+                    except json.JSONDecodeError:
+                        return int(status), {"raw": body[:500]}
+            except HTTPError as e:
+                try:
+                    body = e.read().decode("utf-8", errors="replace")
+                    return e.code, json.loads(body)
+                except Exception:
+                    return e.code, {"error": str(e)}
+            except _GET_TRANSIENT_EXC_TYPES as e:
+                last_transient = e
+                if attempt < _GET_TRANSIENT_RETRIES - 1:
+                    time.sleep(_GET_TRANSIENT_BASE_SLEEP_SEC * (2**attempt))
+            except OSError as e:
+                if getattr(e, "errno", None) not in _OSError_retry_errno:
+                    raise
+                last_transient = e
+                if attempt < _GET_TRANSIENT_RETRIES - 1:
+                    time.sleep(_GET_TRANSIENT_BASE_SLEEP_SEC * (2**attempt))
+        logger.warning(
+            "MassiveClient _get gave up after %s tries %s: %s",
+            _GET_TRANSIENT_RETRIES,
+            _redact_url_api_key(url),
+            last_transient,
+        )
+        return 0, {"error": str(last_transient) if last_transient else "connection error"}
 
-    def _get_json_from_next_url(self, next_url: str) -> Tuple[int, Any]:
+    def _get_json_from_next_url(self, next_url: str, *, timeout_sec: float = 60.0) -> Tuple[int, Any]:
         """Follow Polygon next_url; append apiKey when missing. Returns (http_status, parsed_json)."""
         url = next_url
         if "apiKey=" not in url and "apikey=" not in url.lower():
             sep = "&" if "?" in url else "?"
             url = f"{url}{sep}apiKey={self._api_key}"
-        req = Request(url, headers={"Accept": "application/json"}, method="GET")
-        try:
-            with urlopen(req, timeout=60, context=self._ssl) as resp:
-                body = resp.read().decode("utf-8", errors="replace")
-                status = getattr(resp, "status", 200) or 200
-                try:
-                    return int(status), json.loads(body)
-                except json.JSONDecodeError:
-                    return int(status), {"raw": body[:500]}
-        except HTTPError as e:
+        last_transient: Optional[BaseException] = None
+        for attempt in range(_GET_TRANSIENT_RETRIES):
+            req = Request(url, headers={"Accept": "application/json"}, method="GET")
             try:
-                body = e.read().decode("utf-8", errors="replace")
-                return e.code, json.loads(body)
-            except Exception:
-                return e.code, {"error": str(e)}
-        except URLError as e:
-            logger.warning("MassiveClient _get_json_from_next_url URLError: %s", e)
-            return 0, {"error": str(e)}
+                with urlopen(req, timeout=timeout_sec, context=self._ssl) as resp:
+                    body = resp.read().decode("utf-8", errors="replace")
+                    status = getattr(resp, "status", 200) or 200
+                    try:
+                        return int(status), json.loads(body)
+                    except json.JSONDecodeError:
+                        return int(status), {"raw": body[:500]}
+            except HTTPError as e:
+                try:
+                    body = e.read().decode("utf-8", errors="replace")
+                    return e.code, json.loads(body)
+                except Exception:
+                    return e.code, {"error": str(e)}
+            except _GET_TRANSIENT_EXC_TYPES as e:
+                last_transient = e
+                if attempt < _GET_TRANSIENT_RETRIES - 1:
+                    time.sleep(_GET_TRANSIENT_BASE_SLEEP_SEC * (2**attempt))
+            except OSError as e:
+                if getattr(e, "errno", None) not in _OSError_retry_errno:
+                    raise
+                last_transient = e
+                if attempt < _GET_TRANSIENT_RETRIES - 1:
+                    time.sleep(_GET_TRANSIENT_BASE_SLEEP_SEC * (2**attempt))
+        logger.warning(
+            "MassiveClient _get_json_from_next_url gave up after %s tries: %s",
+            _GET_TRANSIENT_RETRIES,
+            last_transient,
+        )
+        return 0, {"error": str(last_transient) if last_transient else "connection error"}
 
     def count_option_contracts_list_paginated(
         self,
@@ -415,38 +481,29 @@ class MassiveClient:
         while pages < max_pages:
             pages += 1
             if next_url:
-                # next_url is full URL from API; append apiKey if missing
-                url = next_url
-                if "apiKey=" not in url and "apikey=" not in url.lower():
-                    sep = "&" if "?" in url else "?"
-                    url = f"{url}{sep}apiKey={self._api_key}"
-                url_redacted = _redact_url_api_key(url)
-                req = Request(url, headers={"Accept": "application/json"}, method="GET")
-                try:
-                    with urlopen(req, timeout=60, context=self._ssl) as resp:
-                        body = resp.read().decode("utf-8", errors="replace")
-                        http_st = int(getattr(resp, "status", 200) or 200)
-                        data = json.loads(body)
-                except Exception as e:
+                url_redacted = _redact_url_api_key(next_url)
+                http_st, data = self._get_json_from_next_url(next_url)
+                if include_debug:
+                    debug_pages.append(
+                        {
+                            "page_index": pages,
+                            "request": {"method": "GET", "url": url_redacted},
+                            "response_status": int(http_st),
+                            "response": data if isinstance(data, dict) else {"_non_object": data},
+                        }
+                    )
+                if http_st >= 400 or http_st == 0:
+                    err_body = data.get("error", data) if isinstance(data, dict) else str(data)
                     out_e: Dict[str, Any] = {
                         "expirations": sorted(expirations),
                         "strikes": sorted(strikes),
-                        "error": str(e),
+                        "error": err_body,
                     }
                     if collect_contract_rows:
                         out_e["contract_rows"] = contract_rows
                     if include_debug:
                         out_e["massive_debug"] = {"pages": debug_pages, "contract_samples": contract_samples}
                     return out_e
-                if include_debug:
-                    debug_pages.append(
-                        {
-                            "page_index": pages,
-                            "request": {"method": "GET", "url": url_redacted},
-                            "response_status": http_st,
-                            "response": data if isinstance(data, dict) else {"_non_object": data},
-                        }
-                    )
             else:
                 url_redacted = self._redacted_get_url(path, params)
                 status, data = self._get(path, params)
@@ -643,18 +700,11 @@ class MassiveClient:
         path = f"/v3/snapshot/options/{underlying}"
         while pages < max_pages:
             if next_url:
-                url = next_url
-                if "apiKey=" not in url and "apikey=" not in url.lower():
-                    sep = "&" if "?" in url else "?"
-                    url = f"{url}{sep}apiKey={self._api_key}"
-                req = Request(url, headers={"Accept": "application/json"}, method="GET")
-                try:
-                    with urlopen(req, timeout=60, context=self._ssl) as resp:
-                        body = resp.read().decode("utf-8", errors="replace")
-                        data = json.loads(body)
-                except Exception as e:
-                    logger.warning("fetch_options_snapshot_all_pages page error: %s", e)
-                    return {"results": merged, "error": str(e), "pages": pages}
+                http_st, data = self._get_json_from_next_url(next_url)
+                if http_st >= 400 or http_st == 0:
+                    err = data.get("error", data) if isinstance(data, dict) else str(data)
+                    logger.warning("fetch_options_snapshot_all_pages page error: %s", err)
+                    return {"results": merged, "error": str(err), "pages": pages}
             else:
                 # First page: reuse same query params as fetch_options_snapshot
                 q: Dict[str, Any] = {}
@@ -820,21 +870,16 @@ class MassiveClient:
             next_url = seen.get("next_url") if isinstance(seen, dict) else None
             if not next_url:
                 break
-            url = next_url
-            if "apiKey=" not in url and "apikey=" not in url.lower():
-                sep = "&" if "?" in url else "?"
-                url = f"{url}{sep}apiKey={self._api_key}"
-            req = Request(url, headers={"Accept": "application/json"}, method="GET")
-            try:
-                with urlopen(req, timeout=120, context=self._ssl) as resp:
-                    body = resp.read().decode("utf-8", errors="replace")
-                    st = int(getattr(resp, "status", 200) or 200)
-                    if st >= 400:
-                        break
-                    seen = json.loads(body)
-            except (OSError, ValueError, json.JSONDecodeError) as e:
-                logger.warning("fetch_option_aggs next_url fetch failed: %s", e)
+            st, seen_payload = self._get_json_from_next_url(next_url, timeout_sec=120.0)
+            if st >= 400 or st == 0:
+                err_note = (
+                    seen_payload.get("error", seen_payload)
+                    if isinstance(seen_payload, dict)
+                    else str(seen_payload)
+                )
+                logger.warning("fetch_option_aggs next_url fetch failed: %s", err_note)
                 break
+            seen = seen_payload
             if not isinstance(seen, dict):
                 break
             logical = _polygon_body_error_message(seen, 200)
@@ -1286,6 +1331,9 @@ class MassiveClient:
         if sort:
             params["sort"] = sort.strip()
         status, data = self._get(path, params)
+        if status == 0:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
         if status >= 400:
             err = data.get("error", data) if isinstance(data, dict) else str(data)
             return {"results": [], "error": err}

@@ -103,6 +103,30 @@ def get_watchlist_optionable_stk_symbols(status_config: dict) -> List[str]:
 def update_job_massive_backfill_celery_task_id(
     status_config: dict, job_id: int, celery_task_id: str
 ) -> bool:
+    """Bind broker task id for a pending row with **empty** ``celery_task_id`` (legacy path).
+
+    New dispatch should use :func:`reserve_massive_dispatch_token` + ``apply_async`` +
+    :func:`finalize_massive_dispatch_celery_id` so concurrent dispatchers cannot double-pick the same row.
+    """
+    return finalize_massive_dispatch_celery_id(
+        status_config, job_id, None, celery_task_id
+    )
+
+
+def clear_massive_dispatch_token(
+    status_config: dict, job_id: int, dispatch_token: str
+) -> bool:
+    """Clear a ``dispatch:…`` placeholder if still present (producer rollback)."""
+    if not dispatch_token.startswith("dispatch:"):
+        return False
+    if not status_config or (
+        status_config.get("sink") != "postgres" and not status_config.get("postgres")
+    ):
+        return False
+    try:
+        jid = int(job_id)
+    except (TypeError, ValueError):
+        return False
     try:
         params = _get_conn_params(status_config)
         conn = psycopg2.connect(**params)
@@ -111,24 +135,180 @@ def update_job_massive_backfill_celery_task_id(
                 cur.execute(
                     """
                     UPDATE job_massive_backfill
-                    SET celery_task_id = %s, updated_at = now()
+                    SET celery_task_id = NULL, updated_at = now()
                     WHERE job_massive_backfill_id = %s
+                      AND status = 'pending'
+                      AND celery_task_id = %s
                     """,
-                    (celery_task_id, job_id),
+                    (jid, dispatch_token),
                 )
+                n = cur.rowcount
             conn.commit()
-            return True
+            return n > 0
         finally:
             conn.close()
     except Exception as e:
-        logger.warning("update_job_massive_backfill_celery_task_id failed: %s", e)
+        logger.warning("clear_massive_dispatch_token failed: %s", e)
         return False
+
+
+def reserve_massive_dispatch_token(
+    status_config: dict, job_id: int,
+) -> Optional[Dict[str, Any]]:
+    """Set ``celery_task_id`` to ``dispatch:<uuid>`` for one pending row with empty broker id."""
+    import uuid
+
+    if not status_config or (
+        status_config.get("sink") != "postgres" and not status_config.get("postgres")
+    ):
+        return None
+    try:
+        jid = int(job_id)
+    except (TypeError, ValueError):
+        return None
+    token = f"dispatch:{uuid.uuid4()}"
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    UPDATE job_massive_backfill
+                    SET celery_task_id = %s, updated_at = now()
+                    WHERE job_massive_backfill_id = %s
+                      AND status = 'pending'
+                      AND (celery_task_id IS NULL OR trim(celery_task_id::text) = '')
+                    RETURNING job_massive_backfill_id, kind, payload, status, result, celery_task_id, created_at, updated_at
+                    """,
+                    (token, jid),
+                )
+                row = cur.fetchone()
+            conn.commit()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("reserve_massive_dispatch_token failed: %s", e)
+        return None
+
+
+def finalize_massive_dispatch_celery_id(
+    status_config: dict,
+    job_id: int,
+    dispatch_token: Optional[str],
+    celery_task_id: str,
+) -> bool:
+    """After ``apply_async``, replace ``dispatch:…`` (or empty pending slot) with the real Celery task id."""
+    if not status_config or (
+        status_config.get("sink") != "postgres" and not status_config.get("postgres")
+    ):
+        return False
+    try:
+        jid = int(job_id)
+    except (TypeError, ValueError):
+        return False
+    rid = (celery_task_id or "").strip()
+    if not rid:
+        return False
+    dt = (dispatch_token or "").strip()
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                if dt.startswith("dispatch:"):
+                    cur.execute(
+                        """
+                        UPDATE job_massive_backfill
+                        SET celery_task_id = %s, updated_at = now()
+                        WHERE job_massive_backfill_id = %s
+                          AND status = 'pending'
+                          AND celery_task_id = %s
+                        """,
+                        (rid, jid, dt),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE job_massive_backfill
+                        SET celery_task_id = %s, updated_at = now()
+                        WHERE job_massive_backfill_id = %s
+                          AND status = 'pending'
+                          AND (celery_task_id IS NULL OR trim(celery_task_id::text) = '')
+                        """,
+                        (rid, jid),
+                    )
+                ok = cur.rowcount > 0
+            conn.commit()
+            return ok
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("finalize_massive_dispatch_celery_id failed: %s", e)
+        return False
+
+
+def reserve_next_pending_massive_job_for_queue_slice(
+    status_config: dict,
+    qcond: str,
+    qparams: List[Any],
+) -> Optional[Dict[str, Any]]:
+    """Pick next pending row for a broker slice under lock and set ``dispatch:`` token (single winner)."""
+    import uuid
+
+    if not status_config or (
+        status_config.get("sink") != "postgres" and not status_config.get("postgres")
+    ):
+        return None
+    cq = (qcond or "").strip()
+    if not cq:
+        return None
+    token = f"dispatch:{uuid.uuid4()}"
+    sql = f"""
+        UPDATE job_massive_backfill AS j
+        SET celery_task_id = %s,
+            updated_at = now()
+        FROM (
+            SELECT job_massive_backfill_id
+            FROM job_massive_backfill
+            WHERE status = 'pending'
+              AND (
+                celery_task_id IS NULL
+                OR trim(celery_task_id::text) = ''
+                OR (
+                  trim(celery_task_id::text) LIKE 'dispatch:%%'
+                  AND updated_at < (now() - interval '15 minutes')
+                )
+              )
+              AND ({cq})
+            ORDER BY job_massive_backfill_id ASC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+        ) AS t
+        WHERE j.job_massive_backfill_id = t.job_massive_backfill_id
+        RETURNING j.job_massive_backfill_id, j.kind, j.payload, j.status, j.result, j.celery_task_id, j.created_at, j.updated_at
+    """
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(sql, tuple([token] + list(qparams)))
+                row = cur.fetchone()
+            conn.commit()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("reserve_next_pending_massive_job_for_queue_slice failed: %s", e)
+        return None
 
 
 def release_massive_job_to_pending_for_redispatch(status_config: dict, job_id: int) -> bool:
     """Set row back to ``pending``, clear broker id and result (transient DB / worker issues).
 
-    Used when a Celery task could not complete so ``dispatch_pending_massive_topup`` can submit a new message.
+    Used when a worker hit a transient DB issue so a pull worker can claim the row again.
     """
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
@@ -160,6 +340,68 @@ def release_massive_job_to_pending_for_redispatch(status_config: dict, job_id: i
         return False
 
 
+def claim_next_massive_job_for_queue_slice(
+    status_config: dict,
+    celery_queue: str,
+    claim_token: str,
+) -> Optional[int]:
+    """Atomically claim the oldest pending row for a broker queue slice (``FOR UPDATE SKIP LOCKED``).
+
+    Sets ``status`` to ``running`` and ``celery_task_id`` to ``claim_token`` (caller should use a
+    ``dbpull:`` prefix). Returns ``job_massive_backfill_id`` or ``None`` if no row matched.
+    """
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return None
+    cq = (celery_queue or "").strip()
+    qcond, qparams = _massive_celery_queue_condition(cq)
+    if not qcond:
+        return None
+    tok = (claim_token or "").strip()[:512]
+    if not tok:
+        return None
+    sql = f"""
+        WITH c AS (
+            SELECT job_massive_backfill_id
+            FROM job_massive_backfill
+            WHERE status = 'pending'
+              AND (celery_task_id IS NULL OR trim(celery_task_id) = '')
+              AND ({qcond})
+            ORDER BY job_massive_backfill_id ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1
+        )
+        UPDATE job_massive_backfill j
+        SET status = 'running', celery_task_id = %s, updated_at = now()
+        FROM c
+        WHERE j.job_massive_backfill_id = c.job_massive_backfill_id
+        RETURNING j.job_massive_backfill_id
+    """
+    params_exec = tuple(qparams) + (tok,)
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            conn.autocommit = False
+            with conn.cursor() as cur:
+                cur.execute(sql, params_exec)
+                row = cur.fetchone()
+            conn.commit()
+            if row and row[0] is not None:
+                return int(row[0])
+            return None
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("claim_next_massive_job_for_queue_slice failed: %s", e)
+        return None
+
+
 def get_job_massive_backfill(status_config: dict, job_id: Any) -> Optional[Dict[str, Any]]:
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return None
@@ -187,6 +429,110 @@ def get_job_massive_backfill(status_config: dict, job_id: Any) -> Optional[Dict[
     except Exception as e:
         logger.warning("get_job_massive_backfill failed: %s", e)
         return None
+
+
+def get_and_claim_massive_backfill_for_run(
+    status_config: dict,
+    job_id: Any,
+    celery_task_id: Optional[str],
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    """Load one row under ``FOR UPDATE`` and claim ``pending`` -> ``running`` for this Celery task id only.
+
+    Duplicate broker deliveries / rapid retries can run multiple ``run_massive_job`` tasks for one row.
+    Uncoordinated concurrent execution previously raced on ``update_job... running`` and could mark rows
+    ``failed`` under worker saturation.
+    """
+    if not status_config or (
+        status_config.get("sink") != "postgres" and not status_config.get("postgres")
+    ):
+        return None, "not_found"
+    try:
+        jid = int(job_id)
+    except (TypeError, ValueError):
+        return None, "not_found"
+    rid = (celery_task_id or "").strip()
+    conn: Optional[Any] = None
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        conn.autocommit = False
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT job_massive_backfill_id, kind, payload, status, result, celery_task_id, created_at, updated_at
+                FROM job_massive_backfill
+                WHERE job_massive_backfill_id = %s
+                FOR UPDATE
+                """,
+                (jid,),
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.rollback()
+                return None, "not_found"
+
+            st = str(row["status"] or "").strip().lower()
+            ct = str(row["celery_task_id"] or "").strip()
+
+            if st == "done":
+                conn.commit()
+                return dict(row), "skip_done"
+            if st == "failed":
+                conn.commit()
+                return dict(row), "skip_failed"
+            if st == "running":
+                if rid and ct == rid:
+                    conn.commit()
+                    return dict(row), "continue_owner"
+                conn.commit()
+                return dict(row), "skip_duplicate"
+            if st == "pending":
+                is_dispatch_tok = ct.startswith("dispatch:")
+                if rid and ct and ct != rid and not is_dispatch_tok:
+                    conn.commit()
+                    return dict(row), "skip_duplicate"
+                if rid:
+                    cur.execute(
+                        """
+                        UPDATE job_massive_backfill
+                        SET status = %s,
+                            updated_at = now(),
+                            celery_task_id = %s
+                        WHERE job_massive_backfill_id = %s
+                        RETURNING job_massive_backfill_id, kind, payload, status, result, celery_task_id, created_at, updated_at
+                        """,
+                        ("running", rid, jid),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE job_massive_backfill
+                        SET status = %s, updated_at = now()
+                        WHERE job_massive_backfill_id = %s
+                        RETURNING job_massive_backfill_id, kind, payload, status, result, celery_task_id, created_at, updated_at
+                        """,
+                        ("running", jid),
+                    )
+                row2 = cur.fetchone()
+                conn.commit()
+                return dict(row2) if row2 else dict(row), "claimed"
+
+            conn.rollback()
+            return dict(row), "skip_duplicate"
+    except Exception as e:
+        logger.warning("get_and_claim_massive_backfill_for_run failed: %s", e)
+        try:
+            if conn is not None:
+                conn.rollback()
+        except Exception:
+            pass
+        return None, "not_found"
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
 
 
 def list_job_massive_backfill(

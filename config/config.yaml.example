@@ -99,7 +99,7 @@ ops:
   celery:
     default_max_worker_instances: 1
     massive_worker_concurrency: 1
-    massive_pending_dispatch_inflight_cap: 12
+    massive_pending_dispatch_inflight_cap: 15
     canonical_queue_order:
       - stocks_ib
       - stocks_massive_high

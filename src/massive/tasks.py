@@ -1004,11 +1004,13 @@ def _apply_feed_stocks_corporate_actions(
 @app.task(bind=True, name="src.massive.tasks.run_massive_job")
 def run_massive_job(self, job_id: int) -> Dict[str, Any]:
     """Execute one job_massive_backfill row."""
-    dispatch_qname: Optional[str] = None
     from src.app.config import read_config
     from src.vendor.massive.client import MassiveClient
     from src.vendor.massive.config import get_massive_settings
-    from src.vendor.massive.reader import get_job_massive_backfill, update_job_massive_backfill_result
+    from src.vendor.massive.reader import (
+        get_and_claim_massive_backfill_for_run,
+        update_job_massive_backfill_result,
+    )
     import psycopg2
     from src.persistence.postgres.connection import _get_conn_params
 
@@ -1018,7 +1020,12 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
     if not status_cfg.get("postgres") and status_cfg.get("sink") != "postgres":
         return {"ok": False, "error": "postgres not configured"}
 
-    job = get_job_massive_backfill(status_cfg, job_id)
+    celery_rid_raw = getattr(getattr(self, "request", None), "id", None)
+    celery_rid = str(celery_rid_raw).strip() if celery_rid_raw else ""
+
+    job, claim_outcome = get_and_claim_massive_backfill_for_run(
+        status_cfg, job_id, celery_rid or None,
+    )
     if not job:
         return {"ok": False, "error": "job not found"}
     from src.persistence.postgres.ticker_reference import normalize_ticker_ref_kind
@@ -1042,42 +1049,43 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
     priority_high = str(payload.get("priority") or "").strip().lower() == "high"
     dispatch_qname = celery_queue_for_massive_job(kind, priority_high=priority_high)
 
+    if claim_outcome == "skip_done":
+        return {"ok": True, "skipped": "done"}
+
+    if claim_outcome == "skip_failed":
+        return {"ok": True, "skipped": "failed_stale"}
+
+    if claim_outcome == "skip_duplicate":
+        return {"ok": True, "skipped": "duplicate_dispatch"}
+
     ms = get_massive_settings(config)
     client = MassiveClient(ms["api_key"], ms["rest_base"])
-    if not client.configured and kind not in ("trim_jobs", "report_option_max_pain"):
-        update_job_massive_backfill_result(status_cfg, job_id, "failed", {"ok": False, "error": "Massive API key not configured"})
-        try:
-            from src.massive.pending_dispatch import dispatch_pending_massive_topup
-
-            dispatch_pending_massive_topup(status_cfg, dispatch_qname)
-        except Exception:
-            logger.exception("dispatch_pending_massive_topup after no-api-key job_id=%s", job_id)
-        return {"ok": False, "error": "no api key"}
 
     try:
+        if not client.configured and kind not in ("trim_jobs", "report_option_max_pain"):
+            update_job_massive_backfill_result(status_cfg, job_id, "failed", {"ok": False, "error": "Massive API key not configured"})
+            return {"ok": False, "error": "no api key"}
+
         params = _get_conn_params(status_cfg)
         conn = psycopg2.connect(**params)
-        # Only mark running after DB is reachable — avoids ``running`` -> ``failed`` on long connect timeouts.
-        update_job_massive_backfill_result(status_cfg, job_id, "running", None)
         try:
-            # SEPA fundamentals → PostgreSQL (dispatch first; SSOT: FEED_STOCKS_FINANCIALS_KINDS).
+            # SEPA fundamentals → PostgreSQL. Route by *_fin_runners* keys — not only
+            # FEED_STOCKS_FINANCIALS_KINDS — so a stale worker frozenset cannot skip
+            # registered jobs (see unknown_kind: feed_stocks_balance_sheets in prod logs).
             from src.massive.celery_queues import FEED_STOCKS_FINANCIALS_KINDS
+            from src.research.sepa import financials_data as _fd_massive_fin
 
-            if kind in FEED_STOCKS_FINANCIALS_KINDS:
-                from src.research.sepa import financials_data as _fd_massive_fin
+            _fin_runners: Dict[str, Any] = {
+                "feed_stocks_income_statements": _fd_massive_fin.run_feed_stocks_income_statements_job,
+                "feed_stocks_balance_sheets": _fd_massive_fin.run_feed_stocks_balance_sheets_job,
+                "feed_stocks_cash_flows": _fd_massive_fin.run_feed_stocks_cash_flows_job,
+                "feed_stocks_ratios": _fd_massive_fin.run_feed_stocks_ratios_job,
+                "feed_stocks_short_interest": _fd_massive_fin.run_feed_stocks_short_interest_job,
+                "feed_stocks_short_volume": _fd_massive_fin.run_feed_stocks_short_volume_job,
+            }
 
-                _fin_runners: Dict[str, Any] = {
-                    "feed_stocks_income_statements": _fd_massive_fin.run_feed_stocks_income_statements_job,
-                    "feed_stocks_balance_sheets": _fd_massive_fin.run_feed_stocks_balance_sheets_job,
-                    "feed_stocks_cash_flows": _fd_massive_fin.run_feed_stocks_cash_flows_job,
-                    "feed_stocks_ratios": _fd_massive_fin.run_feed_stocks_ratios_job,
-                    "feed_stocks_short_interest": _fd_massive_fin.run_feed_stocks_short_interest_job,
-                    "feed_stocks_short_volume": _fd_massive_fin.run_feed_stocks_short_volume_job,
-                }
-                _fin_fn = _fin_runners.get(kind)
-                if _fin_fn is None:
-                    raise ValueError(f"no fundamentals runner for kind: {kind}")
-                result = _fin_fn(conn, client, payload)
+            if kind in _fin_runners:
+                result = _fin_runners[kind](conn, client, payload)
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 
@@ -2627,10 +2635,19 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     return result
 
             from src.massive.celery_queues import MASSIVE_STOCKS_QUEUE_KINDS
+
             all_known = sorted(MASSIVE_STOCKS_QUEUE_KINDS)
+            in_fundamentals = kind in FEED_STOCKS_FINANCIALS_KINDS
+            in_fin_runners = kind in _fin_runners
+
             raise ValueError(
-                f"unknown kind: {kind!r} — worker may be running stale code. "
-                f"Known stock kinds: {all_known}. Restart Celery workers after git pull."
+                f"unknown kind: {kind!r}. "
+                f"kind_in_fin_runners={in_fin_runners}; "
+                f"kind_in_fundamentals_frozenset={in_fundamentals}; "
+                f"fin_runner_keys_this_worker={sorted(_fin_runners.keys())!r}; "
+                f"massive_stocks_union_kinds_this_worker={all_known}. "
+                f"If this kind should exist, update run_massive_job in src/massive/tasks.py "
+                f"or restart workers after pulling code."
             )
         except Exception as e:
             conn.rollback()
@@ -2666,14 +2683,74 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 logger.exception("dispatch_pending_massive_topup after job_id=%s", job_id)
 
 
+
+def apply_async_massive_pending_job(
+    control_via_db: dict,
+    job_id: int,
+    queue_name: str,
+    *,
+    countdown: Optional[float] = None,
+    pre_dispatch_token: Optional[str] = None,
+) -> Tuple[bool, Optional[str], Optional[str]]:
+    """Reserve ``dispatch:…`` (unless ``pre_dispatch_token``), ``apply_async``, then bind Celery UUID (or revoke on failure).
+
+    Returns ``(ok, error, celery_task_id_or_none)`` so callers can log Celery correlation id.
+    """
+    from src.vendor.massive.reader import (
+        clear_massive_dispatch_token,
+        finalize_massive_dispatch_celery_id,
+        reserve_massive_dispatch_token,
+    )
+
+    pre = (pre_dispatch_token or "").strip()
+    if pre.startswith("dispatch:"):
+        dispatch_token = pre
+    else:
+        locked = reserve_massive_dispatch_token(control_via_db, job_id)
+        if locked is None:
+            return False, "reserve_dispatch_failed_or_not_pending", None
+        dispatch_token = str(locked.get("celery_task_id") or "").strip()
+
+    ftok = dispatch_token if dispatch_token.startswith("dispatch:") else None
+    try:
+        if countdown is not None:
+            async_result = run_massive_job.apply_async(
+                args=[job_id], queue=queue_name, countdown=countdown,
+            )
+        else:
+            async_result = run_massive_job.apply_async(args=[job_id], queue=queue_name)
+    except Exception as e:
+        logger.exception(
+            "apply_async_massive_pending_job enqueue failed job_id=%s: %s",
+            job_id,
+            e,
+        )
+        if ftok:
+            clear_massive_dispatch_token(control_via_db, job_id, dispatch_token)
+        return False, str(e), None
+
+    celery_rid = getattr(async_result, "id", None)
+    celery_rid_s = str(celery_rid).strip() if celery_rid else ""
+
+    if not finalize_massive_dispatch_celery_id(
+        control_via_db, job_id, ftok, celery_rid_s,
+    ):
+        try:
+            app.control.revoke(async_result.id, terminate=False)
+        except Exception:
+            pass
+        if ftok:
+            clear_massive_dispatch_token(control_via_db, job_id, dispatch_token)
+        return False, "finalize_dispatch_failed", None
+
+    return True, None, celery_rid_s
+
+
 def _enqueue_massive_job(kind: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Insert job_massive_backfill and dispatch to the broker queue for this job kind."""
+    """Insert ``job_massive_backfill`` row and ``apply_async`` to the correct broker queue."""
     from src.app.config import read_config
     from src.massive.celery_queues import celery_queue_for_massive_job
-    from src.vendor.massive.reader import (
-        insert_job_massive_backfill,
-        update_job_massive_backfill_celery_task_id,
-    )
+    from src.vendor.massive.reader import insert_job_massive_backfill
 
     cfg_path = _config_path_for_task()
     config, _ = read_config(cfg_path)
@@ -2684,15 +2761,16 @@ def _enqueue_massive_job(kind: str, payload: Optional[Dict[str, Any]] = None) ->
         logger.info("Massive beat: deduplicated kind=%s job_id=%s", kind, jid)
         return {"ok": True, "deduplicated": True, "job_id": jid}
     queue_name = celery_queue_for_massive_job(kind, priority_high=False)
-    async_result = run_massive_job.apply_async(args=[jid], queue=queue_name)
-    update_job_massive_backfill_celery_task_id(config, jid, async_result.id)
+    ok, err, cid = apply_async_massive_pending_job(config, jid, queue_name)
+    if not ok:
+        return {"ok": False, "error": err or "enqueue failed"}
     try:
         from src.massive.pending_dispatch import dispatch_pending_massive_topup
 
         dispatch_pending_massive_topup(config, queue_name)
     except Exception:
         logger.debug("dispatch_pending_massive_topup after _enqueue_massive_job", exc_info=True)
-    return {"ok": True, "job_id": jid, "celery_task_id": async_result.id}
+    return {"ok": True, "job_id": jid, "celery_task_id": cid}
 
 
 @app.task(name="src.massive.tasks.beat_eod_pipeline")
@@ -2819,7 +2897,7 @@ def beat_sepa_universe_grouped_daily() -> Dict[str, Any]:
 
 
 def reenqueue_massive_job_from_row(control_via_db: dict, row: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
-    """Submit ``run_massive_job`` on the correct queue after a row was reset to pending (Ops retry-failed)."""
+    """``apply_async`` a pending row to the correct broker queue (standard Celery dispatch)."""
     try:
         jid = int(row["job_massive_backfill_id"])
     except (TypeError, ValueError, KeyError):
@@ -2839,15 +2917,15 @@ def reenqueue_massive_job_from_row(control_via_db: dict, row: Dict[str, Any]) ->
         payload = {}
     priority_high = str(payload.get("priority") or "").strip().lower() == "high"
     from src.massive.celery_queues import celery_queue_for_massive_job
-    from src.vendor.massive.reader import update_job_massive_backfill_celery_task_id
 
     qname = celery_queue_for_massive_job(kind, priority_high=priority_high)
-    try:
-        async_result = run_massive_job.apply_async(args=[jid], queue=qname)
-        update_job_massive_backfill_celery_task_id(control_via_db, jid, async_result.id)
-    except Exception as e:
-        # Don't revert the job to failed — leave it as pending so the user can
-        # retry again later or a Worker can pick it up once started.
-        logger.exception("reenqueue_massive_job_from_row job_id=%s enqueue failed (job stays pending): %s", jid, e)
-        return False, str(e)
+    celery_row = str(row.get("celery_task_id") or "").strip()
+    ok, err, _cid = apply_async_massive_pending_job(
+        control_via_db,
+        jid,
+        qname,
+        pre_dispatch_token=celery_row if celery_row.startswith("dispatch:") else None,
+    )
+    if not ok:
+        return False, err or "Re-enqueue failed"
     return True, None

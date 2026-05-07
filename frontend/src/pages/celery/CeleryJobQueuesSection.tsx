@@ -498,8 +498,19 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
     try {
       if (activeTab.pipeline === 'massive_async') {
         const r = await postRetryMassiveJob(jobId)
-        if (!r.ok) throw new Error(r.error ?? 'Retry failed')
-        setActionMsg({ text: `Job ${jobId} reset to pending and enqueued.`, isErr: false })
+        if (!r.ok) {
+          await loadMassiveQueue(activeTab.celeryQueue)
+          const st = r.job?.status ? ` Current status: ${r.job.status}.` : ''
+          throw new Error((r.error ?? 'Retry failed') + st)
+        }
+        const doneHint =
+          r.job?.status === 'failed'
+            ? ` Job ${jobId} failed immediately after enqueue — check broker, Massive API key, and worker logs.`
+            : ''
+        setActionMsg({
+          text: `Job ${jobId} reset to pending and enqueued.${doneHint}`,
+          isErr: Boolean(doneHint),
+        })
         await loadMassiveQueue(activeTab.celeryQueue)
       } else {
         const r = await postRetryBarsJob(jobId)
