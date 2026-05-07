@@ -73,6 +73,8 @@ function fmtRelativeTime(iso: string | null | undefined): string {
 
 /** Table rows rendered at once in gap drawers (full list stays in memory; DOM stays small). */
 const SDP_GAP_DRAWER_PAGE = 350
+/** Incremental append chunk for very large gap payloads (keeps drawer opening smooth). */
+const SDP_GAP_LAZY_APPEND_CHUNK = 500
 
 function copyTextFallback(text: string): boolean {
   const ta = document.createElement('textarea')
@@ -199,6 +201,139 @@ function foldStageStatus(statuses: CheckStatus[]): CheckStatus {
 }
 
 type RunbookStageId = 'baseline' | 'financials' | 'market' | 'publish'
+
+type DataSupportLevel = 'supported' | 'partial' | 'not_supported' | 'unknown'
+
+interface InstrumentTypeSupportRow {
+  code: string
+  description: string
+  incomeStatements: DataSupportLevel
+  balanceSheets: DataSupportLevel
+  cashFlows: DataSupportLevel
+  ratios: DataSupportLevel
+  note?: string
+}
+
+const INSTRUMENT_TYPE_DATA_SUPPORT_ROWS: InstrumentTypeSupportRow[] = [
+  {
+    code: 'CS',
+    description: 'Common Stock',
+    incomeStatements: 'supported',
+    balanceSheets: 'supported',
+    cashFlows: 'supported',
+    ratios: 'supported',
+  },
+  {
+    code: 'ADRC',
+    description: 'American Depository Receipt Common',
+    incomeStatements: 'supported',
+    balanceSheets: 'supported',
+    cashFlows: 'supported',
+    ratios: 'supported',
+  },
+  {
+    code: 'PFD',
+    description: 'Preferred Stock',
+    incomeStatements: 'partial',
+    balanceSheets: 'partial',
+    cashFlows: 'partial',
+    ratios: 'partial',
+    note: 'Coverage may vary by issuer and filing frequency.',
+  },
+  {
+    code: 'ETF',
+    description: 'Exchange Traded Fund',
+    incomeStatements: 'not_supported',
+    balanceSheets: 'not_supported',
+    cashFlows: 'not_supported',
+    ratios: 'not_supported',
+    note: 'Commonly sparse/absent in Massive financial statements coverage.',
+  },
+  {
+    code: 'ETS',
+    description: 'Single-security ETF',
+    incomeStatements: 'not_supported',
+    balanceSheets: 'not_supported',
+    cashFlows: 'not_supported',
+    ratios: 'not_supported',
+    note: 'Commonly sparse/absent in Massive financial statements coverage.',
+  },
+  {
+    code: 'ETV',
+    description: 'Exchange Traded Vehicle',
+    incomeStatements: 'not_supported',
+    balanceSheets: 'not_supported',
+    cashFlows: 'not_supported',
+    ratios: 'not_supported',
+    note: 'Commonly sparse/absent in Massive financial statements coverage.',
+  },
+  {
+    code: 'ETN',
+    description: 'Exchange Traded Note',
+    incomeStatements: 'not_supported',
+    balanceSheets: 'not_supported',
+    cashFlows: 'not_supported',
+    ratios: 'not_supported',
+    note: 'Debt note product; issuer-level statements usually not exposed per ticker.',
+  },
+  {
+    code: 'FUND',
+    description: 'Fund',
+    incomeStatements: 'not_supported',
+    balanceSheets: 'not_supported',
+    cashFlows: 'not_supported',
+    ratios: 'not_supported',
+    note: 'Commonly sparse/absent in Massive financial statements coverage.',
+  },
+  {
+    code: 'UNIT',
+    description: 'Unit',
+    incomeStatements: 'not_supported',
+    balanceSheets: 'not_supported',
+    cashFlows: 'not_supported',
+    ratios: 'not_supported',
+    note: 'Commonly sparse/absent in Massive financial statements coverage.',
+  },
+  {
+    code: 'RIGHT',
+    description: 'Rights',
+    incomeStatements: 'not_supported',
+    balanceSheets: 'not_supported',
+    cashFlows: 'not_supported',
+    ratios: 'not_supported',
+    note: 'Derivative security; company statements usually not represented.',
+  },
+  {
+    code: 'WARRANT',
+    description: 'Warrant',
+    incomeStatements: 'not_supported',
+    balanceSheets: 'not_supported',
+    cashFlows: 'not_supported',
+    ratios: 'not_supported',
+    note: 'Derivative security; company statements usually not represented.',
+  },
+  {
+    code: 'SP',
+    description: 'Structured Product',
+    incomeStatements: 'not_supported',
+    balanceSheets: 'not_supported',
+    cashFlows: 'not_supported',
+    ratios: 'not_supported',
+    note: 'Commonly sparse/absent in Massive financial statements coverage.',
+  },
+]
+
+/** Instrument types with Supported / Partial Massive coverage for financial-statement gaps (Steps 4–7). */
+const FIN_STMT_GAP_INSTRUMENT_CODES = INSTRUMENT_TYPE_DATA_SUPPORT_ROWS.filter(
+  (r) => r.incomeStatements === 'supported' || r.incomeStatements === 'partial',
+).map((r) => r.code)
+
+function supportBadge(level: DataSupportLevel): { text: string; cls: string } {
+  if (level === 'supported') return { text: 'Supported', cls: 'sdp-status-pill sdp-status-pill--ok sdp-support-pill sdp-support-pill--ok' }
+  if (level === 'partial') return { text: 'Partial', cls: 'sdp-status-pill sdp-status-pill--warn sdp-support-pill sdp-support-pill--partial' }
+  if (level === 'not_supported') return { text: 'Not supported', cls: 'sdp-status-pill sdp-status-pill--err sdp-support-pill sdp-support-pill--no' }
+  return { text: 'Unknown', cls: 'sdp-status-pill sdp-support-pill sdp-support-pill--unknown' }
+}
 
 const RUNBOOK_STAGE_LAYOUT: ReadonlyArray<{
   id: RunbookStageId
@@ -650,6 +785,7 @@ function criterionStatusLabel(status: CriterionStatus): string {
 }
 
 function SepaScreeningChecklist({ summary }: { summary: SepaReadinessSummaryResponse | null }) {
+  const [activeTab, setActiveTab] = useState<'technical' | 'fundamental'>('technical')
   const techStatuses = SEPA_TECHNICAL_CRITERIA.map((c) => ({
     ...c,
     ...deriveCriterionStatus(c, summary),
@@ -680,9 +816,29 @@ function SepaScreeningChecklist({ summary }: { summary: SepaReadinessSummaryResp
         </div>
       </div>
 
+      <div className="sdp-criteria-tabs" role="tablist" aria-label="SEPA checklist groups">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'technical'}
+          className={`sdp-criteria-tab${activeTab === 'technical' ? ' sdp-criteria-tab--active' : ''}`}
+          onClick={() => setActiveTab('technical')}
+        >
+          TECHNICAL <span className="sdp-criteria-tab-count">{techOk}/{techTotal}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'fundamental'}
+          className={`sdp-criteria-tab${activeTab === 'fundamental' ? ' sdp-criteria-tab--active' : ''}`}
+          onClick={() => setActiveTab('fundamental')}
+        >
+          FUNDAMENTAL <span className="sdp-criteria-tab-count">{fundOk}/{fundTotal}</span>
+        </button>
+      </div>
+
       <div className="sdp-criteria-groups">
-        {/* Technical */}
-        <div className="sdp-criteria-group">
+        {activeTab === 'technical' && <div className="sdp-criteria-group">
           <div className="sdp-criteria-group-head">
             <span className="sdp-criteria-group-badge sdp-criteria-group-badge--tech">TECHNICAL</span>
             <span className="sdp-criteria-group-label">Price / Volume / Trend</span>
@@ -731,10 +887,9 @@ function SepaScreeningChecklist({ summary }: { summary: SepaReadinessSummaryResp
               ))}
             </tbody>
           </table>
-        </div>
+        </div>}
 
-        {/* Fundamental */}
-        <div className="sdp-criteria-group">
+        {activeTab === 'fundamental' && <div className="sdp-criteria-group">
           <div className="sdp-criteria-group-head">
             <span className="sdp-criteria-group-badge sdp-criteria-group-badge--fund">FUNDAMENTAL</span>
             <span className="sdp-criteria-group-label">EPS / Revenue Growth & Acceleration</span>
@@ -781,7 +936,7 @@ function SepaScreeningChecklist({ summary }: { summary: SepaReadinessSummaryResp
               ))}
             </tbody>
           </table>
-        </div>
+        </div>}
       </div>
     </div>
   )
@@ -1271,6 +1426,13 @@ function GapsDrawer({
 type FinancialGapsColumnPreset = 'income' | 'statement' | 'short_dated'
 
 type FinDrawerKind = 'income' | 'balance' | 'cash' | 'ratios' | 'sint' | 'svol'
+type FinBackfillJobKind =
+  | 'feed_stocks_income_statements'
+  | 'feed_stocks_balance_sheets'
+  | 'feed_stocks_cash_flows'
+  | 'feed_stocks_ratios'
+  | 'feed_stocks_short_interest'
+  | 'feed_stocks_short_volume'
 
 function finDrawerTitleForKind(kind: FinDrawerKind): string {
   switch (kind) {
@@ -1293,6 +1455,23 @@ function finDrawerColumnPresetForKind(kind: FinDrawerKind): FinancialGapsColumnP
   if (kind === 'income') return 'income'
   if (kind === 'sint' || kind === 'svol') return 'short_dated'
   return 'statement'
+}
+
+function finBackfillJobKindForDrawer(kind: FinDrawerKind): FinBackfillJobKind {
+  switch (kind) {
+    case 'income':
+      return 'feed_stocks_income_statements'
+    case 'balance':
+      return 'feed_stocks_balance_sheets'
+    case 'cash':
+      return 'feed_stocks_cash_flows'
+    case 'ratios':
+      return 'feed_stocks_ratios'
+    case 'sint':
+      return 'feed_stocks_short_interest'
+    case 'svol':
+      return 'feed_stocks_short_volume'
+  }
 }
 
 interface FinancialGapsDrawerProps {
@@ -1335,14 +1514,23 @@ function FinancialGapsDrawer(props: FinancialGapsDrawerProps) {
   const [q, setQ] = useState('')
   const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(new Set())
   const [visibleLimit, setVisibleLimit] = useState(SDP_GAP_DRAWER_PAGE)
+  const [lazyAppending, setLazyAppending] = useState(false)
+  const lazyAppendTimerRef = useRef<number | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [copyError, setCopyError] = useState(false)
 
   useEffect(() => {
     if (!open) return
     let cancelled = false
+    if (lazyAppendTimerRef.current != null) {
+      window.clearTimeout(lazyAppendTimerRef.current)
+      lazyAppendTimerRef.current = null
+    }
     setVisibleLimit(SDP_GAP_DRAWER_PAGE)
     setLoading(true)
     setError(null)
     setSelectedSymbols(new Set())
+    setLazyAppending(false)
     void fetchGaps().then((r) => {
       if (cancelled) return
       setLoading(false)
@@ -1350,14 +1538,40 @@ function FinancialGapsDrawer(props: FinancialGapsDrawerProps) {
         setError(r.error ?? 'Failed to load gaps')
         setItems([])
         setTotalGapCount(null)
+        setLazyAppending(false)
         return
       }
       const g = Array.isArray(r.gaps) ? r.gaps : []
-      setItems(g)
+      const firstChunk = g.slice(0, SDP_GAP_LAZY_APPEND_CHUNK)
+      setItems(firstChunk)
       setTotalGapCount(typeof r.total_gap_count === 'number' ? r.total_gap_count : g.length)
+      if (g.length <= SDP_GAP_LAZY_APPEND_CHUNK) {
+        setLazyAppending(false)
+        return
+      }
+      setLazyAppending(true)
+      const appendRemaining = (offset: number) => {
+        if (cancelled) return
+        const nextOffset = offset + SDP_GAP_LAZY_APPEND_CHUNK
+        setItems((prev) => prev.concat(g.slice(offset, nextOffset)))
+        if (nextOffset < g.length) {
+          lazyAppendTimerRef.current = window.setTimeout(() => appendRemaining(nextOffset), 0)
+          return
+        }
+        setLazyAppending(false)
+        lazyAppendTimerRef.current = null
+      }
+      lazyAppendTimerRef.current = window.setTimeout(
+        () => appendRemaining(SDP_GAP_LAZY_APPEND_CHUNK),
+        0,
+      )
     })
     return () => {
       cancelled = true
+      if (lazyAppendTimerRef.current != null) {
+        window.clearTimeout(lazyAppendTimerRef.current)
+        lazyAppendTimerRef.current = null
+      }
     }
   }, [open, fetchGaps])
 
@@ -1419,8 +1633,11 @@ function FinancialGapsDrawer(props: FinancialGapsDrawerProps) {
     const text = [header, ...lines].join('\n')
     try {
       await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
     } catch {
-      /* ignore */
+      setCopyError(true)
+      setTimeout(() => setCopyError(false), 2500)
     }
   }
 
@@ -1429,53 +1646,76 @@ function FinancialGapsDrawer(props: FinancialGapsDrawerProps) {
   return (
     <>
       <div className="sdp-drawer-backdrop" onClick={onClose} aria-hidden="true" />
-      <aside className="sdp-drawer sdp-drawer--wide" role="dialog" aria-modal="true" aria-label={`${title} gaps`}>
+      <aside className="sdp-drawer sdp-drawer--wide sdp-drawer--open" role="dialog" aria-modal="true" aria-label={`${title} gaps`}>
         <div className="sdp-drawer-header">
-          <div className="sdp-drawer-title">{title} gaps</div>
-          <button type="button" className="sdp-btn sdp-btn--ghost" onClick={onClose}>
-            Close
-          </button>
+          <div className="sdp-drawer-title">
+            <span className="sdp-drawer-title-icon">⚠</span>
+            {title} gaps
+            {totalGapCount != null && <span className="sdp-drawer-badge">{totalGapCount.toLocaleString()}</span>}
+          </div>
+          <button type="button" className="sdp-drawer-close" onClick={onClose} aria-label="Close gap panel">×</button>
         </div>
 
-        <div className="sdp-drawer-toolbar">
-          <input
-            className="sdp-input sdp-input--search"
-            placeholder="Filter symbols…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-          <button type="button" className="sdp-btn sdp-btn--ghost" onClick={() => void copyReport()}>
-            Copy report
-          </button>
-          <button type="button" className="sdp-btn sdp-btn--primary" disabled={backfillBusy} onClick={onBackfillAll}>
+        <div className="sdp-drawer-sub">
+          Per-symbol financial statement gaps for selected step.
+        </div>
+
+        <div className="sdp-drawer-actions">
+          <button type="button" className="sdp-btn-primary" disabled={backfillBusy} onClick={onBackfillAll}>
             {backfillBusy ? 'Enqueueing…' : 'Backfill all gaps'}
           </button>
           <button
             type="button"
-            className="sdp-btn sdp-btn--secondary"
+            className="sdp-btn-backfill-selected"
             disabled={backfillSelectedBusy || selectedSymbols.size === 0}
             onClick={() => onBackfillSelected(Array.from(selectedSymbols))}
           >
             {backfillSelectedBusy ? 'Enqueueing…' : `Backfill selected (${selectedSymbols.size})`}
           </button>
+          <button
+            type="button"
+            className={`sdp-btn-copy-llm${copied ? ' sdp-btn-copy-llm--ok' : copyError ? ' sdp-btn-copy-llm--err' : ''}`}
+            onClick={() => void copyReport()}
+            disabled={loading || filtered.length === 0}
+            title="Copy gap report to clipboard"
+          >
+            {copied ? '✓ Copied' : copyError ? '⚠ Copy failed' : 'Copy report'}
+          </button>
         </div>
 
         {(backfillMsg || backfillSelectedMsg) && (
-          <div className="sdp-drawer-inline-msg">
+          <div className="sdp-feedback" style={{ margin: '0 var(--space-4) var(--space-2)' }}>
             {backfillMsg && (
-              <div className={backfillOk === false ? 'sdp-inline-msg sdp-inline-msg--err' : 'sdp-inline-msg'}>
+              <div className={backfillOk === false ? 'sdp-msg--err' : 'sdp-msg--ok'}>
                 {backfillMsg}
               </div>
             )}
             {backfillSelectedMsg && (
-              <div
-                className={backfillSelectedOk === false ? 'sdp-inline-msg sdp-inline-msg--err' : 'sdp-inline-msg'}
-              >
+              <div className={backfillSelectedOk === false ? 'sdp-msg--err' : 'sdp-msg--ok'}>
                 {backfillSelectedMsg}
               </div>
             )}
           </div>
         )}
+
+        <div className="sdp-drawer-search">
+          <input
+            type="text"
+            className="sdp-drawer-search-input"
+            placeholder="Filter by symbol…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            aria-label="Filter gap symbols"
+          />
+          {q && (
+            <button type="button" className="sdp-drawer-search-clear" onClick={() => setQ('')} aria-label="Clear filter">×</button>
+          )}
+          {!loading && !error && (
+            <span className="sdp-drawer-search-count">
+              {filtered.length.toLocaleString()} / {(totalGapCount ?? items.length).toLocaleString()}
+            </span>
+          )}
+        </div>
 
         <div className="sdp-drawer-body">
           {loading && <div className="sdp-drawer-loading">Loading…</div>}
@@ -1588,6 +1828,12 @@ function FinancialGapsDrawer(props: FinancialGapsDrawerProps) {
             Showing first {items.length.toLocaleString()} of {totalGapCount.toLocaleString()} symbols.
           </div>
         )}
+        {!loading && !error && lazyAppending && (
+          <div className="sdp-drawer-truncated">
+            Loading remaining symbols… {items.length.toLocaleString()}
+            {totalGapCount != null ? ` / ${totalGapCount.toLocaleString()}` : ''}
+          </div>
+        )}
       </aside>
     </>
   )
@@ -1697,6 +1943,12 @@ function SepaDataReadyPageInner({
   const [checkingStep, setCheckingStep] = useState<number | null>(null)
 
   const [gapsDrawerOpen, setGapsDrawerOpen] = useState(false)
+  const [dataSupportChecked, setDataSupportChecked] = useState(false)
+  const dataSupportSectionRef = useRef<HTMLDivElement | null>(null)
+  const [activeInfoTab, setActiveInfoTab] = useState<'checklist' | 'database' | 'reference' | 'metrics'>('metrics')
+  const [collapsedResultStages, setCollapsedResultStages] = useState<Set<RunbookStageId>>(
+    () => new Set(RUNBOOK_STAGE_LAYOUT.map((s) => s.id)),
+  )
 
   const [finDrawerKind, setFinDrawerKind] = useState<FinDrawerKind | null>(null)
   const [finAllBusy, setFinAllBusy] = useState(false)
@@ -1710,23 +1962,31 @@ function SepaDataReadyPageInner({
   const [queuesErr, setQueuesErr] = useState<string | null>(null)
   const [queuesLoading, setQueuesLoading] = useState(false)
 
-  const loadSummary = useCallback(async (): Promise<SepaReadinessSummaryResponse | null> => {
-    setSummaryLoading(true)
-    setSummaryErr(null)
-    try {
-      const res = await fetchSepaReadinessSummary()
-      setSummary(res)
-      summaryLoadedAtRef.current = new Date().toISOString()
-      if (!res.ok) setSummaryErr(res.error ?? 'Summary failed')
-      return res
-    } catch (e) {
-      setSummaryErr(e instanceof Error ? e.message : 'Summary failed')
-      setSummary(null)
-      return null
-    } finally {
-      setSummaryLoading(false)
-    }
-  }, [])
+  const loadSummary = useCallback(
+    async (opts?: { showGlobalLoading?: boolean }): Promise<SepaReadinessSummaryResponse | null> => {
+      const showGlobalLoading = opts?.showGlobalLoading !== false
+      if (showGlobalLoading) {
+        setSummaryLoading(true)
+      }
+      setSummaryErr(null)
+      try {
+        const res = await fetchSepaReadinessSummary()
+        setSummary(res)
+        summaryLoadedAtRef.current = new Date().toISOString()
+        if (!res.ok) setSummaryErr(res.error ?? 'Summary failed')
+        return res
+      } catch (e) {
+        setSummaryErr(e instanceof Error ? e.message : 'Summary failed')
+        setSummary(null)
+        return null
+      } finally {
+        if (showGlobalLoading) {
+          setSummaryLoading(false)
+        }
+      }
+    },
+    [],
+  )
 
   const loadQueues = useCallback(async () => {
     setQueuesLoading(true)
@@ -1751,7 +2011,8 @@ function SepaDataReadyPageInner({
     setCheckingStep(stepId)
     setCheckedSteps((prev) => new Set([...prev, stepId]))
     try {
-      const res = await loadSummary()
+      // Per-step Check must not flip global summaryLoading — that would mark every runbook step as "loading".
+      const res = await loadSummary({ showGlobalLoading: false })
       void loadQueues()
       if (res?.ok && stepOkFromResponse(stepId, res) && stepId < 12) {
         setActiveRunStep((stepId + 1) as SepaRunStep)
@@ -2101,7 +2362,14 @@ function SepaDataReadyPageInner({
       setFinAllMsg(`Dispatched ${fmt(chunks)} tasks covering ${fmt(gapCount)} gap symbols.`)
       setFinAllOk(true)
       if (res.job_ids && res.job_ids.length > 0) {
-        refJobSession.trackStockOhlcSyncJob({ job_id: res.job_ids[0] })
+        const trackedKind = finBackfillJobKindForDrawer(kind)
+        for (const jid of res.job_ids) {
+          refJobSession.trackMassiveDbJob({
+            job_id: jid,
+            kind: trackedKind,
+            domain: 'financials',
+          })
+        }
       } else {
         refJobSession.openJobsSheet()
       }
@@ -2144,7 +2412,14 @@ function SepaDataReadyPageInner({
       setFinSelMsg(`Dispatched ${fmt(chunks)} tasks for ${fmt(gapCount)} selected symbols.`)
       setFinSelOk(true)
       if (res.job_ids && res.job_ids.length > 0) {
-        refJobSession.trackStockOhlcSyncJob({ job_id: res.job_ids[0] })
+        const trackedKind = finBackfillJobKindForDrawer(finDrawerKind)
+        for (const jid of res.job_ids) {
+          refJobSession.trackMassiveDbJob({
+            job_id: jid,
+            kind: trackedKind,
+            domain: 'financials',
+          })
+        }
       } else {
         refJobSession.openJobsSheet()
       }
@@ -2198,7 +2473,10 @@ function SepaDataReadyPageInner({
         : null
   const notesCount = (summary?.notes_breakdown ?? []).reduce((s, r) => s + r.count, 0)
 
-  const step1Status: CheckStatus = summaryLoading
+  /** True while full reload or a single-step Check is fetching summary (blocks concurrent checks). */
+  const readinessFetchBusy = summaryLoading || checkingStep != null
+
+  const step1Status: CheckStatus = summaryLoading || checkingStep === 1
     ? 'loading'
     : universeCount > 5000
     ? 'ok'
@@ -2216,7 +2494,7 @@ function SepaDataReadyPageInner({
   const holidaysLastSync = holidaysSummary?.last_massive_sync ?? null
   const holidaysLatest = holidaysSummary?.latest_date ?? null
   const holidaysEarliest = holidaysSummary?.earliest_date ?? null
-  const holidaysStatus: CheckStatus = summaryLoading
+  const holidaysStatus: CheckStatus = summaryLoading || checkingStep === 1
     ? 'loading'
     : holidaysTotal >= 100
     ? 'ok'
@@ -2227,7 +2505,7 @@ function SepaDataReadyPageInner({
     : 'unknown'
 
   const unifiedSnapRows = summary?.stock_unified_snapshot_row_count
-  const unifiedSnapStatus: CheckStatus = summaryLoading
+  const unifiedSnapStatus: CheckStatus = summaryLoading || checkingStep === 2
     ? 'loading'
     : unifiedSnapRows != null && unifiedSnapRows > 0
     ? 'ok'
@@ -2235,7 +2513,7 @@ function SepaDataReadyPageInner({
     ? 'warn'
     : 'unknown'
 
-  const barStepStatus: CheckStatus = summaryLoading
+  const barStepStatus: CheckStatus = summaryLoading || checkingStep === 3
     ? 'loading'
     : priceGap === 0
     ? 'ok'
@@ -2245,7 +2523,7 @@ function SepaDataReadyPageInner({
     ? 'error'
     : 'unknown'
 
-  const matSnapshotStepStatus: CheckStatus = summaryLoading
+  const matSnapshotStepStatus: CheckStatus = summaryLoading || checkingStep === 11
     ? 'loading'
     : summary?.snapshot_populated === true
     ? 'ok'
@@ -2260,14 +2538,14 @@ function SepaDataReadyPageInner({
   const shortIntGap = summary?.short_interest_gap_count
   const shortVolGap = summary?.short_volume_gap_count
 
-  const incomeFinStatus = gapCountCheckStatus(summaryLoading, incomeGap)
-  const balanceFinStatus = gapCountCheckStatus(summaryLoading, balanceGap)
-  const cashFinStatus = gapCountCheckStatus(summaryLoading, cashGap)
-  const ratiosFinStatus = gapCountCheckStatus(summaryLoading, ratiosGap)
-  const shortIntFinStatus = gapCountCheckStatus(summaryLoading, shortIntGap)
-  const shortVolFinStatus = gapCountCheckStatus(summaryLoading, shortVolGap)
+  const incomeFinStatus = gapCountCheckStatus(summaryLoading || checkingStep === 4, incomeGap)
+  const balanceFinStatus = gapCountCheckStatus(summaryLoading || checkingStep === 5, balanceGap)
+  const cashFinStatus = gapCountCheckStatus(summaryLoading || checkingStep === 6, cashGap)
+  const ratiosFinStatus = gapCountCheckStatus(summaryLoading || checkingStep === 7, ratiosGap)
+  const shortIntFinStatus = gapCountCheckStatus(summaryLoading || checkingStep === 8, shortIntGap)
+  const shortVolFinStatus = gapCountCheckStatus(summaryLoading || checkingStep === 9, shortVolGap)
 
-  const reviewStepStatus: CheckStatus = summaryLoading
+  const reviewStepStatus: CheckStatus = summaryLoading || checkingStep === 12
     ? 'loading'
     : notesCount === 0 && summary?.snapshot_populated
     ? 'ok'
@@ -2283,7 +2561,7 @@ function SepaDataReadyPageInner({
 
   const fundCacheValid = summary?.fund_cache_valid_count ?? 0
   const fundCacheViewExists = summary?.fund_cache_view_exists
-  const fundStepStatus: CheckStatus = summaryLoading
+  const fundStepStatus: CheckStatus = summaryLoading || checkingStep === 10
     ? 'loading'
     : fundCacheViewExists === false
     ? 'error'
@@ -2427,6 +2705,24 @@ function SepaDataReadyPageInner({
     }
   })
 
+  const snapshotByTypeRows = summary?.stock_unified_snapshot_by_type ?? []
+  const snapshotByTypeMap = new Map(snapshotByTypeRows.map((r) => [r.code, r]))
+  const fundamentalsByTypeRows = summary?.fundamentals_symbol_count_by_type ?? []
+  const fundamentalsByTypeMap = new Map(fundamentalsByTypeRows.map((r) => [r.code, r]))
+  const knownCodes = new Set(INSTRUMENT_TYPE_DATA_SUPPORT_ROWS.map((r) => r.code))
+  const extraSnapshotRows = snapshotByTypeRows
+    .filter((r) => !knownCodes.has(r.code))
+    .map((r) => ({
+      code: r.code,
+      description: r.description ?? '—',
+      incomeStatements: 'unknown' as DataSupportLevel,
+      balanceSheets: 'unknown' as DataSupportLevel,
+      cashFlows: 'unknown' as DataSupportLevel,
+      ratios: 'unknown' as DataSupportLevel,
+      note: 'Observed in unified snapshot; support matrix not yet classified.',
+    }))
+  const supportRows = [...INSTRUMENT_TYPE_DATA_SUPPORT_ROWS, ...extraSnapshotRows]
+
   return (
     <div className="card process-section sepa-data-ready-page wl2">
       <div className="research-page-head">
@@ -2444,6 +2740,8 @@ function SepaDataReadyPageInner({
       <div className="sdp-actions-card">
         <div className="sdp-actions-title">Run book</div>
 
+        <div className="sdp-runbook-layout">
+        <div className="sdp-runbook-main">
         <div className="sdp-runbook-stageflow" role="region" aria-label="SEPA Data Ready run book">
           {runbookStages.map((stage, stageIdx) => (
             <div
@@ -2496,8 +2794,6 @@ function SepaDataReadyPageInner({
           ))}
         </div>
 
-        <div className="sdp-runbook-layout">
-        <div className="sdp-runbook-main">
         <div className="sdp-step-list sdp-step-list--panel">
 
           {/* Step 1 — Tickers Universe + Market Holidays */}
@@ -2546,7 +2842,7 @@ function SepaDataReadyPageInner({
                   type="button"
                   className="sdp-btn-check sdp-btn-check--sky"
                   onClick={() => void handleCheckStep(1)}
-                  disabled={summaryLoading}
+                  disabled={readinessFetchBusy}
                   title="Check tickers and holidays data readiness"
                 >
                   {checkingStep === 1 ? 'Checking…' : 'Check'}
@@ -2638,7 +2934,7 @@ function SepaDataReadyPageInner({
                   type="button"
                   className="sdp-btn-check sdp-btn-check--sky"
                   onClick={() => void handleCheckStep(2)}
-                  disabled={summaryLoading}
+                  disabled={readinessFetchBusy}
                 >
                   {checkingStep === 2 ? 'Checking…' : 'Check'}
                 </button>
@@ -2708,7 +3004,7 @@ function SepaDataReadyPageInner({
                   type="button"
                   className="sdp-btn-check sdp-btn-check--violet"
                   onClick={() => void handleCheckStep(3)}
-                  disabled={summaryLoading}
+                  disabled={readinessFetchBusy}
                 >
                   {checkingStep === 3 ? 'Checking…' : 'Check'}
                 </button>
@@ -2768,14 +3064,15 @@ function SepaDataReadyPageInner({
               </div>
               <p className="sdp-step-desc">
                 Massive <code>GET /stocks/financials/v1/income-statements</code> → PostgreSQL. Quarterly + annual rows
-                power Step 10 fundamentals evaluation when present.
+                power Step 10 fundamentals evaluation when present. Gap checks/backfill scope: instrument types with
+                Supported or Partial coverage in Instrument Type Data Support (<code>{FIN_STMT_GAP_INSTRUMENT_CODES.join(', ')}</code>).
               </p>
               <div className="sdp-step-actions">
                 <button
                   type="button"
                   className="sdp-btn-check sdp-btn-check--amber"
                   onClick={() => void handleCheckStep(4)}
-                  disabled={summaryLoading}
+                  disabled={readinessFetchBusy}
                 >
                   {checkingStep === 4 ? 'Checking…' : 'Check'}
                 </button>
@@ -2827,9 +3124,10 @@ function SepaDataReadyPageInner({
               </div>
               <p className="sdp-step-desc">
                 <code>GET /stocks/financials/v1/balance-sheets</code> — quarterly coverage and total_assets fill rate.
+                Same Supported/Partial gap scope as Step 4: <code>{FIN_STMT_GAP_INSTRUMENT_CODES.join(', ')}</code>.
               </p>
               <div className="sdp-step-actions">
-                <button type="button" className="sdp-btn-check sdp-btn-check--amber" onClick={() => void handleCheckStep(5)} disabled={summaryLoading}>
+                <button type="button" className="sdp-btn-check sdp-btn-check--amber" onClick={() => void handleCheckStep(5)} disabled={readinessFetchBusy}>
                   {checkingStep === 5 ? 'Checking…' : 'Check'}
                 </button>
                 <button
@@ -2842,6 +3140,17 @@ function SepaDataReadyPageInner({
                 </button>
                 <button type="button" className="sdp-btn-secondary" onClick={() => refJobSession.openJobsSheet()}>
                   Jobs
+                </button>
+                <button
+                  type="button"
+                  className="sdp-btn-ghost"
+                  onClick={() => {
+                    setDataSupportChecked(true)
+                    dataSupportSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                  }}
+                  title="Jump to Instrument Type Data Support section"
+                >
+                  Data Support ↓
                 </button>
                 <button
                   type="button"
@@ -2871,10 +3180,11 @@ function SepaDataReadyPageInner({
                 Ingest <code>stock_cash_flows</code>
               </div>
               <p className="sdp-step-desc">
-                <code>GET /stocks/financials/v1/cash-flow-statements</code> — operating cash flow coverage.
+                <code>GET /stocks/financials/v1/cash-flow-statements</code> — operating cash flow coverage. Same Supported/Partial gap
+                scope as Step 4: <code>{FIN_STMT_GAP_INSTRUMENT_CODES.join(', ')}</code>.
               </p>
               <div className="sdp-step-actions">
-                <button type="button" className="sdp-btn-check sdp-btn-check--amber" onClick={() => void handleCheckStep(6)} disabled={summaryLoading}>
+                <button type="button" className="sdp-btn-check sdp-btn-check--amber" onClick={() => void handleCheckStep(6)} disabled={readinessFetchBusy}>
                   {checkingStep === 6 ? 'Checking…' : 'Check'}
                 </button>
                 <button
@@ -2916,10 +3226,12 @@ function SepaDataReadyPageInner({
                 Ingest <code>stock_ratios</code>
               </div>
               <p className="sdp-step-desc">
-                <code>GET /stocks/financials/v1/ratios</code> (v1 when available; worker may fall back to legacy client).
+                <code>GET /stocks/financials/v1/ratios</code> stores TTM ratio rows keyed by{' '}
+                <code>date</code> (trading day). Legacy <code>/vX/reference/financials</code> ratio math is not written here.
+                Supported/Partial gap scope as Step 4: <code>{FIN_STMT_GAP_INSTRUMENT_CODES.join(', ')}</code>.
               </p>
               <div className="sdp-step-actions">
-                <button type="button" className="sdp-btn-check sdp-btn-check--amber" onClick={() => void handleCheckStep(7)} disabled={summaryLoading}>
+                <button type="button" className="sdp-btn-check sdp-btn-check--amber" onClick={() => void handleCheckStep(7)} disabled={readinessFetchBusy}>
                   {checkingStep === 7 ? 'Checking…' : 'Check'}
                 </button>
                 <button
@@ -2964,7 +3276,7 @@ function SepaDataReadyPageInner({
                 <code>GET /stocks/v1/short-interest</code> — recent settlement dates per symbol.
               </p>
               <div className="sdp-step-actions">
-                <button type="button" className="sdp-btn-check sdp-btn-check--amber" onClick={() => void handleCheckStep(8)} disabled={summaryLoading}>
+                <button type="button" className="sdp-btn-check sdp-btn-check--amber" onClick={() => void handleCheckStep(8)} disabled={readinessFetchBusy}>
                   {checkingStep === 8 ? 'Checking…' : 'Check'}
                 </button>
                 <button
@@ -3009,7 +3321,7 @@ function SepaDataReadyPageInner({
                 <code>GET /stocks/v1/short-volume</code> — recent trade dates and short volume ratio.
               </p>
               <div className="sdp-step-actions">
-                <button type="button" className="sdp-btn-check sdp-btn-check--amber" onClick={() => void handleCheckStep(9)} disabled={summaryLoading}>
+                <button type="button" className="sdp-btn-check sdp-btn-check--amber" onClick={() => void handleCheckStep(9)} disabled={readinessFetchBusy}>
                   {checkingStep === 9 ? 'Checking…' : 'Check'}
                 </button>
                 <button
@@ -3077,7 +3389,7 @@ function SepaDataReadyPageInner({
                   type="button"
                   className="sdp-btn-check sdp-btn-check--violet"
                   onClick={() => void handleCheckStep(10)}
-                  disabled={summaryLoading}
+                  disabled={readinessFetchBusy}
                 >
                   {checkingStep === 10 ? 'Checking…' : 'Check'}
                 </button>
@@ -3115,7 +3427,7 @@ function SepaDataReadyPageInner({
                   type="button"
                   className="sdp-btn-check sdp-btn-check--amber"
                   onClick={() => void handleCheckStep(11)}
-                  disabled={summaryLoading}
+                  disabled={readinessFetchBusy}
                 >
                   {checkingStep === 11 ? 'Checking…' : 'Check'}
                 </button>
@@ -3152,7 +3464,7 @@ function SepaDataReadyPageInner({
                   type="button"
                   className="sdp-btn-check sdp-btn-check--teal"
                   onClick={() => void handleCheckStep(12)}
-                  disabled={summaryLoading}
+                  disabled={readinessFetchBusy}
                 >
                   {checkingStep === 12 ? 'Checking…' : 'Check'}
                 </button>
@@ -3202,9 +3514,9 @@ function SepaDataReadyPageInner({
             type="button"
             className="sdp-btn-ghost"
             onClick={handleReload}
-            disabled={summaryLoading}
+            disabled={readinessFetchBusy}
           >
-            {summaryLoading ? 'Reloading…' : '↻ Reload all'}
+            {summaryLoading ? 'Reloading…' : checkingStep != null ? 'Checking…' : '↻ Reload all'}
           </button>
           {refJobSession.refJobItems.length > 0 && (
             <button
@@ -3230,27 +3542,58 @@ function SepaDataReadyPageInner({
         <div className="sdp-runbook-results">
           <div className="sdp-results-header">
             <span className="sdp-results-title">Check Results</span>
-            {checkedSteps.size > 0 && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}>
               <button
                 type="button"
                 className="sdp-results-reset-btn"
-                onClick={() => setCheckedSteps(new Set())}
+                onClick={() => setCollapsedResultStages(new Set())}
               >
-                Reset
+                Expand all
               </button>
-            )}
+              <button
+                type="button"
+                className="sdp-results-reset-btn"
+                onClick={() => setCollapsedResultStages(new Set(RUNBOOK_STAGE_LAYOUT.map((s) => s.id)))}
+              >
+                Collapse all
+              </button>
+              {checkedSteps.size > 0 && (
+                <button
+                  type="button"
+                  className="sdp-results-reset-btn"
+                  onClick={() => setCheckedSteps(new Set())}
+                >
+                  Reset
+                </button>
+              )}
+            </div>
           </div>
           <div className="sdp-results-list sdp-results-list--staged">
             {runbookStages.map((stage) => (
               <div key={stage.id} className="sdp-results-stage">
-                <div className="sdp-results-stage-head">
+                <button
+                  type="button"
+                  className="sdp-results-stage-head sdp-results-stage-toggle"
+                  onClick={() =>
+                    setCollapsedResultStages((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(stage.id)) next.delete(stage.id)
+                      else next.add(stage.id)
+                      return next
+                    })
+                  }
+                  aria-expanded={!collapsedResultStages.has(stage.id)}
+                >
                   <span className={`sdp-check-dot sdp-check-dot--${stage.stageStatus}`} aria-hidden="true" />
                   <span className="sdp-results-stage-title">{stage.title}</span>
                   <span className="sdp-results-stage-count" aria-label={`${stage.doneCount} of ${stage.steps.length} steps complete`}>
                     {stage.doneCount}/{stage.steps.length}
                   </span>
-                </div>
-                <div className="sdp-results-stage-entries">
+                  <span className="sdp-results-stage-chevron" aria-hidden="true">
+                    {collapsedResultStages.has(stage.id) ? '▸' : '▾'}
+                  </span>
+                </button>
+                {!collapsedResultStages.has(stage.id) && <div className="sdp-results-stage-entries">
                   {stage.steps.map((s) => {
                     const isChecked = checkedSteps.has(s.id)
                     const isLoading = checkingStep === s.id
@@ -3453,8 +3796,8 @@ function SepaDataReadyPageInner({
                   )}
                 </div>
               )
-            })}
-                </div>
+                  })}
+                </div>}
               </div>
             ))}
           </div>
@@ -3462,30 +3805,70 @@ function SepaDataReadyPageInner({
         </div>{/* /sdp-runbook-layout */}
       </div>
 
-      {/* ── Screening Criteria Checklist ──────────────────────────────────── */}
-      <SepaScreeningChecklist summary={summary} />
+      <div className="sdp-info-tabs" role="tablist" aria-label="SEPA data insights">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeInfoTab === 'metrics'}
+          className={`sdp-info-tab${activeInfoTab === 'metrics' ? ' sdp-info-tab--active' : ''}`}
+          onClick={() => setActiveInfoTab('metrics')}
+        >
+          Readiness Metrics
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeInfoTab === 'checklist'}
+          className={`sdp-info-tab${activeInfoTab === 'checklist' ? ' sdp-info-tab--active' : ''}`}
+          onClick={() => setActiveInfoTab('checklist')}
+        >
+          Screening Checklist
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeInfoTab === 'database'}
+          className={`sdp-info-tab${activeInfoTab === 'database' ? ' sdp-info-tab--active' : ''}`}
+          onClick={() => setActiveInfoTab('database')}
+        >
+          Database (Raw / Computed)
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeInfoTab === 'reference'}
+          className={`sdp-info-tab${activeInfoTab === 'reference' ? ' sdp-info-tab--active' : ''}`}
+          onClick={() => setActiveInfoTab('reference')}
+        >
+          Reference
+        </button>
+      </div>
 
-      {/* ── Data Catalog ──────────────────────────────────────────────────── */}
+      {activeInfoTab === 'checklist' && <SepaScreeningChecklist summary={summary} />}
 
-      {summary?.data_catalog ? (
-        <CatalogTabs catalog={summary.data_catalog} />
-      ) : (
-        summaryLoading ? (
-          <div className="sdp-catalog-loading">
-            {[0, 1, 2, 3].map((i) => <div key={i} className="sdp-skeleton-card" />)}
-          </div>
-        ) : (
-          summary?.ok === true && (
-            <div className="sdp-info-banner">
-              Data catalog not returned. Deploy a backend that includes <code>data_catalog</code> on{' '}
-              <code>/readiness/summary</code>, then reload summary.
-            </div>
-          )
-        )
+      {activeInfoTab === 'database' && (
+        <>
+          {summary?.data_catalog ? (
+            <CatalogTabs catalog={summary.data_catalog} />
+          ) : (
+            summaryLoading ? (
+              <div className="sdp-catalog-loading">
+                {[0, 1, 2, 3].map((i) => <div key={i} className="sdp-skeleton-card" />)}
+              </div>
+            ) : (
+              summary?.ok === true && (
+                <div className="sdp-info-banner">
+                  Data catalog not returned. Deploy a backend that includes <code>data_catalog</code> on{' '}
+                  <code>/readiness/summary</code>, then reload summary.
+                </div>
+              )
+            )
+          )}
+        </>
       )}
 
-      {/* ── Readiness Metrics ─────────────────────────────────────────────── */}
-
+      {activeInfoTab === 'metrics' && (
+        <>
       <div className="sdp-section-divider">
         <span className="sdp-section-divider-label">Readiness metrics</span>
         <div className="sdp-section-divider-line" />
@@ -3558,6 +3941,147 @@ function SepaDataReadyPageInner({
         </div>
       </div>
 
+      <div className="sdp-section-card" id="sepa-balance-data-support" ref={dataSupportSectionRef}>
+        <div className="sdp-section-card-header">
+          <span className="sdp-section-card-title">Instrument Type Data Support</span>
+          <button
+            type="button"
+            className="sdp-btn-ghost"
+            onClick={() => setDataSupportChecked(true)}
+          >
+            {dataSupportChecked ? 'Checked' : 'Check'}
+          </button>
+        </div>
+        <p className="sdp-step-desc" style={{ marginTop: 0 }}>
+          Coverage matrix for statements + snapshot footprint by instrument type. Steps 4–7 count gaps only for Supported or Partial
+          types here (<code>{FIN_STMT_GAP_INSTRUMENT_CODES.join(', ')}</code>); fully Not supported instrument types do not inflate gap
+          counts. Under each statement column, <strong>distinct symbols</strong> counts join{' '}
+          <code>tickers</code> on <code>symbol</code> (active US <code>stocks</code>, <code>source=massive</code> rows in{' '}
+          <code>stock_*</code> tables).
+        </p>
+        {!dataSupportChecked ? (
+          <div className="sdp-step-aside-empty">
+            Click <strong>Check</strong> to load the instrument-type support matrix.
+          </div>
+        ) : (
+          <div className="table-scroll-x">
+            <table className="sdp-table sdp-table--compact">
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  <th>Description</th>
+                  <th scope="col">
+                    Income
+                    <span className="sdp-th-stacked-sub">distinct symbols</span>
+                  </th>
+                  <th scope="col">
+                    Balance
+                    <span className="sdp-th-stacked-sub">distinct symbols</span>
+                  </th>
+                  <th scope="col">
+                    Cash flow
+                    <span className="sdp-th-stacked-sub">distinct symbols</span>
+                  </th>
+                  <th scope="col">
+                    Ratios
+                    <span className="sdp-th-stacked-sub">distinct symbols</span>
+                  </th>
+                  <th>Snapshot rows</th>
+                  <th>Universe tickers</th>
+                  <th>Coverage</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {supportRows.map((row) => {
+                  const income = supportBadge(row.incomeStatements)
+                  const balance = supportBadge(row.balanceSheets)
+                  const cash = supportBadge(row.cashFlows)
+                  const ratios = supportBadge(row.ratios)
+                  const fc = fundamentalsByTypeMap.get(row.code)
+                  const incN = fc?.income_statement_symbols
+                  const balN = fc?.balance_sheet_symbols
+                  const cfN = fc?.cash_flow_symbols
+                  const rtN = fc?.ratio_symbols
+                  const snap = snapshotByTypeMap.get(row.code)
+                  const snapRows = snap?.snapshot_row_count ?? 0
+                  const uniRows = snap?.universe_ticker_count ?? 0
+                  const coveragePct = uniRows > 0 ? (snapRows / uniRows) * 100 : null
+                  const coverageCls =
+                    coveragePct == null
+                      ? 'sdp-coverage-bar-fill--unknown'
+                      : coveragePct >= 90
+                      ? 'sdp-coverage-bar-fill--high'
+                      : coveragePct >= 60
+                      ? 'sdp-coverage-bar-fill--mid'
+                      : 'sdp-coverage-bar-fill--low'
+                  return (
+                    <tr key={row.code}>
+                      <td><code>{row.code}</code></td>
+                      <td>{row.description}</td>
+                      <td>
+                        <div className="sdp-support-fund-cell">
+                          <span className={income.cls}>{income.text}</span>
+                          {typeof incN === 'number' ? (
+                            <span className="sdp-support-fund-cell__amount">{fmt(incN)}</span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="sdp-support-fund-cell">
+                          <span className={balance.cls}>{balance.text}</span>
+                          {typeof balN === 'number' ? (
+                            <span className="sdp-support-fund-cell__amount">{fmt(balN)}</span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="sdp-support-fund-cell">
+                          <span className={cash.cls}>{cash.text}</span>
+                          {typeof cfN === 'number' ? (
+                            <span className="sdp-support-fund-cell__amount">{fmt(cfN)}</span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="sdp-support-fund-cell">
+                          <span className={ratios.cls}>{ratios.text}</span>
+                          {typeof rtN === 'number' ? (
+                            <span className="sdp-support-fund-cell__amount">{fmt(rtN)}</span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td>{fmt(snapRows)}</td>
+                      <td>{fmt(uniRows)}</td>
+                      <td>
+                        {coveragePct == null ? (
+                          <span className="sdp-coverage-na">—</span>
+                        ) : (
+                          <div className="sdp-coverage-cell">
+                            <div className="sdp-coverage-bar">
+                              <span
+                                className={`sdp-coverage-bar-fill ${coverageCls}`}
+                                style={{ width: `${Math.max(0, Math.min(100, coveragePct))}%` }}
+                              />
+                            </div>
+                            <span className="sdp-coverage-pct">{coveragePct.toFixed(1)}%</span>
+                          </div>
+                        )}
+                      </td>
+                      <td>{row.note ?? '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+        </>
+      )}
+
+      {activeInfoTab === 'reference' && (
+        <>
       {/* ── Notes breakdown ───────────────────────────────────────────────── */}
 
       <div className="sdp-section-card">
@@ -3567,7 +4091,7 @@ function SepaDataReadyPageInner({
             type="button"
             className="sdp-btn-ghost"
             onClick={() => void loadSummary()}
-            disabled={summaryLoading}
+            disabled={readinessFetchBusy}
           >
             Refresh
           </button>
@@ -3658,6 +4182,8 @@ function SepaDataReadyPageInner({
           </table>
         </div>
       </div>
+        </>
+      )}
 
       {finDrawerKind != null && (
         <FinancialGapsDrawer

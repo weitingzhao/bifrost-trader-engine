@@ -4,10 +4,19 @@ import type { MassiveStockTickersSubTab } from './feedMassiveStockTabUtils'
 export const MAX_REF_JOBS_TRACKED = 20
 
 /** Session-tracked Massive stock job scope (extend for future REST domains). */
-export type MassiveStockRefJobDomain = 'tickers' | 'ohlc'
+export type MassiveStockRefJobDomain = 'tickers' | 'ohlc' | 'financials'
 
 /** Jobs shown in the shared session sheet (ticker_reference_* and feed_stocks_aggregate; legacy `stock_ohlc_sync`). */
-export type TrackedMassiveDbJobKind = TickerReferenceJobKind | 'feed_stocks_aggregate' | 'stock_ohlc_sync'
+export type TrackedMassiveDbJobKind =
+  | TickerReferenceJobKind
+  | 'feed_stocks_aggregate'
+  | 'stock_ohlc_sync'
+  | 'feed_stocks_income_statements'
+  | 'feed_stocks_balance_sheets'
+  | 'feed_stocks_cash_flows'
+  | 'feed_stocks_ratios'
+  | 'feed_stocks_short_interest'
+  | 'feed_stocks_short_volume'
 
 export type RefJobTrackItem = {
   jobId: string
@@ -251,6 +260,18 @@ export function refJobKindShortLabel(kind: TrackedMassiveDbJobKind): string {
     case 'ticker_reference_instrument_types':
     case 'stock_reference_instrument_types':
       return 'Ticker types'
+    case 'feed_stocks_income_statements':
+      return 'Income statements'
+    case 'feed_stocks_balance_sheets':
+      return 'Balance sheets'
+    case 'feed_stocks_cash_flows':
+      return 'Cash flows'
+    case 'feed_stocks_ratios':
+      return 'Ratios'
+    case 'feed_stocks_short_interest':
+      return 'Short interest'
+    case 'feed_stocks_short_volume':
+      return 'Short volume'
     default:
       return kind
   }

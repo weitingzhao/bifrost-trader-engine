@@ -456,9 +456,56 @@
 | `stock_income_statements` | `(symbol, timeframe, period_end, source)` | `GET /stocks/financials/v1/income-statements` |
 | `stock_balance_sheets` | `(symbol, timeframe, period_end, source)` | `GET /stocks/financials/v1/balance-sheets` |
 | `stock_cash_flows` | `(symbol, timeframe, period_end, source)` | `GET /stocks/financials/v1/cash-flow-statements` |
-| `stock_ratios` | `(symbol, timeframe, period_end, source)` | `GET /stocks/financials/v1/ratios`（不可用时 Worker 可回退 `GET /vX/reference/financials` 本地算比率） |
+| `stock_ratios` | `(symbol, date, source)` | `GET /stocks/financials/v1/ratios`（按交易日 TTM；**`/vX` 计算的 `fetch_stock_ratios` 仅用于展示，不入本表**） |
 | `stock_short_interest` | `(symbol, settlement_date, source)` | `GET /stocks/v1/short-interest` |
-| `stock_short_volume` | `(symbol, trade_date, source)` | `GET /stocks/v1/short-volume`（`exchanges` 存 jsonb） |
+| `stock_short_volume` | `(symbol, trade_date, source)` | `GET /stocks/v1/short-volume`（**`results[]`** 标量列与 API 同名；**`symbol`**=**`ticker`**、**`trade_date`**=**`date`**；可选 **`exchanges`** jsonb） |
+
+#### `stock_income_statements` 与 Massive income-statements 响应
+
+- **主键**：`(symbol, timeframe, period_end, source)`；**`symbol`** 来自响应 **`tickers`**（与既有 ingest 一致，通常取首个 ticker）。**同一 `period_end` 可同时存在 `quarterly`、`annual`、`trailing_twelve_months`（TTM）等多行**：比对与缺口统计须同时使用 **`timeframe`**。
+- **不入库**：信封 **`next_url`**、**`request_id`**、**`status`**；文档 **Query Parameters**（过滤器）非 **`results[]`** 字段。
+- **列名**：与 **`GET /stocks/financials/v1/income-statements`** 文档 **`results[]`** 标量 **同名 snake_case**；**`tickers`**（`array[string]`）以 **`jsonb`** 原样落库（另有 **`symbol`** / **`source`** / **`fetched_at`**）。绑定顺序见 **`_STOCK_INCOME_UPSERT_BIND_COLUMNS`**（与 [`src/persistence/postgres/ddl.py`](../src/persistence/postgres/ddl.py) 一致）。
+- **规范化**：**`timeframe`**、**`cik`** 与资产负债表 / 现金流量表 ingest 共用 **`_normalize_massive_statement_timeframe`** / **`_normalize_sec_cik`**。
+- **回补**：**`feed_stocks_income_statements`** 对每个 symbol 依次拉取 **`quarterly`、`annual`、`trailing_twelve_months`**（TTM），与现金流量表一致。
+
+#### `stock_balance_sheets` 与 Massive balance-sheets 响应
+
+- **主键**：`(symbol, timeframe, period_end, source)`；**`symbol`** 来自 **`tickers`**。
+- **不入库**：信封 **`next_url`**、**`request_id`**、**`status`**；文档 **Query Parameters**（过滤器）非 **`results[]`** 字段。
+- **列名**：与 **`GET /stocks/financials/v1/balance-sheets`** 文档 **`results[]`** 标量 **同名 snake_case**（另有 **`symbol`** / **`source`** / **`fetched_at`**）；绑定顺序见 **`_STOCK_BALANCE_UPSERT_BIND_COLUMNS`**（与 [`src/persistence/postgres/ddl.py`](../src/persistence/postgres/ddl.py) 表定义一致）。文档示例未出现的行（如 **`additional_paid_in_capital`**、**`goodwill`**）列仍可空，API 若返回则写入。
+- **规范化**：**`timeframe`**、**`cik`** 与现金流量表 ingest 共用 **`_normalize_massive_statement_timeframe`** / **`_normalize_sec_cik`**。
+
+#### `stock_cash_flows` 与 Massive cash-flow-statements 响应
+
+- **主键**：`(symbol, timeframe, period_end, source)`；**`symbol`** 由响应 **`tickers`** 数组推导（与既有 ingest 一致，通常取首个 ticker）。**同一 `period_end` 可同时存在 `quarterly`、`annual`、`trailing_twelve_months`（TTM）等多行**：三者经济数据含义不同，**不得以单列 `(symbol, period_end)` 去对齐 REST JSON**。比对时请同时使用 **`timeframe`**。Massive 请求参数里的 **`ttm`** 与响应 **`trailing_twelve_months`** 入库时规范为 **`trailing_twelve_months`**。
+- **不写入本表的顶层字段**：单次 REST 信封中的 **`next_url`**、**`request_id`**、**`status`**（分页与请求诊断，非财报期维度）。
+- **文档对照**：Massive 文档表格里的 **Query Parameters**（如 **`cik.gt`**、**`period_end`** 过滤器）是 **HTTP 请求过滤条件**，**不是**响应体字段，也 **不入库**；表结构与 **`Response Attributes`** 中的 **`results[].*`** 对齐（另加 **`symbol`** / **`source`** / **`fetched_at`**）。
+- **列名与 Massive `results[]` 一致**：除 **`symbol`**（来自 **`tickers`**）、**`source`**、**`fetched_at`** 外，其余财报字段使用 **与 REST 文档相同的 snake_case 列名**（全部为 **`double precision`** 或 **`date`/`integer`/`text`** 等与 API 类型对应的 PG 类型）。不再保留 **`net_cash_flow_from_*`**、**`net_change_in_cash_and_equivalents`**、**`capital_expenditure`**、**`free_cash_flow`**、**`depreciation_and_amortization`** 等别名列；`pg_ddl` 若检测到旧列布局或缺少关键新列会 **DROP TABLE** 后 **`CREATE`**（见 [`src/persistence/postgres/ddl.py`](../src/persistence/postgres/ddl.py)）。绑定顺序由 **`_STOCK_CASH_FLOW_UPSERT_BIND_COLUMNS`** 与 DDL 锁定一致（见 **`upsert_cash_flow_rows`**）。
+
+#### `stock_ratios` 与 Massive ratios 响应（v1）
+
+- **主键**：`(symbol, date, source)`。**`symbol`** 由 **`results[].ticker`**（与 **`_sym_from_row`** 一致）；**`date`** 对应 API 的 **`results[].date`**（比率对应的交易日）。
+- **不入库**：信封 **`next_url`**、**`request_id`**、**`status`**、文档未列为 **`results[]`** 属性的 **`count`** 等分页/辅助字段。
+- **列名**：与 **`GET /stocks/financials/v1/ratios`** 文档 **`results[]`** **同名**（PostgreSQL 保留字 **`current`** 在 DDL/`INSERT` 中带双引号）；另有 **`symbol`** / **`source`** / **`fetched_at`**。**`tickers`** 在本端点中为 singular **`ticker`**，已并入 **`symbol`**。
+- **查询参数**：文档中的 **`ticker`** / **`tickers`**、**`limit`**、**`sort`** 等为 HTTP 过滤器。客户端优先发 **`ticker`**；若 **`results`** 为空则 **自动用 **`tickers`** 重试**（与同系列其它 v1 习惯对齐）。写入侧默认 **不传 **`sort`**（文档默认列为 **`ticker`**；无效的 **`sort`（例如未文档化的 **`date.desc`）可导致空 **`results`** 而无错误信封**）。回填可在 payload 显式传 **`sort`**。
+- **回填**：**`feed_stocks_ratios`** 每 symbol 一次请求，默认 **`limit=120`**；任务结果附带 **`api_rows_seen`**（API 返回 **`results`** 长度）便于判断「Upsert 0 是未拉到行还是行被跳过」。**不再有 vX 计算比率落库**。历史布局由 `pg_ddl` **DROP** 后重建。
+- **缺口**：universe 内因 **`max(date)`** 过旧或 **无行** 计入 gap（阈值 **45** 日历日，与其它短期基本面表可读性对齐）；详情里 **`annual_max_period_end`** 槽位承载 **`max(date)`**（展示用）。
+- **绑定**：**`_STOCK_RATIOS_UPSERT_BIND_COLUMNS`** / **`upsert_ratios_rows`**。
+
+#### `stock_short_interest` 与 Massive short-interest 响应
+
+- **主键**：`(symbol, settlement_date, source)`。**`symbol`** 存 API **`results[].ticker`**（与全库标的键一致）。
+- **不入库**：信封 **`next_url`**、**`request_id`**、**`status`**、顶层 **`count`**（若出现）；**Query Parameters** 非 **`results[]`**。
+- **列与 `results[]`**：**`settlement_date`**（`date`）、**`short_interest`**、**`avg_daily_volume`**（**`bigint`**，与文档 integer 一致）、**`days_to_cover`**（`double precision`）。另有可空 **`cik`**（文档示例无该字段；若 API 扩展返回则经 **`_normalize_sec_cik`** 写入）、**`source`**、**`fetched_at`**。
+- **绑定**：**`_STOCK_SHORT_INTEREST_UPSERT_BIND_COLUMNS`** / **`upsert_short_interest_rows`**；存量 **`avg_daily_volume` float8** 由 `pg_ddl` **`ALTER … TYPE bigint`** 迁移。
+
+#### `stock_short_volume` 与 Massive short-volume 响应
+
+- **主键**：`(symbol, trade_date, source)`。**`symbol`** 存 API **`results[].ticker`**（**`_sym_from_row`**，亦接受 **`symbol`**）；**`trade_date`** 存 **`results[].date`**（PostgreSQL 列名避免保留字 **`date`**）。
+- **不入库**：信封 **`next_url`**、**`request_id`**、**`status`**、顶层 **`count`**（若出现）；**Query Parameters** 非 **`results[]`**。
+- **列与 `results[]`**（与文档 **同名 snake_case**）：**`adf_short_volume`**、**`adf_short_volume_exempt`**、**`exempt_volume`**、**`nasdaq_carteret_short_volume`**、**`nasdaq_carteret_short_volume_exempt`**、**`nasdaq_chicago_short_volume`**、**`nasdaq_chicago_short_volume_exempt`**、**`non_exempt_volume`**、**`nyse_short_volume`**、**`nyse_short_volume_exempt`**、**`short_volume`**、**`short_volume_ratio`**、**`total_volume`**（文档 integer 类用 **`bigint`**，**`number`** 中可为小数的用 **`double precision`**）。另有可空 **`exchanges`**（**jsonb**，文档未列 **`results[]`** 属性；若 payload 含则写入）、**`cik`**（**`_normalize_sec_cik`**）、**`source`**、**`fetched_at`**。
+- **存量迁移**：`pg_ddl` 在缺 **`adf_short_volume`** 等列时对 **`stock_short_volume`** **`ADD COLUMN`**。
+- **绑定**：**`_STOCK_SHORT_VOLUME_UPSERT_BIND_COLUMNS`** / **`upsert_short_volume_rows`**；**`fetch_stock_short_volume`** 的 **`limit`** 上限 **50000**（与 Massive 文档一致）。
 
 Phase4 / `evaluate_fundamentals` 在存在足够 `stock_income_statements` 行时优先从 PG 组装季度/年度行（见 [`src/research/sepa/phase4_engine.py`](../src/research/sepa/phase4_engine.py)），否则仍走 `GET /vX/reference/financials` 路径。
 
@@ -1634,6 +1681,12 @@ python scripts/db/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-05-05 SEPA 基本面原始表与 Runbook 扩展 | 新增六表 §2.14.9：`stock_income_statements`、`stock_balance_sheets`、`stock_cash_flows`、`stock_ratios`、`stock_short_interest`、`stock_short_volume`（`pg_ddl`）；Celery kind `feed_stocks_*`；`GET/POST …/readiness/*-gaps` / `backfill-*`；`fetch_sepa_readiness_summary` 增加各表 gap 计数；Phase4 优先从 `stock_income_statements` 组装 `evaluate_fundamentals` 输入。SEPA Data Ready 步骤顺序更新为 Step 4–12。 | 研究 / SEPA |
 | 2026-05-04 reference_us_holidays 扩展 + Massive 自动同步 | §2.22 表 `reference_us_holidays` 新增列：`name`、`status`（closed / early-close）、`open_time`、`close_time`、`source`（manual / massive）、`updated_at`；主键仍为 (exchange, holiday_date)，旧 `label` 列保留。新增端点 `POST /research/screening/sepa/readiness/sync-holidays`，由 SEPA Data Ready 页 Step 1「Sync All Tickers」并行触发，调用 Massive REST `GET /v1/marketstatus/upcoming` upsert 到本表（`source='massive'`）。Polygon 该端点返回**裸 JSON 数组**，`MassiveClient.fetch_market_holidays` 已规范化为 `{"results":[...]}` 信封以便复用调用方解析。`stock_day_gap.py`、`get_sepa_grouped_backfill_dates` 升级 holiday 过滤：仅排除 `status IS NULL OR status='closed'`，早收盘日仍期望有 bar。`pg_ddl` `ADD COLUMN IF NOT EXISTS` 自动迁移已有库。 | 研究 / SEPA |
 | 2026-05-04 `ticker_overview` 对齐 Massive Ticker Overview | §2.14.2：新增 `ticker_suffix`、`sic_code`、`homepage_url`、`round_lot`、`share_class_shares_outstanding`、`weighted_shares_outstanding`、`overview_api_request_id`、`overview_api_status`、`overview_api_count`；写入路径 `row_from_ticker_detail` / `upsert_ticker_overview_row` 与合并查询 `fetch_ticker_detail_merged` 同步；`exchange` 映射补充 `primary_exchange`。 | 研究 / Massive |
+| 2026-05-07 `stock_cash_flows` 对齐 Massive cash-flow-statements | §2.14.9：`stock_cash_flows` 列与 **`results[]`** 同名；旧布局 **DROP** 迁移见 `pg_ddl`；绑定顺序 **`_STOCK_CASH_FLOW_UPSERT_BIND_COLUMNS`**；**`feed_stocks_cash_flows`** 增加 **`trailing_twelve_months`**（TTM）拉取；**`timeframe`** 规范化 **`ttm`→`trailing_twelve_months`**；**`cik`** 数值 JSON **零填充 10 位**；文档区分 Query Parameters 与 **`results[]`**，并说明 **`period_end`×`timeframe` 多行**。 | 研究 / SEPA |
+| 2026-05-07 `stock_balance_sheets` 对照 Massive balance-sheets | §2.14.9：确认 **`results[]`** 全量字段已在表中且 **列名与 API 一致**；**`upsert_balance_sheet_rows`** 增加 **`_STOCK_BALANCE_UPSERT_BIND_COLUMNS`** / **`_balance_sheet_bind_tuple`**、占位符自检；**`timeframe`**/**`cik`** 与 cash flows 共用规范化。 | 研究 / SEPA |
+| 2026-05-07 `stock_income_statements` 对齐 Massive income-statements | §2.14.9：新增 **`tickers` jsonb**（完整 **`results[].tickers`**）；**`upsert_income_statement_rows`** 使用 **`_STOCK_INCOME_UPSERT_BIND_COLUMNS`** / **`_income_statement_bind_tuple`**、占位符自检；**`feed_stocks_income_statements`** 增加 **`trailing_twelve_months`**（TTM）；**`timeframe`**/**`cik`** 规范化与另两张财报表一致。 | 研究 / SEPA |
+| 2026-05-07 `stock_ratios` 对齐 Massive v1 ratios | §2.14.9：`stock_ratios` 主键 `(symbol, date, source)`，`current` DDL 引号，45 日 readiness，无 vX 落库；`fetch_financials_v1_ratios`：`ticker` 优先、空包则 `tickers` 重试、默认不传 `sort`；`feed_stocks_ratios` 返回 `api_rows_seen`。 | 研究 / SEPA |
+| 2026-05-07 `stock_short_interest` 对齐 short-interest | §2.14.9：**`avg_daily_volume`** 改为 **`bigint`**（API integer）；**`upsert_short_interest_rows`** 使用 **`_STOCK_SHORT_INTEREST_UPSERT_BIND_COLUMNS`** / **`_short_interest_bind_tuple`**、**`cik`** 规范化；**`fetch_stock_short_interest`** **`limit`** 上限 **50000**。 | 研究 / SEPA |
+| 2026-05-07 `stock_short_volume` 对齐 short-volume | §2.14.9：表增加 **`results[]`** 全量 venue 分解列（**`adf_*`**、**`nasdaq_*`**、**`nyse_*`**、**`exempt_volume`**、**`non_exempt_volume`** 等，列名与 API 一致）；**`trade_date`**=API **`date`**；**`upsert_short_volume_rows`** 使用 **`_STOCK_SHORT_VOLUME_UPSERT_BIND_COLUMNS`** / **`_short_volume_bind_tuple`**；存量 **`ADD COLUMN`** 迁移；**`fetch_stock_short_volume`** **`limit`** 上限 **50000**。 | 研究 / SEPA |
 
 ---
 

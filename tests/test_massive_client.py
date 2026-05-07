@@ -279,3 +279,40 @@ class TestCollectOptionContractKeysPaginated:
         assert len(out.get("keys") or []) == 2
         assert "NVDA|OPT|20260418|100.0|C" in out["keys"]
         assert "NVDA|OPT|20260418|105.0|P" in out["keys"]
+
+
+class TestFetchFinancialsV1Ratios:
+    def test_retries_with_tickers_when_ticker_returns_empty(self):
+        calls: list[dict] = []
+
+        def seq_get(self, path, params=None):
+            calls.append(dict(params or {}))
+            if (params or {}).get("ticker") == "A":
+                return (200, {"status": "OK", "results": []})
+            return (
+                200,
+                {
+                    "status": "OK",
+                    "results": [{"ticker": "A", "date": "2026-05-06", "price": 1.0}],
+                },
+            )
+
+        with patch.object(MassiveClient, "_get", seq_get):
+            out = _client().fetch_financials_v1_ratios(ticker="A", limit=50)
+        assert not out.get("error")
+        assert len(out.get("results") or []) == 1
+        assert len(calls) == 2
+        assert calls[0].get("ticker") == "A"
+        assert calls[1].get("tickers") == "A"
+
+    def test_omits_sort_by_default(self):
+        captured: list[dict] = []
+
+        def cap(self, path, params=None):
+            captured.append(dict(params or {}))
+            return (200, {"status": "OK", "results": []})
+
+        with patch.object(MassiveClient, "_get", cap):
+            _client().fetch_financials_v1_ratios(ticker="MSFT", limit=10)
+        assert "sort" not in captured[0]
+

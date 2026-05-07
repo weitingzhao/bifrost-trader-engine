@@ -26,9 +26,11 @@ from __future__ import annotations
 
 import errno
 import os
+import signal
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -56,28 +58,102 @@ def _without_listen_flags(extra: list[str]) -> list[str]:
     ]
 
 
-def _ensure_listen_available(host: str, port_s: str) -> None:
-    """Fail fast with a clear hint if the TCP port is already bound (avoids Flower traceback)."""
+def _find_listen_pids(port: int) -> list[int]:
+    """Return listener PIDs for a TCP port via lsof (macOS/Linux)."""
     try:
-        port_n = int(port_s)
-    except ValueError:
-        return
+        result = subprocess.run(
+            ["lsof", "-tiTCP:%d" % port, "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return []
+    pids: list[int] = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            pids.append(int(line))
+        except ValueError:
+            continue
+    return sorted(set(pids))
+
+
+def _is_listen_available(host: str, port_n: int) -> bool:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((host, port_n))
+        return True
     except OSError as e:
-        if e.errno != errno.EADDRINUSE:
-            raise
-        alt = port_n + 1
-        sys.stderr.write(
-            f"[run_flower] Address {host!r}:{port_s} is already in use. "
-            f"Stop the other process (e.g. an existing Flower), or use another port:\n"
-            f"  FLOWER_PORT={alt} python scripts/systemd/run_flower.py\n"
-        )
-        raise SystemExit(1) from e
+        if e.errno == errno.EADDRINUSE:
+            return False
+        raise
     finally:
         s.close()
+
+
+def _kill_pids_for_port(port_n: int) -> bool:
+    """Terminate listeners on a port. Returns True if any PID was targeted."""
+    pids = _find_listen_pids(port_n)
+    if not pids:
+        return False
+    this_pid = os.getpid()
+    target_pids = [pid for pid in pids if pid != this_pid]
+    if not target_pids:
+        return False
+    sys.stderr.write(
+        f"[run_flower] Port {port_n} in use by PID(s): {', '.join(str(p) for p in target_pids)}. "
+        "Sending SIGTERM...\n"
+    )
+    for pid in target_pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            sys.stderr.write(f"[run_flower] No permission to terminate PID {pid}.\n")
+    time.sleep(0.8)
+    for pid in target_pids:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            continue
+        except PermissionError:
+            continue
+        sys.stderr.write(f"[run_flower] PID {pid} still alive, sending SIGKILL...\n")
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            sys.stderr.write(f"[run_flower] No permission to kill PID {pid}.\n")
+    time.sleep(0.2)
+    return True
+
+
+def _ensure_listen_available(host: str, port_s: str, auto_kill: bool) -> None:
+    """Ensure Flower target listen address is available, optionally killing conflicting listener."""
+    try:
+        port_n = int(port_s)
+    except ValueError:
+        return
+    if _is_listen_available(host, port_n):
+        return
+    if auto_kill:
+        killed = _kill_pids_for_port(port_n)
+        if killed and _is_listen_available(host, port_n):
+            sys.stderr.write(f"[run_flower] Port {port_n} released, continuing startup.\n")
+            return
+    alt = port_n + 1
+    sys.stderr.write(
+        f"[run_flower] Address {host!r}:{port_s} is already in use. "
+        f"Could not auto-release the port. Use another port:\n"
+        f"  FLOWER_PORT={alt} python scripts/systemd/run_flower.py\n"
+    )
+    raise SystemExit(1)
 
 
 if __name__ == "__main__":
@@ -92,7 +168,14 @@ if __name__ == "__main__":
     port = _flag_value_from_extra(flower_extra, "port") or port
     address = _flag_value_from_extra(flower_extra, "address") or address
 
-    _ensure_listen_available(address, port)
+    auto_kill_conflict = os.environ.get("FLOWER_KILL_PORT_CONFLICT", "1").strip() not in {
+        "0",
+        "false",
+        "False",
+        "no",
+        "No",
+    }
+    _ensure_listen_available(address, port, auto_kill=auto_kill_conflict)
 
     cmd: list[str] = [
         sys.executable,

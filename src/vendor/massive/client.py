@@ -1226,7 +1226,7 @@ class MassiveClient:
         ticker = (ticker or "").strip().upper()
         if not ticker or not self._api_key:
             return {"results": [], "error": "ticker or api key missing"}
-        params: Dict[str, Any] = {"ticker": ticker, "limit": min(max(int(limit), 1), 1000)}
+        params: Dict[str, Any] = {"ticker": ticker, "limit": min(max(int(limit), 1), 50000)}
         if settlement_date:
             params["settlement_date"] = settlement_date
         if sort:
@@ -1253,7 +1253,7 @@ class MassiveClient:
         ticker = (ticker or "").strip().upper()
         if not ticker or not self._api_key:
             return {"results": [], "error": "ticker or api key missing"}
-        params: Dict[str, Any] = {"ticker": ticker, "limit": min(max(int(limit), 1), 1000)}
+        params: Dict[str, Any] = {"ticker": ticker, "limit": min(max(int(limit), 1), 50000)}
         if date:
             params["date"] = date
         if sort:
@@ -1427,29 +1427,62 @@ class MassiveClient:
     def fetch_financials_v1_ratios(
         self,
         *,
+        ticker: Optional[str] = None,
         tickers: Optional[str] = None,
-        tickers_any_of: Optional[str] = None,
-        min_ticker: Optional[str] = None,
-        max_ticker: Optional[str] = None,
-        timeframe: Optional[str] = None,
         limit: int = 50000,
-        sort: Optional[str] = "period_end.desc",
-        fiscal_year: Optional[int] = None,
-        fiscal_quarter: Optional[int] = None,
+        sort: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """GET /stocks/financials/v1/ratios — when unavailable, caller may fall back to fetch_stock_ratios."""
-        return self._fetch_financials_v1(
-            "/stocks/financials/v1/ratios",
-            tickers=tickers,
-            tickers_any_of=tickers_any_of,
-            min_ticker=min_ticker,
-            max_ticker=max_ticker,
-            timeframe=timeframe,
-            fiscal_year=fiscal_year,
-            fiscal_quarter=fiscal_quarter,
-            limit=limit,
-            sort=sort,
-        )
+        """GET /stocks/financials/v1/ratios — TTM-derived daily snapshots (``results[].date``, ``ticker``).
+
+        Query params documented as singular ``ticker``; Polygon often accepts ``tickers`` on other fundamentals.
+        Defaults **omit ``sort`** (API default is ``ticker``); invalid sorts can yield empty ``results``.
+        """
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        t = str(ticker or tickers or "").strip()
+        params: Dict[str, Any] = {"limit": min(max(int(limit), 1), 50000)}
+        if t:
+            params["ticker"] = t.upper()
+        if sort:
+            s = sort.strip()
+            if s:
+                params["sort"] = s
+
+        status, data = self._get("/stocks/financials/v1/ratios", params)
+        if status == 0:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        if isinstance(data, dict):
+            logical = _polygon_body_error_message(data, status)
+            if logical:
+                return {"results": [], "error": logical}
+
+        empty = False
+        if not isinstance(data, dict):
+            empty = True
+        else:
+            r0 = data.get("results")
+            empty = not isinstance(r0, list) or len(r0) == 0
+
+        if empty and t:
+            alt: Dict[str, Any] = {"limit": params["limit"], "tickers": t.upper()}
+            if "sort" in params:
+                alt["sort"] = params["sort"]
+            st2, data2 = self._get("/stocks/financials/v1/ratios", alt)
+            if st2 >= 400:
+                return data if isinstance(data, dict) else {"results": []}
+            if isinstance(data2, dict):
+                logical2 = _polygon_body_error_message(data2, st2)
+                if logical2:
+                    return {"results": [], "error": logical2}
+                r2 = data2.get("results")
+                if isinstance(r2, list) and len(r2) > 0:
+                    return data2
+
+        return data if isinstance(data, dict) else {"results": []}
 
     def fetch_stock_news(
         self,

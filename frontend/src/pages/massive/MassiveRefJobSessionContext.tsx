@@ -48,6 +48,13 @@ export type MassiveRefJobSessionApi = {
   ) => Promise<{ ok: boolean; error?: string; job_id?: string; deduplicated?: boolean }>
   /** Call after successful `postMassiveSync('feed_stocks_aggregate', …)` — adds row, opens sheet, subscribes to SSE. */
   trackStockOhlcSyncJob: (res: { job_id?: string; deduplicated?: boolean }) => void
+  /** Track an already-enqueued Massive DB job (generic kinds, including SEPA financials). */
+  trackMassiveDbJob: (params: {
+    job_id?: string
+    deduplicated?: boolean
+    kind: TrackedMassiveDbJobKind
+    domain?: RefJobTrackItem['domain']
+  }) => void
   /** Wrap `postMassiveSync` so ticker reference UI is disabled while the request runs (same as Universe enqueue). */
   withStockOhlcHttp: <T,>(fn: () => Promise<T>) => Promise<T>
   handleClearCompletedJobs: () => void
@@ -207,6 +214,25 @@ export function MassiveRefJobSessionProvider({ children }: { children: ReactNode
     [pushJob],
   )
 
+  const trackMassiveDbJob = useCallback(
+    (params: {
+      job_id?: string
+      deduplicated?: boolean
+      kind: TrackedMassiveDbJobKind
+      domain?: RefJobTrackItem['domain']
+    }) => {
+      const jid = params.job_id
+      if (!jid) return
+      pushJob({
+        jobId: jid,
+        kind: params.kind,
+        deduplicated: Boolean(params.deduplicated),
+        domain: params.domain ?? (params.kind === 'feed_stocks_aggregate' ? 'ohlc' : 'financials'),
+      })
+    },
+    [pushJob],
+  )
+
   const withStockOhlcHttp = useCallback(async <T,>(fn: () => Promise<T>): Promise<T> => {
     setJobBusyKind('feed_stocks_aggregate')
     try {
@@ -240,6 +266,7 @@ export function MassiveRefJobSessionProvider({ children }: { children: ReactNode
       jobBusyKind,
       enqueueTickerReferenceJob,
       trackStockOhlcSyncJob,
+      trackMassiveDbJob,
       withStockOhlcHttp,
       handleClearCompletedJobs,
       handleClearAllJobs,
@@ -252,6 +279,7 @@ export function MassiveRefJobSessionProvider({ children }: { children: ReactNode
       jobBusyKind,
       enqueueTickerReferenceJob,
       trackStockOhlcSyncJob,
+      trackMassiveDbJob,
       withStockOhlcHttp,
       handleClearCompletedJobs,
       handleClearAllJobs,

@@ -65,6 +65,8 @@ export interface SepaReadinessSummaryResponse {
   stock_unified_snapshot_last_fetched_at?: string | null
   /** Step 2 breakdown: cache_stock_snapshot rows grouped by tickers.instrument_type. */
   stock_unified_snapshot_by_type?: SepaSnapshotByTypeRow[] | null
+  /** Steps 4–7: distinct symbols per instrument_type (join tickers on symbol) with source=massive in each raw table. */
+  fundamentals_symbol_count_by_type?: SepaFundamentalsSymbolCountByTypeRow[] | null
   /**
    * Step 3 stock_day gap count: vendor NY date from cache.last_minute_updated vs max(stock_day);
    * fallback to NOT price_ready when last_minute_updated is null. Null if query failed.
@@ -88,6 +90,15 @@ export interface SepaSnapshotByTypeRow {
   snapshot_row_count: number
   /** Number of public.tickers rows (active US stocks) for this instrument_type. */
   universe_ticker_count: number
+}
+
+/** Distinct symbols with Massive rows in raw fundamentals tables, grouped by tickers.instrument_type. */
+export interface SepaFundamentalsSymbolCountByTypeRow {
+  code: string
+  income_statement_symbols: number
+  balance_sheet_symbols: number
+  cash_flow_symbols: number
+  ratio_symbols: number
 }
 
 export async function fetchSepaReadinessSummary(): Promise<SepaReadinessSummaryResponse> {

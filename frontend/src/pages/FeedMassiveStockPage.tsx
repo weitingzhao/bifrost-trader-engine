@@ -2048,7 +2048,7 @@ export function FeedMassiveStockPage({
                 </div>
                 {sharedFinancialsForm(fundCFBusy)}
                 <div className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-2)' }}>
-                  <p><strong>Key fields:</strong> <code>net_cash_flow_from_operating_activities</code>, <code>net_cash_flow_from_investing_activities</code>, <code>net_cash_flow_from_financing_activities</code>, <code>capital_expenditure</code>, <code>dividends_and_dividend_equivalents_paid_to_common_stockholders</code></p>
+                  <p><strong>Key fields:</strong> <code>net_cash_from_operating_activities</code>, <code>net_cash_from_investing_activities</code>, <code>net_cash_from_financing_activities</code>, <code>purchase_of_property_plant_and_equipment</code>, <code>dividends</code></p>
                   <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/fundamentals/cash-flow-statements</code></p>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>

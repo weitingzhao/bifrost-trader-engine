@@ -618,6 +618,89 @@ def _view_exists(conn, schema: str, name: str) -> bool:
     return bool(row and row[0])
 
 
+def _pg_rel_exists(cur: Any, rel: str) -> bool:
+    cur.execute("SELECT to_regclass(%s) IS NOT NULL AS ex", (rel,))
+    return bool((cur.fetchone() or {}).get("ex"))
+
+
+def _fetch_fundamentals_symbol_counts_by_instrument_type(cur: Any) -> Optional[List[Dict[str, Any]]]:
+    """Distinct symbols per ``tickers.instrument_type`` with Massive rows in raw fundamentals tables.
+
+    Join: ``upper(trim(tickers.ticker)) = fundamentals.symbol``, universe filter matches Step 2 snapshot
+    breakdown (active US ``stocks`` market).
+    """
+    specs: List[Tuple[str, str]] = []
+    if _pg_rel_exists(cur, "public.stock_income_statements"):
+        specs.append(("income_statement_symbols", "stock_income_statements"))
+    if _pg_rel_exists(cur, "public.stock_balance_sheets"):
+        specs.append(("balance_sheet_symbols", "stock_balance_sheets"))
+    if _pg_rel_exists(cur, "public.stock_cash_flows"):
+        specs.append(("cash_flow_symbols", "stock_cash_flows"))
+    if _pg_rel_exists(cur, "public.stock_ratios"):
+        specs.append(("ratio_symbols", "stock_ratios"))
+    if not specs:
+        return []
+
+    _join_tickers = """
+        INNER JOIN public.tickers t
+            ON upper(trim(t.ticker)) = f.symbol
+           AND t.active = true
+           AND lower(coalesce(t.locale, '')) = 'us'
+           AND lower(coalesce(t.market, '')) = 'stocks'
+    """
+
+    by_code: Dict[str, Dict[str, Any]] = {}
+    try:
+        cur.execute(
+            """
+            SELECT DISTINCT COALESCE(NULLIF(instrument_type, ''), '(unknown)') AS code
+            FROM public.tickers
+            WHERE active = true
+              AND lower(coalesce(locale, '')) = 'us'
+              AND lower(coalesce(market, '')) = 'stocks'
+            """
+        )
+        for r in cur.fetchall() or []:
+            code = str(r.get("code") or "(unknown)")
+            by_code[code] = {
+                "code": code,
+                "income_statement_symbols": 0,
+                "balance_sheet_symbols": 0,
+                "cash_flow_symbols": 0,
+                "ratio_symbols": 0,
+            }
+
+        for col, tbl in specs:
+            cur.execute(
+                f"""
+                SELECT COALESCE(NULLIF(t.instrument_type, ''), '(unknown)') AS code,
+                       count(DISTINCT f.symbol)::bigint AS n
+                FROM public.{tbl} f
+                {_join_tickers}
+                WHERE f.source = 'massive'
+                GROUP BY 1
+                """
+            )
+            for r in cur.fetchall() or []:
+                code = str(r.get("code") or "(unknown)")
+                if code not in by_code:
+                    by_code[code] = {
+                        "code": code,
+                        "income_statement_symbols": 0,
+                        "balance_sheet_symbols": 0,
+                        "cash_flow_symbols": 0,
+                        "ratio_symbols": 0,
+                    }
+                by_code[code][col] = int(r.get("n") or 0)
+    except Exception as e:
+        logger.debug("fundamentals_symbol_count_by_type failed: %s", e)
+        return None
+
+    rows = list(by_code.values())
+    rows.sort(key=lambda x: str(x.get("code") or ""))
+    return rows
+
+
 def fetch_sepa_readiness_summary(status_config: dict) -> Dict[str, Any]:
     """Aggregate counts for UI (live views + today's snapshot table)."""
     if not _db_ok(status_config):
@@ -747,6 +830,14 @@ def fetch_sepa_readiness_summary(status_config: dict) -> Dict[str, Any]:
             except Exception as e:
                 logger.debug("stock_unified_snapshot_by_type query failed: %s", e)
                 out["stock_unified_snapshot_by_type"] = None
+
+            try:
+                out["fundamentals_symbol_count_by_type"] = (
+                    _fetch_fundamentals_symbol_counts_by_instrument_type(cur)
+                )
+            except Exception as e:
+                logger.debug("fundamentals_symbol_count_by_type failed: %s", e)
+                out["fundamentals_symbol_count_by_type"] = None
 
             try:
                 cur.execute(

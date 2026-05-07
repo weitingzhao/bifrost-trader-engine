@@ -1587,6 +1587,149 @@
   color: var(--color-text-main);
 }
 
+.sdp-table--compact th,
+.sdp-table--compact td {
+  font-size: 0.71rem;
+  padding: var(--space-2) var(--space-2);
+}
+
+.sdp-table--compact th:not(:first-child),
+.sdp-table--compact td:not(:first-child) {
+  text-align: left;
+  font-family: var(--font-sans);
+}
+
+/* Instrument Type Data Support — fundamentals symbol counts under support badge */
+.sdp-th-stacked-sub {
+  display: block;
+  margin-top: 0.2rem;
+  font-weight: 500;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  line-height: 1.2;
+}
+
+.sdp-support-fund-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.sdp-support-fund-cell__amount {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
+
+.sdp-support-pill {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  background: transparent !important;
+  border: none !important;
+  padding: 0;
+  border-radius: 0;
+}
+
+.sdp-support-pill--ok {
+  color: #34d399;
+}
+
+.sdp-support-pill--partial {
+  color: #fbbf24;
+}
+
+.sdp-support-pill--no {
+  color: #f87171;
+}
+
+.sdp-support-pill--unknown {
+  color: #cbd5e1;
+}
+
+.sdp-coverage-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 8.8rem;
+}
+
+.sdp-coverage-bar {
+  width: 5.6rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.22);
+  overflow: hidden;
+}
+
+.sdp-coverage-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.sdp-coverage-bar-fill--high {
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+}
+
+.sdp-coverage-bar-fill--mid {
+  background: linear-gradient(90deg, #f59e0b, #d97706);
+}
+
+.sdp-coverage-bar-fill--low {
+  background: linear-gradient(90deg, #f97316, #ef4444);
+}
+
+.sdp-coverage-bar-fill--unknown {
+  background: rgba(148, 163, 184, 0.55);
+}
+
+.sdp-coverage-pct {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-text-main);
+}
+
+.sdp-coverage-na {
+  color: var(--color-text-dim);
+}
+
+.sdp-info-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-4) 0 var(--space-3);
+  flex-wrap: wrap;
+}
+
+.sdp-info-tab {
+  border: 1px solid var(--color-border-strong);
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: 999px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.sdp-info-tab:hover {
+  color: var(--color-text-main);
+  border-color: var(--color-accent);
+}
+
+.sdp-info-tab--active {
+  color: var(--color-text-main);
+  border-color: var(--color-accent);
+  background: rgba(99, 102, 241, 0.16);
+}
+
 .sdp-table tbody tr:last-child td {
   border-bottom: none;
 }
@@ -2134,9 +2277,15 @@
 
 .sdp-runbook-layout {
   display: grid;
-  grid-template-columns: 8fr 4fr;
+  grid-template-columns: 9fr 3fr;
   gap: var(--space-4);
   align-items: start;
+}
+
+@media (max-width: 1280px) {
+  .sdp-runbook-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 .sdp-runbook-main {
@@ -2146,9 +2295,16 @@
   gap: var(--space-3);
 }
 
-/* Stage flow inside main should keep its existing spacing */
+/* Stage flow sits in the 9/12 column with step panels; no full-bleed overlap */
 .sdp-runbook-main .sdp-runbook-stageflow {
-  margin: 0 0 0;
+  margin: 0 0 var(--space-3);
+}
+
+/* Narrower than 4×stage min width: 2×2 stages in the Run book left rail */
+@media (max-width: 1480px) {
+  .sdp-runbook-main .sdp-runbook-stageflow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* Step list panel flush with no extra top margin */
@@ -2237,6 +2393,21 @@
   padding: var(--space-2) var(--space-1) var(--space-2) 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   margin-bottom: var(--space-1);
+}
+
+.sdp-results-stage-toggle {
+  width: 100%;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sdp-results-stage-chevron {
+  font-size: 0.72rem;
+  color: var(--color-text-dim);
+  margin-left: var(--space-1);
+  flex-shrink: 0;
 }
 
 .sdp-results-stage-head .sdp-check-dot {
@@ -2475,6 +2646,44 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+.sdp-criteria-tabs {
+  display: inline-flex;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3) 0;
+}
+
+.sdp-criteria-tab {
+  border: 1px solid var(--color-border-strong);
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: 999px;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.sdp-criteria-tab:hover {
+  color: var(--color-text-main);
+  border-color: var(--color-accent);
+}
+
+.sdp-criteria-tab--active {
+  color: var(--color-text-main);
+  border-color: var(--color-accent);
+  background: rgba(99, 102, 241, 0.16);
+}
+
+.sdp-criteria-tab-count {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  opacity: 0.92;
 }
 
 .sdp-criteria-group {

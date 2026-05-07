@@ -2758,11 +2758,18 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 equity_in_affiliates double precision NULL,
                 preferred_stock_dividends_declared double precision NULL,
                 other_operating_expenses double precision NULL,
+                tickers jsonb NULL,
                 cik text NULL,
                 source text NOT NULL DEFAULT 'massive',
                 fetched_at timestamptz NOT NULL DEFAULT now(),
                 PRIMARY KEY (symbol, timeframe, period_end, source)
             )
+            """
+        )
+        cur.execute(
+            """
+            ALTER TABLE public.stock_income_statements
+            ADD COLUMN IF NOT EXISTS tickers jsonb NULL
             """
         )
         cur.execute(
@@ -2834,6 +2841,43 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             "stock_cash_flows",
             "Massive GET /stocks/financials/v1/cash-flow-statements",
         )
+        # Column names match Massive results[] (flat floats). Drop mismatched layouts so INSERT stays aligned.
+        cur.execute(
+            """
+            DO $stock_cf_migrate$
+            BEGIN
+              IF to_regclass('public.stock_cash_flows') IS NOT NULL THEN
+                IF EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'stock_cash_flows'
+                    AND column_name IN (
+                      'net_cash_flow_from_operating_activities',
+                      'net_cash_flow_from_investing_activities',
+                      'net_cash_flow_from_financing_activities',
+                      'net_change_in_cash_and_equivalents',
+                      'capital_expenditure',
+                      'free_cash_flow',
+                      'depreciation_and_amortization'
+                    )
+                )
+                OR NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'stock_cash_flows'
+                    AND column_name = 'change_in_cash_and_equivalents'
+                )
+                OR NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'stock_cash_flows'
+                    AND column_name = 'purchase_of_property_plant_and_equipment'
+                )
+                THEN
+                  DROP TABLE public.stock_cash_flows CASCADE;
+                END IF;
+              END IF;
+            END
+            $stock_cf_migrate$;
+            """
+        )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS public.stock_cash_flows (
@@ -2843,14 +2887,32 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 filing_date date NULL,
                 fiscal_year integer NOT NULL,
                 fiscal_quarter integer NOT NULL DEFAULT 0,
-                net_cash_flow_from_operating_activities double precision NULL,
-                net_cash_flow_from_investing_activities double precision NULL,
-                net_cash_flow_from_financing_activities double precision NULL,
-                net_change_in_cash_and_equivalents double precision NULL,
-                free_cash_flow double precision NULL,
-                capital_expenditure double precision NULL,
-                depreciation_and_amortization double precision NULL,
                 cik text NULL,
+                cash_from_operating_activities_continuing_operations double precision NULL,
+                change_in_cash_and_equivalents double precision NULL,
+                change_in_other_operating_assets_and_liabilities_net double precision NULL,
+                depreciation_depletion_and_amortization double precision NULL,
+                dividends double precision NULL,
+                effect_of_currency_exchange_rate double precision NULL,
+                income_loss_from_discontinued_operations double precision NULL,
+                long_term_debt_issuances_repayments double precision NULL,
+                net_cash_from_financing_activities double precision NULL,
+                net_cash_from_financing_activities_continuing_operations double precision NULL,
+                net_cash_from_financing_activities_discontinued_operations double precision NULL,
+                net_cash_from_investing_activities double precision NULL,
+                net_cash_from_investing_activities_continuing_operations double precision NULL,
+                net_cash_from_investing_activities_discontinued_operations double precision NULL,
+                net_cash_from_operating_activities double precision NULL,
+                net_cash_from_operating_activities_discontinued_operations double precision NULL,
+                net_income double precision NULL,
+                noncontrolling_interests double precision NULL,
+                other_cash_adjustments double precision NULL,
+                other_financing_activities double precision NULL,
+                other_investing_activities double precision NULL,
+                other_operating_activities double precision NULL,
+                purchase_of_property_plant_and_equipment double precision NULL,
+                sale_of_property_plant_and_equipment double precision NULL,
+                short_term_debt_issuances_repayments double precision NULL,
                 source text NOT NULL DEFAULT 'massive',
                 fetched_at timestamptz NOT NULL DEFAULT now(),
                 PRIMARY KEY (symbol, timeframe, period_end, source)
@@ -2866,42 +2928,67 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
 
         _log_table(
             "stock_ratios",
-            "Massive GET /stocks/financials/v1/ratios (or computed ingest)",
+            "Massive GET /stocks/financials/v1/ratios (TTM ratios per trading date)",
+        )
+        cur.execute(
+            """
+            DO $stock_ratios_migrate$
+            BEGIN
+              IF to_regclass('public.stock_ratios') IS NOT NULL THEN
+                IF EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'stock_ratios'
+                    AND column_name IN ('timeframe', 'period_end', 'current_ratio', 'gross_margin')
+                )
+                OR NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'stock_ratios'
+                    AND column_name = 'average_volume'
+                )
+                THEN
+                  DROP TABLE public.stock_ratios CASCADE;
+                END IF;
+              END IF;
+            END
+            $stock_ratios_migrate$;
+            """
         )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS public.stock_ratios (
                 symbol text NOT NULL,
-                timeframe text NOT NULL,
-                period_end date NOT NULL,
-                filing_date date NULL,
-                fiscal_year integer NOT NULL,
-                fiscal_quarter integer NOT NULL DEFAULT 0,
-                basic_earnings_per_share double precision NULL,
-                diluted_earnings_per_share double precision NULL,
-                return_on_equity double precision NULL,
-                return_on_assets double precision NULL,
-                debt_to_equity double precision NULL,
-                current_ratio double precision NULL,
-                gross_margin double precision NULL,
-                operating_margin double precision NULL,
-                net_margin double precision NULL,
-                revenue double precision NULL,
-                net_income double precision NULL,
-                total_assets double precision NULL,
-                total_equity double precision NULL,
-                total_liabilities double precision NULL,
+                date date NOT NULL,
+                average_volume double precision NULL,
+                cash double precision NULL,
                 cik text NULL,
+                "current" double precision NULL,
+                debt_to_equity double precision NULL,
+                dividend_yield double precision NULL,
+                earnings_per_share double precision NULL,
+                enterprise_value double precision NULL,
+                ev_to_ebitda double precision NULL,
+                ev_to_sales double precision NULL,
+                free_cash_flow double precision NULL,
+                market_cap double precision NULL,
+                price double precision NULL,
+                price_to_book double precision NULL,
+                price_to_cash_flow double precision NULL,
+                price_to_earnings double precision NULL,
+                price_to_free_cash_flow double precision NULL,
+                price_to_sales double precision NULL,
+                quick double precision NULL,
+                return_on_assets double precision NULL,
+                return_on_equity double precision NULL,
                 source text NOT NULL DEFAULT 'massive',
                 fetched_at timestamptz NOT NULL DEFAULT now(),
-                PRIMARY KEY (symbol, timeframe, period_end, source)
+                PRIMARY KEY (symbol, date, source)
             )
             """
         )
         cur.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_stock_ratios_sym_tf
-            ON public.stock_ratios (symbol, timeframe, source)
+            CREATE INDEX IF NOT EXISTS idx_stock_ratios_sym_date_src
+            ON public.stock_ratios (symbol, source, date DESC)
             """
         )
 
@@ -2915,13 +3002,35 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 symbol text NOT NULL,
                 settlement_date date NOT NULL,
                 short_interest bigint NULL,
-                avg_daily_volume double precision NULL,
+                avg_daily_volume bigint NULL,
                 days_to_cover double precision NULL,
                 cik text NULL,
                 source text NOT NULL DEFAULT 'massive',
                 fetched_at timestamptz NOT NULL DEFAULT now(),
                 PRIMARY KEY (symbol, settlement_date, source)
             )
+            """
+        )
+        cur.execute(
+            """
+            DO $si_adv_mig$
+            BEGIN
+              IF to_regclass('public.stock_short_interest') IS NOT NULL THEN
+                IF EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'stock_short_interest'
+                    AND column_name = 'avg_daily_volume' AND udt_name = 'float8'
+                ) THEN
+                  ALTER TABLE public.stock_short_interest
+                    ALTER COLUMN avg_daily_volume TYPE bigint
+                    USING CASE
+                      WHEN avg_daily_volume IS NULL THEN NULL
+                      ELSE round(avg_daily_volume)::bigint
+                    END;
+                END IF;
+              END IF;
+            END
+            $si_adv_mig$;
             """
         )
         cur.execute(
@@ -2940,15 +3049,53 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             CREATE TABLE IF NOT EXISTS public.stock_short_volume (
                 symbol text NOT NULL,
                 trade_date date NOT NULL,
+                adf_short_volume bigint NULL,
+                adf_short_volume_exempt bigint NULL,
+                exempt_volume double precision NULL,
+                nasdaq_carteret_short_volume bigint NULL,
+                nasdaq_carteret_short_volume_exempt bigint NULL,
+                nasdaq_chicago_short_volume bigint NULL,
+                nasdaq_chicago_short_volume_exempt bigint NULL,
+                non_exempt_volume double precision NULL,
+                nyse_short_volume bigint NULL,
+                nyse_short_volume_exempt bigint NULL,
                 short_volume bigint NULL,
-                total_volume bigint NULL,
                 short_volume_ratio double precision NULL,
+                total_volume bigint NULL,
                 exchanges jsonb NULL,
                 cik text NULL,
                 source text NOT NULL DEFAULT 'massive',
                 fetched_at timestamptz NOT NULL DEFAULT now(),
                 PRIMARY KEY (symbol, trade_date, source)
             )
+            """
+        )
+        cur.execute(
+            """
+            DO $sv_cols_mig$
+            BEGIN
+              IF to_regclass('public.stock_short_volume') IS NULL THEN
+                RETURN;
+              END IF;
+              IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'stock_short_volume'
+                  AND column_name = 'adf_short_volume'
+              ) THEN
+                ALTER TABLE public.stock_short_volume
+                  ADD COLUMN adf_short_volume bigint NULL,
+                  ADD COLUMN adf_short_volume_exempt bigint NULL,
+                  ADD COLUMN exempt_volume double precision NULL,
+                  ADD COLUMN nasdaq_carteret_short_volume bigint NULL,
+                  ADD COLUMN nasdaq_carteret_short_volume_exempt bigint NULL,
+                  ADD COLUMN nasdaq_chicago_short_volume bigint NULL,
+                  ADD COLUMN nasdaq_chicago_short_volume_exempt bigint NULL,
+                  ADD COLUMN non_exempt_volume double precision NULL,
+                  ADD COLUMN nyse_short_volume bigint NULL,
+                  ADD COLUMN nyse_short_volume_exempt bigint NULL;
+              END IF;
+            END
+            $sv_cols_mig$;
             """
         )
         cur.execute(

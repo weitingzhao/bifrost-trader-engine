@@ -18,6 +18,15 @@ SOURCE_DEFAULT = "massive"
 
 _FQ_TO_PERIOD = {0: "FY", 1: "Q1", 2: "Q2", 3: "Q3", 4: "Q4"}
 
+# Instrument types treated as Supported or Partial for Massive financial statements coverage
+# (income, balance sheet, cash flow, ratios). SEPA Data Ready counts gaps and selects
+# backfill targets only within this universe; not_supported types do not contribute gap counts.
+_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES = (
+    "CS",
+    "ADRC",
+    "PFD",
+)
+
 
 def _symbol_from_gap_sql_row(r: Any) -> Optional[str]:
     """Extract symbol from a gap-query row.
@@ -163,6 +172,18 @@ def _f(row: Dict[str, Any], key: str) -> Optional[float]:
         return None
 
 
+def _f_any(row: Dict[str, Any], *keys: str) -> Optional[float]:
+    """First usable numeric among alternative JSON keys (vendors rename fields; includes negatives and zero).
+
+    Do not chain with ``or`` — legitimate ``0`` must not fall through to a fallback key.
+    """
+    for k in keys:
+        out = _f(row, k)
+        if out is not None:
+            return out
+    return None
+
+
 def _i(row: Dict[str, Any], key: str) -> Optional[int]:
     v = row.get(key)
     if v is None:
@@ -174,12 +195,263 @@ def _i(row: Dict[str, Any], key: str) -> Optional[int]:
 
 
 def _sym_from_row(row: Dict[str, Any], fallback: Optional[str] = None) -> str:
+    tn = row.get("ticker")
+    if tn is not None:
+        sym = str(tn).strip().upper()
+        if sym:
+            return sym
+    sn = row.get("symbol")
+    if sn is not None:
+        sym = str(sn).strip().upper()
+        if sym:
+            return sym
     t = row.get("tickers")
     if isinstance(t, list) and t:
         return str(t[0]).strip().upper()
     if fallback:
         return fallback.strip().upper()
     return ""
+
+
+def _normalize_massive_statement_timeframe(raw: Any) -> str:
+    """Canonical timeframe for financial statement PKs (matches Massive ``results[].timeframe`` wording).
+
+    Request params may use ``ttm`` while bodies use ``trailing_twelve_months``; store one canonical value.
+    """
+    s = str(raw or "").strip().lower()
+    if not s:
+        return "quarterly"
+    if s in ("ttm", "trailing_twelve_months", "trailing-12-months"):
+        return "trailing_twelve_months"
+    return s
+
+
+def _normalize_sec_cik(raw: Any) -> Optional[str]:
+    """SEC CIK as zero-padded 10-digit text when numeric (JSON sometimes emits integers and drops leading zeros)."""
+    if raw is None or raw == "":
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if s.isdigit() and len(s) <= 10:
+        return s.zfill(10)
+    return s
+
+
+# Bound columns for ``upsert_cash_flow_rows`` (order MUST match DDL ``stock_cash_flows`` and INSERT list).
+_STOCK_CASH_FLOW_UPSERT_BIND_COLUMNS: Tuple[str, ...] = (
+    "symbol",
+    "timeframe",
+    "period_end",
+    "filing_date",
+    "fiscal_year",
+    "fiscal_quarter",
+    "cik",
+    "cash_from_operating_activities_continuing_operations",
+    "change_in_cash_and_equivalents",
+    "change_in_other_operating_assets_and_liabilities_net",
+    "depreciation_depletion_and_amortization",
+    "dividends",
+    "effect_of_currency_exchange_rate",
+    "income_loss_from_discontinued_operations",
+    "long_term_debt_issuances_repayments",
+    "net_cash_from_financing_activities",
+    "net_cash_from_financing_activities_continuing_operations",
+    "net_cash_from_financing_activities_discontinued_operations",
+    "net_cash_from_investing_activities",
+    "net_cash_from_investing_activities_continuing_operations",
+    "net_cash_from_investing_activities_discontinued_operations",
+    "net_cash_from_operating_activities",
+    "net_cash_from_operating_activities_discontinued_operations",
+    "net_income",
+    "noncontrolling_interests",
+    "other_cash_adjustments",
+    "other_financing_activities",
+    "other_investing_activities",
+    "other_operating_activities",
+    "purchase_of_property_plant_and_equipment",
+    "sale_of_property_plant_and_equipment",
+    "short_term_debt_issuances_repayments",
+    "source",
+)
+
+
+def _cash_flow_bind_tuple(
+    row: Dict[str, Any],
+    *,
+    sym: str,
+    tf: str,
+    pe: Any,
+    fd: Optional[Any],
+    fy: int,
+    fq: int,
+    cik_v: Optional[str],
+    source: str,
+) -> Tuple[Any, ...]:
+    """Build execute() params in :data:`_STOCK_CASH_FLOW_UPSERT_BIND_COLUMNS` order."""
+    cf_cont = _f_any(row, "cash_from_operating_activities_continuing_operations")
+    chg = _f_any(
+        row,
+        "change_in_cash_and_equivalents",
+        "net_change_in_cash_and_equivalents",
+        "net_change_in_cash",
+    )
+    dep = _f_any(row, "depreciation_depletion_and_amortization", "depreciation_and_amortization")
+    fin_tot = _f_any(
+        row,
+        "net_cash_from_financing_activities",
+        "net_cash_flow_from_financing_activities",
+        "net_cash_flow_from_financingactivities",
+        "net_cash_from_financing_activities_continuing_operations",
+    )
+    inv_tot = _f_any(
+        row,
+        "net_cash_from_investing_activities",
+        "net_cash_flow_from_investing_activities",
+        "net_cash_flow_from_investingactivities",
+        "net_cash_from_investing_activities_continuing_operations",
+    )
+    op_tot = _f_any(
+        row,
+        "net_cash_from_operating_activities",
+        "net_cash_flow_from_operating_activities",
+        "net_cash_flow_from_operatingactivities",
+        "cash_from_operating_activities_continuing_operations",
+    )
+    ppe = _f_any(
+        row,
+        "purchase_of_property_plant_and_equipment",
+        "capital_expenditure",
+        "capital_expenditures",
+    )
+    return (
+        sym,
+        tf,
+        pe,
+        fd,
+        fy,
+        fq,
+        cik_v,
+        cf_cont,
+        chg,
+        _f_any(row, "change_in_other_operating_assets_and_liabilities_net"),
+        dep,
+        _f_any(row, "dividends"),
+        _f_any(row, "effect_of_currency_exchange_rate"),
+        _f_any(row, "income_loss_from_discontinued_operations"),
+        _f_any(row, "long_term_debt_issuances_repayments"),
+        fin_tot,
+        _f_any(row, "net_cash_from_financing_activities_continuing_operations"),
+        _f_any(row, "net_cash_from_financing_activities_discontinued_operations"),
+        inv_tot,
+        _f_any(row, "net_cash_from_investing_activities_continuing_operations"),
+        _f_any(row, "net_cash_from_investing_activities_discontinued_operations"),
+        op_tot,
+        _f_any(row, "net_cash_from_operating_activities_discontinued_operations"),
+        _f_any(row, "net_income"),
+        _f_any(row, "noncontrolling_interests"),
+        _f_any(row, "other_cash_adjustments"),
+        _f_any(row, "other_financing_activities"),
+        _f_any(row, "other_investing_activities"),
+        _f_any(row, "other_operating_activities"),
+        ppe,
+        _f_any(row, "sale_of_property_plant_and_equipment"),
+        _f_any(row, "short_term_debt_issuances_repayments"),
+        source,
+    )
+
+
+_STOCK_INCOME_UPSERT_BIND_COLUMNS: Tuple[str, ...] = (
+    "symbol",
+    "timeframe",
+    "period_end",
+    "filing_date",
+    "fiscal_year",
+    "fiscal_quarter",
+    "basic_earnings_per_share",
+    "diluted_earnings_per_share",
+    "revenue",
+    "basic_shares_outstanding",
+    "diluted_shares_outstanding",
+    "consolidated_net_income_loss",
+    "cost_of_revenue",
+    "gross_profit",
+    "operating_income",
+    "total_operating_expenses",
+    "selling_general_administrative",
+    "research_development",
+    "depreciation_depletion_amortization",
+    "ebitda",
+    "interest_income",
+    "interest_expense",
+    "other_income_expense",
+    "total_other_income_expense",
+    "income_before_income_taxes",
+    "income_taxes",
+    "net_income_loss_attributable_common_shareholders",
+    "noncontrolling_interest",
+    "discontinued_operations",
+    "extraordinary_items",
+    "equity_in_affiliates",
+    "preferred_stock_dividends_declared",
+    "other_operating_expenses",
+    "tickers",
+    "cik",
+    "source",
+)
+
+
+def _income_statement_bind_tuple(
+    row: Dict[str, Any],
+    *,
+    sym: str,
+    tf: str,
+    pe: Any,
+    fd: Optional[Any],
+    fy: int,
+    fq: int,
+    cik_v: Optional[str],
+    source: str,
+) -> Tuple[Any, ...]:
+    """Build execute() params in :data:`_STOCK_INCOME_UPSERT_BIND_COLUMNS` order."""
+    return (
+        sym,
+        tf,
+        pe,
+        fd,
+        fy,
+        fq,
+        _f(row, "basic_earnings_per_share"),
+        _f(row, "diluted_earnings_per_share"),
+        _f(row, "revenue"),
+        _f(row, "basic_shares_outstanding"),
+        _f(row, "diluted_shares_outstanding"),
+        _f(row, "consolidated_net_income_loss"),
+        _f(row, "cost_of_revenue"),
+        _f(row, "gross_profit"),
+        _f(row, "operating_income"),
+        _f(row, "total_operating_expenses"),
+        _f(row, "selling_general_administrative"),
+        _f(row, "research_development"),
+        _f(row, "depreciation_depletion_amortization"),
+        _f(row, "ebitda"),
+        _f(row, "interest_income"),
+        _f(row, "interest_expense"),
+        _f(row, "other_income_expense"),
+        _f(row, "total_other_income_expense"),
+        _f(row, "income_before_income_taxes"),
+        _f(row, "income_taxes"),
+        _f(row, "net_income_loss_attributable_common_shareholders"),
+        _f(row, "noncontrolling_interest"),
+        _f(row, "discontinued_operations"),
+        _f(row, "extraordinary_items"),
+        _f(row, "equity_in_affiliates"),
+        _f(row, "preferred_stock_dividends_declared"),
+        _f(row, "other_operating_expenses"),
+        Json(tk) if (tk := row.get("tickers")) is not None else None,
+        cik_v,
+        source,
+    )
 
 
 def upsert_income_statement_rows(
@@ -189,7 +461,7 @@ def upsert_income_statement_rows(
     fallback_symbol: Optional[str] = None,
     source: str = SOURCE_DEFAULT,
 ) -> int:
-    """UPSERT rows from GET /stocks/financials/v1/income-statements results[]. Returns rows written."""
+    """UPSERT Massive GET /stocks/financials/v1/income-statements ``results[]`` (column names match API)."""
     if not rows:
         return 0
     sql = """
@@ -204,10 +476,10 @@ def upsert_income_statement_rows(
         income_taxes, net_income_loss_attributable_common_shareholders,
         noncontrolling_interest, discontinued_operations, extraordinary_items,
         equity_in_affiliates, preferred_stock_dividends_declared, other_operating_expenses,
-        cik, source, fetched_at
+        tickers, cik, source, fetched_at
     ) VALUES (
         %s,%s,%s,%s,%s,%s,
-        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now()
+        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now()
     )
     ON CONFLICT (symbol, timeframe, period_end, source) DO UPDATE SET
         filing_date = EXCLUDED.filing_date,
@@ -240,9 +512,16 @@ def upsert_income_statement_rows(
         equity_in_affiliates = EXCLUDED.equity_in_affiliates,
         preferred_stock_dividends_declared = EXCLUDED.preferred_stock_dividends_declared,
         other_operating_expenses = EXCLUDED.other_operating_expenses,
+        tickers = EXCLUDED.tickers,
         cik = EXCLUDED.cik,
         fetched_at = now()
     """
+    _n_ph = sql.count("%s")
+    if _n_ph != len(_STOCK_INCOME_UPSERT_BIND_COLUMNS):
+        raise RuntimeError(
+            "stock_income_statements INSERT placeholder mismatch: "
+            f"{_n_ph} vs {len(_STOCK_INCOME_UPSERT_BIND_COLUMNS)}"
+        )
     n = 0
     for row in rows:
         if not isinstance(row, dict):
@@ -253,52 +532,126 @@ def upsert_income_statement_rows(
         pe = _parse_date(row.get("period_end"))
         if not pe:
             continue
-        tf = str(row.get("timeframe") or "").strip().lower() or "quarterly"
+        tf = _normalize_massive_statement_timeframe(row.get("timeframe"))
         fy = int(row.get("fiscal_year") or 0)
         fq = int(row.get("fiscal_quarter") or 0)
         fd = _parse_date(row.get("filing_date"))
-        cur.execute(
-            sql,
-            (
-                sym,
-                tf,
-                pe,
-                fd,
-                fy,
-                fq,
-                _f(row, "basic_earnings_per_share"),
-                _f(row, "diluted_earnings_per_share"),
-                _f(row, "revenue"),
-                _f(row, "basic_shares_outstanding"),
-                _f(row, "diluted_shares_outstanding"),
-                _f(row, "consolidated_net_income_loss"),
-                _f(row, "cost_of_revenue"),
-                _f(row, "gross_profit"),
-                _f(row, "operating_income"),
-                _f(row, "total_operating_expenses"),
-                _f(row, "selling_general_administrative"),
-                _f(row, "research_development"),
-                _f(row, "depreciation_depletion_amortization"),
-                _f(row, "ebitda"),
-                _f(row, "interest_income"),
-                _f(row, "interest_expense"),
-                _f(row, "other_income_expense"),
-                _f(row, "total_other_income_expense"),
-                _f(row, "income_before_income_taxes"),
-                _f(row, "income_taxes"),
-                _f(row, "net_income_loss_attributable_common_shareholders"),
-                _f(row, "noncontrolling_interest"),
-                _f(row, "discontinued_operations"),
-                _f(row, "extraordinary_items"),
-                _f(row, "equity_in_affiliates"),
-                _f(row, "preferred_stock_dividends_declared"),
-                _f(row, "other_operating_expenses"),
-                (str(row.get("cik")).strip() if row.get("cik") else None),
-                source,
-            ),
+        cik_v = _normalize_sec_cik(row.get("cik"))
+        bind = _income_statement_bind_tuple(
+            row,
+            sym=sym,
+            tf=tf,
+            pe=pe,
+            fd=fd,
+            fy=fy,
+            fq=fq,
+            cik_v=cik_v,
+            source=source,
         )
+        if len(bind) != len(_STOCK_INCOME_UPSERT_BIND_COLUMNS):
+            raise RuntimeError("stock_income_statements bind tuple length drift")
+        cur.execute(sql, bind)
         n += 1
     return n
+
+
+_STOCK_BALANCE_UPSERT_BIND_COLUMNS: Tuple[str, ...] = (
+    "symbol",
+    "timeframe",
+    "period_end",
+    "filing_date",
+    "fiscal_year",
+    "fiscal_quarter",
+    "accounts_payable",
+    "accrued_and_other_current_liabilities",
+    "accumulated_other_comprehensive_income",
+    "additional_paid_in_capital",
+    "cash_and_equivalents",
+    "cik",
+    "commitments_and_contingencies",
+    "common_stock",
+    "debt_current",
+    "deferred_revenue_current",
+    "goodwill",
+    "intangible_assets_net",
+    "inventories",
+    "long_term_debt_and_capital_lease_obligations",
+    "noncontrolling_interest",
+    "other_assets",
+    "other_current_assets",
+    "other_equity",
+    "other_noncurrent_liabilities",
+    "preferred_stock",
+    "property_plant_equipment_net",
+    "receivables",
+    "retained_earnings_deficit",
+    "short_term_investments",
+    "total_assets",
+    "total_current_assets",
+    "total_current_liabilities",
+    "total_equity",
+    "total_equity_attributable_to_parent",
+    "total_liabilities",
+    "total_liabilities_and_equity",
+    "treasury_stock",
+    "source",
+)
+
+
+def _balance_sheet_bind_tuple(
+    row: Dict[str, Any],
+    *,
+    sym: str,
+    tf: str,
+    pe: Any,
+    fd: Optional[Any],
+    fy: int,
+    fq: int,
+    cik_v: Optional[str],
+    source: str,
+) -> Tuple[Any, ...]:
+    """Build execute() params in :data:`_STOCK_BALANCE_UPSERT_BIND_COLUMNS` order."""
+    return (
+        sym,
+        tf,
+        pe,
+        fd,
+        fy,
+        fq,
+        _f(row, "accounts_payable"),
+        _f(row, "accrued_and_other_current_liabilities"),
+        _f(row, "accumulated_other_comprehensive_income"),
+        _f(row, "additional_paid_in_capital"),
+        _f(row, "cash_and_equivalents"),
+        cik_v,
+        _f(row, "commitments_and_contingencies"),
+        _f(row, "common_stock"),
+        _f(row, "debt_current"),
+        _f(row, "deferred_revenue_current"),
+        _f(row, "goodwill"),
+        _f(row, "intangible_assets_net"),
+        _f(row, "inventories"),
+        _f(row, "long_term_debt_and_capital_lease_obligations"),
+        _f(row, "noncontrolling_interest"),
+        _f(row, "other_assets"),
+        _f(row, "other_current_assets"),
+        _f(row, "other_equity"),
+        _f(row, "other_noncurrent_liabilities"),
+        _f(row, "preferred_stock"),
+        _f(row, "property_plant_equipment_net"),
+        _f(row, "receivables"),
+        _f(row, "retained_earnings_deficit"),
+        _f(row, "short_term_investments"),
+        _f(row, "total_assets"),
+        _f(row, "total_current_assets"),
+        _f(row, "total_current_liabilities"),
+        _f(row, "total_equity"),
+        _f(row, "total_equity_attributable_to_parent"),
+        _f(row, "total_liabilities"),
+        _f(row, "total_liabilities_and_equity"),
+        _f(row, "treasury_stock"),
+        source,
+    )
 
 
 def upsert_balance_sheet_rows(
@@ -308,6 +661,7 @@ def upsert_balance_sheet_rows(
     fallback_symbol: Optional[str] = None,
     source: str = SOURCE_DEFAULT,
 ) -> int:
+    """UPSERT Massive GET /stocks/financials/v1/balance-sheets ``results[]`` (column names match API)."""
     if not rows:
         return 0
     sql = """
@@ -365,6 +719,12 @@ def upsert_balance_sheet_rows(
         treasury_stock = EXCLUDED.treasury_stock,
         fetched_at = now()
     """
+    _n_ph = sql.count("%s")
+    if _n_ph != len(_STOCK_BALANCE_UPSERT_BIND_COLUMNS):
+        raise RuntimeError(
+            "stock_balance_sheets INSERT placeholder mismatch: "
+            f"{_n_ph} vs {len(_STOCK_BALANCE_UPSERT_BIND_COLUMNS)}"
+        )
     n = 0
     for row in rows:
         if not isinstance(row, dict):
@@ -373,54 +733,25 @@ def upsert_balance_sheet_rows(
         pe = _parse_date(row.get("period_end"))
         if not sym or not pe:
             continue
-        tf = str(row.get("timeframe") or "").strip().lower() or "quarterly"
+        tf = _normalize_massive_statement_timeframe(row.get("timeframe"))
         fy = int(row.get("fiscal_year") or 0)
         fq = int(row.get("fiscal_quarter") or 0)
         fd = _parse_date(row.get("filing_date"))
-        cur.execute(
-            sql,
-            (
-                sym,
-                tf,
-                pe,
-                fd,
-                fy,
-                fq,
-                _f(row, "accounts_payable"),
-                _f(row, "accrued_and_other_current_liabilities"),
-                _f(row, "accumulated_other_comprehensive_income"),
-                _f(row, "additional_paid_in_capital"),
-                _f(row, "cash_and_equivalents"),
-                (str(row.get("cik")).strip() if row.get("cik") else None),
-                _f(row, "commitments_and_contingencies"),
-                _f(row, "common_stock"),
-                _f(row, "debt_current"),
-                _f(row, "deferred_revenue_current"),
-                _f(row, "goodwill"),
-                _f(row, "intangible_assets_net"),
-                _f(row, "inventories"),
-                _f(row, "long_term_debt_and_capital_lease_obligations"),
-                _f(row, "noncontrolling_interest"),
-                _f(row, "other_assets"),
-                _f(row, "other_current_assets"),
-                _f(row, "other_equity"),
-                _f(row, "other_noncurrent_liabilities"),
-                _f(row, "preferred_stock"),
-                _f(row, "property_plant_equipment_net"),
-                _f(row, "receivables"),
-                _f(row, "retained_earnings_deficit"),
-                _f(row, "short_term_investments"),
-                _f(row, "total_assets"),
-                _f(row, "total_current_assets"),
-                _f(row, "total_current_liabilities"),
-                _f(row, "total_equity"),
-                _f(row, "total_equity_attributable_to_parent"),
-                _f(row, "total_liabilities"),
-                _f(row, "total_liabilities_and_equity"),
-                _f(row, "treasury_stock"),
-                source,
-            ),
+        cik_v = _normalize_sec_cik(row.get("cik"))
+        bind = _balance_sheet_bind_tuple(
+            row,
+            sym=sym,
+            tf=tf,
+            pe=pe,
+            fd=fd,
+            fy=fy,
+            fq=fq,
+            cik_v=cik_v,
+            source=source,
         )
+        if len(bind) != len(_STOCK_BALANCE_UPSERT_BIND_COLUMNS):
+            raise RuntimeError("stock_balance_sheets bind tuple length drift")
+        cur.execute(sql, bind)
         n += 1
     return n
 
@@ -432,29 +763,79 @@ def upsert_cash_flow_rows(
     fallback_symbol: Optional[str] = None,
     source: str = SOURCE_DEFAULT,
 ) -> int:
+    """Upsert rows into ``stock_cash_flows``. PG column names match Massive ``results[]`` keys."""
     if not rows:
         return 0
     sql = """
     INSERT INTO public.stock_cash_flows (
-        symbol, timeframe, period_end, filing_date, fiscal_year, fiscal_quarter,
-        net_cash_flow_from_operating_activities, net_cash_flow_from_investing_activities,
-        net_cash_flow_from_financing_activities, net_change_in_cash_and_equivalents,
-        free_cash_flow, capital_expenditure, depreciation_and_amortization, cik, source, fetched_at
-    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
+        symbol, timeframe, period_end, filing_date, fiscal_year, fiscal_quarter, cik,
+        cash_from_operating_activities_continuing_operations,
+        change_in_cash_and_equivalents,
+        change_in_other_operating_assets_and_liabilities_net,
+        depreciation_depletion_and_amortization,
+        dividends,
+        effect_of_currency_exchange_rate,
+        income_loss_from_discontinued_operations,
+        long_term_debt_issuances_repayments,
+        net_cash_from_financing_activities,
+        net_cash_from_financing_activities_continuing_operations,
+        net_cash_from_financing_activities_discontinued_operations,
+        net_cash_from_investing_activities,
+        net_cash_from_investing_activities_continuing_operations,
+        net_cash_from_investing_activities_discontinued_operations,
+        net_cash_from_operating_activities,
+        net_cash_from_operating_activities_discontinued_operations,
+        net_income,
+        noncontrolling_interests,
+        other_cash_adjustments,
+        other_financing_activities,
+        other_investing_activities,
+        other_operating_activities,
+        purchase_of_property_plant_and_equipment,
+        sale_of_property_plant_and_equipment,
+        short_term_debt_issuances_repayments,
+        source, fetched_at
+    ) VALUES (
+        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now()
+    )
     ON CONFLICT (symbol, timeframe, period_end, source) DO UPDATE SET
         filing_date = EXCLUDED.filing_date,
         fiscal_year = EXCLUDED.fiscal_year,
         fiscal_quarter = EXCLUDED.fiscal_quarter,
-        net_cash_flow_from_operating_activities = EXCLUDED.net_cash_flow_from_operating_activities,
-        net_cash_flow_from_investing_activities = EXCLUDED.net_cash_flow_from_investing_activities,
-        net_cash_flow_from_financing_activities = EXCLUDED.net_cash_flow_from_financing_activities,
-        net_change_in_cash_and_equivalents = EXCLUDED.net_change_in_cash_and_equivalents,
-        free_cash_flow = EXCLUDED.free_cash_flow,
-        capital_expenditure = EXCLUDED.capital_expenditure,
-        depreciation_and_amortization = EXCLUDED.depreciation_and_amortization,
         cik = EXCLUDED.cik,
+        cash_from_operating_activities_continuing_operations = EXCLUDED.cash_from_operating_activities_continuing_operations,
+        change_in_cash_and_equivalents = EXCLUDED.change_in_cash_and_equivalents,
+        change_in_other_operating_assets_and_liabilities_net = EXCLUDED.change_in_other_operating_assets_and_liabilities_net,
+        depreciation_depletion_and_amortization = EXCLUDED.depreciation_depletion_and_amortization,
+        dividends = EXCLUDED.dividends,
+        effect_of_currency_exchange_rate = EXCLUDED.effect_of_currency_exchange_rate,
+        income_loss_from_discontinued_operations = EXCLUDED.income_loss_from_discontinued_operations,
+        long_term_debt_issuances_repayments = EXCLUDED.long_term_debt_issuances_repayments,
+        net_cash_from_financing_activities = EXCLUDED.net_cash_from_financing_activities,
+        net_cash_from_financing_activities_continuing_operations = EXCLUDED.net_cash_from_financing_activities_continuing_operations,
+        net_cash_from_financing_activities_discontinued_operations = EXCLUDED.net_cash_from_financing_activities_discontinued_operations,
+        net_cash_from_investing_activities = EXCLUDED.net_cash_from_investing_activities,
+        net_cash_from_investing_activities_continuing_operations = EXCLUDED.net_cash_from_investing_activities_continuing_operations,
+        net_cash_from_investing_activities_discontinued_operations = EXCLUDED.net_cash_from_investing_activities_discontinued_operations,
+        net_cash_from_operating_activities = EXCLUDED.net_cash_from_operating_activities,
+        net_cash_from_operating_activities_discontinued_operations = EXCLUDED.net_cash_from_operating_activities_discontinued_operations,
+        net_income = EXCLUDED.net_income,
+        noncontrolling_interests = EXCLUDED.noncontrolling_interests,
+        other_cash_adjustments = EXCLUDED.other_cash_adjustments,
+        other_financing_activities = EXCLUDED.other_financing_activities,
+        other_investing_activities = EXCLUDED.other_investing_activities,
+        other_operating_activities = EXCLUDED.other_operating_activities,
+        purchase_of_property_plant_and_equipment = EXCLUDED.purchase_of_property_plant_and_equipment,
+        sale_of_property_plant_and_equipment = EXCLUDED.sale_of_property_plant_and_equipment,
+        short_term_debt_issuances_repayments = EXCLUDED.short_term_debt_issuances_repayments,
         fetched_at = now()
     """
+    _n_ph = sql.count("%s")
+    if _n_ph != len(_STOCK_CASH_FLOW_UPSERT_BIND_COLUMNS):
+        raise RuntimeError(
+            "stock_cash_flows INSERT placeholder mismatch: "
+            f"{_n_ph} vs {len(_STOCK_CASH_FLOW_UPSERT_BIND_COLUMNS)} columns"
+        )
     n = 0
     for row in rows:
         if not isinstance(row, dict):
@@ -463,39 +844,92 @@ def upsert_cash_flow_rows(
         pe = _parse_date(row.get("period_end"))
         if not sym or not pe:
             continue
-        tf = str(row.get("timeframe") or "").strip().lower() or "quarterly"
+        tf = _normalize_massive_statement_timeframe(row.get("timeframe"))
         fy = int(row.get("fiscal_year") or 0)
         fq = int(row.get("fiscal_quarter") or 0)
         fd = _parse_date(row.get("filing_date"))
-        op = _f(row, "net_cash_flow_from_operating_activities") or _f(row, "net_cash_flow_from_operatingactivities")
-        inv = _f(row, "net_cash_flow_from_investing_activities") or _f(row, "net_cash_flow_from_investingactivities")
-        fin = _f(row, "net_cash_flow_from_financing_activities") or _f(row, "net_cash_flow_from_financingactivities")
-        chg = _f(row, "net_change_in_cash_and_equivalents") or _f(row, "net_change_in_cash")
-        fcf = _f(row, "free_cash_flow")
-        capex = _f(row, "capital_expenditure") or _f(row, "capital_expenditures")
-        dep = _f(row, "depreciation_and_amortization") or _f(row, "depreciation_depletion_and_amortization")
-        cur.execute(
-            sql,
-            (
-                sym,
-                tf,
-                pe,
-                fd,
-                fy,
-                fq,
-                op,
-                inv,
-                fin,
-                chg,
-                fcf,
-                capex,
-                dep,
-                (str(row.get("cik")).strip() if row.get("cik") else None),
-                source,
-            ),
+        cik_v = _normalize_sec_cik(row.get("cik"))
+        bind = _cash_flow_bind_tuple(
+            row,
+            sym=sym,
+            tf=tf,
+            pe=pe,
+            fd=fd,
+            fy=fy,
+            fq=fq,
+            cik_v=cik_v,
+            source=source,
         )
+        if len(bind) != len(_STOCK_CASH_FLOW_UPSERT_BIND_COLUMNS):
+            raise RuntimeError("stock_cash_flows bind tuple length drift")
+        cur.execute(sql, bind)
         n += 1
     return n
+
+
+_STOCK_RATIOS_UPSERT_BIND_COLUMNS: Tuple[str, ...] = (
+    "symbol",
+    "date",
+    "average_volume",
+    "cash",
+    "cik",
+    "current",
+    "debt_to_equity",
+    "dividend_yield",
+    "earnings_per_share",
+    "enterprise_value",
+    "ev_to_ebitda",
+    "ev_to_sales",
+    "free_cash_flow",
+    "market_cap",
+    "price",
+    "price_to_book",
+    "price_to_cash_flow",
+    "price_to_earnings",
+    "price_to_free_cash_flow",
+    "price_to_sales",
+    "quick",
+    "return_on_assets",
+    "return_on_equity",
+    "source",
+)
+
+
+def _ratios_bind_tuple(
+    row: Dict[str, Any],
+    *,
+    sym: str,
+    d: Any,
+    cik_v: Optional[str],
+    source: str,
+) -> Tuple[Any, ...]:
+    """Build execute() params in :data:`_STOCK_RATIOS_UPSERT_BIND_COLUMNS` order."""
+    return (
+        sym,
+        d,
+        _f(row, "average_volume"),
+        _f(row, "cash"),
+        cik_v,
+        _f(row, "current"),
+        _f(row, "debt_to_equity"),
+        _f(row, "dividend_yield"),
+        _f(row, "earnings_per_share"),
+        _f(row, "enterprise_value"),
+        _f(row, "ev_to_ebitda"),
+        _f(row, "ev_to_sales"),
+        _f(row, "free_cash_flow"),
+        _f(row, "market_cap"),
+        _f(row, "price"),
+        _f(row, "price_to_book"),
+        _f(row, "price_to_cash_flow"),
+        _f(row, "price_to_earnings"),
+        _f(row, "price_to_free_cash_flow"),
+        _f(row, "price_to_sales"),
+        _f(row, "quick"),
+        _f(row, "return_on_assets"),
+        _f(row, "return_on_equity"),
+        source,
+    )
 
 
 def upsert_ratios_rows(
@@ -505,81 +939,110 @@ def upsert_ratios_rows(
     fallback_symbol: Optional[str] = None,
     source: str = SOURCE_DEFAULT,
 ) -> int:
+    """UPSERT Massive GET /stocks/financials/v1/ratios ``results[]`` (scalar keys match API)."""
     if not rows:
         return 0
     sql = """
     INSERT INTO public.stock_ratios (
-        symbol, timeframe, period_end, filing_date, fiscal_year, fiscal_quarter,
-        basic_earnings_per_share, diluted_earnings_per_share,
-        return_on_equity, return_on_assets, debt_to_equity, current_ratio,
-        gross_margin, operating_margin, net_margin,
-        revenue, net_income, total_assets, total_equity, total_liabilities,
-        cik, source, fetched_at
+        symbol, date,
+        average_volume, cash, cik, "current",
+        debt_to_equity, dividend_yield, earnings_per_share,
+        enterprise_value, ev_to_ebitda, ev_to_sales,
+        free_cash_flow, market_cap, price,
+        price_to_book, price_to_cash_flow, price_to_earnings,
+        price_to_free_cash_flow, price_to_sales,
+        quick, return_on_assets, return_on_equity,
+        source, fetched_at
     ) VALUES (
-        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now()
+        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now()
     )
-    ON CONFLICT (symbol, timeframe, period_end, source) DO UPDATE SET
-        filing_date = EXCLUDED.filing_date,
-        fiscal_year = EXCLUDED.fiscal_year,
-        fiscal_quarter = EXCLUDED.fiscal_quarter,
-        basic_earnings_per_share = EXCLUDED.basic_earnings_per_share,
-        diluted_earnings_per_share = EXCLUDED.diluted_earnings_per_share,
-        return_on_equity = EXCLUDED.return_on_equity,
-        return_on_assets = EXCLUDED.return_on_assets,
-        debt_to_equity = EXCLUDED.debt_to_equity,
-        current_ratio = EXCLUDED.current_ratio,
-        gross_margin = EXCLUDED.gross_margin,
-        operating_margin = EXCLUDED.operating_margin,
-        net_margin = EXCLUDED.net_margin,
-        revenue = EXCLUDED.revenue,
-        net_income = EXCLUDED.net_income,
-        total_assets = EXCLUDED.total_assets,
-        total_equity = EXCLUDED.total_equity,
-        total_liabilities = EXCLUDED.total_liabilities,
+    ON CONFLICT (symbol, date, source) DO UPDATE SET
+        average_volume = EXCLUDED.average_volume,
+        cash = EXCLUDED.cash,
         cik = EXCLUDED.cik,
+        "current" = EXCLUDED."current",
+        debt_to_equity = EXCLUDED.debt_to_equity,
+        dividend_yield = EXCLUDED.dividend_yield,
+        earnings_per_share = EXCLUDED.earnings_per_share,
+        enterprise_value = EXCLUDED.enterprise_value,
+        ev_to_ebitda = EXCLUDED.ev_to_ebitda,
+        ev_to_sales = EXCLUDED.ev_to_sales,
+        free_cash_flow = EXCLUDED.free_cash_flow,
+        market_cap = EXCLUDED.market_cap,
+        price = EXCLUDED.price,
+        price_to_book = EXCLUDED.price_to_book,
+        price_to_cash_flow = EXCLUDED.price_to_cash_flow,
+        price_to_earnings = EXCLUDED.price_to_earnings,
+        price_to_free_cash_flow = EXCLUDED.price_to_free_cash_flow,
+        price_to_sales = EXCLUDED.price_to_sales,
+        quick = EXCLUDED.quick,
+        return_on_assets = EXCLUDED.return_on_assets,
+        return_on_equity = EXCLUDED.return_on_equity,
         fetched_at = now()
     """
+    _n_ph = sql.count("%s")
+    if _n_ph != len(_STOCK_RATIOS_UPSERT_BIND_COLUMNS):
+        raise RuntimeError(
+            "stock_ratios INSERT placeholder mismatch: "
+            f"{_n_ph} vs {len(_STOCK_RATIOS_UPSERT_BIND_COLUMNS)}"
+        )
     n = 0
     for row in rows:
         if not isinstance(row, dict):
             continue
         sym = _sym_from_row(row, fallback_symbol)
-        pe = _parse_date(row.get("period_end") or row.get("end_date"))
-        if not sym or not pe:
+        d = _parse_date(row.get("date"))
+        if not sym or not d:
             continue
-        tf = str(row.get("timeframe") or "").strip().lower() or "quarterly"
-        fy = int(row.get("fiscal_year") or 0)
-        fq = int(row.get("fiscal_quarter") or 0)
-        fd = _parse_date(row.get("filing_date"))
-        cur.execute(
-            sql,
-            (
-                sym,
-                tf,
-                pe,
-                fd,
-                fy,
-                fq,
-                _f(row, "basic_earnings_per_share"),
-                _f(row, "diluted_earnings_per_share"),
-                _f(row, "return_on_equity"),
-                _f(row, "return_on_assets"),
-                _f(row, "debt_to_equity"),
-                _f(row, "current_ratio"),
-                _f(row, "gross_margin"),
-                _f(row, "operating_margin"),
-                _f(row, "net_margin"),
-                _f(row, "revenue"),
-                _f(row, "net_income"),
-                _f(row, "total_assets"),
-                _f(row, "total_equity"),
-                _f(row, "total_liabilities"),
-                (str(row.get("cik")).strip() if row.get("cik") else None),
-                source,
-            ),
-        )
+        cik_v = _normalize_sec_cik(row.get("cik"))
+        bind = _ratios_bind_tuple(row, sym=sym, d=d, cik_v=cik_v, source=source)
+        if len(bind) != len(_STOCK_RATIOS_UPSERT_BIND_COLUMNS):
+            raise RuntimeError("stock_ratios bind tuple length drift")
+        cur.execute(sql, bind)
         n += 1
     return n
+
+
+_STOCK_SHORT_INTEREST_UPSERT_BIND_COLUMNS: Tuple[str, ...] = (
+    "symbol",
+    "settlement_date",
+    "short_interest",
+    "avg_daily_volume",
+    "days_to_cover",
+    "cik",
+    "source",
+)
+
+
+def _short_interest_shares_from_row(row: Dict[str, Any]) -> Optional[int]:
+    for k in ("short_interest", "short_interest_shares", "short_shares"):
+        v = _i(row, k)
+        if v is not None:
+            return v
+    return None
+
+
+def _short_interest_bind_tuple(
+    row: Dict[str, Any],
+    *,
+    sym: str,
+    sd: Any,
+    cik_v: Optional[str],
+    source: str,
+) -> Tuple[Any, ...]:
+    """Build execute() params in :data:`_STOCK_SHORT_INTEREST_UPSERT_BIND_COLUMNS` order."""
+    adv = _i(row, "avg_daily_volume")
+    if adv is None:
+        adv = _i(row, "avg_daily_volume_consolidated")
+    return (
+        sym,
+        sd,
+        _short_interest_shares_from_row(row),
+        adv,
+        _f(row, "days_to_cover"),
+        cik_v,
+        source,
+    )
 
 
 def upsert_short_interest_rows(
@@ -589,6 +1052,7 @@ def upsert_short_interest_rows(
     fallback_symbol: Optional[str] = None,
     source: str = SOURCE_DEFAULT,
 ) -> int:
+    """UPSERT Massive ``GET /stocks/v1/short-interest`` ``results[]`` (API keys; ``symbol`` = ``ticker``)."""
     if not rows:
         return 0
     sql = """
@@ -602,36 +1066,81 @@ def upsert_short_interest_rows(
         cik = EXCLUDED.cik,
         fetched_at = now()
     """
+    _n_ph = sql.count("%s")
+    if _n_ph != len(_STOCK_SHORT_INTEREST_UPSERT_BIND_COLUMNS):
+        raise RuntimeError(
+            "stock_short_interest INSERT placeholder mismatch: "
+            f"{_n_ph} vs {len(_STOCK_SHORT_INTEREST_UPSERT_BIND_COLUMNS)}"
+        )
     n = 0
     for row in rows:
         if not isinstance(row, dict):
             continue
-        sym = (row.get("ticker") or row.get("symbol") or fallback_symbol or "")
-        sym = str(sym).strip().upper()
+        sym = _sym_from_row(row, fallback_symbol)
         sd = _parse_date(row.get("settlement_date"))
         if not sym or not sd:
             continue
-        si = row.get("short_interest") or row.get("short_interest_shares") or row.get("short_shares")
-        si_val: Optional[int] = None
-        if si is not None:
-            try:
-                si_val = int(float(si))
-            except (TypeError, ValueError):
-                si_val = None
-        cur.execute(
-            sql,
-            (
-                sym,
-                sd,
-                si_val,
-                _f(row, "avg_daily_volume") or _f(row, "avg_daily_volume_consolidated"),
-                _f(row, "days_to_cover"),
-                (str(row.get("cik")).strip() if row.get("cik") else None),
-                source,
-            ),
-        )
+        cik_v = _normalize_sec_cik(row.get("cik"))
+        bind = _short_interest_bind_tuple(row, sym=sym, sd=sd, cik_v=cik_v, source=source)
+        if len(bind) != len(_STOCK_SHORT_INTEREST_UPSERT_BIND_COLUMNS):
+            raise RuntimeError("stock_short_interest bind tuple length drift")
+        cur.execute(sql, bind)
         n += 1
     return n
+
+
+_STOCK_SHORT_VOLUME_UPSERT_BIND_COLUMNS: Tuple[str, ...] = (
+    "symbol",
+    "trade_date",
+    "adf_short_volume",
+    "adf_short_volume_exempt",
+    "exempt_volume",
+    "nasdaq_carteret_short_volume",
+    "nasdaq_carteret_short_volume_exempt",
+    "nasdaq_chicago_short_volume",
+    "nasdaq_chicago_short_volume_exempt",
+    "non_exempt_volume",
+    "nyse_short_volume",
+    "nyse_short_volume_exempt",
+    "short_volume",
+    "short_volume_ratio",
+    "total_volume",
+    "exchanges",
+    "cik",
+    "source",
+)
+
+
+def _short_volume_bind_tuple(
+    row: Dict[str, Any],
+    *,
+    sym: str,
+    td: Any,
+    ex_js: Any,
+    cik_v: Optional[str],
+    source: str,
+) -> Tuple[Any, ...]:
+    """Build execute() params in :data:`_STOCK_SHORT_VOLUME_UPSERT_BIND_COLUMNS` order."""
+    return (
+        sym,
+        td,
+        _i(row, "adf_short_volume"),
+        _i(row, "adf_short_volume_exempt"),
+        _f(row, "exempt_volume"),
+        _i(row, "nasdaq_carteret_short_volume"),
+        _i(row, "nasdaq_carteret_short_volume_exempt"),
+        _i(row, "nasdaq_chicago_short_volume"),
+        _i(row, "nasdaq_chicago_short_volume_exempt"),
+        _f(row, "non_exempt_volume"),
+        _i(row, "nyse_short_volume"),
+        _i(row, "nyse_short_volume_exempt"),
+        _i(row, "short_volume"),
+        _f(row, "short_volume_ratio"),
+        _i(row, "total_volume"),
+        ex_js,
+        cik_v,
+        source,
+    )
 
 
 def upsert_short_volume_rows(
@@ -641,55 +1150,71 @@ def upsert_short_volume_rows(
     fallback_symbol: Optional[str] = None,
     source: str = SOURCE_DEFAULT,
 ) -> int:
+    """UPSERT Massive ``GET /stocks/v1/short-volume`` ``results[]`` (API column names; ``symbol`` = ``ticker``, ``trade_date`` = ``date``)."""
     if not rows:
         return 0
 
     sql = """
     INSERT INTO public.stock_short_volume (
-        symbol, trade_date, short_volume, total_volume, short_volume_ratio, exchanges, cik, source, fetched_at
-    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,now())
+        symbol, trade_date,
+        adf_short_volume, adf_short_volume_exempt, exempt_volume,
+        nasdaq_carteret_short_volume, nasdaq_carteret_short_volume_exempt,
+        nasdaq_chicago_short_volume, nasdaq_chicago_short_volume_exempt,
+        non_exempt_volume, nyse_short_volume, nyse_short_volume_exempt,
+        short_volume, short_volume_ratio, total_volume,
+        exchanges, cik, source, fetched_at
+    ) VALUES (
+        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now()
+    )
     ON CONFLICT (symbol, trade_date, source) DO UPDATE SET
+        adf_short_volume = EXCLUDED.adf_short_volume,
+        adf_short_volume_exempt = EXCLUDED.adf_short_volume_exempt,
+        exempt_volume = EXCLUDED.exempt_volume,
+        nasdaq_carteret_short_volume = EXCLUDED.nasdaq_carteret_short_volume,
+        nasdaq_carteret_short_volume_exempt = EXCLUDED.nasdaq_carteret_short_volume_exempt,
+        nasdaq_chicago_short_volume = EXCLUDED.nasdaq_chicago_short_volume,
+        nasdaq_chicago_short_volume_exempt = EXCLUDED.nasdaq_chicago_short_volume_exempt,
+        non_exempt_volume = EXCLUDED.non_exempt_volume,
+        nyse_short_volume = EXCLUDED.nyse_short_volume,
+        nyse_short_volume_exempt = EXCLUDED.nyse_short_volume_exempt,
         short_volume = EXCLUDED.short_volume,
-        total_volume = EXCLUDED.total_volume,
         short_volume_ratio = EXCLUDED.short_volume_ratio,
+        total_volume = EXCLUDED.total_volume,
         exchanges = EXCLUDED.exchanges,
         cik = EXCLUDED.cik,
         fetched_at = now()
     """
+    _n_ph = sql.count("%s")
+    if _n_ph != len(_STOCK_SHORT_VOLUME_UPSERT_BIND_COLUMNS):
+        raise RuntimeError(
+            "stock_short_volume INSERT placeholder mismatch: "
+            f"{_n_ph} vs {len(_STOCK_SHORT_VOLUME_UPSERT_BIND_COLUMNS)}"
+        )
     n = 0
     for row in rows:
         if not isinstance(row, dict):
             continue
-        sym = (row.get("ticker") or row.get("symbol") or fallback_symbol or "")
-        sym = str(sym).strip().upper()
+        sym = _sym_from_row(row, fallback_symbol)
         td = _parse_date(row.get("date") or row.get("trade_date"))
         if not sym or not td:
             continue
         ex = row.get("exchanges")
         ex_js = Json(ex) if ex is not None else None
-        sv = row.get("short_volume")
-        tv = row.get("total_volume")
-        sv_i = int(float(sv)) if sv is not None else None
-        tv_i = int(float(tv)) if tv is not None else None
-        cur.execute(
-            sql,
-            (
-                sym,
-                td,
-                sv_i,
-                tv_i,
-                _f(row, "short_volume_ratio"),
-                ex_js,
-                (str(row.get("cik")).strip() if row.get("cik") else None),
-                source,
-            ),
-        )
+        cik_v = _normalize_sec_cik(row.get("cik"))
+        bind = _short_volume_bind_tuple(row, sym=sym, td=td, ex_js=ex_js, cik_v=cik_v, source=source)
+        if len(bind) != len(_STOCK_SHORT_VOLUME_UPSERT_BIND_COLUMNS):
+            raise RuntimeError("stock_short_volume bind tuple length drift")
+        cur.execute(sql, bind)
         n += 1
     return n
 
 
-_INCOME_GAP_DETAIL_SQL = """
-WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+_INCOME_GAP_DETAIL_SQL = f"""
+WITH u AS (
+    SELECT u.symbol
+    FROM public.v_sepa_us_equity_universe u
+    WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
+),
 q AS (
     SELECT symbol,
            count(*)::integer AS n,
@@ -730,8 +1255,12 @@ ORDER BY u.symbol
 LIMIT %s
 """
 
-_INCOME_GAP_COUNT_SQL = """
-WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+_INCOME_GAP_COUNT_SQL = f"""
+WITH u AS (
+    SELECT u.symbol
+    FROM public.v_sepa_us_equity_universe u
+    WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
+),
 q AS (
     SELECT symbol,
            count(*)::integer AS n,
@@ -772,8 +1301,12 @@ def get_income_statements_gap_details(cur: Any, *, limit: int = 2000) -> Tuple[L
     return out, total
 
 
-_BALANCE_GAP_COUNT = """
-WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+_BALANCE_GAP_COUNT = f"""
+WITH u AS (
+    SELECT u.symbol
+    FROM public.v_sepa_us_equity_universe u
+    WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
+),
 q AS (
     SELECT symbol, count(*)::integer AS n,
            count(*) FILTER (WHERE total_assets IS NOT NULL)::integer AS ta_n
@@ -786,8 +1319,12 @@ LEFT JOIN q ON q.symbol=u.symbol
 WHERE q.symbol IS NULL OR q.n < 4 OR (q.n > 0 AND (q.ta_n::float/q.n) < 0.9)
 """
 
-_BALANCE_GAP_DETAIL = """
-WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+_BALANCE_GAP_DETAIL = f"""
+WITH u AS (
+    SELECT u.symbol
+    FROM public.v_sepa_us_equity_universe u
+    WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
+),
 q AS (
     SELECT symbol, count(*)::integer AS n,
            count(*) FILTER (WHERE total_assets IS NOT NULL)::integer AS ta_n
@@ -818,11 +1355,15 @@ def get_balance_sheet_gap_details(cur: Any, *, limit: int = 2000) -> Tuple[List[
     return [dict(r) for r in (cur.fetchall() or [])], total
 
 
-_CF_GAP_COUNT = """
-WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+_CF_GAP_COUNT = f"""
+WITH u AS (
+    SELECT u.symbol
+    FROM public.v_sepa_us_equity_universe u
+    WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
+),
 q AS (
     SELECT symbol, count(*)::integer AS n,
-           count(*) FILTER (WHERE net_cash_flow_from_operating_activities IS NOT NULL)::integer AS op_n
+           count(*) FILTER (WHERE net_cash_from_operating_activities IS NOT NULL)::integer AS op_n
     FROM public.stock_cash_flows
     WHERE source='massive' AND timeframe='quarterly'
     GROUP BY symbol
@@ -832,11 +1373,15 @@ LEFT JOIN q ON q.symbol=u.symbol
 WHERE q.symbol IS NULL OR q.n < 4 OR (q.n > 0 AND (op_n::float/q.n) < 0.8)
 """
 
-_CF_GAP_DETAIL = """
-WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+_CF_GAP_DETAIL = f"""
+WITH u AS (
+    SELECT u.symbol
+    FROM public.v_sepa_us_equity_universe u
+    WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
+),
 q AS (
     SELECT symbol, count(*)::integer AS n,
-           count(*) FILTER (WHERE net_cash_flow_from_operating_activities IS NOT NULL)::integer AS op_n
+           count(*) FILTER (WHERE net_cash_from_operating_activities IS NOT NULL)::integer AS op_n
     FROM public.stock_cash_flows
     WHERE source='massive' AND timeframe='quarterly'
     GROUP BY symbol
@@ -864,31 +1409,43 @@ def get_cash_flow_gap_details(cur: Any, *, limit: int = 2000) -> Tuple[List[Dict
     return [dict(r) for r in (cur.fetchall() or [])], total
 
 
-_RAT_GAP_COUNT = """
-WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+_RAT_GAP_COUNT = f"""
+WITH u AS (
+    SELECT u.symbol
+    FROM public.v_sepa_us_equity_universe u
+    WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
+),
 q AS (
-    SELECT symbol, count(*)::integer AS n
+    SELECT symbol, count(*)::integer AS n,
+           max(date) AS mx
     FROM public.stock_ratios
-    WHERE source='massive' AND timeframe='quarterly'
+    WHERE source='massive'
     GROUP BY symbol
 )
 SELECT count(*)::bigint AS n FROM u
 LEFT JOIN q ON q.symbol=u.symbol
-WHERE q.symbol IS NULL OR q.n < 4
+WHERE q.symbol IS NULL OR q.n < 1 OR q.mx < (CURRENT_DATE - integer '45')
 """
 
-_RAT_GAP_DETAIL = """
-WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+_RAT_GAP_DETAIL = f"""
+WITH u AS (
+    SELECT u.symbol
+    FROM public.v_sepa_us_equity_universe u
+    WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
+),
 q AS (
-    SELECT symbol, count(*)::integer AS n
+    SELECT symbol, count(*)::integer AS n,
+           max(date) AS mx
     FROM public.stock_ratios
-    WHERE source='massive' AND timeframe='quarterly'
+    WHERE source='massive'
     GROUP BY symbol
 )
-SELECT u.symbol, COALESCE(q.n,0) AS quarterly_rows, NULL::text AS annual_max_period_end,
-    CASE WHEN q.symbol IS NULL OR q.n < 4 THEN 'insufficient_quarterly' ELSE NULL END AS gap_reason
+SELECT u.symbol, COALESCE(q.n,0) AS quarterly_rows,
+    to_char(q.mx, 'YYYY-MM-DD') AS annual_max_period_end,
+    CASE WHEN q.symbol IS NULL OR q.n < 1 OR q.mx < (CURRENT_DATE - integer '45') THEN 'stale_or_missing'
+         ELSE NULL END AS gap_reason
 FROM u LEFT JOIN q ON q.symbol=u.symbol
-WHERE q.symbol IS NULL OR q.n < 4
+WHERE q.symbol IS NULL OR q.n < 1 OR q.mx < (CURRENT_DATE - integer '45')
 ORDER BY u.symbol LIMIT %s
 """
 
@@ -1013,7 +1570,12 @@ def run_feed_stocks_income_statements_job(
         sym = str(raw).strip().upper()
         if not sym:
             continue
-        for tf, lim in (("quarterly", 12), ("annual", 5)):
+        # Include trailing-twelve-months so TTM rows persist under timeframe ``trailing_twelve_months`` (distinct PK from quarterly).
+        for tf, lim in (
+            ("quarterly", 12),
+            ("annual", 5),
+            ("trailing_twelve_months", 12),
+        ):
             data = client.fetch_financials_v1_income_statements(
                 tickers=sym, timeframe=tf, limit=lim, sort="period_end.desc"
             )
@@ -1081,7 +1643,12 @@ def run_feed_stocks_cash_flows_job(conn: Any, client: Any, payload: Dict[str, An
         sym = str(raw).strip().upper()
         if not sym:
             continue
-        for tf, lim in (("quarterly", 12), ("annual", 5)):
+        # Include trailing-twelve-months so ``period_end`` rows match Massive TTM payloads (distinct PK from quarterly).
+        for tf, lim in (
+            ("quarterly", 12),
+            ("annual", 5),
+            ("trailing_twelve_months", 12),
+        ):
             data = client.fetch_financials_v1_cash_flow_statements(
                 tickers=sym, timeframe=tf, limit=lim, sort="period_end.desc"
             )
@@ -1111,39 +1678,42 @@ def run_feed_stocks_ratios_job(conn: Any, client: Any, payload: Dict[str, Any]) 
     rows_total = 0
     failures: List[Dict[str, str]] = []
     use_v1 = bool(payload.get("use_v1_endpoint", True))
+    lim = int(payload.get("limit") or 120)
+    sort_raw = payload.get("sort", None)
+    sort: Optional[str] = (
+        str(sort_raw).strip()
+        if sort_raw is not None and str(sort_raw).strip()
+        else None
+    )
+    api_rows_seen = 0
     for raw in symbols:
         sym = str(raw).strip().upper()
         if not sym:
             continue
-        for tf, lim in (("quarterly", 12), ("annual", 5)):
-            data: Dict[str, Any]
-            if use_v1:
-                data = client.fetch_financials_v1_ratios(
-                    tickers=sym, timeframe=tf, limit=lim, sort="period_end.desc"
-                )
-                err = str(data.get("error") or "")
-                if err and (
-                    "404" in err
-                    or "not found" in err.lower()
-                    or "status" in err.lower()
-                ):
-                    data = client.fetch_stock_ratios(sym, limit=lim, sort="filing_date.desc")
-            else:
-                data = client.fetch_stock_ratios(sym, limit=lim, sort="filing_date.desc")
-            if data.get("error"):
-                failures.append({"symbol": sym, "timeframe": tf, "error": str(data["error"])})
-                continue
-            res = data.get("results")
-            if not isinstance(res, list):
-                continue
-            with conn.cursor() as cur:
-                rows_total += upsert_ratios_rows(cur, res, fallback_symbol=sym)
-            conn.commit()
+        if not use_v1:
+            failures.append(
+                {"symbol": sym, "timeframe": "—", "error": "Ratios ingest requires v1 API (use_v1_endpoint=true)"},
+            )
+            _throttle(throttle)
+            continue
+        data = client.fetch_financials_v1_ratios(ticker=sym, limit=lim, sort=sort)
+        if data.get("error"):
+            failures.append({"symbol": sym, "timeframe": "—", "error": str(data["error"])})
+            _throttle(throttle)
+            continue
+        res = data.get("results")
+        if not isinstance(res, list):
+            continue
+        api_rows_seen += len(res)
+        with conn.cursor() as cur:
+            rows_total += upsert_ratios_rows(cur, res, fallback_symbol=sym)
+        conn.commit()
         _throttle(throttle)
     return {
         "ok": True,
         "kind": "feed_stocks_ratios",
         "rows_upserted": rows_total,
+        "api_rows_seen": api_rows_seen,
         "failures": failures[:50],
     }
 
@@ -1207,8 +1777,12 @@ def financials_gap_symbols_from_db(cur: Any, kind: str, *, batch_size: int = 50)
     k = (kind or "").strip().lower()
     if k == "feed_stocks_income_statements":
         cur.execute(
-            """
-            WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+            f"""
+            WITH u AS (
+                SELECT u.symbol
+                FROM public.v_sepa_us_equity_universe u
+                WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
+            ),
             q AS (
                 SELECT symbol,
                        count(*)::integer AS n,
@@ -1235,8 +1809,12 @@ def financials_gap_symbols_from_db(cur: Any, kind: str, *, batch_size: int = 50)
         )
     elif k == "feed_stocks_balance_sheets":
         cur.execute(
-            """
-            WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+            f"""
+            WITH u AS (
+                SELECT u.symbol
+                FROM public.v_sepa_us_equity_universe u
+                WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
+            ),
             q AS (
                 SELECT symbol, count(*)::integer AS n,
                        count(*) FILTER (WHERE total_assets IS NOT NULL)::integer AS ta_n
@@ -1252,11 +1830,15 @@ def financials_gap_symbols_from_db(cur: Any, kind: str, *, batch_size: int = 50)
         )
     elif k == "feed_stocks_cash_flows":
         cur.execute(
-            """
-            WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+            f"""
+            WITH u AS (
+                SELECT u.symbol
+                FROM public.v_sepa_us_equity_universe u
+                WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
+            ),
             q AS (
                 SELECT symbol, count(*)::integer AS n,
-                       count(*) FILTER (WHERE net_cash_flow_from_operating_activities IS NOT NULL)::integer AS op_n
+                       count(*) FILTER (WHERE net_cash_from_operating_activities IS NOT NULL)::integer AS op_n
                 FROM public.stock_cash_flows
                 WHERE source='massive' AND timeframe='quarterly'
                 GROUP BY symbol
@@ -1269,17 +1851,22 @@ def financials_gap_symbols_from_db(cur: Any, kind: str, *, batch_size: int = 50)
         )
     elif k == "feed_stocks_ratios":
         cur.execute(
-            """
-            WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+            f"""
+            WITH u AS (
+                SELECT u.symbol
+                FROM public.v_sepa_us_equity_universe u
+                WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
+            ),
             q AS (
-                SELECT symbol, count(*)::integer AS n
+                SELECT symbol, count(*)::integer AS n,
+                       max(date) AS mx
                 FROM public.stock_ratios
-                WHERE source='massive' AND timeframe='quarterly'
+                WHERE source='massive'
                 GROUP BY symbol
             )
             SELECT u.symbol FROM u
             LEFT JOIN q ON q.symbol=u.symbol
-            WHERE q.symbol IS NULL OR q.n < 4
+            WHERE q.symbol IS NULL OR q.n < 1 OR q.mx < (CURRENT_DATE - integer '45')
             ORDER BY u.symbol
             """
         )
