@@ -309,6 +309,34 @@ export async function postSepaFundamentalsBackfill(opts?: {
   return j as SepaFundamentalsBackfillResponse
 }
 
+export interface SepaTechnicalBackfillResponse {
+  ok: boolean
+  error?: string
+  gap_count?: number
+  message?: string
+}
+
+export async function postSepaTechnicalBackfill(opts?: {
+  only_missing?: boolean
+  max_symbols?: number
+  min_crs?: number
+  lookback_days?: number
+}): Promise<SepaTechnicalBackfillResponse> {
+  const url = researchApiUrl('/research/data/readiness/backfill-technical')
+  const body = opts ? JSON.stringify(opts) : '{}'
+  const r = await fetchWithTimeout(
+    url,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body },
+    60_000,
+  )
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    const msg = typeof j?.detail === 'string' ? j.detail : (j?.error ?? `HTTP ${r.status}`)
+    return { ok: false, error: msg }
+  }
+  return j as SepaTechnicalBackfillResponse
+}
+
 export interface SepaStockUnifiedSnapshotResponse {
   ok: boolean
   error?: string
@@ -518,8 +546,23 @@ export interface SepaCriteriaStats {
     bars_lt_200: number
     no_bars: number
     failure_reasons: Array<{ notes: string | null; cnt: number }>
+    /** Cached technical_eval rows for today (universe scope). */
+    tech_cached_count: number
+    /** Count of symbols with technical_pass = true (all 11 conditions). */
+    tech_pass_count: number
+    /** Count of symbols whose technical_eval is flagged insufficient_data. */
+    tech_insufficient_count: number
+    /** Per-condition pass/fail counts, one entry per known condition id. */
+    conditions: TechConditionStat[]
   }
   computed_at: string
+}
+
+export interface TechConditionStat {
+  id: string
+  label: string
+  pass: number
+  fail: number
 }
 
 export interface SepaDataInventoryStats {
@@ -537,11 +580,11 @@ export async function fetchSepaCriteriaStats(): Promise<SepaCriteriaStats> {
     const j = await r.json().catch(() => ({}))
     if (!r.ok) {
       const msg = typeof j?.detail === 'string' ? j.detail : (j?.error ?? `HTTP ${r.status}`)
-      return { ok: false, error: msg, universe_count: 0, fundamental: { cached_count: 0, fund_pass_count: 0, no_data_count: 0, conditions: [] }, technical: { total_in_snapshot: 0, price_ready_count: 0, fund_cached_count: 0, both_ready: 0, bars_ge_252: 0, bars_ge_240: 0, bars_ge_200: 0, bars_lt_200: 0, no_bars: 0, failure_reasons: [] }, computed_at: '' }
+      return { ok: false, error: msg, universe_count: 0, fundamental: { cached_count: 0, fund_pass_count: 0, no_data_count: 0, conditions: [] }, technical: { total_in_snapshot: 0, price_ready_count: 0, fund_cached_count: 0, both_ready: 0, bars_ge_252: 0, bars_ge_240: 0, bars_ge_200: 0, bars_lt_200: 0, no_bars: 0, failure_reasons: [], tech_cached_count: 0, tech_pass_count: 0, tech_insufficient_count: 0, conditions: [] }, computed_at: '' }
     }
     return j as SepaCriteriaStats
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : 'Network error', universe_count: 0, fundamental: { cached_count: 0, fund_pass_count: 0, no_data_count: 0, conditions: [] }, technical: { total_in_snapshot: 0, price_ready_count: 0, fund_cached_count: 0, both_ready: 0, bars_ge_252: 0, bars_ge_240: 0, bars_ge_200: 0, bars_lt_200: 0, no_bars: 0, failure_reasons: [] }, computed_at: '' }
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error', universe_count: 0, fundamental: { cached_count: 0, fund_pass_count: 0, no_data_count: 0, conditions: [] }, technical: { total_in_snapshot: 0, price_ready_count: 0, fund_cached_count: 0, both_ready: 0, bars_ge_252: 0, bars_ge_240: 0, bars_ge_200: 0, bars_lt_200: 0, no_bars: 0, failure_reasons: [], tech_cached_count: 0, tech_pass_count: 0, tech_insufficient_count: 0, conditions: [] }, computed_at: '' }
   }
 }
 

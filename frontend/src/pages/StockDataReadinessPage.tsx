@@ -16,6 +16,7 @@ import {
   postSepaPriceGapBackfill,
   postSepaSyncHolidays,
   postSepaFundamentalsBackfill,
+  postSepaTechnicalBackfill,
   postSepaIncomeStatementsBackfill,
   postSepaBalanceSheetsBackfill,
   postSepaCashFlowsBackfill,
@@ -849,7 +850,27 @@ function criterionStatusLabel(status: CriterionStatus): string {
   }
 }
 
-function SepaScreeningChecklist({ summary }: { summary: SepaReadinessSummaryResponse | null }) {
+const TECH_COND_LABELS: Record<string, string> = {
+  avg_volume_50_gt_threshold: 'Avg Volume 50D > 100K',
+  crs_ge_70:                  'CRS ≥ 70',
+  close_ge_low52_x_1_3:       'Close ≥ Low52W × 1.3',
+  close_ge_high52_x_0_75:     'Close ≥ High52W × 0.75',
+  sma50_gt_sma150:            'SMA50 > SMA150',
+  sma50_gt_sma200:            'SMA50 > SMA200',
+  sma150_gt_sma200:           'SMA150 > SMA200',
+  sma200_rising_1m:           'SMA200 Rising (1M)',
+  price_gt_sma50:             'Price > SMA50',
+  price_gt_sma150:            'Price > SMA150',
+  price_gt_sma200:            'Price > SMA200',
+}
+
+function SepaScreeningChecklist({
+  summary,
+  criteriaStats,
+}: {
+  summary: SepaReadinessSummaryResponse | null
+  criteriaStats: SepaCriteriaStats | null
+}) {
   const [activeTab, setActiveTab] = useState<'technical' | 'fundamental'>('technical')
   const techStatuses = SEPA_TECHNICAL_CRITERIA.map((c) => ({
     ...c,
@@ -907,51 +928,88 @@ function SepaScreeningChecklist({ summary }: { summary: SepaReadinessSummaryResp
           <div className="sdp-criteria-group-head">
             <span className="sdp-criteria-group-badge sdp-criteria-group-badge--tech">TECHNICAL</span>
             <span className="sdp-criteria-group-label">Price / Volume / Trend</span>
-            <span className="sdp-criteria-group-count">{techOk} / {techTotal}</span>
+            <span className="sdp-criteria-group-count">
+              {criteriaStats?.technical?.tech_pass_count != null
+                ? `${(criteriaStats.technical.tech_pass_count ?? 0).toLocaleString()} pass all 11`
+                : `${techOk} / ${techTotal}`}
+            </span>
           </div>
           <div className="sdp-criteria-group-sub">
-            Data source: <code>stock_day</code> daily OHLCV bars (≥200 trading days)
+            Data source: <code>stock_readiness_daily.technical_eval</code> (Phase-1 stock_day + CRS percentile rank)
           </div>
-          <table className="sdp-criteria-table">
-            <thead>
-              <tr>
-                <th className="sdp-crit-col-status" />
-                <th>Criteria</th>
-                <th>Condition</th>
-                <th>Explain</th>
-                <th className="sdp-crit-col-fields">Required fields</th>
-                <th className="sdp-crit-col-status-label">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {techStatuses.map((c) => (
-                <tr key={c.id} className={`sdp-crit-row sdp-crit-row--${c.status}`}>
-                  <td className="sdp-crit-col-status">
-                    <span className={`sdp-crit-dot ${criterionStatusDot(c.status)}`} />
-                  </td>
-                  <td className="sdp-crit-name">{c.criteria}</td>
-                  <td className="sdp-crit-condition"><code>{c.condition}</code></td>
-                  <td className="sdp-crit-explain">{c.explain}</td>
-                  <td className="sdp-crit-col-fields">
-                    <span className="sdp-crit-fields">
-                      {c.dataFields.map((f) => (
-                        <span key={f} className="sdp-crit-field-chip">{f}</span>
-                      ))}
-                      {c.minBars != null && (
-                        <span className="sdp-crit-field-chip sdp-crit-field-chip--bars">≥{c.minBars}d</span>
-                      )}
+
+          {criteriaStats?.technical?.conditions && criteriaStats.technical.conditions.length > 0 ? (
+            <div className="sdp-criteria-rows">
+              {criteriaStats.technical.conditions.map((cond) => {
+                const denominator = cond.pass + cond.fail
+                const pct = denominator > 0 ? Math.round((cond.pass / denominator) * 100) : 0
+                const barColor =
+                  pct >= 60 ? 'sdp-criteria-bar-fill--ok'
+                  : pct >= 30 ? 'sdp-criteria-bar-fill--warn'
+                  :             'sdp-criteria-bar-fill--error'
+                const label = TECH_COND_LABELS[cond.id] ?? cond.label ?? cond.id
+                return (
+                  <div key={cond.id} className="sdp-criteria-row">
+                    <span className="sdp-criteria-label" title={cond.id}>{label}</span>
+                    <div className="sdp-criteria-bar">
+                      <div className={`sdp-criteria-bar-fill ${barColor}`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="sdp-criteria-stat">
+                      {cond.pass.toLocaleString()} / {denominator.toLocaleString()}
+                      <span className="sdp-check-secondary"> ({pct}%)</span>
                     </span>
-                  </td>
-                  <td className="sdp-crit-col-status-label">
-                    <span className={`sdp-crit-status-pill sdp-crit-status-pill--${c.status}`}>
-                      {criterionStatusLabel(c.status)}
-                    </span>
-                    {c.note && <span className="sdp-crit-note">{c.note}</span>}
-                  </td>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <table className="sdp-criteria-table">
+              <thead>
+                <tr>
+                  <th className="sdp-crit-col-status" />
+                  <th>Criteria</th>
+                  <th>Condition</th>
+                  <th>Explain</th>
+                  <th className="sdp-crit-col-fields">Required fields</th>
+                  <th className="sdp-crit-col-status-label">Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {techStatuses.map((c) => (
+                  <tr key={c.id} className={`sdp-crit-row sdp-crit-row--${c.status}`}>
+                    <td className="sdp-crit-col-status">
+                      <span className={`sdp-crit-dot ${criterionStatusDot(c.status)}`} />
+                    </td>
+                    <td className="sdp-crit-name">{c.criteria}</td>
+                    <td className="sdp-crit-condition"><code>{c.condition}</code></td>
+                    <td className="sdp-crit-explain">{c.explain}</td>
+                    <td className="sdp-crit-col-fields">
+                      <span className="sdp-crit-fields">
+                        {c.dataFields.map((f) => (
+                          <span key={f} className="sdp-crit-field-chip">{f}</span>
+                        ))}
+                        {c.minBars != null && (
+                          <span className="sdp-crit-field-chip sdp-crit-field-chip--bars">≥{c.minBars}d</span>
+                        )}
+                      </span>
+                    </td>
+                    <td className="sdp-crit-col-status-label">
+                      <span className={`sdp-crit-status-pill sdp-crit-status-pill--${c.status}`}>
+                        {criterionStatusLabel(c.status)}
+                      </span>
+                      {c.note && <span className="sdp-crit-note">{c.note}</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {(!criteriaStats?.technical?.conditions || criteriaStats.technical.conditions.length === 0) && (
+            <p className="sdp-check-secondary" style={{ fontSize: 12, marginTop: 8 }}>
+              No technical snapshot yet — run "Evaluate & Publish" or POST <code>/research/data/readiness/backfill-technical</code> to populate.
+            </p>
+          )}
         </div>}
 
         {activeTab === 'fundamental' && <div className="sdp-criteria-group">
@@ -2740,6 +2798,19 @@ function StockDataReadinessPageInner({
           : (fundRes.message ?? `Phase4 job submitted for ${fmt(fundRes.gap_count)} symbols.`),
       )
       setFundBackfillOk(true)
+
+      // Phase 1.5: Technical (Phase-1 + CRS) — fire-and-forget; runs in a backend thread
+      try {
+        const techRes = await postSepaTechnicalBackfill({ only_missing: true })
+        if (techRes.ok) {
+          const note = techRes.gap_count === 0
+            ? (techRes.message ?? 'All symbols already have a technical_eval row for today.')
+            : (techRes.message ?? `Technical backfill started for ${fmt(techRes.gap_count)} symbols.`)
+          setFundBackfillMsg(prev => prev ? `${prev}  ·  ${note}` : note)
+        }
+      } catch {
+        // non-fatal — fundamentals + snapshot still proceed
+      }
 
       // Phase 2: Refresh snapshot
       setEvalPublishPhase('snapshot')
@@ -4537,12 +4608,53 @@ function StockDataReadinessPageInner({
                   <div className="sdp-eval-section-head">
                     <strong>Technical</strong>
                     <span className="sdp-check-secondary">
-                      price_ready: {fmt(criteriaStats.technical.price_ready_count)} / {fmt(criteriaStats.universe_count)}
-                      {' '}({criteriaStats.universe_count > 0 ? Math.round(criteriaStats.technical.price_ready_count / criteriaStats.universe_count * 100) : 0}%)
-                      &nbsp;·&nbsp;fund_cache today: {fmt(criteriaStats.technical.fund_cached_count)}
+                      Evaluated{' '}
+                      {fmt(criteriaStats.technical.tech_cached_count ?? 0)} / {fmt(criteriaStats.universe_count)}
+                      &nbsp;·&nbsp;
+                      <span className={(criteriaStats.technical.tech_pass_count ?? 0) > 0 ? 'sdp-text-ok' : 'sdp-text-dim'}>
+                        Pass all 11: {fmt(criteriaStats.technical.tech_pass_count ?? 0)}
+                        {' '}({criteriaStats.technical.tech_cached_count
+                          ? Math.round(((criteriaStats.technical.tech_pass_count ?? 0) / criteriaStats.technical.tech_cached_count) * 100)
+                          : 0}%)
+                      </span>
+                      &nbsp;·&nbsp;
+                      <span className="sdp-text-dim">Insufficient: {fmt(criteriaStats.technical.tech_insufficient_count ?? 0)}</span>
                     </span>
                   </div>
-                  <div className="sdp-eval-bar-dist">
+
+                  {/* Per-condition pass-rate bars — matches Fundamental style */}
+                  {criteriaStats.technical.conditions.length > 0 ? (
+                    <div className="sdp-criteria-rows">
+                      {criteriaStats.technical.conditions.map((cond) => {
+                        const denominator = cond.pass + cond.fail
+                        const pct = denominator > 0 ? Math.round((cond.pass / denominator) * 100) : 0
+                        const barColor =
+                          pct >= 60 ? 'sdp-criteria-bar-fill--ok'
+                          : pct >= 30 ? 'sdp-criteria-bar-fill--warn'
+                          :             'sdp-criteria-bar-fill--error'
+                        const label = TECH_COND_LABELS[cond.id] ?? cond.label ?? cond.id
+                        return (
+                          <div key={cond.id} className="sdp-criteria-row">
+                            <span className="sdp-criteria-label" title={cond.id}>{label}</span>
+                            <div className="sdp-criteria-bar">
+                              <div className={`sdp-criteria-bar-fill ${barColor}`} style={{ width: `${pct}%` }} />
+                            </div>
+                            <span className="sdp-criteria-stat">
+                              {fmt(cond.pass)} / {fmt(denominator)}
+                              <span className="sdp-check-secondary"> ({pct}%)</span>
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <p className="sdp-check-secondary" style={{ fontSize: 12, margin: '6px 0 0' }}>
+                      No technical snapshot yet — run "Evaluate &amp; Publish" to populate.
+                    </p>
+                  )}
+
+                  {/* Bar-count coverage chips */}
+                  <div className="sdp-eval-bar-dist" style={{ marginTop: 8 }}>
                     {[
                       { label: '≥252 bars', value: criteriaStats.technical.bars_ge_252 },
                       { label: '≥240 bars', value: criteriaStats.technical.bars_ge_240 },
@@ -4694,7 +4806,9 @@ function StockDataReadinessPageInner({
         </button>
       </div>
 
-      {activeInfoTab === 'checklist' && <SepaScreeningChecklist summary={summary} />}
+      {activeInfoTab === 'checklist' && (
+        <SepaScreeningChecklist summary={summary} criteriaStats={criteriaStats} />
+      )}
 
       {activeInfoTab === 'database' && (
         <>

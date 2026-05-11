@@ -14,6 +14,7 @@ from src.research.sepa.readiness_snapshot import (
     get_sepa_price_gap_symbols,
     run_fundamentals_local_backfill,
     run_sepa_universe_readiness_snapshot,
+    run_technical_local_backfill,
 )
 from src.research.sepa.stock_unified_snapshot_refresh import run_refresh_cache_stock_unified_snapshots
 
@@ -220,6 +221,102 @@ def post_sepa_backfill_fundamentals(
         "ok": True,
         "gap_count": len(symbols),
         "message": f"Local fundamentals backfill started for {len(symbols)} symbols (no Phase1/CRS filter).",
+    }
+
+
+@router.post("/research/data/readiness/backfill-technical")
+def post_sepa_backfill_technical(
+    request: Request,
+    body: Dict[str, Any] = Body(default={}),
+) -> Dict[str, Any]:
+    """Evaluate 11 SEPA technical conditions (10 Phase-1 + CRS) for universe symbols and
+    write directly to stock_readiness_daily.technical_eval.
+
+    Reads only from local stock_day (massive). No vendor calls. CRS is computed
+    universe-wide so the rank percentile is meaningful. The heavy work runs in a
+    background thread so this endpoint returns immediately.
+    """
+    import threading
+
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+
+    from src.persistence.postgres.connection import _get_conn_params
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+
+    params = _get_conn_params(db)
+    params["connect_timeout"] = 15
+    try:
+        conn = psycopg2.connect(**params)
+    except Exception as e:
+        return {"ok": False, "error": f"DB connect failed: {e}"}
+
+    only_missing = bool(body.get("only_missing", True))
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SET statement_timeout = 30000")
+            if only_missing:
+                cur.execute(
+                    """
+                    SELECT u.symbol
+                    FROM public.v_us_equity_universe u
+                    LEFT JOIN public.stock_readiness_daily srd
+                        ON srd.symbol = u.symbol
+                       AND srd.as_of_date = CURRENT_DATE
+                       AND srd.universe_rule_version = 'v1'
+                       AND srd.price_source = 'massive'
+                       AND srd.technical_eval IS NOT NULL
+                    WHERE srd.symbol IS NULL
+                    ORDER BY u.symbol
+                    """
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT symbol FROM public.v_us_equity_universe ORDER BY symbol
+                    """
+                )
+            rows = cur.fetchall() or []
+    except Exception as e:
+        return {"ok": False, "error": f"Query failed: {e}"}
+    finally:
+        conn.close()
+
+    symbols = [str(r["symbol"]) for r in rows]
+    if not symbols:
+        return {
+            "ok": True,
+            "gap_count": 0,
+            "message": "All universe symbols already have a technical_eval row for today.",
+        }
+
+    max_symbols = int(body.get("max_symbols", 50000))
+    symbols = symbols[:max_symbols]
+    min_crs = float(body.get("min_crs", 70.0))
+    lookback_days = int(body.get("lookback_days", 420))
+
+    t = threading.Thread(
+        target=run_technical_local_backfill,
+        kwargs={
+            "status_config": db,
+            "symbols": symbols,
+            "min_crs": min_crs,
+            "lookback_days": lookback_days,
+        },
+        daemon=True,
+    )
+    t.start()
+
+    return {
+        "ok": True,
+        "gap_count": len(symbols),
+        "message": (
+            f"Local technical backfill started for {len(symbols)} symbols "
+            f"(Phase-1 + CRS ≥ {min_crs:g})."
+        ),
     }
 
 

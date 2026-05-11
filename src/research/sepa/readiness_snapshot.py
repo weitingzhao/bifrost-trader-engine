@@ -468,7 +468,11 @@ INSERT INTO public.stock_readiness_daily (
     fundamental_pass,
     fundamental_pass_count,
     fundamental_insufficient,
-    fundamental_eval
+    fundamental_eval,
+    technical_pass,
+    technical_pass_count,
+    technical_insufficient,
+    technical_eval
 )
 WITH params AS (
     SELECT
@@ -586,7 +590,12 @@ SELECT
     false       AS fundamental_pass,
     0           AS fundamental_pass_count,
     false       AS fundamental_insufficient,
-    NULL::jsonb AS fundamental_eval
+    NULL::jsonb AS fundamental_eval,
+    -- Stage 5 SEPA technical result columns (written by run_technical_local_backfill, preserved on conflict)
+    false       AS technical_pass,
+    0           AS technical_pass_count,
+    false       AS technical_insufficient,
+    NULL::jsonb AS technical_eval
 FROM params p
 CROSS JOIN symbols s
 LEFT JOIN u ON u.symbol = s.symbol
@@ -625,7 +634,11 @@ DO UPDATE SET
     fundamental_pass        = CASE WHEN EXCLUDED.fundamental_eval IS NOT NULL THEN EXCLUDED.fundamental_pass ELSE stock_readiness_daily.fundamental_pass END,
     fundamental_pass_count  = CASE WHEN EXCLUDED.fundamental_eval IS NOT NULL THEN EXCLUDED.fundamental_pass_count ELSE stock_readiness_daily.fundamental_pass_count END,
     fundamental_insufficient = CASE WHEN EXCLUDED.fundamental_eval IS NOT NULL THEN EXCLUDED.fundamental_insufficient ELSE stock_readiness_daily.fundamental_insufficient END,
-    fundamental_eval        = COALESCE(EXCLUDED.fundamental_eval, stock_readiness_daily.fundamental_eval);
+    fundamental_eval        = COALESCE(EXCLUDED.fundamental_eval, stock_readiness_daily.fundamental_eval),
+    technical_pass          = CASE WHEN EXCLUDED.technical_eval IS NOT NULL THEN EXCLUDED.technical_pass ELSE stock_readiness_daily.technical_pass END,
+    technical_pass_count    = CASE WHEN EXCLUDED.technical_eval IS NOT NULL THEN EXCLUDED.technical_pass_count ELSE stock_readiness_daily.technical_pass_count END,
+    technical_insufficient  = CASE WHEN EXCLUDED.technical_eval IS NOT NULL THEN EXCLUDED.technical_insufficient ELSE stock_readiness_daily.technical_insufficient END,
+    technical_eval          = COALESCE(EXCLUDED.technical_eval, stock_readiness_daily.technical_eval);
 """
 
 
@@ -1175,6 +1188,36 @@ _FUND_COND_LABELS: Dict[str, str] = {
     "rev_acc_fy":        "Revenue Annual Acceleration",
 }
 
+# Phase-1 (10) + CRS (1) = 11 SEPA technical conditions. CRS is computed
+# universe-wide and merged as the 11th condition by run_technical_local_backfill.
+_TECH_COND_IDS = [
+    "avg_volume_50_gt_threshold",
+    "crs_ge_70",
+    "close_ge_low52_x_1_3",
+    "close_ge_high52_x_0_75",
+    "sma50_gt_sma150",
+    "sma50_gt_sma200",
+    "sma150_gt_sma200",
+    "sma200_rising_1m",
+    "price_gt_sma50",
+    "price_gt_sma150",
+    "price_gt_sma200",
+]
+
+_TECH_COND_LABELS: Dict[str, str] = {
+    "avg_volume_50_gt_threshold": "Avg Volume 50D > 100K",
+    "crs_ge_70":                  "CRS ≥ 70",
+    "close_ge_low52_x_1_3":       "Close ≥ Low52W × 1.3",
+    "close_ge_high52_x_0_75":     "Close ≥ High52W × 0.75",
+    "sma50_gt_sma150":            "SMA50 > SMA150",
+    "sma50_gt_sma200":            "SMA50 > SMA200",
+    "sma150_gt_sma200":           "SMA150 > SMA200",
+    "sma200_rising_1m":           "SMA200 Rising (1M)",
+    "price_gt_sma50":             "Price > SMA50",
+    "price_gt_sma150":            "Price > SMA150",
+    "price_gt_sma200":            "Price > SMA200",
+}
+
 
 def run_fundamentals_local_backfill(
     status_config: dict,
@@ -1369,6 +1412,196 @@ def run_fundamentals_local_backfill(
     }
 
 
+def run_technical_local_backfill(
+    status_config: dict,
+    symbols: List[str],
+    *,
+    min_crs: float = 70.0,
+    lookback_days: int = 420,
+    source: str = "massive",
+) -> Dict[str, Any]:
+    """Evaluate 11 SEPA technical conditions for *all* given symbols using local stock_day.
+
+    Mirrors run_fundamentals_local_backfill:
+      1. Batch-read OHLCV (and close-only) series for ALL symbols via two read connections.
+      2. Run phase1_engine.evaluate_symbol_phase1 per symbol → 10 conditions.
+      3. Run crs_engine.compute_crs_scores across the full input set → 1 CRS condition (11th).
+      4. Merge conditions[], compute pass_count/insufficient/metrics, and executemany UPSERT
+         directly into ``stock_readiness_daily`` (technical_pass / technical_pass_count /
+         technical_insufficient / technical_eval).
+
+    Designed for SEPA data-quality backfill so Stock Data Readiness page can render
+    per-condition pass rates next to the Fundamental panel.
+    """
+    import json as _json
+
+    from src.research.sepa.crs_engine import compute_crs_scores
+    from src.research.sepa.phase1_engine import (
+        Phase1Config,
+        evaluate_symbol_phase1,
+    )
+    from src.vendor.massive.reader import (
+        get_stock_day_close_series_for_crs,
+        get_stock_day_series_for_sepa,
+    )
+
+    if not _db_ok(status_config):
+        return {"ok": False, "error": "PostgreSQL not configured"}
+
+    syms = sorted({str(s or "").strip().upper() for s in symbols if str(s or "").strip()})
+    if not syms:
+        return {
+            "ok": True,
+            "total_symbols": 0,
+            "evaluated": 0,
+            "no_local_data": 0,
+            "errors": 0,
+            "error_samples": [],
+        }
+
+    # pass 1: batch-read OHLCV (phase1) + close-only (CRS) ----------------------------------
+    rows_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
+    crs_rows_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
+    try:
+        rows_by_symbol = get_stock_day_series_for_sepa(
+            status_config, syms, lookback_days=lookback_days, source=source
+        ) or {}
+    except Exception as e:
+        return {"ok": False, "error": f"Phase1 stock_day batch read failed: {e}"}
+    try:
+        crs_rows_by_symbol = get_stock_day_close_series_for_crs(
+            status_config, syms, lookback_days=lookback_days, source=source
+        ) or {}
+    except Exception as e:
+        return {"ok": False, "error": f"CRS stock_day batch read failed: {e}"}
+
+    # pass 2: run phase1 evaluation per symbol (10 conditions) ------------------------------
+    phase1_cfg = Phase1Config()
+    phase1_results: Dict[str, Dict[str, Any]] = {}
+    for sym in syms:
+        try:
+            phase1_results[sym] = evaluate_symbol_phase1(
+                sym, rows_by_symbol.get(sym, []), cfg=phase1_cfg
+            )
+        except Exception as exc:
+            logger.warning("phase1 eval failed for %s: %s", sym, exc)
+            phase1_results[sym] = {
+                "symbol": sym,
+                "technical_pass": False,
+                "insufficient_data": True,
+                "conditions": [],
+                "metrics": {},
+                "error": str(exc),
+            }
+
+    # pass 3: run CRS universe-wide (one call covers ALL symbols) ---------------------------
+    try:
+        crs_output = compute_crs_scores(crs_rows_by_symbol, min_crs=min_crs)
+        crs_by_sym: Dict[str, Dict[str, Any]] = {
+            str(r.get("symbol") or "").upper(): r for r in (crs_output.get("results") or [])
+        }
+    except Exception as exc:
+        logger.warning("compute_crs_scores failed: %s", exc)
+        crs_by_sym = {}
+
+    # pass 4: merge → 11 conditions; build upsert rows --------------------------------------
+    srd_rows: List[Tuple] = []
+    no_data = 0
+    errors_list: List[str] = []
+
+    for sym in syms:
+        try:
+            p1 = phase1_results.get(sym, {}) or {}
+            p1_conditions: List[Dict[str, Any]] = list(p1.get("conditions") or [])
+            p1_insufficient = bool(p1.get("insufficient_data", False))
+            p1_metrics: Dict[str, Any] = dict(p1.get("metrics") or {})
+
+            crs = crs_by_sym.get(sym, {})
+            crs_actual = crs.get("crs_score")
+            crs_pass = bool(crs.get("pass", False))
+            crs_insufficient = bool(crs.get("insufficient_data", False))
+
+            crs_condition = {
+                "id": "crs_ge_70",
+                "pass": crs_pass,
+                "actual": crs_actual,
+                "threshold": float(min_crs),
+                "reason": "CRS percentile rank (252-day return vs universe)",
+            }
+
+            all_conditions = p1_conditions + [crs_condition]
+            pass_count = sum(1 for c in all_conditions if c.get("pass"))
+            insufficient = p1_insufficient or crs_insufficient or len(p1_conditions) < 10
+
+            metrics = {
+                **p1_metrics,
+                "ret252": crs.get("ret252"),
+                "crs_score": crs_actual,
+            }
+
+            technical_eval = {
+                "technical_pass": (pass_count == 11) and not insufficient,
+                "insufficient_data": insufficient,
+                "pass_count": pass_count,
+                "fail_count": 11 - pass_count,
+                "conditions": all_conditions,
+                "metrics": metrics,
+            }
+
+            if insufficient and len(p1_conditions) < 10:
+                no_data += 1
+
+            srd_rows.append((
+                sym,
+                bool(technical_eval["technical_pass"]),
+                int(pass_count),
+                bool(insufficient),
+                _json.dumps(technical_eval),
+            ))
+        except Exception as exc:
+            errors_list.append(f"{sym}: {exc}")
+            logger.warning("run_technical_local_backfill eval failed for %s: %s", sym, exc)
+
+    # pass 5: batch-upsert directly to stock_readiness_daily --------------------------------
+    if srd_rows:
+        params = _get_conn_params(status_config)
+        params["connect_timeout"] = 15
+        try:
+            conn_w = psycopg2.connect(**params)
+            try:
+                with conn_w.cursor() as cur:
+                    cur.executemany(
+                        """
+                        INSERT INTO public.stock_readiness_daily
+                            (as_of_date, symbol, universe_rule_version, price_source,
+                             technical_pass, technical_pass_count, technical_insufficient, technical_eval)
+                        VALUES (CURRENT_DATE, %s, 'v1', 'massive', %s, %s, %s, %s::jsonb)
+                        ON CONFLICT (as_of_date, symbol, universe_rule_version, price_source) DO UPDATE SET
+                            technical_pass         = EXCLUDED.technical_pass,
+                            technical_pass_count   = EXCLUDED.technical_pass_count,
+                            technical_insufficient = EXCLUDED.technical_insufficient,
+                            technical_eval         = EXCLUDED.technical_eval
+                        """,
+                        srd_rows,
+                    )
+                conn_w.commit()
+            finally:
+                conn_w.close()
+        except Exception as e:
+            return {"ok": False, "error": f"Batch stock_readiness_daily upsert failed: {e}"}
+
+    return {
+        "ok": True,
+        "total_symbols": len(syms),
+        "evaluated": len(srd_rows),
+        "no_local_data": no_data,
+        "errors": len(errors_list),
+        "error_samples": errors_list[:10],
+        "min_crs": float(min_crs),
+        "lookback_days": int(lookback_days),
+    }
+
+
 def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
     """Aggregate SEPA criteria pass rates from existing cache tables (on-demand, no writes).
 
@@ -1512,7 +1745,10 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                         count(*) FILTER (WHERE bar_count_lookback >= 240)  AS bars_ge_240,
                         count(*) FILTER (WHERE bar_count_lookback >= 200)  AS bars_ge_200,
                         count(*) FILTER (WHERE bar_count_lookback BETWEEN 1 AND 199) AS bars_lt_200,
-                        count(*) FILTER (WHERE bar_count_lookback = 0)     AS no_bars
+                        count(*) FILTER (WHERE bar_count_lookback = 0)     AS no_bars,
+                        count(*) FILTER (WHERE technical_eval IS NOT NULL) AS tech_cached_count,
+                        count(*) FILTER (WHERE technical_pass)             AS tech_pass_count,
+                        count(*) FILTER (WHERE technical_insufficient)     AS tech_insufficient_count
                     FROM public.stock_readiness_daily
                     WHERE as_of_date = CURRENT_DATE
                       AND included_in_universe = true
@@ -1536,11 +1772,55 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
             except Exception as e:
                 logger.debug("criteria_stats failure_reasons query failed: %s", e)
 
+            # --- Technical per-condition pass/fail (jsonb_array_elements) ---
+            tech_conditions: List[Dict[str, Any]] = []
+            try:
+                cur.execute(
+                    """
+                    SELECT
+                        cond->>'id'                                          AS id,
+                        count(*) FILTER (WHERE (cond->>'pass')::boolean)     AS pass,
+                        count(*) FILTER (WHERE NOT (cond->>'pass')::boolean) AS fail
+                    FROM public.stock_readiness_daily,
+                         jsonb_array_elements(technical_eval->'conditions') AS cond
+                    WHERE as_of_date = CURRENT_DATE
+                      AND included_in_universe = true
+                      AND technical_eval IS NOT NULL
+                      AND coalesce((technical_eval->>'insufficient_data')::boolean, false) IS NOT TRUE
+                    GROUP BY cond->>'id'
+                    """
+                )
+                row_map = {
+                    str(r.get("id") or ""): {
+                        "pass": int(r.get("pass") or 0),
+                        "fail": int(r.get("fail") or 0),
+                    }
+                    for r in (cur.fetchall() or [])
+                }
+                for cid in _TECH_COND_IDS:
+                    bucket = row_map.get(cid, {"pass": 0, "fail": 0})
+                    tech_conditions.append({
+                        "id": cid,
+                        "label": _TECH_COND_LABELS.get(cid, cid),
+                        "pass": int(bucket["pass"]),
+                        "fail": int(bucket["fail"]),
+                    })
+            except Exception as e:
+                logger.warning("criteria_stats technical per-condition query failed: %s", e)
+                tech_conditions = [
+                    {"id": cid, "label": _TECH_COND_LABELS.get(cid, cid), "pass": 0, "fail": 0}
+                    for cid in _TECH_COND_IDS
+                ]
+
         return {
             "ok": True,
             "universe_count": universe_count,
             "fundamental": fund_result,
-            "technical": {**tech_result, "failure_reasons": failure_reasons},
+            "technical": {
+                **tech_result,
+                "failure_reasons": failure_reasons,
+                "conditions": tech_conditions,
+            },
             "computed_at": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:

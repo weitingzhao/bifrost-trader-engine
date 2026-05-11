@@ -2665,6 +2665,11 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS fundamental_pass_count    integer NOT NULL DEFAULT 0",
             "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS fundamental_insufficient  boolean NOT NULL DEFAULT false",
             "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS fundamental_eval         jsonb NULL",
+            # Stage 5: SEPA technical evaluation (11 conditions; written by run_technical_local_backfill)
+            "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS technical_pass            boolean NOT NULL DEFAULT false",
+            "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS technical_pass_count      integer NOT NULL DEFAULT 0",
+            "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS technical_insufficient    boolean NOT NULL DEFAULT false",
+            "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS technical_eval            jsonb NULL",
         ]:
             cur.execute(_col_sql)
         cur.execute(
