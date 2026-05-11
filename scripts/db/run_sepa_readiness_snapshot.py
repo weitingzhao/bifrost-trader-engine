@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run SEPA universe + price readiness snapshot (same logic as POST /research/screening/sepa/readiness/snapshot).
+"""Run stock data readiness snapshot (same logic as POST /research/data/readiness/snapshot).
 
 Usage:
   python scripts/db/run_sepa_readiness_snapshot.py [--config PATH] [--prod|--dev]
@@ -19,7 +19,7 @@ os.chdir(_PROJECT_ROOT)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Upsert sepa_universe_readiness_daily for CURRENT_DATE.")
+    parser = argparse.ArgumentParser(description="Upsert stock_readiness_daily for CURRENT_DATE.")
     parser.add_argument("--config", default=None, help="YAML with postgres block")
     parser.add_argument("--prod", action="store_true")
     parser.add_argument("--dev", action="store_true")

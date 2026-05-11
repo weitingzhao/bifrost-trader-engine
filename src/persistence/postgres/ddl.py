@@ -2050,6 +2050,30 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
             """
         )
+        _log("preference_data_gap_ack")
+        # Rename legacy table if it still exists under the old sepa-prefixed name
+        cur.execute(
+            "ALTER TABLE IF EXISTS preference_sepa_gap_ack RENAME TO preference_data_gap_ack"
+        )
+        _log_table(
+            "preference_data_gap_ack",
+            "Data gap source-void acknowledgment per data type (preference)",
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS preference_data_gap_ack (
+                data_type        varchar(64) PRIMARY KEY,
+                is_void          boolean NOT NULL DEFAULT false,
+                acked_gap_count  integer NOT NULL DEFAULT 0,
+                void_reason      text,
+                acked_at         timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            "ALTER TABLE preference_data_gap_ack "
+            "ADD COLUMN IF NOT EXISTS acked_gap_count integer NOT NULL DEFAULT 0"
+        )
         conn.commit()
         _log("reference_us_holidays")
         _log_table("reference_us_holidays", "US market holidays")
@@ -2576,13 +2600,17 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             "CREATE INDEX IF NOT EXISTS idx_job_sepa_phase4_status_created ON job_sepa_phase4 (status, created_at)"
         )
 
+        # Rename legacy table if it still exists under the old sepa-prefixed name
+        cur.execute(
+            "ALTER TABLE IF EXISTS public.sepa_universe_readiness_daily RENAME TO stock_readiness_daily"
+        )
         _log_table(
-            "sepa_universe_readiness_daily",
-            "SEPA full-scan data prep: daily universe + stock_day readiness snapshot rows",
+            "stock_readiness_daily",
+            "Stock Data Readiness: daily per-symbol snapshot covering price bars, financials, short data, and SEPA fundamental results",
         )
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS public.sepa_universe_readiness_daily (
+            CREATE TABLE IF NOT EXISTS public.stock_readiness_daily (
                 as_of_date date NOT NULL,
                 symbol text NOT NULL,
                 tickers_id bigint NULL REFERENCES public.tickers (tickers_id) ON DELETE SET NULL,
@@ -2599,26 +2627,62 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 fund_cache_expire_at timestamptz NULL,
                 notes text NULL,
                 computed_at timestamptz NOT NULL DEFAULT now(),
+                -- Stage 2: financial statement coverage
+                income_stmt_q_count    integer NOT NULL DEFAULT 0,
+                income_stmt_a_count    integer NOT NULL DEFAULT 0,
+                income_stmt_ready      boolean NOT NULL DEFAULT false,
+                balance_sheet_present  boolean NOT NULL DEFAULT false,
+                cash_flow_present      boolean NOT NULL DEFAULT false,
+                ratios_present         boolean NOT NULL DEFAULT false,
+                -- Stage 3: short data coverage
+                short_interest_present boolean NOT NULL DEFAULT false,
+                short_volume_present   boolean NOT NULL DEFAULT false,
+                -- Stage 4: SEPA fundamental results (written directly by run_fundamentals_local_backfill)
+                fundamental_pass          boolean NOT NULL DEFAULT false,
+                fundamental_pass_count    integer NOT NULL DEFAULT 0,
+                fundamental_insufficient  boolean NOT NULL DEFAULT false,
+                fundamental_eval         jsonb NULL,
+                -- Stage 5: SEPA technical results (written directly by run_technical_local_backfill)
+                technical_pass          boolean NOT NULL DEFAULT false,
+                technical_pass_count    integer NOT NULL DEFAULT 0,
+                technical_insufficient  boolean NOT NULL DEFAULT false,
+                technical_eval          jsonb NULL,
                 PRIMARY KEY (as_of_date, symbol, universe_rule_version, price_source)
             )
             """
         )
+        # ADD COLUMN patches for tables already renamed from the old schema
+        for _col_sql in [
+            "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS income_stmt_q_count    integer NOT NULL DEFAULT 0",
+            "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS income_stmt_a_count    integer NOT NULL DEFAULT 0",
+            "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS income_stmt_ready      boolean NOT NULL DEFAULT false",
+            "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS balance_sheet_present  boolean NOT NULL DEFAULT false",
+            "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS cash_flow_present      boolean NOT NULL DEFAULT false",
+            "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS ratios_present         boolean NOT NULL DEFAULT false",
+            "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS short_interest_present boolean NOT NULL DEFAULT false",
+            "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS short_volume_present   boolean NOT NULL DEFAULT false",
+            "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS fundamental_pass          boolean NOT NULL DEFAULT false",
+            "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS fundamental_pass_count    integer NOT NULL DEFAULT 0",
+            "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS fundamental_insufficient  boolean NOT NULL DEFAULT false",
+            "ALTER TABLE public.stock_readiness_daily ADD COLUMN IF NOT EXISTS fundamental_eval         jsonb NULL",
+        ]:
+            cur.execute(_col_sql)
         cur.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_sepa_urd_asof_ready
-            ON public.sepa_universe_readiness_daily (as_of_date, price_ready)
+            CREATE INDEX IF NOT EXISTS idx_srd_asof_ready
+            ON public.stock_readiness_daily (as_of_date, price_ready)
             """
         )
         cur.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_sepa_urd_asof_symbol
-            ON public.sepa_universe_readiness_daily (symbol)
+            CREATE INDEX IF NOT EXISTS idx_srd_asof_symbol
+            ON public.stock_readiness_daily (symbol)
             """
         )
 
         _log_table(
             "cache_stock_snapshot",
-            "Massive GET /v3/snapshot (stocks) per-symbol session/last_minute cache for SEPA Data Ready baseline",
+            "Massive GET /v3/snapshot (stocks) per-symbol session/last_minute cache for Stock Data Readiness baseline",
         )
         cur.execute(
             """
@@ -3105,10 +3169,10 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             """
         )
 
-        _log_table("v_sepa_us_equity_universe", "View: US equity candidate universe from tickers (+ overview)")
+        _log_table("v_us_equity_universe", "View: US common-stock universe from tickers (active CS, locale=us, market=stocks)")
         cur.execute(
             """
-            CREATE OR REPLACE VIEW public.v_sepa_us_equity_universe AS
+            CREATE OR REPLACE VIEW public.v_us_equity_universe AS
             SELECT
                 t.tickers_id,
                 upper(trim(t.ticker)) AS symbol,
@@ -3127,7 +3191,12 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             WHERE COALESCE(t.active, false) = true
               AND lower(COALESCE(t.locale, '')) = 'us'
               AND lower(COALESCE(t.market, '')) = 'stocks'
+              AND lower(COALESCE(t.instrument_type, '')) = 'cs'
             """
+        )
+        # Keep the old sepa-prefixed name as a compatibility alias
+        cur.execute(
+            "CREATE OR REPLACE VIEW public.v_sepa_us_equity_universe AS SELECT * FROM public.v_us_equity_universe"
         )
 
         _log_table(

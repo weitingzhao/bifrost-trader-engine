@@ -301,7 +301,7 @@ def _load_universe_symbols(status_config: dict) -> List[str]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT symbol FROM public.v_sepa_us_equity_universe
+                SELECT symbol FROM public.v_us_equity_universe
                 ORDER BY symbol
                 """
             )
@@ -319,7 +319,7 @@ def run_refresh_cache_stock_unified_snapshots(
     inter_chunk_sleep_sec: float = DEFAULT_INTER_CHUNK_SLEEP_SEC,
     statement_timeout_ms: int = 600_000,
 ) -> Dict[str, Any]:
-    """Fetch unified stock snapshots for all v_sepa_us_equity_universe symbols; UPSERT into cache_stock_snapshot."""
+    """Fetch unified stock snapshots for all v_us_equity_universe symbols; UPSERT into cache_stock_snapshot."""
     if not _db_ok(status_config):
         return {"ok": False, "error": "PostgreSQL not configured"}
     ms = get_massive_settings(merged_config or {})

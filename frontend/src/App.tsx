@@ -22,8 +22,8 @@ import {
 import { LivePage } from './pages/LivePage'
 import { AccountsPage } from './pages/AccountsPage'
 import { OptionScreenerPage } from './pages/OptionScreenerPage'
-import { SepaScreenerPage } from './pages/SepaScreenerPage'
-import { SepaDataReadyPage } from './pages/SepaDataReadyPage'
+import { StockScreenerPage } from './pages/StockScreenerPage'
+import { StockDataReadinessPage } from './pages/StockDataReadinessPage'
 import { PositionsPage } from './pages/PositionsPage'
 import { TradeHistoryPage } from './pages/TradeHistoryPage'
 import type { PortfolioView } from './pages/portfolio/types'
@@ -93,7 +93,7 @@ import {
 } from './pages/accounts/accountsUtils'
 import './App.css'
 import './styles/settings-celery.css'
-import './styles/sepa-data-ready.css'
+import './styles/data-readiness.css'
 
 const THEME_KEY = 'bifrost-monitor-theme'
 const SYSTEM_MESSAGE_BOOTSTRAP_LIMIT = 50
@@ -351,7 +351,7 @@ export default function App() {
   const [urlHash, setUrlHash] = useState(() => (typeof window !== 'undefined' ? window.location.hash : ''))
   const [portfolioView, setPortfolioView] = useState<PortfolioView>('accounts')
   const [researchView, setResearchView] = useState<
-    'risk' | 'screener' | 'sepa' | 'sepaDataReady' | 'watchlist' | 'backtest' | 'options' | 'greeks'
+    'risk' | 'screener' | 'sepa' | 'stockDataReadiness' | 'watchlist' | 'backtest' | 'options' | 'greeks'
   >('risk')
   const [strategyView, setStrategyView] = useState<'structure' | 'opportunity' | 'allocations' | 'gates' | 'typeConfig' | 'instances' | 'winRate'>('structure')
   /** Instance id from URL hash #/strategies/instances/:id; drives Strategy Instances detail view and back/forward. */
@@ -977,7 +977,7 @@ export default function App() {
     id: string
     label: string
     items: {
-      id: 'risk' | 'screener' | 'sepa' | 'sepaDataReady' | 'watchlist' | 'backtest' | 'options' | 'greeks';
+      id: 'risk' | 'screener' | 'sepa' | 'stockDataReadiness' | 'watchlist' | 'backtest' | 'options' | 'greeks';
       label: string
     }[]
   }[] = [
@@ -985,8 +985,8 @@ export default function App() {
       id: 'screener-section',
       label: 'Screener',
       items: [
-        { id: 'sepa', label: 'SEPA Screener' },
-        { id: 'sepaDataReady', label: 'SEPA Data Ready' },
+        { id: 'sepa', label: 'Stock Screener' },
+        { id: 'stockDataReadiness', label: 'Stock Data Readiness' },
         { id: 'screener', label: 'Option Screener' },
         { id: 'watchlist', label: 'Watchlist' },
       ],
@@ -1816,16 +1816,16 @@ export default function App() {
       )}
 
       {activeTab === 'research' && researchView === 'sepa' && (
-        <SepaScreenerPage
+        <StockScreenerPage
           onBreadcrumbResearch={goResearchHome}
-          breadcrumbLabel="SEPA Screener"
+          breadcrumbLabel="Stock Screener"
         />
       )}
 
-      {activeTab === 'research' && researchView === 'sepaDataReady' && (
-        <SepaDataReadyPage
+      {activeTab === 'research' && researchView === 'stockDataReadiness' && (
+        <StockDataReadinessPage
           onBreadcrumbResearch={goResearchHome}
-          breadcrumbLabel="SEPA Data Ready"
+          breadcrumbLabel="Stock Data Readiness"
           onOpenCelerySettings={openCeleryInSettings}
           onOpenFeedMassiveStock={() => {
             setActiveTab('settings')

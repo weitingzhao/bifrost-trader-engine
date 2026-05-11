@@ -433,17 +433,21 @@
 
 **SEPA Data Ready 推荐顺序（与 UI Step 编号一致）**：Step 1（`tickers` + `reference_us_holidays`）→ **Step 2（本表）** → Step 3（`stock_day` 回补）→ Step 4–9（§2.14.9 六张基本面原始表）→ Step 10（评估缓存）→ Step 11（`sepa_universe_readiness_daily`）→ Step 12（缺口修复与复核）。
 
-### 2.14.7 表 `sepa_universe_readiness_daily`（SEPA 全量扫描：数据准备日快照）
+### 2.14.7 表 `stock_readiness_daily`（全量数据准备日快照，原 `sepa_universe_readiness_daily`）
 
-- **用途**：在跑 SEPA Phase4 / 全市场批扫前，将「参考 Universe（`tickers`）」与「行情是否满足 `stock_day` 窗口」固化成**按日一行 per symbol** 的快照，便于补数编排与缺口查询。与 SEPA 引擎读数路径一致：`price_source` 默认 **`massive`**，与 `get_stock_day_series_for_sepa` / `get_stock_day_close_series_for_crs` 的 `source` 筛选对齐。
+- **用途**：在跑策略筛选（SEPA Phase4 等）/ 全市场批扫前，将「参考 Universe（`tickers`）」与「各维度数据是否就绪」固化成**按日一行 per symbol** 的快照，便于补数编排与缺口查询。与 SEPA 引擎读数路径一致：`price_source` 默认 **`massive`**，与 `get_stock_day_series_for_sepa` / `get_stock_day_close_series_for_crs` 的 `source` 筛选对齐。
 - **主键**：`PRIMARY KEY (as_of_date, symbol, universe_rule_version, price_source)`。
 - **外键**：`tickers_id` → `tickers(tickers_id)` ON DELETE SET NULL。
-- **列（要点）**：`included_in_universe`（是否落在 `v_sepa_us_equity_universe`）、`bar_count_lookback`、`first_bar_date`、`last_bar_date`、`null_close_rows`、`null_volume_rows`、`price_ready`、`fund_cache_present`、`fund_cache_expire_at`（与 `research_sepa_fundamentals_cache` 有效行左连，可选）、`notes`、`computed_at`。
-- **填充**：不由守护进程自动写；建议在 **Step 3** 与 **§2.14.9 基本面原始表（Step 4–9）** 之后执行：**Research UI** → **SEPA Data Ready** → Step 11 **Refresh snapshot**（`POST /research/screening/sepa/readiness/snapshot`，逻辑见 [`src/research/sepa/readiness_snapshot.py`](../src/research/sepa/readiness_snapshot.py)）；或 CLI `python scripts/db/run_sepa_readiness_snapshot.py`。原 `scripts/db/sepa_universe_readiness_snapshot.sql` 仅保留说明指向上述真源。阈值（回溯日历天数、最少 bar 数、允许 stale 天数）在 Python 模块内与视图定义对齐可调。
+- **列（要点，28 列）**：
+  - *Stage 1 价格*：`included_in_universe`（是否落在 `v_us_equity_universe`）、`bar_count_lookback`、`first_bar_date`、`last_bar_date`、`null_close_rows`、`null_volume_rows`、`price_ready`、`fund_cache_present`、`fund_cache_expire_at`、`notes`、`computed_at`
+  - *Stage 2 财务覆盖*（新增）：`income_stmt_q_count`（quarterly 行数）、`income_stmt_a_count`（annual 行数）、`income_stmt_ready`（q≥5 AND a≥4）、`balance_sheet_present`、`cash_flow_present`、`ratios_present`
+  - *Stage 3 Short data*（新增）：`short_interest_present`、`short_volume_present`
+  - *Stage 4 SEPA 基本面评估*（新增）：`fundamental_pass`、`fundamental_pass_count`（0–8 通过条数）、`fundamental_insufficient`（数据不足无法评估）、`fundamental_eval jsonb NULL`（完整评估详情，含 `evaluation.conditions×8 + metrics + data_summary`，由 Refresh Snapshot 从 `research_sepa_fundamentals_cache` 物化写入）
+- **填充**：不由守护进程自动写；建议在 **Step 3** 与 **§2.14.9 基本面原始表（Step 4–9）** 之后执行：**Research UI** → **Stock Data Readiness** → Step 11 **Refresh snapshot**（`POST /research/data/readiness/snapshot`，逻辑见 [`src/research/sepa/readiness_snapshot.py`](../src/research/sepa/readiness_snapshot.py)）；或 CLI `python scripts/db/run_sepa_readiness_snapshot.py`。原 `scripts/db/stock_readiness_snapshot.sql` 仅保留说明指向上述真源。阈值（回溯日历天数、最少 bar 数、允许 stale 天数）在 Python 模块内与视图定义对齐可调。
 
-### 2.14.8 视图 `v_sepa_us_equity_universe` / `v_sepa_symbol_price_readiness` / `v_sepa_symbol_fund_cache_readiness`
+### 2.14.8 视图 `v_us_equity_universe` / `v_sepa_symbol_price_readiness` / `v_sepa_symbol_fund_cache_readiness`
 
-- **`v_sepa_us_equity_universe`**：`tickers` LEFT JOIN `ticker_overview`；默认过滤 `active = true`、`locale = 'us'`、`market = 'stocks'`（大小写不敏感）。**生产前请用 Dev 库对 `market` / `locale` / `instrument_type` 做 `DISTINCT` 校准**，必要时收紧 `instrument_type` 或排除 `delisted_utc` 非空行，避免 Universe 与业务定义不一致。
+- **`v_us_equity_universe`**（原 `v_sepa_us_equity_universe`，旧名保留为兼容别名）：`tickers` LEFT JOIN `ticker_overview`；过滤 `active = true`、`locale = 'us'`、`market = 'stocks'`、`instrument_type = 'cs'`（Common Stock，大小写不敏感）。**生产前请用 Dev 库对 `market` / `locale` / `instrument_type` 做 `DISTINCT` 校准**，必要时排除 `delisted_utc` 非空行，避免 Universe 与业务定义不一致。
 - **`v_sepa_symbol_price_readiness`**：对 `stock_day` 在固定窗口（当前为 **最近 420 个日历日至 `CURRENT_DATE`**、`source = 'massive'`）按 symbol 聚合；`price_ready` 条件为：bar 数 ≥ 阈值、最新 `bar_time` 不超过允许陈旧天数、窗口内无 `close`/`volume` 为 NULL 的行。阈值写死在视图定义中；若与 Phase4 `lookback_days` 分歧，应同步改视图或改为参数化表/MV（后续迭代）。
 - **`v_sepa_symbol_fund_cache_readiness`**：读 `research_sepa_fundamentals_cache` 中 `rule_version = 'sepa_fundamentals_v1'` 且 `expire_at > now()` 的行。若缓存表尚不存在，`db_refresh_schema` 内以 `DO` 块跳过创建该视图，避免首次建库失败；表首次由 SEPA fundamentals / Phase4 写入路径创建（与 [`src/vendor/massive/reader.py`](../src/vendor/massive/reader.py) 中 `_ensure_sepa_fundamentals_cache_table` 一致）。快照脚本内带 **同结构 `CREATE TABLE IF NOT EXISTS`**，便于在从未跑过 Phase4 的库上仍能执行快照（`fund_cache_*` 可能长期为 false）。
 
@@ -899,6 +903,30 @@ Phase4 / `evaluate_fundamentals` 在存在足够 `stock_income_statements` 行�
 
 - **主键**：(category_name, symbol)。
 - **读取**：GET /position-categories/symbol-order 返回 `{ order: { [category_name]: string[] } }`，供前端 Market Streams 表格排序。
+
+### 2.22 表 `preference_data_gap_ack`（偏好：数据 Gap 源端空洞确认，原 `preference_sepa_gap_ack`）
+
+- **用途**：偏好类表。为 Stock Data Readiness Runbook 的步骤 4–9（Income Statements、Balance Sheets、Cash Flows、Ratios、Short Interest、Short Volume），记录用户对"Massive 数据源本身不提供该数据"的确认标记，并保存确认时的 Gap 数量基线（`acked_gap_count`）用于双指标数据质量监控。
+- **双指标机制**：
+  - `coverage_gap_count`（已有字段，来自 readiness_snapshot）：总缺口数量（全部未达阈值的符号）
+  - `actionable_gap_count = max(0, total_gap_count - acked_gap_count)`：真正可修复的缺口（驱动 UI 颜色）
+  - 当 `is_void=true` 且 `actionable=0` 时，UI 显示灰色"Source N/A"；`actionable>0` 时仍显示黄/红（提示宇宙扩容或新增可修复 Gap）
+- **写入**：Research API `POST /research/data/readiness/gap-ack`（含 `gap_count` 参数）；前端 Stock Data Readiness 页各步骤的"Source N/A"切换按钮或"Re-ack"按钮触发。
+- **读取**：`GET /research/data/readiness/summary` 返回各步骤的 `*_source_void`、`*_acked_gap_count`、`*_actionable_gap_count` 字段；`GET /research/data/readiness/gap-ack` 返回完整列表（含 `acked_gap_count`）。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| data_type | varchar(64) | 数据类型（PK），取值：income_statements、balance_sheets、cash_flows、ratios、short_interest、short_volume |
+| is_void | boolean NOT NULL | true = 源端不可用（已确认），gap 状态基于 actionable 而非 total |
+| acked_gap_count | integer NOT NULL DEFAULT 0 | 确认时的 Gap 数量快照（基线）；actionable = max(0, total - acked) |
+| void_reason | text | 可选备注（如"Massive /v1/income-statements API 无数据返回"） |
+| acked_at | timestamptz NOT NULL | 最后确认/更新时间（默认 now()） |
+
+- **主键**：data_type（每种数据类型一行）。
+- **Re-ack 机制**：当宇宙扩容导致 `total > acked`（即 `actionable > 0`）时，UI 显示"Re-ack (N new)"按钮；点击后以当前 total 更新 `acked_gap_count` 基线，恢复灰色显示。
+- **改善检测**：当 Massive 开始提供数据（`total < acked`）时，`actionable = max(0, total - acked) = 0`，UI 仍显示灰色但 summary 可读出改善信号（total 在下降）。
+- **注意**：切换 is_void=false 时 `acked_gap_count` 清零；若 Massive 将来开始提供数据，建议先将 is_void 改为 false 再重新 Check 以确认新数据到位。
 
 ### 2.5 表 `daemon_run_status`（阶段 2：挂起/恢复状态，监控机写入、交易机轮询）
 
@@ -1687,6 +1715,10 @@ python scripts/db/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-05-07 `stock_ratios` 对齐 Massive v1 ratios | §2.14.9：`stock_ratios` 主键 `(symbol, date, source)`，`current` DDL 引号，45 日 readiness，无 vX 落库；`fetch_financials_v1_ratios`：`ticker` 优先、空包则 `tickers` 重试、默认不传 `sort`；`feed_stocks_ratios` 返回 `api_rows_seen`。 | 研究 / SEPA |
 | 2026-05-07 `stock_short_interest` 对齐 short-interest | §2.14.9：**`avg_daily_volume`** 改为 **`bigint`**（API integer）；**`upsert_short_interest_rows`** 使用 **`_STOCK_SHORT_INTEREST_UPSERT_BIND_COLUMNS`** / **`_short_interest_bind_tuple`**、**`cik`** 规范化；**`fetch_stock_short_interest`** **`limit`** 上限 **50000**。 | 研究 / SEPA |
 | 2026-05-07 `stock_short_volume` 对齐 short-volume | §2.14.9：表增加 **`results[]`** 全量 venue 分解列（**`adf_*`**、**`nasdaq_*`**、**`nyse_*`**、**`exempt_volume`**、**`non_exempt_volume`** 等，列名与 API 一致）；**`trade_date`**=API **`date`**；**`upsert_short_volume_rows`** 使用 **`_STOCK_SHORT_VOLUME_UPSERT_BIND_COLUMNS`** / **`_short_volume_bind_tuple`**；存量 **`ADD COLUMN`** 迁移；**`fetch_stock_short_volume`** **`limit`** 上限 **50000**。 | 研究 / SEPA |
+| 2026-05-07 SEPA Gap Source-Void 确认机制（Round 1） | 新增 §2.22 表 **`preference_sepa_gap_ack`**：为 SEPA Data Ready Runbook 步骤 4–9（income_statements、balance_sheets、cash_flows、ratios、short_interest、short_volume）记录 Massive 源端不可用的手动确认（`is_void` + `void_reason`）。`fetch_sepa_readiness_summary` 增加六个 `*_source_void` 字段；新增端点 `GET/POST /research/screening/sepa/readiness/gap-ack`；已确认为 void 的步骤在 SEPA Data Ready 页以灰色"Source N/A"代替红色错误显示，真正可修复的 Gap 仍红色。 | 研究 / SEPA |
+| 2026-05-07 SEPA Gap 双指标机制（Round 2）—— acked_gap_count 基线 | **`preference_sepa_gap_ack`** 表新增 `acked_gap_count integer NOT NULL DEFAULT 0`：ACK 时记录 Gap 数量快照作为基线。`fetch_sepa_readiness_summary` 新增 `*_acked_gap_count`、`*_actionable_gap_count` 字段（`actionable = max(0, total - acked)`）；`POST /gap-ack` 接受 `gap_count` 参数；UI 状态颜色改为基于 `actionable_gap_count` 而非 total：`void+actionable=0`→灰色，`void+actionable>0`→黄/红（新增可修复 Gap）；新增"Re-ack"按钮（橙色虚线）用于宇宙扩容后更新基线；`ADD COLUMN IF NOT EXISTS` 自动迁移已有库。 | 研究 / SEPA |
+| 2026-05-11 `fundamental_eval` jsonb 列合并 | `stock_readiness_daily` 新增第 28 列 `fundamental_eval jsonb NULL`：Refresh Snapshot 将 `research_sepa_fundamentals_cache.payload->'evaluation'`（conditions×8 + metrics + data_summary）物化写入该列，实现按日追溯评估历史。`compute_sepa_criteria_stats` 数据源从 `research_sepa_fundamentals_cache` 迁移至 `stock_readiness_daily.fundamental_eval`，无需实时 JOIN cache。`run_fundamentals_local_backfill` payload 移除 `quarterly_rows`/`annual_rows`，改存轻量 `data_summary`（quarterly_count、annual_count、latest_period_end）；原始行仍可通过 `stock_income_statements WHERE symbol=? AND source='massive'` 重建。§2.14.7。 | 研究 / SEPA |
+| 2026-05-08 数据层中性化重命名 + Readiness 表扩充 | 1）**DB 重命名**：`sepa_universe_readiness_daily`→`stock_readiness_daily`（§2.14.7）、`v_sepa_us_equity_universe`→`v_us_equity_universe`（§2.14.8，旧名保留兼容别名）、`preference_sepa_gap_ack`→`preference_data_gap_ack`（§2.22）；`ALTER TABLE/VIEW IF EXISTS ... RENAME TO ...` 由 `pg_ddl` 自动执行。2）**Readiness 表新增 11 列**：Stage 2 财务覆盖（`income_stmt_q_count/a_count/ready`、`balance_sheet_present`、`cash_flow_present`、`ratios_present`）、Stage 3 Short data（`short_interest/volume_present`）、Stage 4 SEPA 评估结果（`fundamental_pass/pass_count/insufficient`）；快照 SQL 新增 7 个 MATERIALIZED CTE（`inc_agg`/`bs_agg`/`cf_agg`/`rat_agg`/`si_agg`/`sv_agg`/`fund_agg`）批量聚合。3）**HTTP 路由**：`/research/screening/sepa/readiness/`→`/research/data/readiness/`，旧路由文件保留 re-export 兼容层。4）**前端**：页面重命名为 "Stock Data Readiness"，菜单 id `sepaDataReady`→`stockDataReadiness`，API 文件 `sepaReadiness.ts`→`dataReadiness.ts`，CSS `sepa-data-ready.css`→`data-readiness.css`，旧文件均保留 re-export 兼容层。 | 研究 / 重构 |
 
 ---
 

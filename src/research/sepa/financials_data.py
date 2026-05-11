@@ -1212,7 +1212,7 @@ def upsert_short_volume_rows(
 _INCOME_GAP_DETAIL_SQL = f"""
 WITH u AS (
     SELECT u.symbol
-    FROM public.v_sepa_us_equity_universe u
+    FROM public.v_us_equity_universe u
     WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
 ),
 q AS (
@@ -1258,7 +1258,7 @@ LIMIT %s
 _INCOME_GAP_COUNT_SQL = f"""
 WITH u AS (
     SELECT u.symbol
-    FROM public.v_sepa_us_equity_universe u
+    FROM public.v_us_equity_universe u
     WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
 ),
 q AS (
@@ -1304,7 +1304,7 @@ def get_income_statements_gap_details(cur: Any, *, limit: int = 2000) -> Tuple[L
 _BALANCE_GAP_COUNT = f"""
 WITH u AS (
     SELECT u.symbol
-    FROM public.v_sepa_us_equity_universe u
+    FROM public.v_us_equity_universe u
     WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
 ),
 q AS (
@@ -1322,7 +1322,7 @@ WHERE q.symbol IS NULL OR q.n < 4 OR (q.n > 0 AND (q.ta_n::float/q.n) < 0.9)
 _BALANCE_GAP_DETAIL = f"""
 WITH u AS (
     SELECT u.symbol
-    FROM public.v_sepa_us_equity_universe u
+    FROM public.v_us_equity_universe u
     WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
 ),
 q AS (
@@ -1358,7 +1358,7 @@ def get_balance_sheet_gap_details(cur: Any, *, limit: int = 2000) -> Tuple[List[
 _CF_GAP_COUNT = f"""
 WITH u AS (
     SELECT u.symbol
-    FROM public.v_sepa_us_equity_universe u
+    FROM public.v_us_equity_universe u
     WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
 ),
 q AS (
@@ -1376,7 +1376,7 @@ WHERE q.symbol IS NULL OR q.n < 4 OR (q.n > 0 AND (op_n::float/q.n) < 0.8)
 _CF_GAP_DETAIL = f"""
 WITH u AS (
     SELECT u.symbol
-    FROM public.v_sepa_us_equity_universe u
+    FROM public.v_us_equity_universe u
     WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
 ),
 q AS (
@@ -1412,7 +1412,7 @@ def get_cash_flow_gap_details(cur: Any, *, limit: int = 2000) -> Tuple[List[Dict
 _RAT_GAP_COUNT = f"""
 WITH u AS (
     SELECT u.symbol
-    FROM public.v_sepa_us_equity_universe u
+    FROM public.v_us_equity_universe u
     WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
 ),
 q AS (
@@ -1430,7 +1430,7 @@ WHERE q.symbol IS NULL OR q.n < 1 OR q.mx < (CURRENT_DATE - integer '45')
 _RAT_GAP_DETAIL = f"""
 WITH u AS (
     SELECT u.symbol
-    FROM public.v_sepa_us_equity_universe u
+    FROM public.v_us_equity_universe u
     WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
 ),
 q AS (
@@ -1463,7 +1463,7 @@ def get_ratios_gap_details(cur: Any, *, limit: int = 2000) -> Tuple[List[Dict[st
 
 
 _SI_GAP_COUNT = """
-WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+WITH u AS (SELECT symbol FROM public.v_us_equity_universe),
 h AS (
     SELECT symbol, count(*)::integer AS n,
            max(settlement_date) AS mx
@@ -1477,7 +1477,7 @@ WHERE h.symbol IS NULL OR h.n < 1 OR h.mx < (CURRENT_DATE - integer '45')
 """
 
 _SI_GAP_DETAIL = """
-WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+WITH u AS (SELECT symbol FROM public.v_us_equity_universe),
 h AS (
     SELECT symbol, count(*)::integer AS n,
            max(settlement_date) AS mx
@@ -1508,7 +1508,7 @@ def get_short_interest_gap_details(cur: Any, *, limit: int = 2000) -> Tuple[List
 
 
 _SV_GAP_COUNT = """
-WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+WITH u AS (SELECT symbol FROM public.v_us_equity_universe),
 d AS (
     SELECT symbol, count(*)::integer AS n, max(trade_date) AS mx
     FROM public.stock_short_volume
@@ -1521,7 +1521,7 @@ WHERE d.symbol IS NULL OR d.n < 5 OR d.mx < (CURRENT_DATE - integer '14')
 """
 
 _SV_GAP_DETAIL = """
-WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+WITH u AS (SELECT symbol FROM public.v_us_equity_universe),
 d AS (
     SELECT symbol, count(*)::integer AS n, max(trade_date) AS mx
     FROM public.stock_short_volume
@@ -1780,7 +1780,7 @@ def financials_gap_symbols_from_db(cur: Any, kind: str, *, batch_size: int = 50)
             f"""
             WITH u AS (
                 SELECT u.symbol
-                FROM public.v_sepa_us_equity_universe u
+                FROM public.v_us_equity_universe u
                 WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
             ),
             q AS (
@@ -1812,7 +1812,7 @@ def financials_gap_symbols_from_db(cur: Any, kind: str, *, batch_size: int = 50)
             f"""
             WITH u AS (
                 SELECT u.symbol
-                FROM public.v_sepa_us_equity_universe u
+                FROM public.v_us_equity_universe u
                 WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
             ),
             q AS (
@@ -1833,7 +1833,7 @@ def financials_gap_symbols_from_db(cur: Any, kind: str, *, batch_size: int = 50)
             f"""
             WITH u AS (
                 SELECT u.symbol
-                FROM public.v_sepa_us_equity_universe u
+                FROM public.v_us_equity_universe u
                 WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
             ),
             q AS (
@@ -1854,7 +1854,7 @@ def financials_gap_symbols_from_db(cur: Any, kind: str, *, batch_size: int = 50)
             f"""
             WITH u AS (
                 SELECT u.symbol
-                FROM public.v_sepa_us_equity_universe u
+                FROM public.v_us_equity_universe u
                 WHERE upper(coalesce(u.instrument_type, '')) IN {_FINANCIAL_STATEMENTS_INSTRUMENT_TYPES}
             ),
             q AS (
@@ -1873,7 +1873,7 @@ def financials_gap_symbols_from_db(cur: Any, kind: str, *, batch_size: int = 50)
     elif k == "feed_stocks_short_interest":
         cur.execute(
             """
-            WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+            WITH u AS (SELECT symbol FROM public.v_us_equity_universe),
             h AS (
                 SELECT symbol, count(*)::integer AS n, max(settlement_date) AS mx
                 FROM public.stock_short_interest
@@ -1889,7 +1889,7 @@ def financials_gap_symbols_from_db(cur: Any, kind: str, *, batch_size: int = 50)
     elif k == "feed_stocks_short_volume":
         cur.execute(
             """
-            WITH u AS (SELECT symbol FROM public.v_sepa_us_equity_universe),
+            WITH u AS (SELECT symbol FROM public.v_us_equity_universe),
             d AS (
                 SELECT symbol, count(*)::integer AS n, max(trade_date) AS mx
                 FROM public.stock_short_volume

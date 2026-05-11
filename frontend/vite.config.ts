@@ -97,6 +97,7 @@ export default defineConfig({
       '/research/docs': { target: DOCS, changeOrigin: true },
       '/research/option': { target: RESEARCH, changeOrigin: true },
       '/research/screening': { target: RESEARCH, changeOrigin: true },
+      '/research/data': { target: RESEARCH, changeOrigin: true },
       '/research/screener': { target: RESEARCH, changeOrigin: true },
       '/research/greeks': { target: RESEARCH, changeOrigin: true },
       '/research/iv-term-structure': { target: RESEARCH, changeOrigin: true },

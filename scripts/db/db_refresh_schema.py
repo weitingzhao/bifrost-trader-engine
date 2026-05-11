@@ -74,6 +74,7 @@ EXPECTED_TABLES_BY_CATEGORY: Dict[str, List[str]] = {
         "preference_market_streams_symbol_order",
         "preference_position_categories",
         "preference_position_category_tags",
+        "preference_data_gap_ack",
     ],
     "reference": ["reference_us_holidays"],
     "settings": ["settings", "settings_ib_flex"],

@@ -31,6 +31,12 @@
   --color-text-main: #e4e9ef;
   --color-text-muted: #7a8492;
   --color-text-dim: #5c6572;
+  /* Compatibility aliases — some legacy stylesheets (data-readiness.css, settings-celery.css,
+     etc.) reference the older Tailwind/material naming. Map them onto the canonical project
+     tokens so they themeup correctly (and don't fall back to hard-coded light-mode colors that
+     become invisible on the dark surface). */
+  --color-text-primary: var(--color-text-main);
+  --color-text-secondary: var(--color-text-muted);
 
   /* 语义色：红绿灯与操作 */
   --color-lamp-green: #4ade80;
@@ -124,6 +130,9 @@
   --color-text-main: #1a1d21;
   --color-text-muted: #6b7280;
   --color-text-dim: #9ca3af;
+  /* Mirror the alias on light theme. */
+  --color-text-primary: var(--color-text-main);
+  --color-text-secondary: var(--color-text-muted);
 
   --color-lamp-green: #16a34a;
   --color-lamp-yellow: #ca8a04;

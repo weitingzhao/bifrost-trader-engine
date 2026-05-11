@@ -1,0 +1,10 @@
+-- Stock data + price readiness daily snapshot (reference).
+--
+-- Canonical implementation: Python module ``src.research.sepa.readiness_snapshot``
+-- (used by Research API ``POST /research/data/readiness/snapshot``).
+--
+-- CLI (same merged config resolution as db_refresh_schema / run_server):
+--   python scripts/db/run_stock_readiness_snapshot.py [--config PATH] [--prod|--dev]
+--
+-- Prerequisites: ``db_refresh_schema`` has created ``stock_readiness_daily``
+-- and views ``v_us_equity_universe``, ``v_sepa_symbol_price_readiness``.
