@@ -859,6 +859,22 @@ _SEPA_VALID_CONDITION_IDS = frozenset(
     )
 )
 
+_TECH_VALID_CONDITION_IDS = frozenset(
+    (
+        "avg_volume_50_gt_threshold",
+        "crs_ge_70",
+        "close_ge_low52_x_1_3",
+        "close_ge_high52_x_0_75",
+        "sma50_gt_sma150",
+        "sma50_gt_sma200",
+        "sma150_gt_sma200",
+        "sma200_rising_1m",
+        "price_gt_sma50",
+        "price_gt_sma150",
+        "price_gt_sma200",
+    )
+)
+
 
 @router.get("/research/data/readiness/fundamental-filter")
 def get_fundamental_filter(
@@ -916,6 +932,102 @@ def get_fundamental_filter(
         "SELECT symbol, "
         "       coalesce((fundamental_eval->>'pass_count')::int, 0) AS pass_count, "
         "       fundamental_eval->'conditions' AS conditions "
+        "FROM public.stock_readiness_daily "
+        f"WHERE {' AND '.join(where_clauses)} "
+        "ORDER BY pass_count DESC, symbol ASC "
+        "LIMIT %(lim)s"
+    )
+
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SET statement_timeout = 10000")
+            cur.execute(sql, sql_params)
+            rows = cur.fetchall() or []
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        conn.close()
+
+    symbols = []
+    for r in rows:
+        cond_list = r.get("conditions") or []
+        passed_ids = (
+            [c.get("id") for c in cond_list if isinstance(c, dict) and c.get("pass") is True]
+            if isinstance(cond_list, list)
+            else []
+        )
+        symbols.append(
+            {
+                "symbol": r["symbol"],
+                "pass_count": int(r.get("pass_count") or 0),
+                "passed_conditions": passed_ids,
+            }
+        )
+    return {
+        "ok": True,
+        "include": cond_ids,
+        "count": len(symbols),
+        "symbols": symbols,
+        "limit": eff_limit,
+    }
+
+
+@router.get("/research/data/readiness/technical-filter")
+def get_technical_filter(
+    request: Request,
+    include: str = "",
+    limit: int = 500,
+) -> Dict[str, Any]:
+    """Return universe symbols whose today's technical snapshot **passes every** condition in ``include``.
+
+    Mirrors ``fundamental-filter`` but reads from ``technical_eval`` JSONB.
+    ``include`` is a comma-separated list of canonical technical condition IDs (see
+    ``_TECH_VALID_CONDITION_IDS``). Insufficient-data rows are excluded.
+    Results are sorted by descending ``pass_count``, then symbol.
+    """
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+
+    from src.persistence.postgres.connection import _get_conn_params
+
+    raw_ids = [s.strip() for s in (include or "").split(",") if s.strip()]
+    cond_ids = [c for c in raw_ids if c in _TECH_VALID_CONDITION_IDS]
+    if not raw_ids:
+        return {"ok": True, "include": [], "count": 0, "symbols": [], "limit": limit}
+    if not cond_ids:
+        return {"ok": False, "error": "no valid technical condition IDs"}
+
+    try:
+        eff_limit = max(1, min(int(limit), 5000))
+    except Exception:
+        eff_limit = 500
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    params = _get_conn_params(db)
+    params["connect_timeout"] = 10
+    try:
+        conn = psycopg2.connect(**params)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    where_clauses = [
+        "as_of_date = CURRENT_DATE",
+        "included_in_universe = true",
+        "technical_eval IS NOT NULL",
+        "coalesce((technical_eval->>'insufficient_data')::boolean, false) IS NOT TRUE",
+    ]
+    sql_params: Dict[str, Any] = {"lim": eff_limit}
+    for i, cid in enumerate(cond_ids):
+        key = f"c{i}"
+        where_clauses.append(f"technical_eval->'conditions' @> %({key})s::jsonb")
+        sql_params[key] = json.dumps([{"id": cid, "pass": True}])
+
+    sql = (
+        "SELECT symbol, "
+        "       coalesce((technical_eval->>'pass_count')::int, 0) AS pass_count, "
+        "       technical_eval->'conditions' AS conditions "
         "FROM public.stock_readiness_daily "
         f"WHERE {' AND '.join(where_clauses)} "
         "ORDER BY pass_count DESC, symbol ASC "
@@ -1020,7 +1132,11 @@ def get_symbols_readiness_snapshot(
                   fundamental_pass,
                   fundamental_pass_count,
                   fundamental_insufficient,
-                  fundamental_eval
+                  fundamental_eval,
+                  technical_pass,
+                  technical_pass_count,
+                  technical_insufficient,
+                  technical_eval
                 FROM public.stock_readiness_daily
                 WHERE symbol = ANY(%(syms)s)
                 ORDER BY symbol, as_of_date DESC, computed_at DESC
@@ -1030,10 +1146,17 @@ def get_symbols_readiness_snapshot(
             for r in cur.fetchall() or []:
                 sym = r["symbol"]
                 fund_eval = r.get("fundamental_eval") or {}
-                cond_list = fund_eval.get("conditions") if isinstance(fund_eval, dict) else None
+                fund_cond_list = fund_eval.get("conditions") if isinstance(fund_eval, dict) else None
                 passed_conditions = (
-                    [c.get("id") for c in cond_list if isinstance(c, dict) and c.get("pass") is True]
-                    if isinstance(cond_list, list)
+                    [c.get("id") for c in fund_cond_list if isinstance(c, dict) and c.get("pass") is True]
+                    if isinstance(fund_cond_list, list)
+                    else []
+                )
+                tech_eval = r.get("technical_eval") or {}
+                tech_cond_list = tech_eval.get("conditions") if isinstance(tech_eval, dict) else None
+                passed_tech_conditions = (
+                    [c.get("id") for c in tech_cond_list if isinstance(c, dict) and c.get("pass") is True]
+                    if isinstance(tech_cond_list, list)
                     else []
                 )
                 ao = r.get("as_of_date")
@@ -1061,6 +1184,10 @@ def get_symbols_readiness_snapshot(
                     "fundamental_pass_count": int(r.get("fundamental_pass_count") or 0),
                     "fundamental_insufficient": bool(r.get("fundamental_insufficient") or False),
                     "passed_conditions": passed_conditions,
+                    "technical_pass": bool(r.get("technical_pass") or False),
+                    "technical_pass_count": int(r.get("technical_pass_count") or 0),
+                    "technical_insufficient": bool(r.get("technical_insufficient") or False),
+                    "passed_tech_conditions": passed_tech_conditions,
                 }
                 if ao_str and (latest_as_of is None or ao_str > latest_as_of):
                     latest_as_of = ao_str

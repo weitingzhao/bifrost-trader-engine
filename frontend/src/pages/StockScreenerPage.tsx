@@ -6,9 +6,11 @@ import {
   fetchSepaCriteriaStats,
   fetchFundamentalDistributionSymbols,
   fetchFundamentalFilter,
+  fetchTechnicalFilter,
   fetchSymbolsReadinessSnapshot,
   type SepaCriteriaStats,
   type FundDistSymbolRow,
+  type TechFilterSymbolRow,
   type ReadinessSnapshotRow,
 } from '../api/research/dataReadiness'
 import '../styles/data-readiness.css'
@@ -40,6 +42,21 @@ const SEPA_COND_CATALOG: { id: string; label: string; short: string; group: 'eps
   { id: 'rev_3y_ge_15pct',  label: 'Revenue 3Y CAGR ≥ 15%', short: 'Rev 3Y',     group: 'rev' },
   { id: 'eps_acc_fy',       label: 'EPS Accelerating (FY)', short: 'EPS Acc FY', group: 'eps' },
   { id: 'rev_acc_fy',       label: 'Revenue Accel (FY)',    short: 'Rev Acc FY', group: 'rev' },
+]
+
+/** 11 SEPA technical conditions in display order (matches _TECH_COND_IDS on backend). */
+const TECH_COND_CATALOG: { id: string; label: string; short: string; group: 'vol' | 'price52' | 'sma' | 'price' }[] = [
+  { id: 'avg_volume_50_gt_threshold', label: 'Avg Volume 50D > 100K',   short: 'Vol',       group: 'vol' },
+  { id: 'crs_ge_70',                  label: 'CRS ≥ 70',                short: 'CRS',       group: 'vol' },
+  { id: 'close_ge_low52_x_1_3',       label: 'Close ≥ Low52W × 1.3',   short: '≥L52×1.3',  group: 'price52' },
+  { id: 'close_ge_high52_x_0_75',     label: 'Close ≥ High52W × 0.75', short: '≥H52×0.75', group: 'price52' },
+  { id: 'sma50_gt_sma150',            label: 'SMA50 > SMA150',          short: '50>150',     group: 'sma' },
+  { id: 'sma50_gt_sma200',            label: 'SMA50 > SMA200',          short: '50>200',     group: 'sma' },
+  { id: 'sma150_gt_sma200',           label: 'SMA150 > SMA200',         short: '150>200',    group: 'sma' },
+  { id: 'sma200_rising_1m',           label: 'SMA200 Rising (1M)',       short: '200↑',       group: 'sma' },
+  { id: 'price_gt_sma50',             label: 'Price > SMA50',            short: 'P>50',       group: 'price' },
+  { id: 'price_gt_sma150',            label: 'Price > SMA150',           short: 'P>150',      group: 'price' },
+  { id: 'price_gt_sma200',            label: 'Price > SMA200',           short: 'P>200',      group: 'price' },
 ]
 
 type InspectorSeed = { passCount: number; passedConditions: string[] }
@@ -89,10 +106,11 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
   useEffect(() => { void loadCriteriaStats() }, [loadCriteriaStats])
 
   // ── Filter by Conditions (top-middle card) ──────────────────────────────
+  const [filterTab, setFilterTab] = useState<'fund' | 'tech'>('fund')
+
+  // Fundamental condition filter
   const [condFilter, setCondFilter] = useState<Set<string>>(new Set())
   const [condResult, setCondResult] = useState<FundDistSymbolRow[] | null>(null)
-  const [condResultCount, setCondResultCount] = useState<number | null>(null)
-  const [condResultTruncated, setCondResultTruncated] = useState(false)
   const [condFilterLoading, setCondFilterLoading] = useState(false)
   const [condFilterError, setCondFilterError] = useState<string | null>(null)
   const condFilterKey = useMemo(() => Array.from(condFilter).sort().join(','), [condFilter])
@@ -100,8 +118,6 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
   useEffect(() => {
     if (condFilter.size === 0) {
       setCondResult(null)
-      setCondResultCount(null)
-      setCondResultTruncated(false)
       setCondFilterError(null)
       return
     }
@@ -115,15 +131,11 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
           if (cancelled) return
           if (!res.ok) {
             setCondResult([])
-            setCondResultCount(0)
-            setCondResultTruncated(false)
             setCondFilterError(res.error ?? 'Failed')
             return
           }
           const syms = res.symbols ?? []
           setCondResult(syms)
-          setCondResultCount(typeof res.count === 'number' ? res.count : syms.length)
-          setCondResultTruncated(syms.length >= (res.limit ?? 1000))
         })
         .catch((e) => {
           if (!cancelled) setCondFilterError(e instanceof Error ? e.message : 'Network error')
@@ -147,6 +159,97 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
     })
   }, [])
   const clearCondFilter = useCallback(() => setCondFilter(new Set()), [])
+
+  // Technical condition filter
+  const [techCondFilter, setTechCondFilter] = useState<Set<string>>(new Set())
+  const [techCondResult, setTechCondResult] = useState<TechFilterSymbolRow[] | null>(null)
+  const [techCondFilterLoading, setTechCondFilterLoading] = useState(false)
+  const [techCondFilterError, setTechCondFilterError] = useState<string | null>(null)
+  const techCondFilterKey = useMemo(() => Array.from(techCondFilter).sort().join(','), [techCondFilter])
+
+  useEffect(() => {
+    if (techCondFilter.size === 0) {
+      setTechCondResult(null)
+      setTechCondFilterError(null)
+      return
+    }
+    let cancelled = false
+    setTechCondFilterLoading(true)
+    setTechCondFilterError(null)
+    const include = Array.from(techCondFilter)
+    const handle = window.setTimeout(() => {
+      fetchTechnicalFilter({ include, limit: 1000 })
+        .then((res) => {
+          if (cancelled) return
+          if (!res.ok) {
+            setTechCondResult([])
+            setTechCondFilterError(res.error ?? 'Failed')
+            return
+          }
+          const syms = res.symbols ?? []
+          setTechCondResult(syms)
+        })
+        .catch((e) => {
+          if (!cancelled) setTechCondFilterError(e instanceof Error ? e.message : 'Network error')
+        })
+        .finally(() => {
+          if (!cancelled) setTechCondFilterLoading(false)
+        })
+    }, 180)
+    return () => {
+      cancelled = true
+      window.clearTimeout(handle)
+    }
+  }, [techCondFilter, techCondFilterKey])
+
+  const toggleTechCondFilter = useCallback((id: string) => {
+    setTechCondFilter((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+  const clearTechCondFilter = useCallback(() => setTechCondFilter(new Set()), [])
+
+  // Combined filter result: intersection of fund + tech results (when both active)
+  const combinedFilterResult = useMemo<{ symbols: Array<{ symbol: string; fundPassed: number; techPassed: number }> | null; loading: boolean; error: string | null }>(() => {
+    const fundActive = condFilter.size > 0
+    const techActive = techCondFilter.size > 0
+    if (!fundActive && !techActive) return { symbols: null, loading: false, error: null }
+    if (condFilterLoading || techCondFilterLoading) return { symbols: null, loading: true, error: null }
+    const err = condFilterError ?? techCondFilterError
+    if (err) return { symbols: null, loading: false, error: err }
+
+    if (fundActive && techActive) {
+      // AND intersection
+      const fundSet = new Map((condResult ?? []).map((r) => [r.symbol, r.pass_count]))
+      const techSet = new Map((techCondResult ?? []).map((r) => [r.symbol, r.pass_count]))
+      const intersection = [...fundSet.entries()]
+        .filter(([sym]) => techSet.has(sym))
+        .map(([sym, fp]) => ({ symbol: sym, fundPassed: fp, techPassed: techSet.get(sym) ?? 0 }))
+        .sort((a, b) => b.fundPassed - a.fundPassed || a.symbol.localeCompare(b.symbol))
+      return { symbols: intersection, loading: false, error: null }
+    }
+    if (fundActive) {
+      return {
+        symbols: (condResult ?? []).map((r) => ({ symbol: r.symbol, fundPassed: r.pass_count, techPassed: 0 })),
+        loading: false,
+        error: null,
+      }
+    }
+    // techActive only
+    return {
+      symbols: (techCondResult ?? []).map((r) => ({ symbol: r.symbol, fundPassed: 0, techPassed: r.pass_count })),
+      loading: false,
+      error: null,
+    }
+  }, [
+    condFilter.size, techCondFilter.size,
+    condFilterLoading, techCondFilterLoading,
+    condFilterError, techCondFilterError,
+    condResult, techCondResult,
+  ])
 
   // ── Symbols & readiness-driven main table (top-right + below) ───────────
   const [loadedFromDist, setLoadedFromDist] = useState<FundDistSymbolRow[]>([])
@@ -233,11 +336,13 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
     if (readinessRows.length === 0) return null
     const found = readinessRows.filter((r) => r.found)
     const fundPass = found.filter((r) => (r.fundamental_pass_count ?? 0) === 8).length
+    const techPass = found.filter((r) => r.technical_pass === true).length
     const insuff = found.filter((r) => r.fundamental_insufficient).length
     return {
       total: readinessRows.length,
       found: found.length,
       fundPass,
+      techPass,
       insufficient: insuff,
     }
   }, [readinessRows])
@@ -365,93 +470,140 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
           <header className="ssp-card-head ssp-card-head--tight">
             <h3 className="ssp-card-title">
               Filter by Conditions
-              <span className="ssp-card-title-aux">AND across 8 SEPA</span>
+              {(condFilter.size > 0 || techCondFilter.size > 0) && (
+                <span className="ssp-card-title-aux">
+                  {[condFilter.size > 0 && `${condFilter.size}F`, techCondFilter.size > 0 && `${techCondFilter.size}T`]
+                    .filter(Boolean).join(' · ')} selected
+                </span>
+              )}
             </h3>
-            {condFilter.size > 0 && (
+            {(condFilter.size > 0 || techCondFilter.size > 0) && (
               <button
                 type="button"
                 className="ssp-btn ssp-btn--ghost ssp-cond-filter-clear"
-                onClick={clearCondFilter}
-                title="Clear all condition filters"
+                onClick={() => { clearCondFilter(); clearTechCondFilter() }}
+                title="Clear all filters"
               >
-                Clear
+                Clear all
               </button>
             )}
           </header>
 
-          <div className="ssp-cond-filter-hint">
-            {condFilter.size === 0
-              ? 'Click any condition to find symbols that pass it.'
-              : `${condFilter.size} selected${
-                  condFilterLoading
-                    ? ' · loading…'
-                    : condResultCount != null
-                      ? ` · ${condResultCount.toLocaleString()} match${condResultCount === 1 ? '' : 'es'}${condResultTruncated ? '+' : ''}`
-                      : ''
-                }`}
+          {/* Tab switcher */}
+          <div className="ssp-filter-tabs">
+            <button
+              type="button"
+              className={`ssp-filter-tab${filterTab === 'fund' ? ' ssp-filter-tab--active' : ''}`}
+              onClick={() => setFilterTab('fund')}
+            >
+              Fundamental
+              {condFilter.size > 0 && <span className="ssp-filter-tab-badge">{condFilter.size}</span>}
+            </button>
+            <button
+              type="button"
+              className={`ssp-filter-tab${filterTab === 'tech' ? ' ssp-filter-tab--active' : ''}`}
+              onClick={() => setFilterTab('tech')}
+            >
+              Technical
+              {techCondFilter.size > 0 && <span className="ssp-filter-tab-badge ssp-filter-tab-badge--tech">{techCondFilter.size}</span>}
+            </button>
           </div>
 
-          <div className="ssp-cond-filter-chips">
-            {SEPA_COND_CATALOG.map(({ id, label, group }) => {
-              const active = condFilter.has(id)
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  className={`ssp-cond-chip ssp-cond-chip--${group}${active ? ' ssp-cond-chip--active' : ''}`}
-                  onClick={() => toggleCondFilter(id)}
-                  title={active ? `Remove ${label} from filter` : `Add ${label} to filter`}
-                >
-                  <span className="ssp-cond-chip-check" aria-hidden>
-                    {active ? '✓' : ''}
-                  </span>
-                  <span className="ssp-cond-chip-label">{label}</span>
-                </button>
-              )
-            })}
-          </div>
+          {/* Fundamental chips */}
+          {filterTab === 'fund' && (
+            <div className="ssp-cond-filter-chips">
+              {SEPA_COND_CATALOG.map(({ id, label, group }) => {
+                const active = condFilter.has(id)
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`ssp-cond-chip ssp-cond-chip--${group}${active ? ' ssp-cond-chip--active' : ''}`}
+                    onClick={() => toggleCondFilter(id)}
+                    title={active ? `Remove ${label} from filter` : `Add ${label} to filter`}
+                  >
+                    <span className="ssp-cond-chip-check" aria-hidden>{active ? '✓' : ''}</span>
+                    <span className="ssp-cond-chip-label">{label}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
 
-          {condFilter.size > 0 && (
+          {/* Technical chips */}
+          {filterTab === 'tech' && (
+            <div className="ssp-cond-filter-chips">
+              {TECH_COND_CATALOG.map(({ id, label, group }) => {
+                const active = techCondFilter.has(id)
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`ssp-cond-chip ssp-cond-chip--tech-${group}${active ? ' ssp-cond-chip--active' : ''}`}
+                    onClick={() => toggleTechCondFilter(id)}
+                    title={active ? `Remove ${label} from filter` : `Add ${label} to filter`}
+                  >
+                    <span className="ssp-cond-chip-check" aria-hidden>{active ? '✓' : ''}</span>
+                    <span className="ssp-cond-chip-label">{label}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Combined result */}
+          {(condFilter.size > 0 || techCondFilter.size > 0) && (
             <div className="ssp-cond-filter-result">
-              {condFilterError && <div className="ssp-empty-line ssp-status-err">{condFilterError}</div>}
-              {!condFilterError && condResult && condResult.length === 0 && !condFilterLoading && (
-                <div className="ssp-empty-line">No symbols match all selected conditions.</div>
+              {combinedFilterResult.loading && (
+                <div className="ssp-empty-line">Loading…</div>
               )}
-              {!condFilterError && condResult && condResult.length > 0 && (
+              {combinedFilterResult.error && !combinedFilterResult.loading && (
+                <div className="ssp-empty-line ssp-status-err">{combinedFilterResult.error}</div>
+              )}
+              {!combinedFilterResult.loading && !combinedFilterResult.error && combinedFilterResult.symbols != null && (
                 <>
-                  <div className="ssp-cond-result-chips">
-                    {condResult.map((s) => (
-                      <span
-                        key={s.symbol}
-                        className="ssp-dist-chip"
-                        title={`${s.symbol} — ${s.pass_count}/8 · click to open inspector`}
-                        onClick={() =>
-                          openInspector(s.symbol, {
-                            passCount: s.pass_count,
-                            passedConditions: s.passed_conditions,
-                          })
-                        }
-                      >
-                        {s.symbol}
-                        <span className="ssp-cond-result-frac">{s.pass_count}/8</span>
-                      </span>
-                    ))}
+                  <div className="ssp-cond-filter-hint" style={{ marginBottom: 4 }}>
+                    {combinedFilterResult.symbols.length === 0
+                      ? 'No symbols match all selected conditions.'
+                      : `${combinedFilterResult.symbols.length.toLocaleString()} match${combinedFilterResult.symbols.length === 1 ? '' : 'es'}`
+                        + (condFilter.size > 0 && techCondFilter.size > 0 ? ` (${condFilter.size}F ∩ ${techCondFilter.size}T)` : '')}
                   </div>
-                  {condResultTruncated && (
-                    <div className="ssp-empty-line">
-                      Showing first {condResult.length.toLocaleString()} matches (limit reached).
-                    </div>
+                  {combinedFilterResult.symbols.length > 0 && (
+                    <>
+                      <div className="ssp-cond-result-chips">
+                        {combinedFilterResult.symbols.map((s) => (
+                          <span
+                            key={s.symbol}
+                            className="ssp-dist-chip"
+                            title={`${s.symbol}${condFilter.size > 0 ? ` — F:${s.fundPassed}/8` : ''}${techCondFilter.size > 0 ? ` T:${s.techPassed}/11` : ''}`}
+                            onClick={() => openInspector(s.symbol)}
+                          >
+                            {s.symbol}
+                            <span className="ssp-cond-result-frac">
+                              {condFilter.size > 0 && <span>{s.fundPassed}/8</span>}
+                              {condFilter.size > 0 && techCondFilter.size > 0 && <span className="ssp-cond-result-sep">·</span>}
+                              {techCondFilter.size > 0 && <span className="ssp-cond-result-tech">{s.techPassed}/11</span>}
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                      <div className="ssp-cond-result-actions">
+                        <button
+                          type="button"
+                          className="ssp-btn ssp-btn--secondary"
+                          onClick={() => {
+                            const syms = combinedFilterResult.symbols ?? []
+                            setSymbolText(syms.map((s) => s.symbol).join(','))
+                            setLoadedFromDist(syms.map((s) => ({ symbol: s.symbol, pass_count: s.fundPassed, passed_conditions: [] })))
+                            setLoadedFromBucket(null)
+                          }}
+                          title="Replace the Symbols input with these matches"
+                        >
+                          Load into Screener
+                        </button>
+                      </div>
+                    </>
                   )}
-                  <div className="ssp-cond-result-actions">
-                    <button
-                      type="button"
-                      className="ssp-btn ssp-btn--secondary"
-                      onClick={() => applyDistSymbolsToScreener(condResult, null)}
-                      title="Replace the Symbols input with these matches"
-                    >
-                      Load into Screener
-                    </button>
-                  </div>
                 </>
               )}
             </div>
@@ -485,7 +637,10 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
               {summary && (
                 <span className="ssp-symbols-summary">
                   <span>Found <strong>{summary.found}</strong>/<strong>{summary.total}</strong></span>
-                  <span className="ssp-results-summary-good"> · 8/8 <strong>{summary.fundPass}</strong></span>
+                  <span className="ssp-results-summary-good"> · F8/8 <strong>{summary.fundPass}</strong></span>
+                  {summary.techPass > 0 && (
+                    <span className="ssp-results-summary-tech"> · T11/11 <strong>{summary.techPass}</strong></span>
+                  )}
                   {summary.insufficient > 0 && (
                     <span className="ssp-results-summary-warn"> · insuff <strong>{summary.insufficient}</strong></span>
                   )}
@@ -556,7 +711,8 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
             <thead>
               <tr>
                 <th style={{ width: 110 }}>Symbol</th>
-                <th style={{ width: 70 }}>Fund</th>
+                <th style={{ width: 68 }}>Fund</th>
+                <th style={{ width: 68 }}>Tech</th>
                 <th>Conditions</th>
                 <th style={{ width: 70, textAlign: 'center' }}>Univ</th>
                 <th style={{ width: 100 }}>Price</th>
@@ -568,11 +724,11 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
             <tbody>
               {readinessRows.length === 0 && (
                 <tr className="ssp-table-empty">
-                  <td colSpan={8}>
+                  <td colSpan={9}>
                     {readinessLoading
                       ? 'Loading readiness for parsed symbols…'
                       : symbols.length === 0
-                        ? 'No symbols yet. Click a Fundamental Distribution bucket, use Filter by Conditions, or paste symbols above.'
+                        ? 'No symbols yet. Click a Fundamental Distribution bucket, use Filter by Conditions (Fundamental or Technical), or paste symbols above.'
                         : readinessError
                           ? 'Failed to load readiness — see error above.'
                           : 'No readiness rows.'}
@@ -593,20 +749,31 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
                           {r.symbol}
                         </button>
                       </td>
-                      <td colSpan={7} className="ssp-num--dim">
+                      <td colSpan={8} className="ssp-num--dim">
                         No row in stock_readiness_daily — run the universe snapshot from Stock Data Readiness.
                       </td>
                     </tr>
                   )
                 }
                 const passed = new Set(r.passed_conditions ?? [])
+                const passedTech = new Set(r.passed_tech_conditions ?? [])
                 const insuf = r.fundamental_insufficient ?? false
                 const passCount = r.fundamental_pass_count ?? 0
+                const techInsuf = r.technical_insufficient ?? false
+                const techPassCount = r.technical_pass_count ?? 0
+                const techEvalPresent = r.technical_pass !== undefined
                 const fundCls =
                   insuf ? 'ssp-fund-cell--insuf'
                   : passCount === 8 ? 'ssp-fund-cell--all'
                   : passCount >= 5 ? 'ssp-fund-cell--good'
                   : passCount >= 2 ? 'ssp-fund-cell--warn'
+                  : 'ssp-fund-cell--poor'
+                const techCls =
+                  !techEvalPresent ? 'ssp-fund-cell--insuf'
+                  : techInsuf ? 'ssp-fund-cell--insuf'
+                  : techPassCount === 11 ? 'ssp-fund-cell--all'
+                  : techPassCount >= 8 ? 'ssp-fund-cell--good'
+                  : techPassCount >= 5 ? 'ssp-fund-cell--warn'
                   : 'ssp-fund-cell--poor'
                 const isActive = inspector?.symbol === r.symbol
                 const seed: InspectorSeed = {
@@ -628,9 +795,21 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
                     <td>
                       <span
                         className={`ssp-fund-cell ${fundCls}`}
-                        title={insuf ? 'Insufficient data' : `${passCount}/8 conditions passed`}
+                        title={insuf ? 'Fundamental: insufficient data' : `${passCount}/8 fundamental conditions passed`}
                       >
                         {insuf ? 'INS' : `${passCount}/8`}
+                      </span>
+                    </td>
+                    <td>
+                      <span
+                        className={`ssp-fund-cell ${techCls}`}
+                        title={
+                          !techEvalPresent ? 'Technical: not yet evaluated'
+                          : techInsuf ? 'Technical: insufficient data'
+                          : `${techPassCount}/11 technical conditions passed`
+                        }
+                      >
+                        {!techEvalPresent ? '—' : techInsuf ? 'INS' : `${techPassCount}/11`}
                       </span>
                     </td>
                     <td>
@@ -642,6 +821,21 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
                               key={id}
                               className={`ssp-cond-dot ssp-cond-dot--${group}${pass ? ' ssp-cond-dot--pass' : ' ssp-cond-dot--fail'}${insuf ? ' ssp-cond-dot--dim' : ''}`}
                               title={`${short}: ${insuf ? 'insufficient' : pass ? 'pass' : 'fail'}`}
+                            >
+                              {pass ? '✓' : ''}
+                            </span>
+                          )
+                        })}
+                        {techEvalPresent && (
+                          <span className="ssp-cond-dots-sep" aria-hidden title="Technical conditions below" />
+                        )}
+                        {techEvalPresent && TECH_COND_CATALOG.map(({ id, short, group }) => {
+                          const pass = passedTech.has(id)
+                          return (
+                            <span
+                              key={id}
+                              className={`ssp-cond-dot ssp-cond-dot--tech-${group}${pass ? ' ssp-cond-dot--pass' : ' ssp-cond-dot--fail'}${techInsuf ? ' ssp-cond-dot--dim' : ''}`}
+                              title={`${short}: ${techInsuf ? 'insufficient' : pass ? 'pass' : 'fail'}`}
                             >
                               {pass ? '✓' : ''}
                             </span>

@@ -632,6 +632,23 @@ export interface FundamentalFilterResponse {
   limit?: number
 }
 
+export interface TechFilterSymbolRow {
+  symbol: string
+  /** Number of technical conditions passed (0–11). */
+  pass_count: number
+  /** IDs of the technical conditions that passed. */
+  passed_conditions: string[]
+}
+
+export interface TechnicalFilterResponse {
+  ok: boolean
+  error?: string
+  include?: string[]
+  count?: number
+  symbols?: TechFilterSymbolRow[]
+  limit?: number
+}
+
 /**
  * Per-symbol readiness snapshot row returned by `/research/data/readiness/symbols-snapshot`.
  * Mirrors columns from `public.stock_readiness_daily` plus a derived `passed_conditions`.
@@ -657,6 +674,10 @@ export interface ReadinessSnapshotRow {
   fundamental_pass_count?: number
   fundamental_insufficient?: boolean
   passed_conditions?: string[]
+  technical_pass?: boolean
+  technical_pass_count?: number
+  technical_insufficient?: boolean
+  passed_tech_conditions?: string[]
 }
 
 export interface SymbolsReadinessSnapshotResponse {
@@ -710,6 +731,30 @@ export async function fetchFundamentalFilter(opts: {
       return { ok: false, error: msg }
     }
     return j as FundamentalFilterResponse
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
+
+export async function fetchTechnicalFilter(opts: {
+  include: string[]
+  limit?: number
+}): Promise<TechnicalFilterResponse> {
+  const include = (opts.include || []).map((s) => s.trim()).filter(Boolean)
+  if (include.length === 0) {
+    return { ok: true, include: [], count: 0, symbols: [], limit: opts.limit ?? 500 }
+  }
+  const limit = Math.max(1, Math.min(opts.limit ?? 500, 5000))
+  const qs = new URLSearchParams({ include: include.join(','), limit: String(limit) })
+  const url = researchApiUrl(`/research/data/readiness/technical-filter?${qs.toString()}`)
+  try {
+    const r = await fetchWithTimeout(url, { method: 'GET' }, 20_000)
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) {
+      const msg = typeof j?.detail === 'string' ? j.detail : (j?.error ?? `HTTP ${r.status}`)
+      return { ok: false, error: msg }
+    }
+    return j as TechnicalFilterResponse
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
   }
