@@ -59,60 +59,133 @@
   color: var(--color-text-muted);
 }
 
-/* ── Top split grid — Distribution + Symbols/Controls ──────────────────── */
+/* ── Row 1: Technical (5 cards) ─────────────────────────────────────────── */
+/* SEPA Tech Dist · SEPA Tech Conditions · Tech Momentum · Tech Structure · Tech Sentiment */
 
-.ssp-top-grid {
+.ssp-tech-row {
   display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  grid-template-columns: 1.25fr 1.35fr 1.05fr 1.05fr 0.75fr;
   gap: var(--space-3);
-  align-items: stretch;
+  align-items: start;
 }
 
-/* 2-column layout */
-.ssp-top-grid--dual {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-/* 3-column layout */
-.ssp-top-grid--triple {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-/* 4-column layout: Tech Dist · Fund Dist · Tech Conditions · Fund Conditions */
-.ssp-top-grid--quad {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.ssp-top-grid > .ssp-card {
+.ssp-tech-row > .ssp-card {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
-@media (max-width: 1600px) {
-  .ssp-top-grid--quad {
+@media (max-width: 1500px) {
+  .ssp-tech-row {
+    grid-template-columns: 1.2fr 1.3fr 1fr 1fr 0.75fr;
+  }
+}
+
+@media (max-width: 1280px) {
+  .ssp-tech-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .ssp-tech-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 1400px) {
-  .ssp-top-grid--triple {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-  .ssp-top-grid--triple > .ssp-card:nth-child(3) {
-    grid-column: 1 / -1;
+@media (max-width: 600px) {
+  .ssp-tech-row {
+    grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 880px) {
-  .ssp-top-grid,
-  .ssp-top-grid--triple,
-  .ssp-top-grid--dual,
-  .ssp-top-grid--quad {
-    grid-template-columns: 1fr;
+/* ── Row 2: Fundamental (9 cards) ───────────────────────────────────────── */
+/* SEPA Fund Dist · SEPA Fund Conditions · Quality · Balance · CashFlow · Valuation · Profit · Efficiency · Sentiment */
+
+.ssp-fund-row {
+  display: grid;
+  grid-template-columns: 1.25fr 1.1fr repeat(7, minmax(0, 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.ssp-fund-row > .ssp-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+@media (max-width: 1700px) {
+  .ssp-fund-row {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
-  .ssp-top-grid--triple > .ssp-card:nth-child(3) {
-    grid-column: auto;
+}
+
+@media (max-width: 1280px) {
+  .ssp-fund-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+}
+
+@media (max-width: 900px) {
+  .ssp-fund-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .ssp-fund-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ── Tier mini-card left border accents ────────────────────────────────── */
+.ssp-card--tier-momentum { border-left: 3px solid rgba(245, 158, 11, 0.55); }
+.ssp-card--tier-structure { border-left: 3px solid rgba(52, 211, 153, 0.55); }
+.ssp-card--tier-sentiment { border-left: 3px solid rgba(244, 114, 182, 0.55); }
+
+/* Tier card title colors */
+.ssp-tier-card-title--momentum { color: #f59e0b; }
+.ssp-tier-card-title--structure { color: #34d399; }
+.ssp-tier-card-title--sentiment { color: #f472b6; }
+
+/* ── Extended group mini-card left border accents ───────────────────────── */
+.ssp-card--group-quality     { border-left: 3px solid rgba(125, 211, 252, 0.55); }
+.ssp-card--group-balance     { border-left: 3px solid rgba(132, 204, 22, 0.55); }
+.ssp-card--group-cashflow    { border-left: 3px solid rgba(52, 211, 153, 0.55); }
+.ssp-card--group-valuation   { border-left: 3px solid rgba(251, 191, 36, 0.55); }
+.ssp-card--group-profitability { border-left: 3px solid rgba(167, 139, 250, 0.55); }
+.ssp-card--group-efficiency  { border-left: 3px solid rgba(249, 115, 22, 0.55); }
+.ssp-card--group-sentiment   { border-left: 3px solid rgba(244, 114, 182, 0.55); }
+
+/* Group card title colors */
+.ssp-group-title--quality     { color: #7dd3fc; }
+.ssp-group-title--balance     { color: #84cc16; }
+.ssp-group-title--cashflow    { color: #34d399; }
+.ssp-group-title--valuation   { color: #fbbf24; }
+.ssp-group-title--profitability { color: #a78bfa; }
+.ssp-group-title--efficiency  { color: #fb923c; }
+.ssp-group-title--sentiment   { color: #f472b6; }
+
+/* SEPA core fund group classes (in SEPA Fund Conditions card) */
+.ssp-cond-group--fund-eps .ssp-cond-group-header { color: #7dd3fc; border-bottom-color: rgba(125,211,252,0.35); }
+.ssp-cond-group--fund-rev .ssp-cond-group-header { color: #84cc16; border-bottom-color: rgba(132,204,22,0.35); }
+
+/* ── Score row inside tier mini-cards ──────────────────────────────────── */
+.ssp-tier-score-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 3px 0;
+}
+
+.ssp-tier-score-inline {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
 }
 
 /* ── Filter action bar ──────────────────────────────────────────────────── */
@@ -459,14 +532,36 @@
 }
 
 .ssp-cond-group-header {
-  font-size: 0.58rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--color-text-dim);
-  padding-bottom: 3px;
+  color: var(--color-text-muted);
+  padding-bottom: 4px;
   border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
+
+/* ── Technical Tier 1 group header colors ────────────────────────── */
+.ssp-cond-group--vol     .ssp-cond-group-header { color: #a78bfa; border-bottom-color: rgba(167,139,250,0.35); }
+.ssp-cond-group--price52 .ssp-cond-group-header { color: #34d399; border-bottom-color: rgba(52,211,153,0.35); }
+.ssp-cond-group--sma     .ssp-cond-group-header { color: #63b3ed; border-bottom-color: rgba(99,179,237,0.35); }
+.ssp-cond-group--price   .ssp-cond-group-header { color: #fbbf24; border-bottom-color: rgba(251,191,36,0.35); }
+
+/* ── Fund core group header colors ────────────────────────────────── */
+.ssp-fund-core-group--eps .ssp-cond-group-header { color: #7dd3fc; border-bottom-color: rgba(125,211,252,0.35); }
+.ssp-fund-core-group--rev .ssp-cond-group-header { color: #84cc16; border-bottom-color: rgba(132,204,22,0.35); }
+
+/* ── Extended fund group header colors (standalone group mini-cards) ──── */
+.ssp-card--group-quality     .ssp-cond-group-header { color: #7dd3fc; }
+.ssp-card--group-balance     .ssp-cond-group-header { color: #84cc16; }
+.ssp-card--group-cashflow    .ssp-cond-group-header { color: #34d399; }
+.ssp-card--group-valuation   .ssp-cond-group-header { color: #fbbf24; }
+.ssp-card--group-profitability .ssp-cond-group-header { color: #a78bfa; }
+.ssp-card--group-efficiency  .ssp-cond-group-header { color: #fb923c; }
+.ssp-card--group-sentiment   .ssp-cond-group-header { color: #f472b6; }
 
 .ssp-cond-chips-row {
   display: flex;
@@ -1682,22 +1777,246 @@
   color: #7c3aed;
 }
 
-/* ── Tier hint card ────────────────────────────────────────────── */
+/* ── Tier 2-4 card — Momentum / Structure / Sentiment ──────────── */
 
-.ssp-card--tier-hint {
-  border-left: 3px solid var(--color-accent, #6366f1);
-}
-
-.ssp-tier-hint-text {
-  font-size: 0.75rem;
-  color: var(--color-text-secondary, #64748b);
-  margin: 4px 12px 10px;
-  line-height: 1.5;
-}
-
-.ssp-tier-hint-text code {
-  font-size: 0.70rem;
-  background: rgba(99, 102, 241, 0.08);
-  padding: 1px 4px;
+.ssp-card-title-tier {
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 5px;
   border-radius: 3px;
+  background: rgba(99, 102, 241, 0.12);
+  color: #818cf8;
+  margin-left: 4px;
+}
+
+/* Card variant with scrollable sections */
+.ssp-card--tiers {
+  overflow-y: auto;
+  max-height: 480px;
+}
+
+/* Sections container */
+.ssp-tier-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.ssp-tier-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: var(--space-2) 0;
+}
+
+.ssp-tier-section-divider {
+  height: 1px;
+  background: var(--color-border);
+  opacity: 0.5;
+  margin: 0;
+}
+
+/* Section head: label + inline score slider */
+.ssp-tier-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ssp-tier-section-label {
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 72px;
+}
+
+.ssp-tier-section-label--momentum { color: #f59e0b; }
+.ssp-tier-section-label--structure { color: #34d399; }
+.ssp-tier-section-label--sentiment { color: #f472b6; }
+
+.ssp-tier-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 3px;
+  border-radius: 9999px;
+  font-size: 0.55rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ssp-tier-count-badge--momentum { background: rgba(245, 158, 11, 0.22); color: #f59e0b; }
+.ssp-tier-count-badge--structure { background: rgba(52, 211, 153, 0.22); color: #34d399; }
+.ssp-tier-count-badge--sentiment { background: rgba(244, 114, 182, 0.22); color: #f472b6; }
+
+/* Inline score control */
+.ssp-tier-score-inline {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+}
+
+.ssp-tier-score-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
+
+.ssp-tier-score-slider {
+  flex: 1;
+  accent-color: var(--color-accent);
+  min-width: 0;
+  cursor: pointer;
+}
+
+.ssp-tier-score-val {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  min-width: 2.2rem;
+  text-align: right;
+}
+
+.ssp-tier-score-val--momentum { color: #f59e0b; }
+.ssp-tier-score-val--structure { color: #34d399; }
+.ssp-tier-score-val--sentiment { color: #f472b6; }
+
+/* Tier chip color accents */
+.ssp-cond-chip--tier-momentum { border-left: 2px solid rgba(245, 158, 11, 0.6); }
+.ssp-cond-chip--tier-structure { border-left: 2px solid rgba(52, 211, 153, 0.6); }
+.ssp-cond-chip--tier-sentiment { border-left: 2px solid rgba(244, 114, 182, 0.6); }
+
+/* Filter bar tags for tiers */
+.ssp-filter-bar-tag--momentum {
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+}
+
+.ssp-filter-bar-tag--structure {
+  background: rgba(52, 211, 153, 0.12);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.28);
+}
+
+.ssp-filter-bar-tag--sentiment {
+  background: rgba(244, 114, 182, 0.12);
+  color: #f472b6;
+  border: 1px solid rgba(244, 114, 182, 0.28);
+}
+
+/* Filter tab badge for tiers */
+.ssp-filter-tab-badge--tier {
+  background: rgba(99, 102, 241, 0.85);
+  color: #fff;
+}
+
+/* ── Fundamental Conditions — full-width card ─────────────────── */
+
+.ssp-fund-card-fullwidth {
+  /* Takes full width below the 4-col top grid */
+}
+
+/* Core row: EPS + Revenue side by side */
+.ssp-fund-core-row {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+
+.ssp-fund-core-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Divider between core and extended */
+.ssp-fund-ext-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: var(--space-2) 0;
+  opacity: 0.6;
+}
+
+/* Extended groups — 4-column grid */
+.ssp-fund-ext-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+@media (max-width: 1400px) {
+  .ssp-fund-ext-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1000px) {
+  .ssp-fund-ext-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .ssp-fund-ext-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ssp-fund-ext-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-2);
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.ssp-fund-ext-header {
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 4px;
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+}
+
+/* Per-group subtle left accent */
+.ssp-fund-ext-cell--quality       { border-left: 2px solid rgba(125, 211, 252, 0.45); }
+.ssp-fund-ext-cell--balance       { border-left: 2px solid rgba(132, 204, 22, 0.45); }
+.ssp-fund-ext-cell--cashflow      { border-left: 2px solid rgba(52, 211, 153, 0.45); }
+.ssp-fund-ext-cell--valuation     { border-left: 2px solid rgba(251, 191, 36, 0.45); }
+.ssp-fund-ext-cell--profitability { border-left: 2px solid rgba(167, 139, 250, 0.45); }
+.ssp-fund-ext-cell--efficiency    { border-left: 2px solid rgba(249, 115, 22, 0.45); }
+.ssp-fund-ext-cell--sentiment     { border-left: 2px solid rgba(244, 114, 182, 0.45); }
+
+/* Per-group chip accents */
+.ssp-cond-chip--ext-quality       { border-left: 2px solid rgba(125, 211, 252, 0.5); }
+.ssp-cond-chip--ext-balance       { border-left: 2px solid rgba(132, 204, 22, 0.5); }
+.ssp-cond-chip--ext-cashflow      { border-left: 2px solid rgba(52, 211, 153, 0.5); }
+.ssp-cond-chip--ext-valuation     { border-left: 2px solid rgba(251, 191, 36, 0.5); }
+.ssp-cond-chip--ext-profitability { border-left: 2px solid rgba(167, 139, 250, 0.5); }
+.ssp-cond-chip--ext-efficiency    { border-left: 2px solid rgba(249, 115, 22, 0.5); }
+.ssp-cond-chip--ext-sentiment     { border-left: 2px solid rgba(244, 114, 182, 0.5); }
+
+[data-theme="light"] .ssp-fund-ext-cell {
+  background: rgba(0, 0, 0, 0.012);
 }

@@ -293,6 +293,7 @@ export async function postSepaFundamentalsBackfill(opts?: {
   rate_limit_rps?: number
   cache_ttl_sec?: number
   max_symbols?: number
+  only_missing?: boolean
 }): Promise<SepaFundamentalsBackfillResponse> {
   const url = researchApiUrl('/research/data/readiness/backfill-fundamentals')
   const body = opts ? JSON.stringify(opts) : '{}'
@@ -1292,6 +1293,38 @@ export async function fetchMomentumFilter(params: {
     const j = await r.json().catch(() => ({}))
     if (!r.ok) return { ok: false, error: j?.error ?? `HTTP ${r.status}` }
     return j as MomentumFilterResponse
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
+
+export interface TierFilterResponse {
+  ok: boolean
+  error?: string
+  tier?: string
+  include?: string[]
+  min_score?: number
+  count?: number
+  symbols?: { symbol: string; tier_score: number; core_pass_count: number }[]
+  limit?: number
+}
+
+export async function fetchTierFilter(params: {
+  tier: 'structure' | 'sentiment'
+  include?: string[]
+  min_score?: number
+  limit?: number
+}): Promise<TierFilterResponse> {
+  const qs = new URLSearchParams({ tier: params.tier })
+  if (params.include?.length) qs.set('include', params.include.join(','))
+  if (params.min_score != null && params.min_score > 0) qs.set('min_score', String(params.min_score))
+  if (params.limit != null) qs.set('limit', String(params.limit))
+  const url = researchApiUrl(`/research/data/readiness/tier-filter?${qs.toString()}`)
+  try {
+    const r = await fetchWithTimeout(url, { method: 'GET' }, 15_000)
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) return { ok: false, error: j?.error ?? `HTTP ${r.status}` }
+    return j as TierFilterResponse
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
   }

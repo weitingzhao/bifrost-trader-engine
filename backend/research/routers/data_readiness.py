@@ -171,23 +171,31 @@ def post_sepa_backfill_fundamentals(
     except Exception as e:
         return {"ok": False, "error": f"DB connect failed: {e}"}
 
+    only_missing = bool(body.get("only_missing", True))
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("SET statement_timeout = 30000")
-            cur.execute(
-                """
-                SELECT u.symbol
-                FROM public.v_us_equity_universe u
-                LEFT JOIN public.stock_readiness_daily srd
-                    ON srd.symbol = u.symbol
-                   AND srd.as_of_date = CURRENT_DATE
-                   AND srd.universe_rule_version = 'v1'
-                   AND srd.price_source = 'massive'
-                   AND srd.fundamental_eval IS NOT NULL
-                WHERE srd.symbol IS NULL
-                ORDER BY u.symbol
-                """
-            )
+            if only_missing:
+                cur.execute(
+                    """
+                    SELECT u.symbol
+                    FROM public.v_us_equity_universe u
+                    LEFT JOIN public.stock_readiness_daily srd
+                        ON srd.symbol = u.symbol
+                       AND srd.as_of_date = CURRENT_DATE
+                       AND srd.universe_rule_version = 'v1'
+                       AND srd.price_source = 'massive'
+                       AND srd.fundamental_eval IS NOT NULL
+                    WHERE srd.symbol IS NULL
+                    ORDER BY u.symbol
+                    """
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT symbol FROM public.v_us_equity_universe ORDER BY symbol
+                    """
+                )
             rows = cur.fetchall() or []
     except Exception as e:
         return {"ok": False, "error": f"Query failed: {e}"}
@@ -1946,6 +1954,115 @@ def get_momentum_filter(
         ]
         return {
             "ok": True,
+            "include": cond_ids,
+            "min_score": eff_score,
+            "count": len(symbols),
+            "symbols": symbols,
+            "limit": eff_limit,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        conn.close()
+
+
+_TIER_INDICATOR_IDS: Dict[str, frozenset] = {
+    "structure": _TECH_STRUCTURE_INDICATOR_IDS,
+    "sentiment": _TECH_SENTIMENT_INDICATOR_IDS,
+}
+_TIER_MAX_SCORE: Dict[str, int] = {
+    "structure": 10,
+    "sentiment": 3,
+}
+
+
+@router.get("/research/data/readiness/tier-filter")
+def get_tier_filter(
+    request: Request,
+    tier: str = "structure",
+    include: str = "",
+    min_score: int = 0,
+    limit: int = 500,
+) -> Dict[str, Any]:
+    """Filter symbols by structure or sentiment tier sub-conditions and/or minimum tier score.
+
+    ``tier``: 'structure' or 'sentiment'.
+    ``include``: comma-separated indicator IDs (validated against tier whitelist).
+    ``min_score``: minimum tier score.
+    """
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+
+    from src.persistence.postgres.connection import _get_conn_params
+
+    if tier not in _TIER_INDICATOR_IDS:
+        return {"ok": False, "error": f"tier must be one of: {list(_TIER_INDICATOR_IDS.keys())}"}
+
+    valid_ids = _TIER_INDICATOR_IDS[tier]
+    max_score = _TIER_MAX_SCORE.get(tier, 10)
+    raw_ids = [s.strip() for s in (include or "").split(",") if s.strip()]
+    cond_ids = [c for c in raw_ids if c in valid_ids]
+
+    try:
+        eff_limit = max(1, min(int(limit), 5000))
+        eff_score = max(0, min(int(min_score), max_score))
+    except Exception:
+        eff_limit = 500
+        eff_score = 0
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    params = _get_conn_params(db)
+    params["connect_timeout"] = 10
+    try:
+        conn = psycopg2.connect(**params)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SET statement_timeout = 15000")
+
+            where_parts = [
+                "as_of_date = CURRENT_DATE",
+                "technical_eval IS NOT NULL",
+                f"technical_eval->'tiers'->'{tier}' IS NOT NULL",
+            ]
+            if eff_score > 0:
+                where_parts.append(
+                    f"(technical_eval->'tiers'->'{tier}'->>'score')::int >= {eff_score}"
+                )
+            for cid in cond_ids:
+                where_parts.append(
+                    f"""EXISTS (
+                        SELECT 1 FROM jsonb_array_elements(
+                            technical_eval->'tiers'->'{tier}'->'indicators'
+                        ) elem
+                        WHERE elem->>'id' = '{cid}' AND (elem->>'pass')::boolean = true
+                    )"""
+                )
+
+            query = f"""
+                SELECT
+                    symbol,
+                    (technical_eval->'tiers'->'{tier}'->>'score')::int AS tier_score,
+                    coalesce(technical_pass_count, 0) AS core_pass_count
+                FROM public.stock_readiness_daily
+                WHERE {' AND '.join(where_parts)}
+                ORDER BY (technical_eval->'tiers'->'{tier}'->>'score')::int DESC, symbol
+                LIMIT {eff_limit}
+            """
+            cur.execute(query)
+            rows = cur.fetchall() or []
+
+        symbols = [
+            {"symbol": r["symbol"], "tier_score": r["tier_score"], "core_pass_count": r["core_pass_count"]}
+            for r in rows
+        ]
+        return {
+            "ok": True,
+            "tier": tier,
             "include": cond_ids,
             "min_score": eff_score,
             "count": len(symbols),

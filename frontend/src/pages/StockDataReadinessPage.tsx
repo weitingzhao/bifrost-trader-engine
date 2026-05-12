@@ -2903,8 +2903,8 @@ function StockDataReadinessPageInner({
     setSnapshotMsg(null)
     setSnapshotOk(null)
     try {
-      // Phase 1: Evaluate fundamentals
-      const fundRes = await postSepaFundamentalsBackfill({ max_workers: 4, rate_limit_rps: 4.0 })
+      // Phase 1: Evaluate fundamentals (force re-evaluate all so extension conditions are included)
+      const fundRes = await postSepaFundamentalsBackfill({ max_workers: 4, rate_limit_rps: 4.0, only_missing: false })
       if (!fundRes.ok) {
         setFundBackfillMsg(fundRes.error ?? 'Fundamentals backfill failed')
         setFundBackfillOk(false)
@@ -2919,7 +2919,7 @@ function StockDataReadinessPageInner({
 
       // Phase 1.5: Technical (Phase-1 + CRS) — fire-and-forget; runs in a backend thread
       try {
-        const techRes = await postSepaTechnicalBackfill({ only_missing: true })
+        const techRes = await postSepaTechnicalBackfill({ only_missing: false })
         if (techRes.ok) {
           const note = techRes.gap_count === 0
             ? (techRes.message ?? 'All symbols already have a technical_eval row for today.')
@@ -4721,60 +4721,63 @@ function StockDataReadinessPageInner({
                   )}
                 </div>
 
-                {/* Extension fundamental groups coverage */}
-                {criteriaStats.fundamental.groups && Object.keys(criteriaStats.fundamental.groups).length > 0 && (
-                  <div className="sdp-eval-section sdp-eval-section--ext">
-                    <div className="sdp-eval-section-head">
-                      <strong>Extension Groups</strong>
-                      <span className="sdp-check-secondary">
-                        {Object.keys(criteriaStats.fundamental.groups).length} groups
-                      </span>
-                    </div>
-                    <div className="sdp-ext-groups-grid">
-                      {Object.entries(criteriaStats.fundamental.groups)
-                        .filter(([gk]) => gk !== 'sepa_core')
-                        .map(([gk, gData]) => {
-                          const totalConds = gData.conditions?.length ?? 0
-                          const passSum = gData.conditions?.reduce((s, c) => s + (c.pass ?? 0), 0) ?? 0
-                          const failSum = gData.conditions?.reduce((s, c) => s + (c.fail ?? 0), 0) ?? 0
-                          const evaluated = passSum + failSum
-                          const passPct = evaluated > 0 ? Math.round(passSum / evaluated * 100) : 0
-                          return (
-                            <div key={gk} className="sdp-ext-group-card">
-                              <div className="sdp-ext-group-card-head">
-                                <span className="sdp-ext-group-card-name">{gk}</span>
-                                <span className="sdp-ext-group-card-count">{totalConds} conditions</span>
-                              </div>
-                              <div className="sdp-ext-group-card-body">
-                                <div className="sdp-ext-group-stat">
-                                  <span className="sdp-ext-group-stat-label">Evaluated</span>
-                                  <span className="sdp-ext-group-stat-val">{fmt(gData.cached_count ?? 0)}</span>
+                {/* Extension fundamental groups — same bar-chart style as SEPA core */}
+                {criteriaStats.fundamental.groups && (() => {
+                  const extEntries = Object.entries(criteriaStats.fundamental.groups).filter(([gk]) => gk !== 'sepa_core')
+                  if (!extEntries.length) return null
+                  const EXT_GROUP_DISPLAY: Record<string, string> = {
+                    quality: 'Quality', balance: 'Balance Sheet', cashflow: 'Cash Flow',
+                    valuation: 'Valuation', profitability: 'Profitability',
+                    efficiency: 'Efficiency', sentiment: 'Sentiment',
+                  }
+                  return extEntries.map(([gk, gData]) => {
+                    const gconds = gData.conditions ?? []
+                    if (!gconds.length) return null
+                    const passSum = gconds.reduce((s, c) => s + (c.pass ?? 0), 0)
+                    const failSum = gconds.reduce((s, c) => s + (c.fail ?? 0), 0)
+                    const evalTotal = passSum + failSum
+                    const avgPct = evalTotal > 0 ? Math.round(passSum / evalTotal * 100) : 0
+                    return (
+                      <div key={gk} className="sdp-eval-section" style={{ marginTop: 'var(--space-3)' }}>
+                        <details>
+                          <summary className="sdp-eval-section-head" style={{ cursor: 'pointer', userSelect: 'none' }}>
+                            <strong>{EXT_GROUP_DISPLAY[gk] ?? gk}</strong>
+                            <span className="sdp-check-secondary">
+                              {gconds.length} conditions
+                              &nbsp;·&nbsp;
+                              <span className={avgPct >= 30 ? 'sdp-text-ok' : avgPct >= 15 ? 'sdp-text-warn' : 'sdp-text-dim'}>
+                                Avg pass rate: {avgPct}%
+                              </span>
+                              &nbsp;·&nbsp;
+                              Evaluated {fmt(gData.cached_count ?? 0)}
+                            </span>
+                          </summary>
+                          <div className="sdp-criteria-rows">
+                            {gconds.map((cond) => {
+                              const denominator = cond.pass + cond.fail
+                              const pct = denominator > 0 ? Math.round(cond.pass / denominator * 100) : 0
+                              const barColor = pct >= 30 ? 'sdp-criteria-bar-fill--ok' : pct >= 15 ? 'sdp-criteria-bar-fill--warn' : 'sdp-criteria-bar-fill--error'
+                              return (
+                                <div key={cond.id}>
+                                  <div className="sdp-criteria-row">
+                                    <span className="sdp-criteria-label" title={cond.id}>{cond.label}</span>
+                                    <div className="sdp-criteria-bar">
+                                      <div className={`sdp-criteria-bar-fill ${barColor}`} style={{ width: `${pct}%` }} />
+                                    </div>
+                                    <span className="sdp-criteria-stat">
+                                      {fmt(cond.pass)} / {fmt(denominator)}
+                                      <span className="sdp-check-secondary"> ({pct}%)</span>
+                                    </span>
+                                  </div>
                                 </div>
-                                <div className="sdp-ext-group-stat">
-                                  <span className="sdp-ext-group-stat-label">Avg pass rate</span>
-                                  <span className={`sdp-ext-group-stat-val ${passPct >= 30 ? 'sdp-text-ok' : passPct >= 15 ? 'sdp-text-warn' : 'sdp-text-dim'}`}>{passPct}%</span>
-                                </div>
-                              </div>
-                              {gData.conditions && gData.conditions.length > 0 && (
-                                <div className="sdp-ext-group-conds">
-                                  {gData.conditions.map(c => {
-                                    const d = c.pass + c.fail
-                                    const p = d > 0 ? Math.round(c.pass / d * 100) : 0
-                                    return (
-                                      <div key={c.id} className="sdp-ext-group-cond-row">
-                                        <span className="sdp-ext-group-cond-label" title={c.id}>{c.label}</span>
-                                        <span className="sdp-ext-group-cond-stat">{fmt(c.pass)}/{fmt(d)} ({p}%)</span>
-                                      </div>
-                                    )
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          )
-                        })}
-                    </div>
-                  </div>
-                )}
+                              )
+                            })}
+                          </div>
+                        </details>
+                      </div>
+                    )
+                  })
+                })()}
 
                 {/* Technical */}
                 <div className="sdp-eval-section">

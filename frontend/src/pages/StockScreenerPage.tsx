@@ -8,6 +8,8 @@ import {
   fetchTechnicalDistributionSymbols,
   fetchFundamentalFilter,
   fetchTechnicalFilter,
+  fetchMomentumFilter,
+  fetchTierFilter,
   fetchSymbolsReadinessSnapshot,
   type SepaCriteriaStats,
   type ReadinessSnapshotRow,
@@ -31,11 +33,12 @@ function parseSymbols(text: string): string[] {
   )
 }
 
-/** 8 canonical SEPA fundamental conditions in display order. */
+/** Core SEPA fundamental conditions */
 const FUND_GROUP_LABELS: Record<string, string> = {
   eps: 'EPS',
   rev: 'Revenue',
 }
+/** Extended fundamental groups — displayed in 4-col grid */
 const EXT_GROUP_LABELS: Record<string, string> = {
   quality:       'Quality',
   balance:       'Balance Sheet',
@@ -45,6 +48,7 @@ const EXT_GROUP_LABELS: Record<string, string> = {
   efficiency:    'Efficiency',
   sentiment:     'Sentiment',
 }
+/** Tier 1 technical groups */
 const TECH_GROUP_LABELS: Record<string, string> = {
   vol:     'Volume / Momentum',
   price52: '52-Week Range',
@@ -52,13 +56,15 @@ const TECH_GROUP_LABELS: Record<string, string> = {
   price:   'Price Position',
 }
 
+// ── Catalogs ──────────────────────────────────────────────────────────────────
+
 const SEPA_COND_CATALOG: { id: string; label: string; short: string; group: 'eps' | 'rev' }[] = [
   { id: 'eps_q2q_ge_25pct', label: 'EPS QoQ ≥ 25%',         short: 'EPS Q2Q',    group: 'eps' },
   { id: 'rev_q2q_ge_25pct', label: 'Revenue QoQ ≥ 25%',     short: 'Rev Q2Q',    group: 'rev' },
   { id: 'eps_acc_2q',       label: 'EPS Accelerating (2Q)', short: 'EPS Acc 2Q', group: 'eps' },
   { id: 'rev_acc_2q',       label: 'Revenue Accel (2Q)',    short: 'Rev Acc 2Q', group: 'rev' },
-  { id: 'eps_3y_ge_15pct',  label: 'EPS 3Y CAGR ≥ 15%',     short: 'EPS 3Y',     group: 'eps' },
-  { id: 'rev_3y_ge_15pct',  label: 'Revenue 3Y CAGR ≥ 15%', short: 'Rev 3Y',     group: 'rev' },
+  { id: 'eps_3y_ge_15pct',  label: 'EPS 3Y CAGR ≥ 15%',    short: 'EPS 3Y',     group: 'eps' },
+  { id: 'rev_3y_ge_15pct',  label: 'Revenue 3Y CAGR ≥ 15%', short: 'Rev 3Y',    group: 'rev' },
   { id: 'eps_acc_fy',       label: 'EPS Accelerating (FY)', short: 'EPS Acc FY', group: 'eps' },
   { id: 'rev_acc_fy',       label: 'Revenue Accel (FY)',    short: 'Rev Acc FY', group: 'rev' },
 ]
@@ -91,7 +97,6 @@ const EXT_COND_CATALOG: { id: string; label: string; short: string; group: strin
   { id: 'short_interest_pct_of_float_le_15pct', label: 'SI % Float ≤ 15%',      short: 'SI%≤15',   group: 'sentiment' },
 ]
 
-/** 11 SEPA technical conditions in display order (matches _TECH_COND_IDS on backend). */
 const TECH_COND_CATALOG: { id: string; label: string; short: string; group: 'vol' | 'price52' | 'sma' | 'price' }[] = [
   { id: 'avg_volume_50_gt_threshold', label: 'Avg Volume 50D > 100K',   short: 'Vol',       group: 'vol' },
   { id: 'crs_ge_70',                  label: 'CRS ≥ 70',                short: 'CRS',       group: 'vol' },
@@ -106,6 +111,47 @@ const TECH_COND_CATALOG: { id: string; label: string; short: string; group: 'vol
   { id: 'price_gt_sma200',            label: 'Price > SMA200',           short: 'P>200',      group: 'price' },
 ]
 
+// ── Tier 2-4 indicator catalogs ───────────────────────────────────────────────
+
+const MOMENTUM_INDICATORS: { id: string; label: string }[] = [
+  { id: 'rsi_14_in_band',              label: 'RSI 14 In Band' },
+  { id: 'macd_hist_positive',          label: 'MACD Hist Positive' },
+  { id: 'roc_3m_positive',             label: 'ROC 3M Positive' },
+  { id: 'roc_6m_positive',             label: 'ROC 6M Positive' },
+  { id: 'roc_12m_positive',            label: 'ROC 12M Positive' },
+  { id: 'multi_period_rs_4w_positive',  label: 'RS 4W Positive' },
+  { id: 'multi_period_rs_13w_positive', label: 'RS 13W Positive' },
+  { id: 'multi_period_rs_26w_positive', label: 'RS 26W Positive' },
+  { id: 'slope_sma200_positive',        label: 'SMA200 Slope ↑' },
+  { id: 'up_down_volume_50d_gt_1',      label: 'Up/Down Vol > 1' },
+]
+
+const STRUCTURE_INDICATORS: { id: string; label: string }[] = [
+  { id: 'realized_vol_contraction', label: 'Vol Contraction' },
+  { id: 'bb_squeeze',               label: 'BB Squeeze' },
+  { id: 'obv_slope_30d_positive',   label: 'OBV Slope ↑' },
+  { id: 'adx_14_ge_25',             label: 'ADX 14 ≥ 25' },
+  { id: 'aroon_oscillator_ge_50',   label: 'Aroon ≥ 50' },
+  { id: 'tight_closes_5d',          label: 'Tight Closes 5D' },
+  { id: 'vcp_contraction_3m',       label: 'VCP 3M' },
+  { id: 'pocket_pivot_count',       label: 'Pocket Pivot' },
+  { id: 'rsl_new_high',             label: 'RSL New High' },
+  { id: 'base_metrics',             label: 'Base Metrics' },
+]
+
+const SENTIMENT_INDICATORS: { id: string; label: string }[] = [
+  { id: 'days_to_cover_ge_5',                  label: 'Days to Cover ≥ 5' },
+  { id: 'short_volume_ratio_le_30pct_recent',   label: 'Short Vol ≤ 30%' },
+  { id: 'short_volume_ratio_trend_4w_falling',  label: 'Short Vol ↓ 4W' },
+]
+
+type TierKey = 'momentum' | 'structure' | 'sentiment'
+
+interface TierFilterState {
+  indicators: Set<string>
+  minScore: number
+}
+
 type InspectorSeed = { passCount: number; passedConditions: string[] }
 type InspectorState = { symbol: string; seed?: InspectorSeed }
 
@@ -117,9 +163,7 @@ function boolMark(v: boolean | undefined | null): ReactNode {
 export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Stock Screener' }: StockScreenerPageProps) {
   const [symbolText, setSymbolText] = useState('')
 
-  // ── Right-hand Stock inspector ──────────────────────────────────────────
   const [inspector, setInspector] = useState<InspectorState | null>(null)
-
   const openInspector = useCallback((symbol: string, seed?: InspectorSeed) => {
     const sym = (symbol || '').trim().toUpperCase()
     if (!sym) return
@@ -127,19 +171,17 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
   }, [])
   const closeInspector = useCallback(() => setInspector(null), [])
 
-  // ── Fundamental & Technical Distribution (top two cards) ────────────────
+  // ── Distribution stats ──────────────────────────────────────────────────────
   const [criteriaStats, setCriteriaStats] = useState<SepaCriteriaStats | null>(null)
   const [criteriaLoading, setCriteriaLoading] = useState(false)
   const [criteriaErr, setCriteriaErr] = useState<string | null>(null)
 
-  // Fundamental distribution — active bucket
   const [activeBucket, setActiveBucket] = useState<number | null>(null)
   const [bucketLoading, setBucketLoading] = useState(false)
   const [bucketLoadedCount, setBucketLoadedCount] = useState<number | null>(null)
   const [bucketError, setBucketError] = useState<string | null>(null)
   const distCacheRef = useRef<Map<number, string[]>>(new Map())
 
-  // Technical distribution — active bucket
   const [activeTechBucket, setActiveTechBucket] = useState<number | null>(null)
   const [techBucketLoading, setTechBucketLoading] = useState(false)
   const [techBucketLoadedCount, setTechBucketLoadedCount] = useState<number | null>(null)
@@ -162,103 +204,181 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
 
   useEffect(() => { void loadCriteriaStats() }, [loadCriteriaStats])
 
-  // ── Condition filter chips (no auto-fetch; triggered by Apply Filter button) ──
+  // ── Condition filter chips ──────────────────────────────────────────────────
   const [condFilter, setCondFilter] = useState<Set<string>>(new Set())
   const [techCondFilter, setTechCondFilter] = useState<Set<string>>(new Set())
 
+  // Tier 2-4 filter state
+  const [tierFilters, setTierFilters] = useState<Record<TierKey, TierFilterState>>(() => ({
+    momentum: { indicators: new Set<string>(), minScore: 0 },
+    structure: { indicators: new Set<string>(), minScore: 0 },
+    sentiment: { indicators: new Set<string>(), minScore: 0 },
+  }))
   const toggleCondFilter = useCallback((id: string) => {
-    setCondFilter((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-    setFilterPreview(null)
-    setFilterError(null)
+    setCondFilter((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+    setFilterPreview(null); setFilterError(null)
   }, [])
   const clearCondFilter = useCallback(() => { setCondFilter(new Set()); setFilterPreview(null) }, [])
 
   const toggleTechCondFilter = useCallback((id: string) => {
-    setTechCondFilter((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-    setFilterPreview(null)
-    setFilterError(null)
+    setTechCondFilter((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+    setFilterPreview(null); setFilterError(null)
   }, [])
   const clearTechCondFilter = useCallback(() => { setTechCondFilter(new Set()); setFilterPreview(null) }, [])
 
-  // ── Apply Filter — two-step: 1) preview count  2) apply to Symbols/Results ──
+  const toggleTierIndicator = useCallback((tier: TierKey, id: string) => {
+    setTierFilters((prev) => {
+      const cur = prev[tier]
+      const next = new Set(cur.indicators)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return { ...prev, [tier]: { ...cur, indicators: next } }
+    })
+    setFilterPreview(null); setFilterError(null)
+  }, [])
+
+  const setTierMinScore = useCallback((tier: TierKey, score: number) => {
+    setTierFilters((prev) => ({ ...prev, [tier]: { ...prev[tier], minScore: score } }))
+    setFilterPreview(null); setFilterError(null)
+  }, [])
+
+  const clearTierFilter = useCallback((tier: TierKey) => {
+    setTierFilters((prev) => ({ ...prev, [tier]: { indicators: new Set(), minScore: 0 } }))
+    setFilterPreview(null)
+  }, [])
+
+  const clearAllTierFilters = useCallback(() => {
+    setTierFilters({ momentum: { indicators: new Set(), minScore: 0 }, structure: { indicators: new Set(), minScore: 0 }, sentiment: { indicators: new Set(), minScore: 0 } })
+    setFilterPreview(null)
+  }, [])
+
+  const tierActiveCount = useMemo(() => {
+    let count = 0
+    for (const k of ['momentum', 'structure', 'sentiment'] as TierKey[]) {
+      const f = tierFilters[k]
+      if (f.indicators.size > 0 || f.minScore > 0) count++
+    }
+    return count
+  }, [tierFilters])
+
+  // ── Apply Filter ────────────────────────────────────────────────────────────
   const [filterLoading, setFilterLoading] = useState(false)
   const [filterError, setFilterError] = useState<string | null>(null)
-  // Preview state: pending symbols ready to be applied
   const [filterPreview, setFilterPreview] = useState<{ symbols: string[]; parts: string } | null>(null)
 
-  /** Step 1: fetch count/symbols and show preview without pushing to Results yet */
   const previewFilter = useCallback(async () => {
     const fundActive = condFilter.size > 0
     const techActive = techCondFilter.size > 0
-    if (!fundActive && !techActive) return
+    const momentumActive = tierFilters.momentum.indicators.size > 0 || tierFilters.momentum.minScore > 0
+    const structureActive = tierFilters.structure.indicators.size > 0 || tierFilters.structure.minScore > 0
+    const sentimentActive = tierFilters.sentiment.indicators.size > 0 || tierFilters.sentiment.minScore > 0
+    if (!fundActive && !techActive && !momentumActive && !structureActive && !sentimentActive) return
+
     setFilterLoading(true)
     setFilterError(null)
     setFilterPreview(null)
+
     try {
-      let fundSyms: string[] | null = null
-      let techSyms: string[] | null = null
+      const results: { label: string; syms: string[] }[] = []
+
       if (fundActive) {
         const res = await fetchFundamentalFilter({ include: Array.from(condFilter), limit: 2000 })
         if (!res.ok) throw new Error(res.error ?? 'Fundamental filter failed')
-        fundSyms = (res.symbols ?? []).map((s) => s.symbol)
+        results.push({ label: `${condFilter.size}F`, syms: (res.symbols ?? []).map((s) => s.symbol) })
       }
       if (techActive) {
         const res = await fetchTechnicalFilter({ include: Array.from(techCondFilter), limit: 2000 })
         if (!res.ok) throw new Error(res.error ?? 'Technical filter failed')
-        techSyms = (res.symbols ?? []).map((s) => s.symbol)
+        results.push({ label: `${techCondFilter.size}T`, syms: (res.symbols ?? []).map((s) => s.symbol) })
       }
-      let result: string[]
-      if (fundSyms && techSyms) {
-        const ts = new Set(techSyms)
-        result = fundSyms.filter((s) => ts.has(s))
-      } else {
-        result = fundSyms ?? techSyms ?? []
+      if (momentumActive) {
+        const f = tierFilters.momentum
+        const res = await fetchMomentumFilter({
+          include: f.indicators.size > 0 ? Array.from(f.indicators) : undefined,
+          min_score: f.minScore > 0 ? f.minScore : undefined,
+          limit: 2000,
+        })
+        if (!res.ok) throw new Error(res.error ?? 'Momentum filter failed')
+        results.push({ label: `M(≥${f.minScore})`, syms: (res.symbols ?? []).map((s) => s.symbol) })
       }
-      const parts = [
-        fundActive && `${condFilter.size}F`,
-        techActive && `${techCondFilter.size}T`,
-      ].filter(Boolean).join(' ∩ ')
-      setFilterPreview({ symbols: result, parts })
+      if (structureActive) {
+        const f = tierFilters.structure
+        const res = await fetchTierFilter({
+          tier: 'structure',
+          include: f.indicators.size > 0 ? Array.from(f.indicators) : undefined,
+          min_score: f.minScore > 0 ? f.minScore : undefined,
+          limit: 2000,
+        })
+        if (!res.ok) throw new Error(res.error ?? 'Structure filter failed')
+        results.push({ label: `S(≥${f.minScore})`, syms: (res.symbols ?? []).map((s) => s.symbol) })
+      }
+      if (sentimentActive) {
+        const f = tierFilters.sentiment
+        const res = await fetchTierFilter({
+          tier: 'sentiment',
+          include: f.indicators.size > 0 ? Array.from(f.indicators) : undefined,
+          min_score: f.minScore > 0 ? f.minScore : undefined,
+          limit: 2000,
+        })
+        if (!res.ok) throw new Error(res.error ?? 'Sentiment filter failed')
+        results.push({ label: `Se(≥${f.minScore})`, syms: (res.symbols ?? []).map((s) => s.symbol) })
+      }
+
+      let intersection: string[] = results[0]?.syms ?? []
+      for (let i = 1; i < results.length; i++) {
+        const s = new Set(results[i].syms)
+        intersection = intersection.filter((x) => s.has(x))
+      }
+      const parts = results.map((r) => r.label).join(' ∩ ')
+      setFilterPreview({ symbols: intersection, parts })
     } catch (e) {
       setFilterError(e instanceof Error ? e.message : 'Filter failed')
     } finally {
       setFilterLoading(false)
     }
-  }, [condFilter, techCondFilter])
+  }, [condFilter, techCondFilter, tierFilters])
 
-  /** Step 2: push previewed symbols to Symbols / Results */
   const applyFilter = useCallback(() => {
     if (!filterPreview) return
-    setActiveBucket(null)
-    setActiveTechBucket(null)
+    setActiveBucket(null); setActiveTechBucket(null)
     setSymbolText(filterPreview.symbols.join(','))
   }, [filterPreview])
 
-  // ── Results table sort state ────────────────────────────────────────────
+  const clearExtGroupFilter = useCallback((gk: string) => {
+    setCondFilter((prev) => {
+      const next = new Set(prev)
+      EXT_COND_CATALOG.filter((c) => c.group === gk).forEach((c) => next.delete(c.id))
+      return next
+    })
+    setFilterPreview(null)
+  }, [])
+
+  const clearSepaGroupFilter = useCallback((g: 'eps' | 'rev') => {
+    setCondFilter((prev) => {
+      const next = new Set(prev)
+      SEPA_COND_CATALOG.filter((c) => c.group === g).forEach((c) => next.delete(c.id))
+      return next
+    })
+    setFilterPreview(null)
+  }, [])
+
+  const clearAllFilters = useCallback(() => {
+    clearCondFilter(); clearTechCondFilter(); clearAllTierFilters()
+    setFilterPreview(null); setFilterError(null)
+  }, [clearCondFilter, clearTechCondFilter, clearAllTierFilters])
+
+  const anyFilterActive = condFilter.size > 0 || techCondFilter.size > 0 || tierActiveCount > 0
+
+  // ── Sort ────────────────────────────────────────────────────────────────────
   const [sortCol, setSortCol] = useState<'tech' | 'fund' | null>(null)
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc')
   const toggleSort = useCallback((col: 'tech' | 'fund') => {
     setSortCol((prev) => {
-      if (prev === col) {
-        setSortDir((d) => d === 'desc' ? 'asc' : 'desc')
-        return col
-      }
-      setSortDir('desc')
-      return col
+      if (prev === col) { setSortDir((d) => d === 'desc' ? 'asc' : 'desc'); return col }
+      setSortDir('desc'); return col
     })
   }, [])
 
-  // ── Symbols & readiness-driven main table ───────────────────────────────
+  // ── Symbols & readiness ─────────────────────────────────────────────────────
   const symbols = useMemo(() => parseSymbols(symbolText), [symbolText])
   const symbolsKey = useMemo(() => symbols.join(','), [symbols])
 
@@ -269,69 +389,38 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
 
   useEffect(() => {
     if (symbols.length === 0) {
-      setReadinessRows([])
-      setReadinessAsOf(null)
-      setReadinessError(null)
-      return
+      setReadinessRows([]); setReadinessAsOf(null); setReadinessError(null); return
     }
     let cancelled = false
-    setReadinessLoading(true)
-    setReadinessError(null)
+    setReadinessLoading(true); setReadinessError(null)
     const handle = window.setTimeout(() => {
       fetchSymbolsReadinessSnapshot(symbols)
         .then((res) => {
           if (cancelled) return
-          if (!res.ok) {
-            setReadinessRows([])
-            setReadinessAsOf(null)
-            setReadinessError(res.error ?? 'Failed')
-            return
-          }
+          if (!res.ok) { setReadinessRows([]); setReadinessAsOf(null); setReadinessError(res.error ?? 'Failed'); return }
           setReadinessRows(res.symbols ?? [])
           setReadinessAsOf(res.as_of_date ?? null)
         })
-        .catch((e) => {
-          if (!cancelled) setReadinessError(e instanceof Error ? e.message : 'Network error')
-        })
-        .finally(() => {
-          if (!cancelled) setReadinessLoading(false)
-        })
+        .catch((e) => { if (!cancelled) setReadinessError(e instanceof Error ? e.message : 'Network error') })
+        .finally(() => { if (!cancelled) setReadinessLoading(false) })
     }, 200)
-    return () => {
-      cancelled = true
-      window.clearTimeout(handle)
-    }
-    // symbolsKey is the canonical dependency; including `symbols` for ESLint exhaustive-deps.
+    return () => { cancelled = true; window.clearTimeout(handle) }
   }, [symbolsKey, symbols])
 
   const handleBucketClick = useCallback((n: number, count: number) => {
     if (count === 0) return
     const isActivating = activeBucket !== n
     setActiveBucket(isActivating ? n : null)
-    // Deactivate technical bucket when fundamental is clicked
     setActiveTechBucket(null)
     if (!isActivating) return
-
     const cached = distCacheRef.current.get(n)
-    if (cached) {
-      setSymbolText(cached.join(','))
-      setBucketLoadedCount(cached.length)
-      setBucketError(null)
-      return
-    }
-    setBucketLoading(true)
-    setBucketError(null)
-    setBucketLoadedCount(null)
+    if (cached) { setSymbolText(cached.join(',')); setBucketLoadedCount(cached.length); setBucketError(null); return }
+    setBucketLoading(true); setBucketError(null); setBucketLoadedCount(null)
     fetchFundamentalDistributionSymbols(n).then((res) => {
       setBucketLoading(false)
-      if (!res.ok) {
-        setBucketError(res.error ?? 'Failed')
-        return
-      }
+      if (!res.ok) { setBucketError(res.error ?? 'Failed'); return }
       const syms = (res.symbols ?? []).map((s) => s.symbol)
-      distCacheRef.current.set(n, syms)
-      setSymbolText(syms.join(','))
-      setBucketLoadedCount(syms.length)
+      distCacheRef.current.set(n, syms); setSymbolText(syms.join(',')); setBucketLoadedCount(syms.length)
     })
   }, [activeBucket])
 
@@ -339,34 +428,19 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
     if (count === 0) return
     const isActivating = activeTechBucket !== n
     setActiveTechBucket(isActivating ? n : null)
-    // Deactivate fundamental bucket when technical is clicked
     setActiveBucket(null)
     if (!isActivating) return
-
     const cached = techDistCacheRef.current.get(n)
-    if (cached) {
-      setSymbolText(cached.join(','))
-      setTechBucketLoadedCount(cached.length)
-      setTechBucketError(null)
-      return
-    }
-    setTechBucketLoading(true)
-    setTechBucketError(null)
-    setTechBucketLoadedCount(null)
+    if (cached) { setSymbolText(cached.join(',')); setTechBucketLoadedCount(cached.length); setTechBucketError(null); return }
+    setTechBucketLoading(true); setTechBucketError(null); setTechBucketLoadedCount(null)
     fetchTechnicalDistributionSymbols(n).then((res) => {
       setTechBucketLoading(false)
-      if (!res.ok) {
-        setTechBucketError(res.error ?? 'Failed')
-        return
-      }
+      if (!res.ok) { setTechBucketError(res.error ?? 'Failed'); return }
       const syms = (res.symbols ?? []).map((s) => s.symbol)
-      techDistCacheRef.current.set(n, syms)
-      setSymbolText(syms.join(','))
-      setTechBucketLoadedCount(syms.length)
+      techDistCacheRef.current.set(n, syms); setSymbolText(syms.join(',')); setTechBucketLoadedCount(syms.length)
     })
   }, [activeTechBucket])
 
-  // Sorted rows for display
   const sortedRows = useMemo(() => {
     if (!sortCol) return readinessRows
     return [...readinessRows].sort((a, b) => {
@@ -376,51 +450,33 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
     })
   }, [readinessRows, sortCol, sortDir])
 
-  // Summary derived from readiness rows
   const summary = useMemo(() => {
     if (readinessRows.length === 0) return null
     const found = readinessRows.filter((r) => r.found)
-    const fundPass = found.filter((r) => (r.fundamental_pass_count ?? 0) === 8).length
-    const techPass = found.filter((r) => r.technical_pass === true).length
-    const insuff = found.filter((r) => r.fundamental_insufficient).length
     return {
       total: readinessRows.length,
       found: found.length,
-      fundPass,
-      techPass,
-      insufficient: insuff,
+      fundPass: found.filter((r) => (r.fundamental_pass_count ?? 0) === 8).length,
+      techPass: found.filter((r) => r.technical_pass === true).length,
+      insufficient: found.filter((r) => r.fundamental_insufficient).length,
     }
   }, [readinessRows])
 
-  // Fundamental distribution — sorted by conditions_passed DESC (funnel: most conditions at top)
+  // ── Distribution helpers ────────────────────────────────────────────────────
   const distRaw = criteriaStats?.fundamental?.pass_count_distribution ?? null
   const distBase = distRaw ? distRaw.reduce((s, d) => s + d.symbol_count, 0) || 1 : 1
-  const dist = distRaw
-    ? [...distRaw].filter((d) => d.symbol_count > 0).sort((a, b) => b.conditions_passed - a.conditions_passed)
-    : null
+  const dist = distRaw ? [...distRaw].filter((d) => d.symbol_count > 0).sort((a, b) => b.conditions_passed - a.conditions_passed) : null
   const distMaxCount = dist ? Math.max(...dist.map((d) => d.symbol_count), 1) : 1
   const barColorForN = (n: number) =>
-    n === 8 ? 'ssp-dist-bar-fill--ok'
-    : n >= 6  ? 'ssp-dist-bar-fill--good'
-    : n >= 4  ? 'ssp-dist-bar-fill--warn'
-    : n >= 2  ? 'ssp-dist-bar-fill--poor'
-    :           'ssp-dist-bar-fill--error'
+    n === 8 ? 'ssp-dist-bar-fill--ok' : n >= 6 ? 'ssp-dist-bar-fill--good' : n >= 4 ? 'ssp-dist-bar-fill--warn' : n >= 2 ? 'ssp-dist-bar-fill--poor' : 'ssp-dist-bar-fill--error'
 
-  // Technical distribution — sorted by conditions_passed DESC, top 8 shown
   const techDistRaw = criteriaStats?.technical?.pass_count_distribution ?? null
   const techDistBase = techDistRaw ? techDistRaw.reduce((s, d) => s + d.symbol_count, 0) || 1 : 1
-  const techDist = techDistRaw
-    ? [...techDistRaw].filter((d) => d.symbol_count > 0).sort((a, b) => b.conditions_passed - a.conditions_passed).slice(0, 8)
-    : null
+  const techDist = techDistRaw ? [...techDistRaw].filter((d) => d.symbol_count > 0).sort((a, b) => b.conditions_passed - a.conditions_passed).slice(0, 8) : null
   const techDistMaxCount = techDist ? Math.max(...techDist.map((d) => d.symbol_count), 1) : 1
   const techBarColorForN = (n: number) =>
-    n === 11 ? 'ssp-dist-bar-fill--tech-ok'
-    : n >= 9  ? 'ssp-dist-bar-fill--tech-good'
-    : n >= 7  ? 'ssp-dist-bar-fill--tech-warn'
-    : n >= 4  ? 'ssp-dist-bar-fill--tech-poor'
-    :           'ssp-dist-bar-fill--tech-error'
+    n === 11 ? 'ssp-dist-bar-fill--tech-ok' : n >= 9 ? 'ssp-dist-bar-fill--tech-good' : n >= 7 ? 'ssp-dist-bar-fill--tech-warn' : n >= 4 ? 'ssp-dist-bar-fill--tech-poor' : 'ssp-dist-bar-fill--tech-error'
 
-  // Auto-load: on first criteria load, populate Results with the top fundamental bucket
   const hasAutoLoadedRef = useRef(false)
   useEffect(() => {
     if (hasAutoLoadedRef.current || !dist || dist.length === 0) return
@@ -430,16 +486,10 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
     handleBucketClick(top.conditions_passed, top.symbol_count)
   }, [dist, handleBucketClick])
 
-  // Funnel-style row: centered bar gives visual taper when sorted by conditions_passed DESC
   const funnelRow = (
-    conditions_passed: number,
-    symbol_count: number,
-    maxCount: number,
-    base: number,
-    colorFn: (n: number) => string,
-    activeBucketVal: number | null,
-    clickFn: (n: number, c: number) => void,
-    suffix: string,
+    conditions_passed: number, symbol_count: number, maxCount: number, base: number,
+    colorFn: (n: number) => string, activeBucketVal: number | null,
+    clickFn: (n: number, c: number) => void, suffix: string,
   ) => {
     const widthPct = Math.round(symbol_count / maxCount * 100)
     const sharePct = Math.round(symbol_count / base * 100)
@@ -447,8 +497,7 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
     const isClickable = symbol_count > 0
     const isFull = conditions_passed === parseInt(suffix)
     return (
-      <div
-        key={conditions_passed}
+      <div key={conditions_passed}
         className={`ssp-funnel-row${isClickable ? ' ssp-funnel-row--clickable' : ''}${isActive ? ' ssp-funnel-row--active' : ''}`}
         onClick={() => clickFn(conditions_passed, symbol_count)}
         role={isClickable ? 'button' : undefined}
@@ -462,13 +511,19 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
         <div className="ssp-funnel-bar-wrap">
           <div className={`ssp-funnel-bar-fill ${colorFn(conditions_passed)}`} style={{ width: `${widthPct}%` }} />
         </div>
-        <span className="ssp-funnel-stat">
-          {symbol_count.toLocaleString()}
-          <span className="ssp-funnel-stat-sub">({sharePct}%)</span>
-        </span>
+        <span className="ssp-funnel-stat">{symbol_count.toLocaleString()}<span className="ssp-funnel-stat-sub">({sharePct}%)</span></span>
       </div>
     )
   }
+
+  // ── Tier helpers ────────────────────────────────────────────────────────────
+  const tierCatalog: Record<TierKey, { id: string; label: string }[]> = {
+    momentum: MOMENTUM_INDICATORS,
+    structure: STRUCTURE_INDICATORS,
+    sentiment: SENTIMENT_INDICATORS,
+  }
+  const tierMaxScore: Record<TierKey, number> = { momentum: 10, structure: 10, sentiment: 3 }
+
 
   return (
     <div className="card process-section stock-screener-page wl2 ssp-page">
@@ -478,138 +533,227 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
           pageTitle={breadcrumbLabel}
           onMenuClick={onBreadcrumbResearch}
           menuNavigateAriaLabel="Go to Research home"
-          infoText="Discover symbols by SEPA conditions and inspect their daily readiness snapshot. All calculations come from the unified Stock Data Readiness pipeline; this page only filters and views."
+          infoText="Discover symbols by SEPA conditions and inspect their daily readiness snapshot."
           style={{ margin: 0 }}
         />
       </div>
 
-      {/* Top: 4-column grid (Tech Dist · Fund Dist · Tech Conditions · Fund Conditions) */}
-      <div className="ssp-top-grid ssp-top-grid--quad">
-        {/* ── Card 1: Technical Distribution (top-left) ───────────────────── */}
-        <section className="ssp-card">
-          <header className="ssp-card-head ssp-card-head--tight">
-            <h3 className="ssp-card-title">
-              Technical Dist.
-            </h3>
-            <button type="button" className="ssp-btn ssp-btn--ghost" onClick={() => void loadCriteriaStats()} disabled={criteriaLoading} title="Refresh">
-              {criteriaLoading ? '…' : '↻'}
-            </button>
-          </header>
-          {activeTechBucket != null && (
-            <div className="ssp-dist-active-hint ssp-dist-active-hint--tech">
-              {techBucketLoading && <span>Loading…</span>}
-              {techBucketError && <span className="ssp-status-err">{techBucketError}</span>}
-              {!techBucketLoading && !techBucketError && techBucketLoadedCount != null && (
-                <span><span className="ssp-dist-active-badge ssp-dist-active-badge--tech">{activeTechBucket}/11</span> — {techBucketLoadedCount} → Results</span>
-              )}
-            </div>
-          )}
-          <div className="ssp-dist-body">
-            {criteriaErr && <div className="ssp-empty-line ssp-status-err">{criteriaErr}</div>}
-            {techDist
-              ? <div className="ssp-dist-rows">{techDist.map(({ conditions_passed, symbol_count }) => funnelRow(conditions_passed, symbol_count, techDistMaxCount, techDistBase, techBarColorForN, activeTechBucket, handleTechBucketClick, '11'))}</div>
-              : !criteriaLoading && <div className="ssp-empty-line">No data — run technical backfill first.</div>}
-          </div>
-        </section>
+      {/* ══ Technical Section ═══════════════════════════════════════════════ */}
+      <div className="ssp-section">
+        <div className="ssp-section-header">
+          <span className="ssp-section-label ssp-section-label--tech">Technical</span>
+          <div className="ssp-section-rule" />
+        </div>
 
-        {/* ── Card 2: Fundamental Distribution ────────────────────────────── */}
-        <section className="ssp-card">
-          <header className="ssp-card-head ssp-card-head--tight">
-            <h3 className="ssp-card-title">
-              Fundamental Dist.
-            </h3>
-            <button type="button" className="ssp-btn ssp-btn--ghost" onClick={() => void loadCriteriaStats()} disabled={criteriaLoading} title="Refresh">
-              {criteriaLoading ? '…' : '↻'}
-            </button>
-          </header>
-          {activeBucket != null && (
-            <div className="ssp-dist-active-hint">
-              {bucketLoading && <span>Loading…</span>}
-              {bucketError && <span className="ssp-status-err">{bucketError}</span>}
-              {!bucketLoading && !bucketError && bucketLoadedCount != null && (
-                <span><span className="ssp-dist-active-badge">{activeBucket}/8</span> — {bucketLoadedCount} → Results</span>
-              )}
-            </div>
-          )}
-          <div className="ssp-dist-body">
-            {criteriaErr && <div className="ssp-empty-line ssp-status-err">{criteriaErr}</div>}
-            {dist
-              ? <div className="ssp-dist-rows">{dist.map(({ conditions_passed, symbol_count }) => funnelRow(conditions_passed, symbol_count, distMaxCount, distBase, barColorForN, activeBucket, handleBucketClick, '8'))}</div>
-              : !criteriaLoading && <div className="ssp-empty-line">No distribution data.</div>}
-          </div>
-        </section>
+        {/* Tech Row A: SEPA Dist + SEPA Conditions */}
+        <div className="ssp-section-row ssp-section-row--overview">
 
-        {/* ── Card 3: Technical Conditions filter ─────────────────────────── */}
-        <section className="ssp-card">
-          <header className="ssp-card-head ssp-card-head--tight">
-            <h3 className="ssp-card-title">
-              Technical Conditions
-              {techCondFilter.size > 0 && <span className="ssp-filter-tab-badge ssp-filter-tab-badge--tech" style={{ marginLeft: 6 }}>{techCondFilter.size}</span>}
-            </h3>
-            {techCondFilter.size > 0 && (
-              <button type="button" className="ssp-btn ssp-btn--ghost" onClick={clearTechCondFilter} title="Clear technical conditions">Clear</button>
+          <section className="ssp-card">
+            <header className="ssp-card-head ssp-card-head--tight">
+              <h3 className="ssp-card-title">SEPA Dist.</h3>
+              <button type="button" className="ssp-btn ssp-btn--ghost" onClick={() => void loadCriteriaStats()} disabled={criteriaLoading} title="Refresh">{criteriaLoading ? '…' : '↻'}</button>
+            </header>
+            {activeTechBucket != null && (
+              <div className="ssp-dist-active-hint ssp-dist-active-hint--tech">
+                {techBucketLoading && <span>Loading…</span>}
+                {techBucketError && <span className="ssp-status-err">{techBucketError}</span>}
+                {!techBucketLoading && !techBucketError && techBucketLoadedCount != null && (
+                  <span><span className="ssp-dist-active-badge ssp-dist-active-badge--tech">{activeTechBucket}/11</span> — {techBucketLoadedCount} → Results</span>
+                )}
+              </div>
             )}
-          </header>
-          <div className="ssp-cond-groups">
-            {(['vol', 'price52', 'sma', 'price'] as const).map((g) => (
-              <div key={g} className="ssp-cond-group">
-                <div className="ssp-cond-group-header">{TECH_GROUP_LABELS[g]}</div>
+            <div className="ssp-dist-body">
+              {criteriaErr && <div className="ssp-empty-line ssp-status-err">{criteriaErr}</div>}
+              {techDist
+                ? <div className="ssp-dist-rows">{techDist.map(({ conditions_passed, symbol_count }) => funnelRow(conditions_passed, symbol_count, techDistMaxCount, techDistBase, techBarColorForN, activeTechBucket, handleTechBucketClick, '11'))}</div>
+                : !criteriaLoading && <div className="ssp-empty-line">No data — run technical backfill first.</div>}
+            </div>
+          </section>
+
+          <section className="ssp-card">
+            <header className="ssp-card-head ssp-card-head--tight">
+              <h3 className="ssp-card-title">
+                SEPA Conditions
+                {techCondFilter.size > 0 && <span className="ssp-filter-tab-badge ssp-filter-tab-badge--tech" style={{ marginLeft: 4 }}>{techCondFilter.size}</span>}
+              </h3>
+              {techCondFilter.size > 0 && <button type="button" className="ssp-btn ssp-btn--ghost" onClick={clearTechCondFilter}>Clear</button>}
+            </header>
+            <div className="ssp-cond-groups">
+              {(['vol', 'price52', 'sma', 'price'] as const).map((g) => (
+                <div key={g} className={`ssp-cond-group ssp-cond-group--${g}`}>
+                  <div className="ssp-cond-group-header">{TECH_GROUP_LABELS[g]}</div>
+                  <div className="ssp-cond-chips-row">
+                    {TECH_COND_CATALOG.filter(c => c.group === g).map(({ id, label }) => {
+                      const active = techCondFilter.has(id)
+                      return (
+                        <button key={id} type="button"
+                          className={`ssp-cond-chip ssp-cond-chip--tech-${g}${active ? ' ssp-cond-chip--active' : ''}`}
+                          onClick={() => toggleTechCondFilter(id)}
+                          title={active ? `Remove ${label}` : `Add ${label}`}
+                        >
+                          <span className="ssp-cond-chip-check" aria-hidden>{active ? '✓' : ''}</span>
+                          <span className="ssp-cond-chip-label">{label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+        </div>{/* end tech row A */}
+
+        {/* Tech Row B: Momentum · Structure · Sentiment */}
+        <div className="ssp-section-row ssp-section-row--tiers">
+          {(['momentum', 'structure', 'sentiment'] as TierKey[]).map((tk) => {
+            const f = tierFilters[tk]
+            const activeCount = f.indicators.size + (f.minScore > 0 ? 1 : 0)
+            const tierLabel = tk.charAt(0).toUpperCase() + tk.slice(1)
+            return (
+              <section key={tk} className={`ssp-card ssp-card--tier-${tk}`}>
+                <header className="ssp-card-head ssp-card-head--tight">
+                  <h3 className={`ssp-card-title ssp-tier-card-title--${tk}`}>
+                    {tierLabel}
+                    {activeCount > 0 && <span className={`ssp-tier-count-badge ssp-tier-count-badge--${tk}`} style={{ marginLeft: 4 }}>{activeCount}</span>}
+                  </h3>
+                  {activeCount > 0 && <button type="button" className="ssp-btn ssp-btn--ghost" onClick={() => clearTierFilter(tk)}>Clear</button>}
+                </header>
+                <div className="ssp-tier-score-row">
+                  <span className="ssp-tier-score-label">Score ≥</span>
+                  <div className="ssp-tier-score-inline">
+                    <input type="range" min={0} max={tierMaxScore[tk]} value={f.minScore}
+                      onChange={(e) => setTierMinScore(tk, Number(e.target.value))}
+                      className="ssp-tier-score-slider"
+                    />
+                    <span className={`ssp-tier-score-val${f.minScore > 0 ? ` ssp-tier-score-val--${tk}` : ''}`}>
+                      {f.minScore}/{tierMaxScore[tk]}
+                    </span>
+                  </div>
+                </div>
                 <div className="ssp-cond-chips-row">
-                  {TECH_COND_CATALOG.filter(c => c.group === g).map(({ id, label }) => {
-                    const active = techCondFilter.has(id)
+                  {tierCatalog[tk].map(({ id, label: chipLabel }) => {
+                    const active = f.indicators.has(id)
                     return (
                       <button key={id} type="button"
-                        className={`ssp-cond-chip ssp-cond-chip--tech-${g}${active ? ' ssp-cond-chip--active' : ''}`}
-                        onClick={() => toggleTechCondFilter(id)}
-                        title={active ? `Remove ${label}` : `Add ${label}`}
+                        className={`ssp-cond-chip ssp-cond-chip--tier-${tk}${active ? ' ssp-cond-chip--active' : ''}`}
+                        onClick={() => toggleTierIndicator(tk, id)}
+                        title={active ? `Remove ${chipLabel}` : `Add ${chipLabel}`}
                       >
                         <span className="ssp-cond-chip-check" aria-hidden>{active ? '✓' : ''}</span>
-                        <span className="ssp-cond-chip-label">{label}</span>
+                        <span className="ssp-cond-chip-label">{chipLabel}</span>
                       </button>
                     )
                   })}
                 </div>
+              </section>
+            )
+          })}
+        </div>{/* end tech row B */}
+
+      </div>{/* end Technical section */}
+
+      {/* ══ Fundamental Section ════════════════════════════════════════════════ */}
+      <div className="ssp-section">
+        <div className="ssp-section-header">
+          <span className="ssp-section-label ssp-section-label--fund">Fundamental</span>
+          <div className="ssp-section-rule" />
+        </div>
+
+        {/* Fund Row A: SEPA Dist + SEPA Conditions */}
+        <div className="ssp-section-row ssp-section-row--overview">
+
+          <section className="ssp-card">
+            <header className="ssp-card-head ssp-card-head--tight">
+              <h3 className="ssp-card-title">SEPA Dist.</h3>
+              <button type="button" className="ssp-btn ssp-btn--ghost" onClick={() => void loadCriteriaStats()} disabled={criteriaLoading} title="Refresh">{criteriaLoading ? '…' : '↻'}</button>
+            </header>
+            {activeBucket != null && (
+              <div className="ssp-dist-active-hint">
+                {bucketLoading && <span>Loading…</span>}
+                {bucketError && <span className="ssp-status-err">{bucketError}</span>}
+                {!bucketLoading && !bucketError && bucketLoadedCount != null && (
+                  <span><span className="ssp-dist-active-badge">{activeBucket}/8</span> — {bucketLoadedCount} → Results</span>
+                )}
               </div>
-            ))}
-          </div>
-        </section>
-
-        {/* ── Card 3b: Tier-aware filter hint ───────────────────────────── */}
-        <section className="ssp-card ssp-card--tier-hint">
-          <header className="ssp-card-head ssp-card-head--tight">
-            <h3 className="ssp-card-title" style={{ fontSize: '0.82rem' }}>
-              Extended Tiers
-              <span className="ssp-check-secondary" style={{ fontWeight: 400, marginLeft: 8 }}>Momentum · Structure · Sentiment</span>
-            </h3>
-          </header>
-          <p className="ssp-tier-hint-text">
-            Technical evaluation now includes Tier 2 (Momentum 0–10), Tier 3 (Structure/Patterns),
-            and Tier 4 (Sentiment/Short). Use the <strong>Inspector panel</strong> for per-symbol
-            drill-down, or the <code>/momentum-filter</code> API with <code>min_score</code> for bulk screening.
-          </p>
-        </section>
-
-        {/* ── Card 4: Fundamental Conditions filter ───────────────────────── */}
-        <section className="ssp-card">
-          <header className="ssp-card-head ssp-card-head--tight">
-            <h3 className="ssp-card-title">
-              Fundamental Conditions
-              {condFilter.size > 0 && <span className="ssp-filter-tab-badge" style={{ marginLeft: 6 }}>{condFilter.size}</span>}
-            </h3>
-            {condFilter.size > 0 && (
-              <button type="button" className="ssp-btn ssp-btn--ghost" onClick={clearCondFilter} title="Clear fundamental conditions">Clear</button>
             )}
-          </header>
-          <div className="ssp-cond-groups">
-            {(['eps', 'rev'] as const).map((g) => (
-              <div key={g} className="ssp-cond-group">
-                <div className="ssp-cond-group-header">{FUND_GROUP_LABELS[g]}</div>
+            <div className="ssp-dist-body">
+              {criteriaErr && <div className="ssp-empty-line ssp-status-err">{criteriaErr}</div>}
+              {dist
+                ? <div className="ssp-dist-rows">{dist.map(({ conditions_passed, symbol_count }) => funnelRow(conditions_passed, symbol_count, distMaxCount, distBase, barColorForN, activeBucket, handleBucketClick, '8'))}</div>
+                : !criteriaLoading && <div className="ssp-empty-line">No distribution data.</div>}
+            </div>
+          </section>
+
+          <section className="ssp-card">
+            <header className="ssp-card-head ssp-card-head--tight">
+              <h3 className="ssp-card-title">
+                SEPA Conditions
+                {(['eps', 'rev'] as const).reduce((n, g) => n + SEPA_COND_CATALOG.filter(c => c.group === g && condFilter.has(c.id)).length, 0) > 0 && (
+                  <span className="ssp-filter-tab-badge" style={{ marginLeft: 4 }}>
+                    {(['eps', 'rev'] as const).reduce((n, g) => n + SEPA_COND_CATALOG.filter(c => c.group === g && condFilter.has(c.id)).length, 0)}
+                  </span>
+                )}
+              </h3>
+              {(['eps', 'rev'] as const).some(g => SEPA_COND_CATALOG.filter(c => c.group === g).some(c => condFilter.has(c.id))) && (
+                <button type="button" className="ssp-btn ssp-btn--ghost" onClick={() => { clearSepaGroupFilter('eps'); clearSepaGroupFilter('rev') }}>Clear</button>
+              )}
+            </header>
+            <div className="ssp-cond-groups">
+              {(['eps', 'rev'] as const).map((g) => {
+                const groupActive = SEPA_COND_CATALOG.filter(c => c.group === g && condFilter.has(c.id)).length
+                return (
+                  <div key={g} className={`ssp-cond-group ssp-cond-group--fund-${g}`}>
+                    <div className="ssp-cond-group-header">
+                      {FUND_GROUP_LABELS[g]}
+                      {groupActive > 0 && <span className="ssp-filter-tab-badge" style={{ marginLeft: 4 }}>{groupActive}</span>}
+                    </div>
+                    <div className="ssp-cond-chips-row">
+                      {SEPA_COND_CATALOG.filter(c => c.group === g).map(({ id, label }) => {
+                        const active = condFilter.has(id)
+                        return (
+                          <button key={id} type="button"
+                            className={`ssp-cond-chip ssp-cond-chip--${g}${active ? ' ssp-cond-chip--active' : ''}`}
+                            onClick={() => toggleCondFilter(id)}
+                            title={active ? `Remove ${label}` : `Add ${label}`}
+                          >
+                            <span className="ssp-cond-chip-check" aria-hidden>{active ? '✓' : ''}</span>
+                            <span className="ssp-cond-chip-label">{label}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+
+        </div>{/* end fund row A */}
+
+        {/* Fund Row B: 7 extended group mini-cards */}
+        <div className="ssp-section-row ssp-section-row--ext">
+          {Object.entries(EXT_GROUP_LABELS).map(([gk, gLabel]) => {
+            const items = EXT_COND_CATALOG.filter(c => c.group === gk)
+            if (!items.length) return null
+            const activeCount = items.filter(c => condFilter.has(c.id)).length
+            return (
+              <section key={gk} className={`ssp-card ssp-card--group-${gk}`}>
+                <header className="ssp-card-head ssp-card-head--tight">
+                  <h3 className={`ssp-card-title ssp-group-title--${gk}`}>
+                    {gLabel}
+                    {activeCount > 0 && <span className="ssp-filter-tab-badge" style={{ marginLeft: 4 }}>{activeCount}</span>}
+                  </h3>
+                  {activeCount > 0 && (
+                    <button type="button" className="ssp-btn ssp-btn--ghost" onClick={() => clearExtGroupFilter(gk)}>Clear</button>
+                  )}
+                </header>
                 <div className="ssp-cond-chips-row">
-                  {SEPA_COND_CATALOG.filter(c => c.group === g).map(({ id, label }) => {
+                  {items.map(({ id, label }) => {
                     const active = condFilter.has(id)
                     return (
                       <button key={id} type="button"
-                        className={`ssp-cond-chip ssp-cond-chip--${g}${active ? ' ssp-cond-chip--active' : ''}`}
+                        className={`ssp-cond-chip ssp-cond-chip--ext-${gk}${active ? ' ssp-cond-chip--active' : ''}`}
                         onClick={() => toggleCondFilter(id)}
                         title={active ? `Remove ${label}` : `Add ${label}`}
                       >
@@ -619,50 +763,27 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
                     )
                   })}
                 </div>
-              </div>
-            ))}
+              </section>
+            )
+          })}
+        </div>{/* end fund row B */}
 
-            {/* Extension fundamental groups */}
-            {Object.entries(EXT_GROUP_LABELS).map(([gk, gLabel]) => {
-              const items = EXT_COND_CATALOG.filter(c => c.group === gk)
-              if (!items.length) return null
-              const activeCount = items.filter(c => condFilter.has(c.id)).length
-              return (
-                <details key={gk} className="ssp-cond-group ssp-cond-group--ext">
-                  <summary className="ssp-cond-group-header ssp-cond-group-header--ext">
-                    {gLabel}
-                    {activeCount > 0 && <span className="ssp-filter-tab-badge" style={{ marginLeft: 4 }}>{activeCount}</span>}
-                  </summary>
-                  <div className="ssp-cond-chips-row">
-                    {items.map(({ id, label }) => {
-                      const active = condFilter.has(id)
-                      return (
-                        <button key={id} type="button"
-                          className={`ssp-cond-chip ssp-cond-chip--ext${active ? ' ssp-cond-chip--active' : ''}`}
-                          onClick={() => toggleCondFilter(id)}
-                          title={active ? `Remove ${label}` : `Add ${label}`}
-                        >
-                          <span className="ssp-cond-chip-check" aria-hidden>{active ? '✓' : ''}</span>
-                          <span className="ssp-cond-chip-label">{label}</span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </details>
-              )
-            })}
-          </div>
-        </section>
+      </div>{/* end Fundamental section */}
 
-      </div>
-
-      {/* ── Filter action bar ────────────────────────────────────────────── */}
-      {(condFilter.size > 0 || techCondFilter.size > 0) && (
+      {/* Filter action bar */}
+      {anyFilterActive && (
         <div className="ssp-filter-bar">
           <div className="ssp-filter-bar-info">
             {condFilter.size > 0 && <span className="ssp-filter-bar-tag ssp-filter-bar-tag--fund">{condFilter.size} Fundamental</span>}
             {condFilter.size > 0 && techCondFilter.size > 0 && <span className="ssp-filter-bar-and">∩</span>}
             {techCondFilter.size > 0 && <span className="ssp-filter-bar-tag ssp-filter-bar-tag--tech">{techCondFilter.size} Technical</span>}
+            {tierActiveCount > 0 && (condFilter.size > 0 || techCondFilter.size > 0) && <span className="ssp-filter-bar-and">∩</span>}
+            {(['momentum', 'structure', 'sentiment'] as TierKey[]).map((tk) => {
+              const f = tierFilters[tk]
+              const n = f.indicators.size + (f.minScore > 0 ? 1 : 0)
+              if (n === 0) return null
+              return <span key={tk} className={`ssp-filter-bar-tag ssp-filter-bar-tag--${tk}`}>{n} {tk.charAt(0).toUpperCase() + tk.slice(1)}</span>
+            })}
             {filterLoading && <span className="ssp-filter-bar-status ssp-filter-bar-status--loading">Searching…</span>}
             {!filterLoading && filterPreview && !filterError && (
               <span className="ssp-filter-bar-preview">
@@ -673,47 +794,18 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
             )}
             {filterError && <span className="ssp-status-err ssp-filter-bar-status">{filterError}</span>}
           </div>
-          {/* Step 1: preview count */}
           {!filterPreview && (
-            <button
-              type="button"
-              className="ssp-btn ssp-btn--secondary"
-              onClick={() => void previewFilter()}
-              disabled={filterLoading}
-            >
+            <button type="button" className="ssp-btn ssp-btn--secondary" onClick={() => void previewFilter()} disabled={filterLoading}>
               {filterLoading ? 'Searching…' : 'Search'}
             </button>
           )}
-          {/* Step 2: apply previewed symbols to Results */}
-          {filterPreview && (
-            <button
-              type="button"
-              className="ssp-btn ssp-btn--primary"
-              onClick={applyFilter}
-            >
-              Apply ({filterPreview.symbols.length})
-            </button>
-          )}
-          {filterPreview && (
-            <button
-              type="button"
-              className="ssp-btn ssp-btn--ghost"
-              onClick={() => setFilterPreview(null)}
-            >
-              Retry
-            </button>
-          )}
-          <button
-            type="button"
-            className="ssp-btn ssp-btn--ghost"
-            onClick={() => { clearCondFilter(); clearTechCondFilter(); setFilterPreview(null); setFilterError(null) }}
-          >
-            Clear
-          </button>
+          {filterPreview && <button type="button" className="ssp-btn ssp-btn--primary" onClick={applyFilter}>Apply ({filterPreview.symbols.length})</button>}
+          {filterPreview && <button type="button" className="ssp-btn ssp-btn--ghost" onClick={() => setFilterPreview(null)}>Retry</button>}
+          <button type="button" className="ssp-btn ssp-btn--ghost" onClick={clearAllFilters}>Clear</button>
         </div>
       )}
 
-      {/* Symbols strip — compact single row above Results */}
+      {/* Symbols strip */}
       <div className="ssp-symbols-strip">
         <div className="ssp-symbols-strip-label">
           <span className="ssp-symbols-strip-title">Symbols</span>
@@ -725,47 +817,26 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
             className="ssp-symbols-textarea ssp-symbols-textarea--strip"
             rows={2}
             value={symbolText}
-            onChange={(e) => {
-              setActiveBucket(null)
-              setActiveTechBucket(null)
-              setFilterPreview(null)
-              setSymbolText(e.target.value)
-            }}
+            onChange={(e) => { setActiveBucket(null); setActiveTechBucket(null); setFilterPreview(null); setSymbolText(e.target.value) }}
             placeholder="AAPL,MSFT,NVDA  — or select conditions above"
           />
         </div>
         <div className="ssp-symbols-strip-meta">
-          <span className="ssp-symbols-strip-count">
-            <span className="ssp-num--dim">Parsed </span>
-            <strong>{symbols.length}</strong>
-          </span>
+          <span className="ssp-symbols-strip-count"><span className="ssp-num--dim">Parsed </span><strong>{symbols.length}</strong></span>
           {summary && (
             <>
               <span className="ssp-symbols-strip-sep" />
-              <span>
-                <span className="ssp-num--dim">Found </span>
-                <strong>{summary.found}</strong><span className="ssp-num--dim">/{summary.total}</span>
-              </span>
-              <span className="ssp-results-summary-good">
-                F8/8 <strong>{summary.fundPass}</strong>
-              </span>
-              {summary.techPass > 0 && (
-                <span className="ssp-results-summary-tech">
-                  T11/11 <strong>{summary.techPass}</strong>
-                </span>
-              )}
-              {summary.insufficient > 0 && (
-                <span className="ssp-results-summary-warn">
-                  insuff <strong>{summary.insufficient}</strong>
-                </span>
-              )}
+              <span><span className="ssp-num--dim">Found </span><strong>{summary.found}</strong><span className="ssp-num--dim">/{summary.total}</span></span>
+              <span className="ssp-results-summary-good">F8/8 <strong>{summary.fundPass}</strong></span>
+              {summary.techPass > 0 && <span className="ssp-results-summary-tech">T11/11 <strong>{summary.techPass}</strong></span>}
+              {summary.insufficient > 0 && <span className="ssp-results-summary-warn">insuff <strong>{summary.insufficient}</strong></span>}
             </>
           )}
           {readinessError && <span className="ssp-status-err">{readinessError}</span>}
         </div>
       </div>
 
-      {/* Results — readiness-driven */}
+      {/* Results table */}
       <section className="ssp-card">
         <header className="ssp-card-head ssp-card-head--tight">
           <h3 className="ssp-card-title">
@@ -773,24 +844,15 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
             {readinessRows.length > 0 && <span className="ssp-card-title-aux">{readinessRows.length} shown · readiness snapshot</span>}
           </h3>
         </header>
-
         <div className="ssp-table-wrap">
           <table className="ssp-table">
             <thead>
               <tr>
                 <th style={{ width: 110 }}>Symbol</th>
-                <th
-                  className={`ssp-th-sortable${sortCol === 'tech' ? ' ssp-th-sortable--active' : ''}`}
-                  onClick={() => toggleSort('tech')}
-                  title="Sort by Technical pass count"
-                >
+                <th className={`ssp-th-sortable${sortCol === 'tech' ? ' ssp-th-sortable--active' : ''}`} onClick={() => toggleSort('tech')} title="Sort by Technical pass count">
                   Technical {sortCol === 'tech' ? (sortDir === 'desc' ? '↓' : '↑') : '⇅'}
                 </th>
-                <th
-                  className={`ssp-th-sortable${sortCol === 'fund' ? ' ssp-th-sortable--active' : ''}`}
-                  onClick={() => toggleSort('fund')}
-                  title="Sort by Fundamental pass count"
-                >
+                <th className={`ssp-th-sortable${sortCol === 'fund' ? ' ssp-th-sortable--active' : ''}`} onClick={() => toggleSort('fund')} title="Sort by Fundamental pass count">
                   Fundamental {sortCol === 'fund' ? (sortDir === 'desc' ? '↓' : '↑') : '⇅'}
                 </th>
                 <th style={{ width: 70, textAlign: 'center' }}>Univ</th>
@@ -804,13 +866,10 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
               {readinessRows.length === 0 && (
                 <tr className="ssp-table-empty">
                   <td colSpan={8}>
-                    {readinessLoading
-                      ? 'Loading readiness…'
-                      : symbols.length === 0
-                        ? 'Select a distribution bucket, apply a condition filter, or type symbols below.'
-                        : readinessError
-                          ? 'Failed to load readiness — see error above.'
-                          : 'No readiness rows found.'}
+                    {readinessLoading ? 'Loading readiness…'
+                      : symbols.length === 0 ? 'Select a distribution bucket, apply a condition filter, or type symbols below.'
+                      : readinessError ? 'Failed to load readiness — see error above.'
+                      : 'No readiness rows found.'}
                   </td>
                 </tr>
               )}
@@ -819,18 +878,9 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
                   return (
                     <tr key={r.symbol} className="ssp-row-missing">
                       <td>
-                        <button
-                          type="button"
-                          className="ssp-sym-open"
-                          onClick={() => openInspector(r.symbol)}
-                          title={`Open ${r.symbol} inspector`}
-                        >
-                          {r.symbol}
-                        </button>
+                        <button type="button" className="ssp-sym-open" onClick={() => openInspector(r.symbol)} title={`Open ${r.symbol} inspector`}>{r.symbol}</button>
                       </td>
-                      <td colSpan={7} className="ssp-num--dim">
-                        No row in stock_readiness_daily — run the universe snapshot from Stock Data Readiness.
-                      </td>
+                      <td colSpan={7} className="ssp-num--dim">No row in stock_readiness_daily — run the universe snapshot from Stock Data Readiness.</td>
                     </tr>
                   )
                 }
@@ -841,37 +891,17 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
                 const techInsuf = r.technical_insufficient ?? false
                 const techPassCount = r.technical_pass_count ?? 0
                 const techEvalPresent = r.technical_pass !== undefined
-                const fundCls =
-                  insuf ? 'ssp-fund-cell--insuf'
-                  : passCount === 8 ? 'ssp-fund-cell--all'
-                  : passCount >= 5 ? 'ssp-fund-cell--good'
-                  : passCount >= 2 ? 'ssp-fund-cell--warn'
-                  : 'ssp-fund-cell--poor'
-                const techCls =
-                  !techEvalPresent ? 'ssp-fund-cell--insuf'
-                  : techInsuf ? 'ssp-fund-cell--insuf'
-                  : techPassCount === 11 ? 'ssp-fund-cell--all'
-                  : techPassCount >= 8 ? 'ssp-fund-cell--good'
-                  : techPassCount >= 5 ? 'ssp-fund-cell--warn'
-                  : 'ssp-fund-cell--poor'
+                const fundCls = insuf ? 'ssp-fund-cell--insuf' : passCount === 8 ? 'ssp-fund-cell--all' : passCount >= 5 ? 'ssp-fund-cell--good' : passCount >= 2 ? 'ssp-fund-cell--warn' : 'ssp-fund-cell--poor'
+                const techCls = !techEvalPresent ? 'ssp-fund-cell--insuf' : techInsuf ? 'ssp-fund-cell--insuf' : techPassCount === 11 ? 'ssp-fund-cell--all' : techPassCount >= 8 ? 'ssp-fund-cell--good' : techPassCount >= 5 ? 'ssp-fund-cell--warn' : 'ssp-fund-cell--poor'
                 const isActive = inspector?.symbol === r.symbol
-                const seed: InspectorSeed = {
-                  passCount,
-                  passedConditions: Array.from(passed),
-                }
+                const seed: InspectorSeed = { passCount, passedConditions: Array.from(passed) }
                 return (
                   <tr key={r.symbol} className={isActive ? 'ssp-row-active' : ''}>
                     <td>
-                      <button
-                        type="button"
-                        className="ssp-sym-open"
-                        onClick={() => openInspector(r.symbol, seed)}
-                        title={isActive ? 'Close inspector' : `Open ${r.symbol} inspector`}
-                      >
+                      <button type="button" className="ssp-sym-open" onClick={() => openInspector(r.symbol, seed)} title={isActive ? 'Close inspector' : `Open ${r.symbol} inspector`}>
                         {r.symbol}<span className="ssp-sym-open-hint" aria-hidden>↗</span>
                       </button>
                     </td>
-                    {/* Technical column: pill + 11 condition dots */}
                     <td>
                       <div className="ssp-cond-col">
                         <span className={`ssp-fund-cell ${techCls}`} title={!techEvalPresent ? 'Not evaluated' : techInsuf ? 'Insufficient data' : `${techPassCount}/11 passed`}>
@@ -882,30 +912,21 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
                             {TECH_COND_CATALOG.map(({ id, short, group }) => {
                               const pass = passedTech.has(id)
                               return (
-                                <span key={id}
-                                  className={`ssp-cond-dot ssp-cond-dot--tech-${group}${pass ? ' ssp-cond-dot--pass' : ' ssp-cond-dot--fail'}${techInsuf ? ' ssp-cond-dot--dim' : ''}`}
-                                  title={`${short}: ${techInsuf ? 'insufficient' : pass ? 'pass' : 'fail'}`}
-                                >{pass ? '✓' : ''}</span>
+                                <span key={id} className={`ssp-cond-dot ssp-cond-dot--tech-${group}${pass ? ' ssp-cond-dot--pass' : ' ssp-cond-dot--fail'}${techInsuf ? ' ssp-cond-dot--dim' : ''}`} title={`${short}: ${techInsuf ? 'insufficient' : pass ? 'pass' : 'fail'}`}>{pass ? '✓' : ''}</span>
                               )
                             })}
                           </div>
                         )}
                       </div>
                     </td>
-                    {/* Fundamental column: pill + 8 condition dots */}
                     <td>
                       <div className="ssp-cond-col">
-                        <span className={`ssp-fund-cell ${fundCls}`} title={insuf ? 'Insufficient data' : `${passCount}/8 passed`}>
-                          {insuf ? 'INS' : `${passCount}/8`}
-                        </span>
+                        <span className={`ssp-fund-cell ${fundCls}`} title={insuf ? 'Insufficient data' : `${passCount}/8 passed`}>{insuf ? 'INS' : `${passCount}/8`}</span>
                         <div className="ssp-cond-dots">
                           {SEPA_COND_CATALOG.map(({ id, short, group }) => {
                             const pass = passed.has(id)
                             return (
-                              <span key={id}
-                                className={`ssp-cond-dot ssp-cond-dot--${group}${pass ? ' ssp-cond-dot--pass' : ' ssp-cond-dot--fail'}${insuf ? ' ssp-cond-dot--dim' : ''}`}
-                                title={`${short}: ${insuf ? 'insufficient' : pass ? 'pass' : 'fail'}`}
-                              >{pass ? '✓' : ''}</span>
+                              <span key={id} className={`ssp-cond-dot ssp-cond-dot--${group}${pass ? ' ssp-cond-dot--pass' : ' ssp-cond-dot--fail'}${insuf ? ' ssp-cond-dot--dim' : ''}`} title={`${short}: ${insuf ? 'insufficient' : pass ? 'pass' : 'fail'}`}>{pass ? '✓' : ''}</span>
                             )
                           })}
                         </div>
@@ -913,17 +934,11 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
                     </td>
                     <td style={{ textAlign: 'center' }}>{boolMark(r.included_in_universe)}</td>
                     <td>
-                      <span className="ssp-data-pair">
-                        {boolMark(r.price_ready)}
-                        <span className="ssp-num--dim">{(r.bar_count_lookback ?? 0).toLocaleString()}b</span>
-                      </span>
+                      <span className="ssp-data-pair">{boolMark(r.price_ready)}<span className="ssp-num--dim">{(r.bar_count_lookback ?? 0).toLocaleString()}b</span></span>
                     </td>
                     <td>
                       <div className="ssp-stmt-row">
-                        <span
-                          className={`ssp-stmt-chip${r.income_stmt_ready ? ' ssp-stmt-chip--ok' : ''}`}
-                          title={`Income: ${r.income_stmt_q_count ?? 0}Q · ${r.income_stmt_a_count ?? 0}A`}
-                        >IS</span>
+                        <span className={`ssp-stmt-chip${r.income_stmt_ready ? ' ssp-stmt-chip--ok' : ''}`} title={`Income: ${r.income_stmt_q_count ?? 0}Q · ${r.income_stmt_a_count ?? 0}A`}>IS</span>
                         <span className={`ssp-stmt-chip${r.balance_sheet_present ? ' ssp-stmt-chip--ok' : ''}`} title="Balance Sheet">BS</span>
                         <span className={`ssp-stmt-chip${r.cash_flow_present ? ' ssp-stmt-chip--ok' : ''}`} title="Cash Flow">CF</span>
                         <span className={`ssp-stmt-chip${r.ratios_present ? ' ssp-stmt-chip--ok' : ''}`} title="Ratios">RT</span>
@@ -944,14 +959,9 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
         </div>
       </section>
 
-      {/* Shared right-hand Stock inspector (same component used on Positions). */}
       <RightInspectorDrawer open={inspector != null} ariaLabel="Stock detail">
         {inspector && (
-          <StockInspectorPanel
-            symbol={inspector.symbol}
-            fundamentalSeed={inspector.seed}
-            onClose={closeInspector}
-          />
+          <StockInspectorPanel symbol={inspector.symbol} fundamentalSeed={inspector.seed} onClose={closeInspector} />
         )}
       </RightInspectorDrawer>
     </div>
