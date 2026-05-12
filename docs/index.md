@@ -32,6 +32,7 @@
 | **[状态空间](research/STATE_SPACE_MAPPING.md)** | O、D、M、L、E、S 与代码/配置的对应关系 |
 | **[配置安全分类（风险模型）](research/CONFIG_SAFETY_TAXONOMY.md)** | 配置中的安全边界分类与风险维度 |
 | **[Guard 微调与影响](research/GUARD_TUNING_AND_IMPACT.md)** | Guard/边界参数微调方法、后果分析、block reason 与回测验证 |
+| **[Fundamental Extension](research/FUNDAMENTAL_EXTENSION.md)** | 33 条基本面条件目录（8 SEPA core + 25 extension）、阈值、源表、降级行为、JSONB 结构 |
 | **[组合级模型化回报与风险（R-M8）](plans/PORTFOLIO_RISK_RETURN.md)** | Model Analysis：CAR、DTE 年化、Delta、压力矩阵；与 R-M7 会计绩效分离；分阶段落地 |
 | **[SEPA 股票筛选实施方案（R-A8）](plans/SEPA_IMPLEMENTATION_PLAN.md)** | SEPA 分阶段实施方案（计算、CRS、批量效率、API/UI），含每阶段目标、验收标准与风险/降级策略 |
 | **[Massive API 覆盖比对（Options）](plans/massive-api-coverage.md)** | Polygon/Massive Options 官方接口与项目实现、Capability、pytest 对照；MkDocs 侧打开 HTML/CSV，监控 UI（Settings → Feed → Massive Option）内嵌同源查看器 |

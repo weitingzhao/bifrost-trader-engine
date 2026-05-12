@@ -510,10 +510,28 @@ export interface SepaGapAckSetResponse {
 export interface SepaConditionStat {
   id: string
   label: string
+  group?: string
   pass: number
   fail: number
   no_data: number
   total: number
+}
+
+/** Summary for one fundamental condition group (sepa_core, quality, balance, etc.) */
+export interface FundGroupSummary {
+  total: number
+  pass_count: number
+  pass: boolean
+  insufficient: boolean
+}
+
+/** Catalog entry for a fundamental condition (from /fundamental-condition-catalog). */
+export interface FundamentalConditionCatalogEntry {
+  id: string
+  group: string
+  label: string
+  threshold: number | null
+  source_table: string
 }
 
 export interface FundPassCountBucket {
@@ -541,6 +559,8 @@ export interface SepaCriteriaStats {
     conditions: SepaConditionStat[]
     /** Distribution: how many symbols passed exactly N out of 8 conditions. Ordered 8→0. */
     pass_count_distribution?: FundPassCountBucket[]
+    /** Per-group summaries keyed by group name (sepa_core, quality, balance, ...). */
+    groups?: Record<string, { cached_count: number; pass_count: number; conditions: SepaConditionStat[] }>
   }
   technical: {
     total_in_snapshot: number
@@ -563,6 +583,14 @@ export interface SepaCriteriaStats {
     conditions: TechConditionStat[]
     /** Distribution: how many symbols passed exactly N out of 11 conditions. Ordered 11→0. */
     pass_count_distribution?: TechPassCountBucket[]
+    /** Tier 2: Per momentum indicator pass/fail counts. */
+    momentum_conditions?: TechConditionStat[]
+    /** Tier 2: Momentum score distribution (10→0). */
+    momentum_score_distribution?: Array<{ score: number; symbol_count: number }>
+    /** Tier 3: Per structure diagnostic active/inactive counts. */
+    structure_conditions?: TechConditionStat[]
+    /** Tier 4: Per sentiment indicator pass/fail counts. */
+    sentiment_conditions?: TechConditionStat[]
   }
   computed_at: string
 }
@@ -602,6 +630,8 @@ export interface FundDistSymbolRow {
   pass_count: number
   /** IDs of the conditions that passed, e.g. ["eps_q2q_ge_25pct", "rev_q2q_ge_25pct"] */
   passed_conditions: string[]
+  /** Passed condition IDs bucketed by group name. */
+  passed_conditions_by_group?: Record<string, string[]>
 }
 
 export interface FundDistSymbolsResponse {
@@ -716,6 +746,10 @@ export interface ReadinessSnapshotRow {
   fundamental_pass_count?: number
   fundamental_insufficient?: boolean
   passed_conditions?: string[]
+  /** Passed condition IDs bucketed by group name. */
+  passed_conditions_by_group?: Record<string, string[]>
+  /** Per-group summaries from fundamental_eval. */
+  fund_groups?: Record<string, FundGroupSummary> | null
   technical_pass?: boolean
   technical_pass_count?: number
   technical_insufficient?: boolean
@@ -806,6 +840,7 @@ export async function fetchTechnicalFilter(opts: {
 
 export interface SymbolFundamentalConditionRow {
   id: string
+  group?: string
   pass: boolean
   actual: number | string | null
   threshold: number | string | null
@@ -822,6 +857,8 @@ export interface SymbolFundamentalConditionsResponse {
   fundamental_pass?: boolean
   insufficient_data?: boolean
   conditions?: SymbolFundamentalConditionRow[]
+  /** Per-group summaries (sepa_core, quality, balance, cashflow, valuation, profitability, efficiency, sentiment). */
+  groups?: Record<string, FundGroupSummary> | null
 }
 
 export async function fetchSymbolFundamentalConditions(
@@ -855,6 +892,71 @@ export interface SymbolTechnicalConditionRow {
   reason: string | null
 }
 
+// ── Technical Tiers (v2 schema) ─────────────────────────────────────────────
+
+export interface TierMomentumIndicator {
+  id: string
+  pass: boolean
+  actual: number | null
+  threshold: number | number[] | null
+  reason?: string
+}
+
+export interface TierMomentum {
+  score: number
+  max: number
+  indicators: TierMomentumIndicator[]
+}
+
+export interface TierStructureDiagnostic {
+  id: string
+  active: boolean
+  value: number | null
+  threshold?: number
+}
+
+export interface TierPatternEntry {
+  id: string
+  [key: string]: unknown
+}
+
+export interface TierStructure {
+  diagnostics: TierStructureDiagnostic[]
+  metrics: Record<string, number | null>
+  patterns: TierPatternEntry[]
+  pattern_metrics: Record<string, number | boolean | null>
+}
+
+export interface TierSentimentShort {
+  days_to_cover: number | null
+  si_pct_change_2w: number | null
+  sv_ratio_avg_4w: number | null
+  sv_ratio_trend_falling: boolean | null
+  staleness_days: number | null
+  si_staleness_days?: number | null
+  sv_staleness_days?: number | null
+}
+
+export interface TierSentimentIndicator {
+  id: string
+  pass: boolean
+  actual: number | boolean | null
+  threshold: number | null
+  reason?: string
+}
+
+export interface TierSentiment {
+  short: TierSentimentShort
+  indicators: TierSentimentIndicator[]
+}
+
+export interface TechnicalTiers {
+  core: { pass: boolean; pass_count: number; fail_count: number }
+  momentum: TierMomentum
+  structure: TierStructure
+  sentiment: TierSentiment
+}
+
 export interface SymbolTechnicalConditionsResponse {
   ok: boolean
   error?: string
@@ -866,6 +968,7 @@ export interface SymbolTechnicalConditionsResponse {
   insufficient_data?: boolean
   conditions?: SymbolTechnicalConditionRow[]
   metrics?: Record<string, number | null>
+  tiers?: TechnicalTiers
 }
 
 export async function fetchSymbolTechnicalConditions(
@@ -884,6 +987,29 @@ export async function fetchSymbolTechnicalConditions(
       return { ok: false, error: msg }
     }
     return j as SymbolTechnicalConditionsResponse
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
+
+export interface FundamentalConditionCatalogResponse {
+  ok: boolean
+  error?: string
+  groups?: string[]
+  conditions?: FundamentalConditionCatalogEntry[]
+  total?: number
+}
+
+export async function fetchFundamentalConditionCatalog(): Promise<FundamentalConditionCatalogResponse> {
+  const url = researchApiUrl('/research/data/readiness/fundamental-condition-catalog')
+  try {
+    const r = await fetchWithTimeout(url, { method: 'GET' }, 10_000)
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) {
+      const msg = typeof j?.detail === 'string' ? j.detail : (j?.error ?? `HTTP ${r.status}`)
+      return { ok: false, error: msg }
+    }
+    return j as FundamentalConditionCatalogResponse
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
   }
@@ -1109,6 +1235,90 @@ export async function fetchTickerOverview(symbol: string): Promise<TickerOvervie
     const j = await r.json().catch(() => ({}))
     if (!r.ok) return { ok: false, error: j?.error ?? `HTTP ${r.status}` }
     return j as TickerOverviewResponse
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
+
+// ── Tier 2–4 endpoints ─────────────────────────────────────────────────────────
+
+export interface MomentumDistributionResponse {
+  ok: boolean
+  error?: string
+  distribution?: Record<number, number>
+  total?: number
+}
+
+export async function fetchMomentumDistribution(): Promise<MomentumDistributionResponse> {
+  const url = researchApiUrl('/research/data/readiness/momentum-distribution')
+  try {
+    const r = await fetchWithTimeout(url, { method: 'GET' }, 15_000)
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) return { ok: false, error: j?.error ?? `HTTP ${r.status}` }
+    return j as MomentumDistributionResponse
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
+
+export interface MomentumFilterSymbol {
+  symbol: string
+  momentum_score: number
+  core_pass_count: number
+}
+
+export interface MomentumFilterResponse {
+  ok: boolean
+  error?: string
+  include?: string[]
+  min_score?: number
+  count?: number
+  symbols?: MomentumFilterSymbol[]
+  limit?: number
+}
+
+export async function fetchMomentumFilter(params: {
+  include?: string[]
+  min_score?: number
+  limit?: number
+}): Promise<MomentumFilterResponse> {
+  const qs = new URLSearchParams()
+  if (params.include?.length) qs.set('include', params.include.join(','))
+  if (params.min_score != null) qs.set('min_score', String(params.min_score))
+  if (params.limit != null) qs.set('limit', String(params.limit))
+  const url = researchApiUrl(`/research/data/readiness/momentum-filter?${qs.toString()}`)
+  try {
+    const r = await fetchWithTimeout(url, { method: 'GET' }, 15_000)
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) return { ok: false, error: j?.error ?? `HTTP ${r.status}` }
+    return j as MomentumFilterResponse
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
+
+export interface SymbolTechnicalTiersResponse {
+  ok: boolean
+  error?: string
+  symbol?: string
+  found?: boolean
+  as_of_date?: string
+  technical_pass?: boolean
+  pass_count?: number
+  insufficient_data?: boolean
+  tiers?: TechnicalTiers
+  rule_version?: string | null
+}
+
+export async function fetchSymbolTechnicalTiers(symbol: string): Promise<SymbolTechnicalTiersResponse> {
+  const sym = (symbol || '').trim().toUpperCase()
+  if (!sym) return { ok: false, error: 'symbol is required' }
+  const url = researchApiUrl(`/research/data/readiness/symbol-technical-tiers?symbol=${encodeURIComponent(sym)}`)
+  try {
+    const r = await fetchWithTimeout(url, { method: 'GET' }, 15_000)
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) return { ok: false, error: j?.error ?? `HTTP ${r.status}` }
+    return j as SymbolTechnicalTiersResponse
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
   }

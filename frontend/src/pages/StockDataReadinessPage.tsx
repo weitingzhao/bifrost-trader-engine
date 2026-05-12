@@ -851,6 +851,7 @@ function criterionStatusLabel(status: CriterionStatus): string {
 }
 
 const TECH_COND_LABELS: Record<string, string> = {
+  // Core 11
   avg_volume_50_gt_threshold: 'Avg Volume 50D > 100K',
   crs_ge_70:                  'CRS ≥ 70',
   close_ge_low52_x_1_3:       'Close ≥ Low52W × 1.3',
@@ -862,6 +863,27 @@ const TECH_COND_LABELS: Record<string, string> = {
   price_gt_sma50:             'Price > SMA50',
   price_gt_sma150:            'Price > SMA150',
   price_gt_sma200:            'Price > SMA200',
+  // Momentum
+  rsi_14_in_band:               'RSI(14) in [40, 80]',
+  macd_hist_positive:           'MACD Histogram > 0 & Rising',
+  roc_3m_positive:              'ROC 3M > 0',
+  roc_6m_positive:              'ROC 6M > 0',
+  roc_12m_positive:             'ROC 12M > 0',
+  multi_period_rs_4w_positive:  'RS vs SPY (4W) > 0',
+  multi_period_rs_13w_positive: 'RS vs SPY (13W) > 0',
+  multi_period_rs_26w_positive: 'RS vs SPY (26W) > 0',
+  slope_sma200_positive:        'SMA200 Slope > 0',
+  up_down_volume_50d_gt_1:      'Up/Down Vol (50D) > 1',
+  // Structure
+  realized_vol_contraction:  'Realized Vol Contraction',
+  bb_squeeze:                'BB Squeeze Active',
+  obv_slope_30d_positive:    'OBV Slope (30D) Positive',
+  adx_14_ge_25:              'ADX(14) ≥ 25 (Trending)',
+  aroon_oscillator_ge_50:    'Aroon Osc ≥ 50',
+  // Sentiment
+  days_to_cover_ge_5:                  'Days to Cover ≥ 5',
+  short_volume_ratio_le_30pct_recent:  'Short Vol Ratio < 30%',
+  short_volume_ratio_trend_4w_falling: 'Short Vol Trend Falling',
 }
 
 function SepaScreeningChecklist({
@@ -1009,6 +1031,102 @@ function SepaScreeningChecklist({
             <p className="sdp-check-secondary" style={{ fontSize: 12, marginTop: 8 }}>
               No technical snapshot yet — run "Evaluate & Publish" or POST <code>/research/data/readiness/backfill-technical</code> to populate.
             </p>
+          )}
+
+          {/* ── Tier 2: Momentum indicators ── */}
+          {criteriaStats?.technical?.momentum_conditions && criteriaStats.technical.momentum_conditions.length > 0 && (
+            <>
+              <div className="sdp-criteria-group-head" style={{ marginTop: 16 }}>
+                <span className="sdp-criteria-group-badge" style={{ background: 'rgba(59,130,246,0.12)', color: '#2563eb' }}>MOMENTUM</span>
+                <span className="sdp-criteria-group-label">Scored 0–10 (RSI, MACD, ROC, Relative Strength)</span>
+              </div>
+              <div className="sdp-criteria-rows">
+                {criteriaStats.technical.momentum_conditions.map((cond) => {
+                  const denominator = cond.pass + cond.fail
+                  const pct = denominator > 0 ? Math.round((cond.pass / denominator) * 100) : 0
+                  const barColor =
+                    pct >= 60 ? 'sdp-criteria-bar-fill--ok'
+                    : pct >= 30 ? 'sdp-criteria-bar-fill--warn'
+                    :             'sdp-criteria-bar-fill--error'
+                  return (
+                    <div key={cond.id} className="sdp-criteria-row">
+                      <span className="sdp-criteria-label" title={cond.id}>{cond.label ?? cond.id}</span>
+                      <div className="sdp-criteria-bar">
+                        <div className={`sdp-criteria-bar-fill ${barColor}`} style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="sdp-criteria-stat">
+                        {cond.pass.toLocaleString()} / {denominator.toLocaleString()}
+                        <span className="sdp-check-secondary"> ({pct}%)</span>
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          )}
+
+          {/* ── Tier 3: Structure diagnostics ── */}
+          {criteriaStats?.technical?.structure_conditions && criteriaStats.technical.structure_conditions.length > 0 && (
+            <>
+              <div className="sdp-criteria-group-head" style={{ marginTop: 16 }}>
+                <span className="sdp-criteria-group-badge" style={{ background: 'rgba(168,85,247,0.12)', color: '#7c3aed' }}>STRUCTURE</span>
+                <span className="sdp-criteria-group-label">Volatility Contraction, Trend Strength, Accumulation</span>
+              </div>
+              <div className="sdp-criteria-rows">
+                {criteriaStats.technical.structure_conditions.map((cond) => {
+                  const denominator = cond.pass + cond.fail
+                  const pct = denominator > 0 ? Math.round((cond.pass / denominator) * 100) : 0
+                  const barColor =
+                    pct >= 60 ? 'sdp-criteria-bar-fill--ok'
+                    : pct >= 30 ? 'sdp-criteria-bar-fill--warn'
+                    :             'sdp-criteria-bar-fill--error'
+                  return (
+                    <div key={cond.id} className="sdp-criteria-row">
+                      <span className="sdp-criteria-label" title={cond.id}>{cond.label ?? cond.id}</span>
+                      <div className="sdp-criteria-bar">
+                        <div className={`sdp-criteria-bar-fill ${barColor}`} style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="sdp-criteria-stat">
+                        {cond.pass.toLocaleString()} / {denominator.toLocaleString()}
+                        <span className="sdp-check-secondary"> ({pct}%)</span>
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          )}
+
+          {/* ── Tier 4: Sentiment indicators ── */}
+          {criteriaStats?.technical?.sentiment_conditions && criteriaStats.technical.sentiment_conditions.length > 0 && (
+            <>
+              <div className="sdp-criteria-group-head" style={{ marginTop: 16 }}>
+                <span className="sdp-criteria-group-badge" style={{ background: 'rgba(249,115,22,0.12)', color: '#ea580c' }}>SENTIMENT</span>
+                <span className="sdp-criteria-group-label">Short Interest & Short Volume Signals</span>
+              </div>
+              <div className="sdp-criteria-rows">
+                {criteriaStats.technical.sentiment_conditions.map((cond) => {
+                  const denominator = cond.pass + cond.fail
+                  const pct = denominator > 0 ? Math.round((cond.pass / denominator) * 100) : 0
+                  const barColor =
+                    pct >= 60 ? 'sdp-criteria-bar-fill--ok'
+                    : pct >= 30 ? 'sdp-criteria-bar-fill--warn'
+                    :             'sdp-criteria-bar-fill--error'
+                  return (
+                    <div key={cond.id} className="sdp-criteria-row">
+                      <span className="sdp-criteria-label" title={cond.id}>{cond.label ?? cond.id}</span>
+                      <div className="sdp-criteria-bar">
+                        <div className={`sdp-criteria-bar-fill ${barColor}`} style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="sdp-criteria-stat">
+                        {cond.pass.toLocaleString()} / {denominator.toLocaleString()}
+                        <span className="sdp-check-secondary"> ({pct}%)</span>
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
           )}
         </div>}
 
@@ -4469,7 +4587,7 @@ function StockDataReadinessPageInner({
                     </button>
                   </div>
                   <div className="sdp-criteria-rows">
-                    {criteriaStats.fundamental.conditions.map((cond) => {
+                    {criteriaStats.fundamental.conditions.filter(c => !c.group || c.group === 'sepa_core').map((cond) => {
                       const denominator = cond.pass + cond.fail
                       const pct = denominator > 0 ? Math.round(cond.pass / denominator * 100) : 0
                       const barColor = pct >= 30 ? 'sdp-criteria-bar-fill--ok' : pct >= 15 ? 'sdp-criteria-bar-fill--warn' : 'sdp-criteria-bar-fill--error'
@@ -4603,6 +4721,61 @@ function StockDataReadinessPageInner({
                   )}
                 </div>
 
+                {/* Extension fundamental groups coverage */}
+                {criteriaStats.fundamental.groups && Object.keys(criteriaStats.fundamental.groups).length > 0 && (
+                  <div className="sdp-eval-section sdp-eval-section--ext">
+                    <div className="sdp-eval-section-head">
+                      <strong>Extension Groups</strong>
+                      <span className="sdp-check-secondary">
+                        {Object.keys(criteriaStats.fundamental.groups).length} groups
+                      </span>
+                    </div>
+                    <div className="sdp-ext-groups-grid">
+                      {Object.entries(criteriaStats.fundamental.groups)
+                        .filter(([gk]) => gk !== 'sepa_core')
+                        .map(([gk, gData]) => {
+                          const totalConds = gData.conditions?.length ?? 0
+                          const passSum = gData.conditions?.reduce((s, c) => s + (c.pass ?? 0), 0) ?? 0
+                          const failSum = gData.conditions?.reduce((s, c) => s + (c.fail ?? 0), 0) ?? 0
+                          const evaluated = passSum + failSum
+                          const passPct = evaluated > 0 ? Math.round(passSum / evaluated * 100) : 0
+                          return (
+                            <div key={gk} className="sdp-ext-group-card">
+                              <div className="sdp-ext-group-card-head">
+                                <span className="sdp-ext-group-card-name">{gk}</span>
+                                <span className="sdp-ext-group-card-count">{totalConds} conditions</span>
+                              </div>
+                              <div className="sdp-ext-group-card-body">
+                                <div className="sdp-ext-group-stat">
+                                  <span className="sdp-ext-group-stat-label">Evaluated</span>
+                                  <span className="sdp-ext-group-stat-val">{fmt(gData.cached_count ?? 0)}</span>
+                                </div>
+                                <div className="sdp-ext-group-stat">
+                                  <span className="sdp-ext-group-stat-label">Avg pass rate</span>
+                                  <span className={`sdp-ext-group-stat-val ${passPct >= 30 ? 'sdp-text-ok' : passPct >= 15 ? 'sdp-text-warn' : 'sdp-text-dim'}`}>{passPct}%</span>
+                                </div>
+                              </div>
+                              {gData.conditions && gData.conditions.length > 0 && (
+                                <div className="sdp-ext-group-conds">
+                                  {gData.conditions.map(c => {
+                                    const d = c.pass + c.fail
+                                    const p = d > 0 ? Math.round(c.pass / d * 100) : 0
+                                    return (
+                                      <div key={c.id} className="sdp-ext-group-cond-row">
+                                        <span className="sdp-ext-group-cond-label" title={c.id}>{c.label}</span>
+                                        <span className="sdp-ext-group-cond-stat">{fmt(c.pass)}/{fmt(d)} ({p}%)</span>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Technical */}
                 <div className="sdp-eval-section">
                   <div className="sdp-eval-section-head">
@@ -4675,6 +4848,102 @@ function StockDataReadinessPageInner({
                           {fr.notes ?? '(unknown)'} — {fmt(fr.cnt)}
                         </span>
                       ))}
+                    </div>
+                  )}
+
+                  {/* ── Tier 2: Momentum ── */}
+                  {criteriaStats.technical.momentum_conditions && criteriaStats.technical.momentum_conditions.length > 0 && (
+                    <div style={{ marginTop: 14 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#2563eb', background: 'rgba(59,130,246,0.10)', padding: '1px 8px', borderRadius: 6 }}>MOMENTUM</span>
+                        <span className="sdp-check-secondary" style={{ fontSize: '0.70rem' }}>Scored 0–10</span>
+                      </div>
+                      <div className="sdp-criteria-rows">
+                        {criteriaStats.technical.momentum_conditions.map((cond) => {
+                          const denominator = cond.pass + cond.fail
+                          const pct = denominator > 0 ? Math.round((cond.pass / denominator) * 100) : 0
+                          const barColor =
+                            pct >= 60 ? 'sdp-criteria-bar-fill--ok'
+                            : pct >= 30 ? 'sdp-criteria-bar-fill--warn'
+                            :             'sdp-criteria-bar-fill--error'
+                          return (
+                            <div key={cond.id} className="sdp-criteria-row">
+                              <span className="sdp-criteria-label" title={cond.id}>{cond.label ?? cond.id}</span>
+                              <div className="sdp-criteria-bar">
+                                <div className={`sdp-criteria-bar-fill ${barColor}`} style={{ width: `${pct}%` }} />
+                              </div>
+                              <span className="sdp-criteria-stat">
+                                {fmt(cond.pass)} / {fmt(denominator)}
+                                <span className="sdp-check-secondary"> ({pct}%)</span>
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Tier 3: Structure ── */}
+                  {criteriaStats.technical.structure_conditions && criteriaStats.technical.structure_conditions.length > 0 && (
+                    <div style={{ marginTop: 14 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#7c3aed', background: 'rgba(168,85,247,0.10)', padding: '1px 8px', borderRadius: 6 }}>STRUCTURE</span>
+                        <span className="sdp-check-secondary" style={{ fontSize: '0.70rem' }}>Diagnostics</span>
+                      </div>
+                      <div className="sdp-criteria-rows">
+                        {criteriaStats.technical.structure_conditions.map((cond) => {
+                          const denominator = cond.pass + cond.fail
+                          const pct = denominator > 0 ? Math.round((cond.pass / denominator) * 100) : 0
+                          const barColor =
+                            pct >= 60 ? 'sdp-criteria-bar-fill--ok'
+                            : pct >= 30 ? 'sdp-criteria-bar-fill--warn'
+                            :             'sdp-criteria-bar-fill--error'
+                          return (
+                            <div key={cond.id} className="sdp-criteria-row">
+                              <span className="sdp-criteria-label" title={cond.id}>{cond.label ?? cond.id}</span>
+                              <div className="sdp-criteria-bar">
+                                <div className={`sdp-criteria-bar-fill ${barColor}`} style={{ width: `${pct}%` }} />
+                              </div>
+                              <span className="sdp-criteria-stat">
+                                {fmt(cond.pass)} / {fmt(denominator)}
+                                <span className="sdp-check-secondary"> ({pct}%)</span>
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Tier 4: Sentiment ── */}
+                  {criteriaStats.technical.sentiment_conditions && criteriaStats.technical.sentiment_conditions.length > 0 && (
+                    <div style={{ marginTop: 14 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#ea580c', background: 'rgba(249,115,22,0.10)', padding: '1px 8px', borderRadius: 6 }}>SENTIMENT</span>
+                        <span className="sdp-check-secondary" style={{ fontSize: '0.70rem' }}>Short Interest / Volume</span>
+                      </div>
+                      <div className="sdp-criteria-rows">
+                        {criteriaStats.technical.sentiment_conditions.map((cond) => {
+                          const denominator = cond.pass + cond.fail
+                          const pct = denominator > 0 ? Math.round((cond.pass / denominator) * 100) : 0
+                          const barColor =
+                            pct >= 60 ? 'sdp-criteria-bar-fill--ok'
+                            : pct >= 30 ? 'sdp-criteria-bar-fill--warn'
+                            :             'sdp-criteria-bar-fill--error'
+                          return (
+                            <div key={cond.id} className="sdp-criteria-row">
+                              <span className="sdp-criteria-label" title={cond.id}>{cond.label ?? cond.id}</span>
+                              <div className="sdp-criteria-bar">
+                                <div className={`sdp-criteria-bar-fill ${barColor}`} style={{ width: `${pct}%` }} />
+                              </div>
+                              <span className="sdp-criteria-stat">
+                                {fmt(cond.pass)} / {fmt(denominator)}
+                                <span className="sdp-check-secondary"> ({pct}%)</span>
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>

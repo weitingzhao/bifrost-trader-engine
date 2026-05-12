@@ -36,6 +36,15 @@ const FUND_GROUP_LABELS: Record<string, string> = {
   eps: 'EPS',
   rev: 'Revenue',
 }
+const EXT_GROUP_LABELS: Record<string, string> = {
+  quality:       'Quality',
+  balance:       'Balance Sheet',
+  cashflow:      'Cash Flow',
+  valuation:     'Valuation',
+  profitability: 'Profitability',
+  efficiency:    'Efficiency',
+  sentiment:     'Sentiment',
+}
 const TECH_GROUP_LABELS: Record<string, string> = {
   vol:     'Volume / Momentum',
   price52: '52-Week Range',
@@ -52,6 +61,34 @@ const SEPA_COND_CATALOG: { id: string; label: string; short: string; group: 'eps
   { id: 'rev_3y_ge_15pct',  label: 'Revenue 3Y CAGR ≥ 15%', short: 'Rev 3Y',     group: 'rev' },
   { id: 'eps_acc_fy',       label: 'EPS Accelerating (FY)', short: 'EPS Acc FY', group: 'eps' },
   { id: 'rev_acc_fy',       label: 'Revenue Accel (FY)',    short: 'Rev Acc FY', group: 'rev' },
+]
+
+const EXT_COND_CATALOG: { id: string; label: string; short: string; group: string }[] = [
+  { id: 'gross_margin_ge_30pct',     label: 'Gross Margin ≥ 30%',        short: 'GM≥30',    group: 'quality' },
+  { id: 'operating_margin_ge_10pct', label: 'Oper. Margin ≥ 10%',        short: 'OM≥10',    group: 'quality' },
+  { id: 'net_margin_ge_5pct',        label: 'Net Margin ≥ 5%',           short: 'NM≥5',     group: 'quality' },
+  { id: 'ocf_to_ni_ge_0_7',          label: 'OCF/NI ≥ 0.7',             short: 'OCF/NI',   group: 'quality' },
+  { id: 'interest_coverage_ge_5x',   label: 'Interest Coverage ≥ 5×',    short: 'IC≥5',     group: 'quality' },
+  { id: 'current_ratio_ge_1_5',      label: 'Current Ratio ≥ 1.5',       short: 'CR≥1.5',   group: 'balance' },
+  { id: 'quick_ratio_ge_1_0',        label: 'Quick Ratio ≥ 1.0',         short: 'QR≥1',     group: 'balance' },
+  { id: 'debt_to_equity_le_1',       label: 'D/E ≤ 1.0',                short: 'D/E≤1',    group: 'balance' },
+  { id: 'net_debt_to_ebitda_le_3',   label: 'NetDebt/EBITDA ≤ 3',        short: 'ND/EB≤3',  group: 'balance' },
+  { id: 'fcf_positive',              label: 'FCF Positive',              short: 'FCF>0',    group: 'cashflow' },
+  { id: 'fcf_margin_ge_5pct',        label: 'FCF Margin ≥ 5%',           short: 'FCFm≥5',   group: 'cashflow' },
+  { id: 'fcf_yield_ge_3pct',         label: 'FCF Yield ≥ 3%',            short: 'FCFy≥3',   group: 'cashflow' },
+  { id: 'capex_intensity_le_15pct',  label: 'CapEx ≤ 15%',               short: 'CpX≤15',   group: 'cashflow' },
+  { id: 'pe_le_60',                  label: 'P/E ≤ 60',                  short: 'PE≤60',    group: 'valuation' },
+  { id: 'ps_le_15',                  label: 'P/S ≤ 15',                  short: 'PS≤15',    group: 'valuation' },
+  { id: 'pb_le_8',                   label: 'P/B ≤ 8',                   short: 'PB≤8',     group: 'valuation' },
+  { id: 'ev_to_ebitda_le_30',        label: 'EV/EBITDA ≤ 30',            short: 'EVEB≤30',  group: 'valuation' },
+  { id: 'roe_ge_15pct',              label: 'ROE ≥ 15%',                 short: 'ROE≥15',   group: 'profitability' },
+  { id: 'roa_ge_5pct',               label: 'ROA ≥ 5%',                  short: 'ROA≥5',    group: 'profitability' },
+  { id: 'asset_turnover_ge_0_5',     label: 'Asset Turnover ≥ 0.5',      short: 'AT≥0.5',   group: 'efficiency' },
+  { id: 'dso_le_75_days',            label: 'DSO ≤ 75 days',             short: 'DSO≤75',   group: 'efficiency' },
+  { id: 'dio_le_120_days',           label: 'DIO ≤ 120 days',            short: 'DIO≤120',  group: 'efficiency' },
+  { id: 'days_to_cover_le_5',                   label: 'Days to Cover ≤ 5',    short: 'DtC≤5',    group: 'sentiment' },
+  { id: 'short_volume_ratio_recent_le_30pct',   label: 'Short Vol Ratio ≤ 30%', short: 'SVR≤30',   group: 'sentiment' },
+  { id: 'short_interest_pct_of_float_le_15pct', label: 'SI % Float ≤ 15%',      short: 'SI%≤15',   group: 'sentiment' },
 ]
 
 /** 11 SEPA technical conditions in display order (matches _TECH_COND_IDS on backend). */
@@ -537,6 +574,21 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
           </div>
         </section>
 
+        {/* ── Card 3b: Tier-aware filter hint ───────────────────────────── */}
+        <section className="ssp-card ssp-card--tier-hint">
+          <header className="ssp-card-head ssp-card-head--tight">
+            <h3 className="ssp-card-title" style={{ fontSize: '0.82rem' }}>
+              Extended Tiers
+              <span className="ssp-check-secondary" style={{ fontWeight: 400, marginLeft: 8 }}>Momentum · Structure · Sentiment</span>
+            </h3>
+          </header>
+          <p className="ssp-tier-hint-text">
+            Technical evaluation now includes Tier 2 (Momentum 0–10), Tier 3 (Structure/Patterns),
+            and Tier 4 (Sentiment/Short). Use the <strong>Inspector panel</strong> for per-symbol
+            drill-down, or the <code>/momentum-filter</code> API with <code>min_score</code> for bulk screening.
+          </p>
+        </section>
+
         {/* ── Card 4: Fundamental Conditions filter ───────────────────────── */}
         <section className="ssp-card">
           <header className="ssp-card-head ssp-card-head--tight">
@@ -569,6 +621,36 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
                 </div>
               </div>
             ))}
+
+            {/* Extension fundamental groups */}
+            {Object.entries(EXT_GROUP_LABELS).map(([gk, gLabel]) => {
+              const items = EXT_COND_CATALOG.filter(c => c.group === gk)
+              if (!items.length) return null
+              const activeCount = items.filter(c => condFilter.has(c.id)).length
+              return (
+                <details key={gk} className="ssp-cond-group ssp-cond-group--ext">
+                  <summary className="ssp-cond-group-header ssp-cond-group-header--ext">
+                    {gLabel}
+                    {activeCount > 0 && <span className="ssp-filter-tab-badge" style={{ marginLeft: 4 }}>{activeCount}</span>}
+                  </summary>
+                  <div className="ssp-cond-chips-row">
+                    {items.map(({ id, label }) => {
+                      const active = condFilter.has(id)
+                      return (
+                        <button key={id} type="button"
+                          className={`ssp-cond-chip ssp-cond-chip--ext${active ? ' ssp-cond-chip--active' : ''}`}
+                          onClick={() => toggleCondFilter(id)}
+                          title={active ? `Remove ${label}` : `Add ${label}`}
+                        >
+                          <span className="ssp-cond-chip-check" aria-hidden>{active ? '✓' : ''}</span>
+                          <span className="ssp-cond-chip-label">{label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </details>
+              )
+            })}
           </div>
         </section>
 

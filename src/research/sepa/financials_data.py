@@ -1909,3 +1909,231 @@ def financials_gap_symbols_from_db(cur: Any, kind: str, *, batch_size: int = 50)
     bs = max(1, min(int(batch_size), 200))
     batches = [syms[i : i + bs] for i in range(0, len(syms), bs)]
     return {"ok": True, "gap_count": len(syms), "batches": batches}
+
+
+# ── Batch readers for fundamentals extension evaluators ──────────────────────
+
+def fetch_income_ext_rows_batch(
+    cur: Any,
+    symbols: List[str],
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Batch-read quarterly income-statement rows with extra columns needed by ext evaluators.
+
+    Returns symbol -> list of dicts (ascending period_end).
+    Columns: revenue, gross_profit, operating_income, ebitda, cost_of_revenue,
+    consolidated_net_income_loss, interest_expense, diluted_shares_outstanding.
+    """
+    from collections import defaultdict
+
+    out: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    if not symbols:
+        return dict(out)
+    cur.execute(
+        """
+        SELECT symbol, fiscal_year, fiscal_quarter, period_end,
+               revenue, gross_profit, operating_income, ebitda, cost_of_revenue,
+               consolidated_net_income_loss, interest_expense,
+               diluted_shares_outstanding
+        FROM public.stock_income_statements
+        WHERE symbol = ANY(%s)
+          AND source = 'massive'
+          AND timeframe = 'quarterly'
+        ORDER BY symbol, period_end ASC
+        """,
+        (symbols,),
+    )
+    for r in cur.fetchall() or []:
+        out[r["symbol"]].append(dict(r))
+    return dict(out)
+
+
+def fetch_balance_sheet_rows_for_ext_batch(
+    cur: Any,
+    symbols: List[str],
+    *,
+    max_quarters: int = 6,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Batch-read latest N quarterly balance-sheet rows for each symbol.
+
+    Returns symbol -> list of dicts (ascending period_end).
+    """
+    from collections import defaultdict
+
+    out: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    if not symbols:
+        return dict(out)
+    cur.execute(
+        """
+        SELECT * FROM (
+            SELECT symbol, period_end, fiscal_year, fiscal_quarter,
+                   cash_and_equivalents, short_term_investments,
+                   receivables, inventories,
+                   total_current_assets, total_current_liabilities,
+                   total_assets, total_liabilities, total_equity,
+                   debt_current, long_term_debt_and_capital_lease_obligations,
+                   goodwill, intangible_assets_net,
+                   property_plant_equipment_net, retained_earnings_deficit,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY period_end DESC) AS rn
+            FROM public.stock_balance_sheets
+            WHERE symbol = ANY(%s)
+              AND source = 'massive'
+              AND timeframe = 'quarterly'
+        ) ranked
+        WHERE rn <= %s
+        ORDER BY symbol, period_end ASC
+        """,
+        (symbols, max_quarters),
+    )
+    for r in cur.fetchall() or []:
+        d = dict(r)
+        d.pop("rn", None)
+        out[d["symbol"]].append(d)
+    return dict(out)
+
+
+def fetch_cash_flow_rows_for_ext_batch(
+    cur: Any,
+    symbols: List[str],
+    *,
+    max_quarters: int = 6,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Batch-read latest N quarterly cash-flow rows for each symbol.
+
+    Returns symbol -> list of dicts (ascending period_end).
+    """
+    from collections import defaultdict
+
+    out: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    if not symbols:
+        return dict(out)
+    cur.execute(
+        """
+        SELECT * FROM (
+            SELECT symbol, period_end, fiscal_year, fiscal_quarter,
+                   net_income,
+                   net_cash_from_operating_activities,
+                   purchase_of_property_plant_and_equipment,
+                   depreciation_depletion_and_amortization,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY period_end DESC) AS rn
+            FROM public.stock_cash_flows
+            WHERE symbol = ANY(%s)
+              AND source = 'massive'
+              AND timeframe = 'quarterly'
+        ) ranked
+        WHERE rn <= %s
+        ORDER BY symbol, period_end ASC
+        """,
+        (symbols, max_quarters),
+    )
+    for r in cur.fetchall() or []:
+        d = dict(r)
+        d.pop("rn", None)
+        out[d["symbol"]].append(d)
+    return dict(out)
+
+
+def fetch_ratios_latest_for_ext_batch(
+    cur: Any,
+    symbols: List[str],
+) -> Dict[str, Dict[str, Any]]:
+    """Batch-read the latest ratios row per symbol (DISTINCT ON).
+
+    Returns symbol -> single dict.
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    if not symbols:
+        return out
+    cur.execute(
+        """
+        SELECT DISTINCT ON (symbol)
+            symbol, date,
+            price_to_earnings, price_to_sales, price_to_book,
+            price_to_free_cash_flow, price_to_cash_flow,
+            debt_to_equity, return_on_equity, return_on_assets,
+            market_cap, free_cash_flow, earnings_per_share,
+            average_volume, dividend_yield,
+            enterprise_value, ev_to_ebitda, ev_to_sales,
+            "current" AS current_ratio_from_ratios,
+            quick AS quick_ratio_from_ratios
+        FROM public.stock_ratios
+        WHERE symbol = ANY(%s)
+          AND source = 'massive'
+        ORDER BY symbol, date DESC
+        """,
+        (symbols,),
+    )
+    for r in cur.fetchall() or []:
+        out[r["symbol"]] = dict(r)
+    return out
+
+
+def fetch_short_interest_latest_batch(
+    cur: Any,
+    symbols: List[str],
+    *,
+    max_rows: int = 2,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Batch-read latest N short-interest rows per symbol.
+
+    Returns symbol -> list of dicts (ascending settlement_date).
+    """
+    from collections import defaultdict
+
+    out: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    if not symbols:
+        return dict(out)
+    cur.execute(
+        """
+        SELECT * FROM (
+            SELECT symbol, settlement_date, short_interest, avg_daily_volume, days_to_cover,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY settlement_date DESC) AS rn
+            FROM public.stock_short_interest
+            WHERE symbol = ANY(%s)
+              AND source = 'massive'
+        ) ranked
+        WHERE rn <= %s
+        ORDER BY symbol, settlement_date ASC
+        """,
+        (symbols, max_rows),
+    )
+    for r in cur.fetchall() or []:
+        d = dict(r)
+        d.pop("rn", None)
+        out[d["symbol"]].append(d)
+    return dict(out)
+
+
+def fetch_short_volume_recent_batch(
+    cur: Any,
+    symbols: List[str],
+    *,
+    max_days: int = 10,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Batch-read latest N short-volume rows per symbol.
+
+    Returns symbol -> list of dicts (ascending trade_date).
+    """
+    from collections import defaultdict
+
+    out: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    if not symbols:
+        return dict(out)
+    cur.execute(
+        """
+        SELECT * FROM (
+            SELECT symbol, trade_date, short_volume, short_volume_ratio, total_volume,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS rn
+            FROM public.stock_short_volume
+            WHERE symbol = ANY(%s)
+              AND source = 'massive'
+        ) ranked
+        WHERE rn <= %s
+        ORDER BY symbol, trade_date ASC
+        """,
+        (symbols, max_days),
+    )
+    for r in cur.fetchall() or []:
+        d = dict(r)
+        d.pop("rn", None)
+        out[d["symbol"]].append(d)
+    return dict(out)

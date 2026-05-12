@@ -532,6 +532,27 @@
   border-left: 2px solid rgba(132, 204, 22, 0.55);
 }
 
+/* Extension fundamental chip accent */
+.ssp-cond-chip--ext {
+  border-left: 2px solid rgba(168, 162, 158, 0.45);
+}
+.ssp-cond-group--ext {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0;
+}
+.ssp-cond-group-header--ext {
+  cursor: pointer;
+  padding: 4px 8px;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ssp-cond-group--ext > .ssp-cond-chips-row {
+  padding: 4px 8px 6px;
+}
+
 /* Technical chip group hue accents */
 .ssp-cond-chip--tech-vol    { border-left: 2px solid rgba(167, 139, 250, 0.6); }  /* purple — Vol + CRS */
 .ssp-cond-chip--tech-price52{ border-left: 2px solid rgba(52, 211, 153, 0.6);  }  /* teal  — 52W price */
@@ -1659,4 +1680,24 @@
 
 [data-theme="light"] .ssp-funnel-label--full-tech {
   color: #7c3aed;
+}
+
+/* ── Tier hint card ────────────────────────────────────────────── */
+
+.ssp-card--tier-hint {
+  border-left: 3px solid var(--color-accent, #6366f1);
+}
+
+.ssp-tier-hint-text {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #64748b);
+  margin: 4px 12px 10px;
+  line-height: 1.5;
+}
+
+.ssp-tier-hint-text code {
+  font-size: 0.70rem;
+  background: rgba(99, 102, 241, 0.08);
+  padding: 1px 4px;
+  border-radius: 3px;
 }

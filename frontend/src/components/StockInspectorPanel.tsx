@@ -188,6 +188,16 @@ const SEPA_COND_ORDER: { id: string; label: string }[] = [
   { id: 'rev_acc_fy',       label: 'Revenue Accelerating (FY)' },
 ]
 
+const FUND_EXT_GROUP_META: { key: string; label: string }[] = [
+  { key: 'quality',       label: 'Quality' },
+  { key: 'balance',       label: 'Balance Sheet' },
+  { key: 'cashflow',      label: 'Cash Flow' },
+  { key: 'valuation',     label: 'Valuation' },
+  { key: 'profitability', label: 'Profitability' },
+  { key: 'efficiency',    label: 'Efficiency' },
+  { key: 'sentiment',     label: 'Sentiment' },
+]
+
 /** Display order + labels for the 11 SEPA technical conditions. */
 const TECH_COND_ORDER: { id: string; label: string }[] = [
   { id: 'avg_volume_50_gt_threshold', label: 'Avg Volume 50D > 100K' },
@@ -643,15 +653,16 @@ export function StockInspectorPanel({
               </div>
             )}
 
-            {/* Row 3: related tickers */}
-            {overview.related_tickers && overview.related_tickers.length > 0 && (
-              <div className="sip-overview-related">
-                <span className="sip-overview-related-label">Related</span>
-                {overview.related_tickers.map((sym) => (
-                  <span key={sym} className="sip-overview-related-chip">{sym}</span>
-                ))}
-              </div>
-            )}
+            {/* Row 3: related tickers — always rendered */}
+            <div className="sip-overview-related">
+              <span className="sip-overview-related-label">Related</span>
+              {overview.related_tickers && overview.related_tickers.length > 0
+                ? overview.related_tickers.map((s) => (
+                    <span key={s} className="sip-overview-related-chip">{s}</span>
+                  ))
+                : <span className="sip-overview-related-none">No related tickers on record</span>
+              }
+            </div>
           </section>
         )}
 
@@ -789,12 +800,60 @@ export function StockInspectorPanel({
                   </span>
                 </div>
               )}
+
+              {/* Extension fundamental groups (quality, balance, cashflow, etc.) */}
+              {fund?.groups && (() => {
+                const groups = fund.groups!
+                const extConds = (fund.conditions ?? []).filter(c => c.group && c.group !== 'sepa_core')
+                if (extConds.length === 0) return null
+                return (
+                  <div className="sip-ext-groups">
+                    {FUND_EXT_GROUP_META.map(({ key, label }) => {
+                      const gs = groups[key]
+                      if (!gs) return null
+                      const groupConds = extConds.filter(c => c.group === key)
+                      if (groupConds.length === 0) return null
+                      return (
+                        <details key={key} className="sip-ext-group">
+                          <summary className="sip-ext-group-header">
+                            <span className="sip-ext-group-label">{label}</span>
+                            <span className={`sip-ext-group-badge ${gs.pass ? 'sip-ext-group-badge--pass' : gs.insufficient ? 'sip-ext-group-badge--insuf' : 'sip-ext-group-badge--fail'}`}>
+                              {gs.pass_count}/{gs.total}
+                            </span>
+                          </summary>
+                          <ul className="sip-cond-list sip-cond-list--ext">
+                            {groupConds.map((c) => (
+                              <li key={c.id} className={`sip-cond-row sip-cond-row--${c.pass ? 'pass' : 'fail'}`}>
+                                <span className={`sip-cond-icon sip-cond-icon--${c.pass ? 'pass' : 'fail'}`} aria-hidden>
+                                  {c.pass ? '✓' : '✕'}
+                                </span>
+                                <span className="sip-cond-label">{c.id.replace(/_/g, ' ')}</span>
+                                {c.actual != null || c.threshold != null ? (
+                                  <span className="sip-cond-metric" title={c.reason ?? undefined}>
+                                    <span className="sip-cond-actual">{fmtVal(c.actual)}</span>
+                                    <span className="sip-cond-vs"> / </span>
+                                    <span className="sip-cond-threshold">{fmtVal(c.threshold)}</span>
+                                  </span>
+                                ) : (
+                                  <span className={`sip-cond-pill ${c.pass ? 'sip-cond-pill--pass' : 'sip-cond-pill--fail'}`}>
+                                    {c.pass ? 'PASS' : 'FAIL'}
+                                  </span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
             </>
           )}
         </section>
 
         {/* SEPA Technical Conditions */}
-        <section className="od-detail-section sip-fund-section sip-tech-section" aria-labelledby="riv-stock-sec-tech">
+        <section className="od-detail-section sip-fund-section" aria-labelledby="riv-stock-sec-tech">
           <h4 id="riv-stock-sec-tech" className="od-detail-section-title sip-fund-title">
             <span>SEPA Technical Conditions</span>
             {tech?.as_of_date && (
@@ -863,6 +922,97 @@ export function StockInspectorPanel({
                     {techOverallPass ? 'PASS (11/11)' : `${techPassCount ?? 0} / 11`}
                   </span>
                 </div>
+              )}
+
+              {/* ── Tier 2: Momentum ── */}
+              {tech?.tiers?.momentum && tech.tiers.momentum.indicators.length > 0 && (
+                <details className="sip-tier-details">
+                  <summary className="sip-tier-summary">
+                    <span>Momentum</span>
+                    <span className="sip-tier-score">{tech.tiers.momentum.score} / {tech.tiers.momentum.max}</span>
+                  </summary>
+                  <ul className="sip-cond-list sip-tier-list">
+                    {tech.tiers.momentum.indicators.map((ind) => (
+                      <li key={ind.id} className={`sip-cond-row sip-cond-row--${ind.pass ? 'pass' : 'fail'}`}>
+                        <span className={`sip-cond-icon sip-cond-icon--${ind.pass ? 'pass' : 'fail'}`} aria-hidden>
+                          {ind.pass ? '✓' : '✕'}
+                        </span>
+                        <span className="sip-cond-label">{ind.id.replace(/_/g, ' ')}</span>
+                        <span className="sip-cond-metric" title={ind.reason ?? undefined}>
+                          {ind.actual != null ? (typeof ind.actual === 'number' ? ind.actual.toFixed(3) : String(ind.actual)) : '—'}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+
+              {/* ── Tier 3: Structure & Patterns ── */}
+              {tech?.tiers?.structure && (tech.tiers.structure.diagnostics.length > 0 || tech.tiers.structure.patterns.length > 0) && (
+                <details className="sip-tier-details">
+                  <summary className="sip-tier-summary">
+                    <span>Structure & Patterns</span>
+                    <span className="sip-tier-badge">
+                      {tech.tiers.structure.diagnostics.filter((d) => d.active).length} active
+                    </span>
+                  </summary>
+                  <ul className="sip-cond-list sip-tier-list">
+                    {tech.tiers.structure.diagnostics.map((d) => (
+                      <li key={d.id} className={`sip-cond-row sip-cond-row--${d.active ? 'pass' : 'fail'}`}>
+                        <span className={`sip-cond-icon sip-cond-icon--${d.active ? 'pass' : 'fail'}`} aria-hidden>
+                          {d.active ? '●' : '○'}
+                        </span>
+                        <span className="sip-cond-label">{d.id.replace(/_/g, ' ')}</span>
+                        <span className="sip-cond-metric">
+                          {d.value != null ? (typeof d.value === 'number' ? d.value.toFixed(3) : String(d.value)) : '—'}
+                        </span>
+                      </li>
+                    ))}
+                    {tech.tiers.structure.patterns.map((p) => (
+                      <li key={p.id} className="sip-cond-row sip-cond-row--neutral">
+                        <span className="sip-cond-icon" aria-hidden>◆</span>
+                        <span className="sip-cond-label">{p.id.replace(/_/g, ' ')}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+
+              {/* ── Tier 4: Sentiment ── */}
+              {tech?.tiers?.sentiment?.indicators && tech.tiers.sentiment.indicators.length > 0 && (
+                <details className="sip-tier-details">
+                  <summary className="sip-tier-summary">
+                    <span>Sentiment (Short)</span>
+                    {tech.tiers.sentiment.short.staleness_days != null && (
+                      <span className="sip-tier-badge">{tech.tiers.sentiment.short.staleness_days}d stale</span>
+                    )}
+                  </summary>
+                  <ul className="sip-cond-list sip-tier-list">
+                    {tech.tiers.sentiment.indicators.map((ind) => (
+                      <li key={ind.id} className={`sip-cond-row sip-cond-row--${ind.pass ? 'pass' : 'fail'}`}>
+                        <span className={`sip-cond-icon sip-cond-icon--${ind.pass ? 'pass' : 'fail'}`} aria-hidden>
+                          {ind.pass ? '✓' : '✕'}
+                        </span>
+                        <span className="sip-cond-label">{ind.id.replace(/_/g, ' ')}</span>
+                        <span className="sip-cond-metric" title={ind.reason ?? undefined}>
+                          {ind.actual != null ? String(ind.actual) : '—'}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {tech.tiers.sentiment.short.days_to_cover != null && (
+                    <div className="sip-tier-metric-row">
+                      <span>Days to Cover</span>
+                      <span>{tech.tiers.sentiment.short.days_to_cover}</span>
+                    </div>
+                  )}
+                  {tech.tiers.sentiment.short.sv_ratio_avg_4w != null && (
+                    <div className="sip-tier-metric-row">
+                      <span>Short Vol Ratio (4W Avg)</span>
+                      <span>{(tech.tiers.sentiment.short.sv_ratio_avg_4w * 100).toFixed(1)}%</span>
+                    </div>
+                  )}
+                </details>
               )}
             </>
           )}

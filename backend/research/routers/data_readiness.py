@@ -885,12 +885,16 @@ def get_fundamental_conditions_by_symbol(
             conditions.append(
                 {
                     "id": str(c.get("id") or ""),
+                    "group": str(c.get("group") or "sepa_core"),
                     "pass": bool(c.get("pass") or False),
                     "actual": c.get("actual"),
                     "threshold": c.get("threshold"),
                     "reason": c.get("reason"),
                 }
             )
+
+    groups_raw = eval_json.get("groups") if isinstance(eval_json, dict) else None
+
     return {
         "ok": True,
         "symbol": sym,
@@ -900,6 +904,7 @@ def get_fundamental_conditions_by_symbol(
         "fundamental_pass": bool(row.get("fundamental_pass") or False),
         "insufficient_data": bool(row.get("insufficient_data") or False),
         "conditions": conditions,
+        "groups": groups_raw,
     }
 
 
@@ -981,6 +986,10 @@ def get_symbol_technical_conditions(
     if isinstance(eval_json, dict):
         metrics = eval_json.get("metrics") or {}
 
+    tiers = None
+    if isinstance(eval_json, dict) and "tiers" in eval_json:
+        tiers = eval_json["tiers"]
+
     return {
         "ok": True,
         "symbol": sym,
@@ -991,21 +1000,81 @@ def get_symbol_technical_conditions(
         "insufficient_data": bool(row.get("insufficient_data") or False),
         "conditions": conditions,
         "metrics": metrics,
+        "tiers": tiers,
     }
 
 
-_SEPA_VALID_CONDITION_IDS = frozenset(
-    (
-        "eps_q2q_ge_25pct",
-        "rev_q2q_ge_25pct",
-        "eps_acc_2q",
-        "rev_acc_2q",
-        "eps_3y_ge_15pct",
-        "rev_3y_ge_15pct",
-        "eps_acc_fy",
-        "rev_acc_fy",
-    )
-)
+_SEPA_FUND_GROUPS: Dict[str, frozenset] = {
+    "sepa_core": frozenset((
+        "eps_q2q_ge_25pct", "rev_q2q_ge_25pct",
+        "eps_acc_2q", "rev_acc_2q",
+        "eps_3y_ge_15pct", "rev_3y_ge_15pct",
+        "eps_acc_fy", "rev_acc_fy",
+    )),
+    "quality": frozenset((
+        "gross_margin_ge_30pct", "operating_margin_ge_10pct", "net_margin_ge_5pct",
+        "ocf_to_ni_ge_0_7", "interest_coverage_ge_5x",
+    )),
+    "balance": frozenset((
+        "current_ratio_ge_1_5", "quick_ratio_ge_1_0",
+        "debt_to_equity_le_1", "net_debt_to_ebitda_le_3",
+    )),
+    "cashflow": frozenset((
+        "fcf_positive", "fcf_margin_ge_5pct",
+        "fcf_yield_ge_3pct", "capex_intensity_le_15pct",
+    )),
+    "valuation": frozenset((
+        "pe_le_60", "ps_le_15", "pb_le_8", "ev_to_ebitda_le_30",
+    )),
+    "profitability": frozenset((
+        "roe_ge_15pct", "roa_ge_5pct",
+    )),
+    "efficiency": frozenset((
+        "asset_turnover_ge_0_5", "dso_le_75_days", "dio_le_120_days",
+    )),
+    "sentiment": frozenset((
+        "days_to_cover_le_5", "short_volume_ratio_recent_le_30pct",
+        "short_interest_pct_of_float_le_15pct",
+    )),
+}
+
+_SEPA_VALID_CONDITION_IDS = frozenset().union(*_SEPA_FUND_GROUPS.values())
+
+_FUND_CONDITION_CATALOG = [
+    {"id": "eps_q2q_ge_25pct", "group": "sepa_core", "label": "EPS quarterly YoY growth >= 25%", "threshold": 0.25, "source_table": "stock_income_statements"},
+    {"id": "rev_q2q_ge_25pct", "group": "sepa_core", "label": "Revenue quarterly YoY growth >= 25%", "threshold": 0.25, "source_table": "stock_income_statements"},
+    {"id": "eps_acc_2q", "group": "sepa_core", "label": "EPS YoY growth accelerating 2 quarters", "threshold": None, "source_table": "stock_income_statements"},
+    {"id": "rev_acc_2q", "group": "sepa_core", "label": "Revenue YoY growth accelerating 2 quarters", "threshold": None, "source_table": "stock_income_statements"},
+    {"id": "eps_3y_ge_15pct", "group": "sepa_core", "label": "EPS 3-year CAGR >= 15%", "threshold": 0.15, "source_table": "stock_income_statements"},
+    {"id": "rev_3y_ge_15pct", "group": "sepa_core", "label": "Revenue 3-year CAGR >= 15%", "threshold": 0.15, "source_table": "stock_income_statements"},
+    {"id": "eps_acc_fy", "group": "sepa_core", "label": "EPS annual growth acceleration", "threshold": None, "source_table": "stock_income_statements"},
+    {"id": "rev_acc_fy", "group": "sepa_core", "label": "Revenue annual growth acceleration", "threshold": None, "source_table": "stock_income_statements"},
+    {"id": "gross_margin_ge_30pct", "group": "quality", "label": "Gross margin >= 30%", "threshold": 0.30, "source_table": "stock_income_statements"},
+    {"id": "operating_margin_ge_10pct", "group": "quality", "label": "Operating margin >= 10%", "threshold": 0.10, "source_table": "stock_income_statements"},
+    {"id": "net_margin_ge_5pct", "group": "quality", "label": "Net margin >= 5%", "threshold": 0.05, "source_table": "stock_income_statements"},
+    {"id": "ocf_to_ni_ge_0_7", "group": "quality", "label": "OCF / net income >= 0.7 (earnings quality)", "threshold": 0.70, "source_table": "stock_cash_flows,stock_income_statements"},
+    {"id": "interest_coverage_ge_5x", "group": "quality", "label": "Interest coverage >= 5x", "threshold": 5.0, "source_table": "stock_income_statements"},
+    {"id": "current_ratio_ge_1_5", "group": "balance", "label": "Current ratio >= 1.5", "threshold": 1.5, "source_table": "stock_balance_sheets"},
+    {"id": "quick_ratio_ge_1_0", "group": "balance", "label": "Quick ratio >= 1.0", "threshold": 1.0, "source_table": "stock_balance_sheets"},
+    {"id": "debt_to_equity_le_1", "group": "balance", "label": "Debt-to-equity <= 1.0", "threshold": 1.0, "source_table": "stock_ratios"},
+    {"id": "net_debt_to_ebitda_le_3", "group": "balance", "label": "Net debt / EBITDA <= 3.0", "threshold": 3.0, "source_table": "stock_balance_sheets,stock_income_statements"},
+    {"id": "fcf_positive", "group": "cashflow", "label": "Free cash flow positive", "threshold": 0, "source_table": "stock_cash_flows"},
+    {"id": "fcf_margin_ge_5pct", "group": "cashflow", "label": "FCF margin >= 5%", "threshold": 0.05, "source_table": "stock_cash_flows,stock_income_statements"},
+    {"id": "fcf_yield_ge_3pct", "group": "cashflow", "label": "FCF yield >= 3%", "threshold": 0.03, "source_table": "stock_cash_flows,stock_ratios"},
+    {"id": "capex_intensity_le_15pct", "group": "cashflow", "label": "CapEx intensity <= 15%", "threshold": 0.15, "source_table": "stock_cash_flows,stock_income_statements"},
+    {"id": "pe_le_60", "group": "valuation", "label": "P/E <= 60", "threshold": 60.0, "source_table": "stock_ratios"},
+    {"id": "ps_le_15", "group": "valuation", "label": "P/S <= 15", "threshold": 15.0, "source_table": "stock_ratios"},
+    {"id": "pb_le_8", "group": "valuation", "label": "P/B <= 8", "threshold": 8.0, "source_table": "stock_ratios"},
+    {"id": "ev_to_ebitda_le_30", "group": "valuation", "label": "EV/EBITDA <= 30", "threshold": 30.0, "source_table": "stock_ratios"},
+    {"id": "roe_ge_15pct", "group": "profitability", "label": "Return on equity >= 15%", "threshold": 0.15, "source_table": "stock_ratios"},
+    {"id": "roa_ge_5pct", "group": "profitability", "label": "Return on assets >= 5%", "threshold": 0.05, "source_table": "stock_ratios"},
+    {"id": "asset_turnover_ge_0_5", "group": "efficiency", "label": "Asset turnover >= 0.5", "threshold": 0.5, "source_table": "stock_income_statements,stock_balance_sheets"},
+    {"id": "dso_le_75_days", "group": "efficiency", "label": "Days sales outstanding <= 75", "threshold": 75.0, "source_table": "stock_income_statements,stock_balance_sheets"},
+    {"id": "dio_le_120_days", "group": "efficiency", "label": "Days inventory outstanding <= 120", "threshold": 120.0, "source_table": "stock_income_statements,stock_balance_sheets"},
+    {"id": "days_to_cover_le_5", "group": "sentiment", "label": "Days to cover <= 5", "threshold": 5.0, "source_table": "stock_short_interest"},
+    {"id": "short_volume_ratio_recent_le_30pct", "group": "sentiment", "label": "Short volume ratio avg <= 30%", "threshold": 0.30, "source_table": "stock_short_volume"},
+    {"id": "short_interest_pct_of_float_le_15pct", "group": "sentiment", "label": "Short interest % of float <= 15%", "threshold": 0.15, "source_table": "stock_short_interest,stock_income_statements"},
+]
 
 _TECH_VALID_CONDITION_IDS = frozenset(
     (
@@ -1022,6 +1091,55 @@ _TECH_VALID_CONDITION_IDS = frozenset(
         "price_gt_sma200",
     )
 )
+
+_TECH_MOMENTUM_INDICATOR_IDS = frozenset(
+    (
+        "rsi_14_in_band",
+        "macd_hist_positive",
+        "roc_3m_positive",
+        "roc_6m_positive",
+        "roc_12m_positive",
+        "multi_period_rs_4w_positive",
+        "multi_period_rs_13w_positive",
+        "multi_period_rs_26w_positive",
+        "slope_sma200_positive",
+        "up_down_volume_50d_gt_1",
+    )
+)
+
+_TECH_STRUCTURE_INDICATOR_IDS = frozenset(
+    (
+        "realized_vol_contraction",
+        "bb_squeeze",
+        "obv_slope_30d_positive",
+        "adx_14_ge_25",
+        "aroon_oscillator_ge_50",
+        "tight_closes_5d",
+        "vcp_contraction_3m",
+        "pocket_pivot_count",
+        "rsl_new_high",
+        "base_metrics",
+    )
+)
+
+_TECH_SENTIMENT_INDICATOR_IDS = frozenset(
+    (
+        "days_to_cover_ge_5",
+        "short_volume_ratio_le_30pct_recent",
+        "short_volume_ratio_trend_4w_falling",
+    )
+)
+
+
+@router.get("/research/data/readiness/fundamental-condition-catalog")
+def get_fundamental_condition_catalog() -> Dict[str, Any]:
+    """Return static catalog of all fundamental condition IDs with group/label/threshold metadata."""
+    return {
+        "ok": True,
+        "groups": list(_SEPA_FUND_GROUPS.keys()),
+        "conditions": _FUND_CONDITION_CATALOG,
+        "total": len(_FUND_CONDITION_CATALOG),
+    }
 
 
 @router.get("/research/data/readiness/fundamental-filter")
@@ -1300,6 +1418,14 @@ def get_symbols_readiness_snapshot(
                     if isinstance(fund_cond_list, list)
                     else []
                 )
+                # Build passed_conditions_by_group from fund_eval conditions
+                passed_by_group: Dict[str, list] = {}
+                if isinstance(fund_cond_list, list):
+                    for c in fund_cond_list:
+                        if isinstance(c, dict) and c.get("pass") is True:
+                            grp = c.get("group") or "sepa_core"
+                            passed_by_group.setdefault(grp, []).append(c.get("id"))
+                fund_groups_summary = fund_eval.get("groups") if isinstance(fund_eval, dict) else None
                 tech_eval = r.get("technical_eval") or {}
                 tech_cond_list = tech_eval.get("conditions") if isinstance(tech_eval, dict) else None
                 passed_tech_conditions = (
@@ -1332,6 +1458,8 @@ def get_symbols_readiness_snapshot(
                     "fundamental_pass_count": int(r.get("fundamental_pass_count") or 0),
                     "fundamental_insufficient": bool(r.get("fundamental_insufficient") or False),
                     "passed_conditions": passed_conditions,
+                    "passed_conditions_by_group": passed_by_group,
+                    "fund_groups": fund_groups_summary,
                     "technical_pass": bool(r.get("technical_pass") or False),
                     "technical_pass_count": int(r.get("technical_pass_count") or 0),
                     "technical_insufficient": bool(r.get("technical_insufficient") or False),
@@ -1680,3 +1808,221 @@ def get_ticker_overview(symbol: str, request: Request) -> Dict[str, Any]:
         return {"ok": False, "error": str(e)}
     finally:
         conn.close()
+
+
+# ── Tier 2–4 new endpoints ────────────────────────────────────────────────────
+
+
+@router.get("/research/data/readiness/momentum-distribution")
+def get_momentum_distribution(request: Request) -> Dict[str, Any]:
+    """Return universe-wide histogram of momentum_score (0..10)."""
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+
+    from src.persistence.postgres.connection import _get_conn_params
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    params = _get_conn_params(db)
+    params["connect_timeout"] = 10
+    try:
+        conn = psycopg2.connect(**params)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SET statement_timeout = 15000")
+            cur.execute(
+                """
+                SELECT
+                    coalesce(
+                        (technical_eval->'tiers'->'momentum'->>'score')::int,
+                        0
+                    ) AS score,
+                    count(*) AS cnt
+                FROM public.stock_readiness_daily
+                WHERE as_of_date = CURRENT_DATE
+                  AND technical_eval IS NOT NULL
+                  AND technical_eval->'tiers'->'momentum' IS NOT NULL
+                GROUP BY 1
+                ORDER BY 1
+                """
+            )
+            rows = cur.fetchall() or []
+
+        distribution = {i: 0 for i in range(11)}
+        total = 0
+        for r in rows:
+            s = int(r.get("score", 0))
+            c = int(r.get("cnt", 0))
+            distribution[s] = c
+            total += c
+
+        return {"ok": True, "distribution": distribution, "total": total}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        conn.close()
+
+
+@router.get("/research/data/readiness/momentum-filter")
+def get_momentum_filter(
+    request: Request,
+    include: str = "",
+    min_score: int = 0,
+    limit: int = 500,
+) -> Dict[str, Any]:
+    """Filter symbols by momentum sub-conditions and/or minimum momentum score.
+
+    ``include``: comma-separated momentum indicator IDs (validated against whitelist).
+    ``min_score``: minimum momentum_score (0..10).
+    """
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+
+    from src.persistence.postgres.connection import _get_conn_params
+
+    raw_ids = [s.strip() for s in (include or "").split(",") if s.strip()]
+    cond_ids = [c for c in raw_ids if c in _TECH_MOMENTUM_INDICATOR_IDS]
+
+    try:
+        eff_limit = max(1, min(int(limit), 5000))
+        eff_score = max(0, min(int(min_score), 10))
+    except Exception:
+        eff_limit = 500
+        eff_score = 0
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    params = _get_conn_params(db)
+    params["connect_timeout"] = 10
+    try:
+        conn = psycopg2.connect(**params)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SET statement_timeout = 15000")
+
+            where_parts = [
+                "as_of_date = CURRENT_DATE",
+                "technical_eval IS NOT NULL",
+                "technical_eval->'tiers'->'momentum' IS NOT NULL",
+            ]
+            if eff_score > 0:
+                where_parts.append(
+                    f"(technical_eval->'tiers'->'momentum'->>'score')::int >= {eff_score}"
+                )
+            for cid in cond_ids:
+                where_parts.append(
+                    f"""EXISTS (
+                        SELECT 1 FROM jsonb_array_elements(
+                            technical_eval->'tiers'->'momentum'->'indicators'
+                        ) elem
+                        WHERE elem->>'id' = '{cid}' AND (elem->>'pass')::boolean = true
+                    )"""
+                )
+
+            query = f"""
+                SELECT
+                    symbol,
+                    (technical_eval->'tiers'->'momentum'->>'score')::int AS momentum_score,
+                    coalesce(technical_pass_count, 0) AS core_pass_count
+                FROM public.stock_readiness_daily
+                WHERE {' AND '.join(where_parts)}
+                ORDER BY (technical_eval->'tiers'->'momentum'->>'score')::int DESC, symbol
+                LIMIT {eff_limit}
+            """
+            cur.execute(query)
+            rows = cur.fetchall() or []
+
+        symbols = [
+            {"symbol": r["symbol"], "momentum_score": r["momentum_score"], "core_pass_count": r["core_pass_count"]}
+            for r in rows
+        ]
+        return {
+            "ok": True,
+            "include": cond_ids,
+            "min_score": eff_score,
+            "count": len(symbols),
+            "symbols": symbols,
+            "limit": eff_limit,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        conn.close()
+
+
+@router.get("/research/data/readiness/symbol-technical-tiers")
+def get_symbol_technical_tiers(
+    request: Request,
+    symbol: str = "",
+) -> Dict[str, Any]:
+    """Return the full 4-tier technical evaluation for a single symbol."""
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+
+    from src.persistence.postgres.connection import _get_conn_params
+
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"ok": False, "error": "symbol is required"}
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    params = _get_conn_params(db)
+    params["connect_timeout"] = 10
+    try:
+        conn = psycopg2.connect(**params)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SET statement_timeout = 8000")
+            cur.execute(
+                """
+                SELECT
+                    symbol,
+                    as_of_date::text AS as_of_date,
+                    coalesce(technical_pass, false) AS technical_pass,
+                    coalesce(technical_pass_count, 0) AS pass_count,
+                    coalesce(technical_insufficient, false) AS insufficient_data,
+                    technical_eval
+                FROM public.stock_readiness_daily
+                WHERE symbol = %(sym)s
+                  AND technical_eval IS NOT NULL
+                ORDER BY as_of_date DESC, universe_rule_version DESC, price_source DESC
+                LIMIT 1
+                """,
+                {"sym": sym},
+            )
+            row = cur.fetchone()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        conn.close()
+
+    if not row:
+        return {"ok": True, "symbol": sym, "found": False}
+
+    eval_json = row.get("technical_eval") or {}
+    tiers = eval_json.get("tiers") if isinstance(eval_json, dict) else None
+
+    return {
+        "ok": True,
+        "symbol": sym,
+        "found": True,
+        "as_of_date": row.get("as_of_date"),
+        "technical_pass": bool(row.get("technical_pass") or False),
+        "pass_count": int(row.get("pass_count") or 0),
+        "insufficient_data": bool(row.get("insufficient_data") or False),
+        "tiers": tiers,
+        "rule_version": eval_json.get("rule_version") if isinstance(eval_json, dict) else None,
+    }

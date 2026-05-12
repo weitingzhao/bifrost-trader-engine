@@ -2825,3 +2825,145 @@ def upsert_sepa_fundamentals_cache(
     except Exception as e:
         logger.debug("upsert_sepa_fundamentals_cache failed: %s", e)
         return False
+
+
+# ── Tier 2–4 batch readers (technical_engine) ────────────────────────────────
+
+
+def get_spy_close_series(
+    status_config: dict,
+    *,
+    lookback_days: int = 420,
+    source: str = "massive",
+) -> List[float]:
+    """Read SPY daily closes (ascending) from stock_day. Shared by all symbols."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return []
+    lb = max(260, min(int(lookback_days), 3000))
+    src = (source or "").strip().lower() or "massive"
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT close
+                    FROM stock_day
+                    WHERE UPPER(TRIM(symbol)) = 'SPY'
+                      AND source = %s
+                      AND bar_time >= (CURRENT_DATE - (%s || ' days')::interval)::date
+                      AND close IS NOT NULL
+                    ORDER BY bar_time ASC
+                    """,
+                    (src, lb),
+                )
+                rows = cur.fetchall() or []
+            return [float(r[0]) for r in rows if r[0] is not None]
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("get_spy_close_series failed: %s", e)
+        return []
+
+
+def get_short_interest_recent(
+    status_config: dict,
+    symbols: List[str],
+    *,
+    settlements: int = 6,
+    source: str = "massive",
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Batch-read recent short interest rows per symbol (settlement_date DESC)."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return {}
+    syms = sorted({str(s or "").strip().upper() for s in symbols if str(s or "").strip()})
+    if not syms:
+        return {}
+    src = (source or "").strip().lower() or "massive"
+    out: Dict[str, List[Dict[str, Any]]] = {s: [] for s in syms}
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT
+                      UPPER(TRIM(symbol)) AS symbol,
+                      settlement_date,
+                      short_interest,
+                      avg_daily_volume,
+                      days_to_cover
+                    FROM (
+                      SELECT *,
+                        ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(symbol)) ORDER BY settlement_date DESC) AS rn
+                      FROM public.stock_short_interest
+                      WHERE UPPER(TRIM(symbol)) = ANY(%s)
+                        AND source = %s
+                    ) sub
+                    WHERE rn <= %s
+                    ORDER BY symbol, settlement_date DESC
+                    """,
+                    (syms, src, settlements),
+                )
+                for row in cur.fetchall() or []:
+                    sym = str((row or {}).get("symbol") or "").strip().upper()
+                    if sym:
+                        out.setdefault(sym, []).append(dict(row))
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("get_short_interest_recent failed: %s", e)
+    return out
+
+
+def get_short_volume_recent(
+    status_config: dict,
+    symbols: List[str],
+    *,
+    trade_days: int = 60,
+    source: str = "massive",
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Batch-read recent short volume rows per symbol (trade_date DESC)."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return {}
+    syms = sorted({str(s or "").strip().upper() for s in symbols if str(s or "").strip()})
+    if not syms:
+        return {}
+    src = (source or "").strip().lower() or "massive"
+    out: Dict[str, List[Dict[str, Any]]] = {s: [] for s in syms}
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT
+                      UPPER(TRIM(symbol)) AS symbol,
+                      trade_date,
+                      short_volume,
+                      short_volume_ratio,
+                      total_volume
+                    FROM (
+                      SELECT *,
+                        ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(symbol)) ORDER BY trade_date DESC) AS rn
+                      FROM public.stock_short_volume
+                      WHERE UPPER(TRIM(symbol)) = ANY(%s)
+                        AND source = %s
+                    ) sub
+                    WHERE rn <= %s
+                    ORDER BY symbol, trade_date DESC
+                    """,
+                    (syms, src, trade_days),
+                )
+                for row in cur.fetchall() or []:
+                    sym = str((row or {}).get("symbol") or "").strip().upper()
+                    if sym:
+                        out.setdefault(sym, []).append(dict(row))
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("get_short_volume_recent failed: %s", e)
+    return out

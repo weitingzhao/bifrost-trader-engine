@@ -3318,6 +3318,100 @@
   max-width: 24rem;
 }
 
+/* ── Extension groups grid ────────────────────────────────────────── */
+
+.sdp-eval-section--ext {
+  margin-top: var(--space-3, 10px);
+}
+
+.sdp-ext-groups-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.sdp-ext-group-card {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sdp-ext-group-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sdp-ext-group-card-name {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.sdp-ext-group-card-count {
+  font-size: 0.68rem;
+  color: var(--color-text-dim);
+}
+
+.sdp-ext-group-card-body {
+  display: flex;
+  gap: 16px;
+}
+
+.sdp-ext-group-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sdp-ext-group-stat-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-dim);
+}
+
+.sdp-ext-group-stat-val {
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.sdp-ext-group-conds {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 4px;
+}
+
+.sdp-ext-group-cond-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.7rem;
+}
+
+.sdp-ext-group-cond-label {
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+
+.sdp-ext-group-cond-stat {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
 @media (max-width: 900px) {
   .sdp-criteria-row {
     grid-template-columns: 10rem 1fr 8rem;
@@ -3326,5 +3420,9 @@
   .sdp-inventory-table-name,
   .sdp-inventory-indicator {
     display: none;
+  }
+
+  .sdp-ext-groups-grid {
+    grid-template-columns: 1fr;
   }
 }

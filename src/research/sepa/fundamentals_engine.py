@@ -16,20 +16,37 @@ class FundamentalsConfig:
     rev_3y_threshold: float = 0.15
 
 
-def _condition(
+def make_condition(
     cond_id: str,
     passed: bool,
     actual: Optional[float],
     threshold: Optional[float],
     reason: str,
+    *,
+    group: Optional[str] = None,
 ) -> Dict[str, Any]:
-    return {
+    d: Dict[str, Any] = {
         "id": cond_id,
         "pass": bool(passed),
         "actual": actual,
         "threshold": threshold,
         "reason": reason,
     }
+    if group is not None:
+        d["group"] = group
+    return d
+
+
+_condition = make_condition
+
+
+def to_float(v: Any) -> Optional[float]:
+    try:
+        if v is None:
+            return None
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _sort_quarterly(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -46,13 +63,7 @@ def _sort_annual(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(rows, key=lambda r: int(r.get("fiscal_year") or 0))
 
 
-def _to_float(v: Any) -> Optional[float]:
-    try:
-        if v is None:
-            return None
-        return float(v)
-    except (TypeError, ValueError):
-        return None
+_to_float = to_float
 
 
 def _build_quarterly_growth_series(

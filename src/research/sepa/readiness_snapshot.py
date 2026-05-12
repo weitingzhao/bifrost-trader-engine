@@ -1167,6 +1167,7 @@ def fetch_sepa_readiness_summary(status_config: dict) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 _FUND_COND_IDS = [
+    # sepa_core (8)
     "eps_q2q_ge_25pct",
     "rev_q2q_ge_25pct",
     "eps_acc_2q",
@@ -1175,6 +1176,38 @@ _FUND_COND_IDS = [
     "rev_3y_ge_15pct",
     "eps_acc_fy",
     "rev_acc_fy",
+    # quality (5)
+    "gross_margin_ge_30pct",
+    "operating_margin_ge_10pct",
+    "net_margin_ge_5pct",
+    "ocf_to_ni_ge_0_7",
+    "interest_coverage_ge_5x",
+    # balance (4)
+    "current_ratio_ge_1_5",
+    "quick_ratio_ge_1_0",
+    "debt_to_equity_le_1",
+    "net_debt_to_ebitda_le_3",
+    # cashflow (4)
+    "fcf_positive",
+    "fcf_margin_ge_5pct",
+    "fcf_yield_ge_3pct",
+    "capex_intensity_le_15pct",
+    # valuation (4)
+    "pe_le_60",
+    "ps_le_15",
+    "pb_le_8",
+    "ev_to_ebitda_le_30",
+    # profitability (2)
+    "roe_ge_15pct",
+    "roa_ge_5pct",
+    # efficiency (3)
+    "asset_turnover_ge_0_5",
+    "dso_le_75_days",
+    "dio_le_120_days",
+    # sentiment (3)
+    "days_to_cover_le_5",
+    "short_volume_ratio_recent_le_30pct",
+    "short_interest_pct_of_float_le_15pct",
 ]
 
 _FUND_COND_LABELS: Dict[str, str] = {
@@ -1186,6 +1219,53 @@ _FUND_COND_LABELS: Dict[str, str] = {
     "rev_3y_ge_15pct":   "Revenue 3Y CAGR ≥15%",
     "eps_acc_fy":        "EPS Annual Acceleration",
     "rev_acc_fy":        "Revenue Annual Acceleration",
+    "gross_margin_ge_30pct":     "Gross Margin ≥30%",
+    "operating_margin_ge_10pct": "Oper. Margin ≥10%",
+    "net_margin_ge_5pct":        "Net Margin ≥5%",
+    "ocf_to_ni_ge_0_7":          "OCF/NI ≥0.7",
+    "interest_coverage_ge_5x":   "Interest Coverage ≥5×",
+    "current_ratio_ge_1_5":      "Current Ratio ≥1.5",
+    "quick_ratio_ge_1_0":        "Quick Ratio ≥1.0",
+    "debt_to_equity_le_1":       "D/E ≤1.0",
+    "net_debt_to_ebitda_le_3":   "NetDebt/EBITDA ≤3",
+    "fcf_positive":              "FCF Positive",
+    "fcf_margin_ge_5pct":        "FCF Margin ≥5%",
+    "fcf_yield_ge_3pct":         "FCF Yield ≥3%",
+    "capex_intensity_le_15pct":  "CapEx ≤15%",
+    "pe_le_60":                  "P/E ≤60",
+    "ps_le_15":                  "P/S ≤15",
+    "pb_le_8":                   "P/B ≤8",
+    "ev_to_ebitda_le_30":        "EV/EBITDA ≤30",
+    "roe_ge_15pct":              "ROE ≥15%",
+    "roa_ge_5pct":               "ROA ≥5%",
+    "asset_turnover_ge_0_5":     "Asset Turnover ≥0.5",
+    "dso_le_75_days":            "DSO ≤75 days",
+    "dio_le_120_days":           "DIO ≤120 days",
+    "days_to_cover_le_5":                   "Days to Cover ≤5",
+    "short_volume_ratio_recent_le_30pct":   "Short Vol Ratio ≤30%",
+    "short_interest_pct_of_float_le_15pct": "SI % Float ≤15%",
+}
+
+_FUND_COND_GROUP: Dict[str, str] = {
+    "eps_q2q_ge_25pct": "sepa_core", "rev_q2q_ge_25pct": "sepa_core",
+    "eps_acc_2q": "sepa_core", "rev_acc_2q": "sepa_core",
+    "eps_3y_ge_15pct": "sepa_core", "rev_3y_ge_15pct": "sepa_core",
+    "eps_acc_fy": "sepa_core", "rev_acc_fy": "sepa_core",
+    "gross_margin_ge_30pct": "quality", "operating_margin_ge_10pct": "quality",
+    "net_margin_ge_5pct": "quality", "ocf_to_ni_ge_0_7": "quality",
+    "interest_coverage_ge_5x": "quality",
+    "current_ratio_ge_1_5": "balance", "quick_ratio_ge_1_0": "balance",
+    "debt_to_equity_le_1": "balance", "net_debt_to_ebitda_le_3": "balance",
+    "fcf_positive": "cashflow", "fcf_margin_ge_5pct": "cashflow",
+    "fcf_yield_ge_3pct": "cashflow", "capex_intensity_le_15pct": "cashflow",
+    "pe_le_60": "valuation", "ps_le_15": "valuation",
+    "pb_le_8": "valuation", "ev_to_ebitda_le_30": "valuation",
+    "roe_ge_15pct": "profitability", "roa_ge_5pct": "profitability",
+    "asset_turnover_ge_0_5": "efficiency", "dso_le_75_days": "efficiency",
+    "dio_le_120_days": "efficiency",
+    "days_to_cover_le_5": "sentiment",
+    "short_volume_ratio_recent_le_30pct": "sentiment",
+    "short_interest_pct_of_float_le_15pct": "sentiment",
 }
 
 # Phase-1 (10) + CRS (1) = 11 SEPA technical conditions. CRS is computed
@@ -1218,6 +1298,63 @@ _TECH_COND_LABELS: Dict[str, str] = {
     "price_gt_sma200":            "Price > SMA200",
 }
 
+# Tier 2: Momentum indicator IDs
+_MOMENTUM_IND_IDS = [
+    "rsi_14_in_band",
+    "macd_hist_positive",
+    "roc_3m_positive",
+    "roc_6m_positive",
+    "roc_12m_positive",
+    "multi_period_rs_4w_positive",
+    "multi_period_rs_13w_positive",
+    "multi_period_rs_26w_positive",
+    "slope_sma200_positive",
+    "up_down_volume_50d_gt_1",
+]
+
+_MOMENTUM_IND_LABELS: Dict[str, str] = {
+    "rsi_14_in_band":               "RSI(14) in [40, 80]",
+    "macd_hist_positive":           "MACD Histogram > 0 & Rising",
+    "roc_3m_positive":              "ROC 3M > 0",
+    "roc_6m_positive":              "ROC 6M > 0",
+    "roc_12m_positive":             "ROC 12M > 0",
+    "multi_period_rs_4w_positive":  "RS vs SPY (4W) > 0",
+    "multi_period_rs_13w_positive": "RS vs SPY (13W) > 0",
+    "multi_period_rs_26w_positive": "RS vs SPY (26W) > 0",
+    "slope_sma200_positive":        "SMA200 Slope > 0",
+    "up_down_volume_50d_gt_1":      "Up/Down Vol (50D) > 1",
+}
+
+# Tier 3: Structure diagnostic IDs
+_STRUCTURE_DIAG_IDS = [
+    "realized_vol_contraction",
+    "bb_squeeze",
+    "obv_slope_30d_positive",
+    "adx_14_ge_25",
+    "aroon_oscillator_ge_50",
+]
+
+_STRUCTURE_DIAG_LABELS: Dict[str, str] = {
+    "realized_vol_contraction":  "Realized Vol Contraction",
+    "bb_squeeze":                "BB Squeeze Active",
+    "obv_slope_30d_positive":    "OBV Slope (30D) Positive",
+    "adx_14_ge_25":              "ADX(14) ≥ 25 (Trending)",
+    "aroon_oscillator_ge_50":    "Aroon Osc ≥ 50",
+}
+
+# Tier 4: Sentiment indicator IDs
+_SENTIMENT_IND_IDS = [
+    "days_to_cover_ge_5",
+    "short_volume_ratio_le_30pct_recent",
+    "short_volume_ratio_trend_4w_falling",
+]
+
+_SENTIMENT_IND_LABELS: Dict[str, str] = {
+    "days_to_cover_ge_5":                  "Days to Cover ≥ 5",
+    "short_volume_ratio_le_30pct_recent":  "Short Vol Ratio < 30%",
+    "short_volume_ratio_trend_4w_falling": "Short Vol Trend Falling",
+}
+
 
 def run_fundamentals_local_backfill(
     status_config: dict,
@@ -1225,15 +1362,21 @@ def run_fundamentals_local_backfill(
     *,
     cache_ttl_sec: int = 21600,
 ) -> Dict[str, Any]:
-    """Evaluate 8 SEPA fundamental conditions for *all* given symbols using local income data.
+    """Evaluate 8 SEPA fundamental conditions + 25 extended conditions for all given symbols.
 
     Uses TWO DB connections total (read pass + write pass) regardless of symbol count:
-      1. Batch SELECT quarterly + annual rows for ALL symbols in two queries.
-      2. Group by symbol in Python, call evaluate_fundamentals per symbol.
+      1. Batch SELECT quarterly + annual income rows, balance sheets, cash flows,
+         ratios, short interest, and short volume for ALL symbols.
+      2. Group by symbol in Python, call evaluate_fundamentals (SEPA core 8) and
+         7 extension group evaluators per symbol, then merge results.
       3. executemany batch-upsert all results in one commit.
 
-    No Phase1 / CRS filtering. No external API calls. Designed for Stage 4 Step 10 data-quality
-    backfill so Step 13 Criteria Stats shows completeness across the full CS universe.
+    The ``fundamental_pass / fundamental_pass_count / fundamental_insufficient``
+    columns are driven *only* by the original 8 SEPA core conditions.  Extension
+    results are written into ``fundamental_eval`` JSONB under ``groups`` and as
+    additional entries in the flat ``conditions[]`` list (backward-compatible).
+
+    No Phase1 / CRS filtering. No external API calls.
     """
     import json as _json
     from collections import defaultdict
@@ -1242,6 +1385,26 @@ def run_fundamentals_local_backfill(
         FUNDAMENTALS_RULE_VERSION,
         FundamentalsConfig,
         evaluate_fundamentals,
+        to_float as _to_float,
+    )
+    from src.research.sepa.fundamentals_ext_engine import (
+        FundamentalsExtConfig,
+        evaluate_balance_group,
+        evaluate_cashflow_group,
+        evaluate_efficiency_group,
+        evaluate_profitability_group,
+        evaluate_quality_group,
+        evaluate_sentiment_group,
+        evaluate_valuation_group,
+        merge_extension_into_eval,
+    )
+    from src.research.sepa.financials_data import (
+        fetch_balance_sheet_rows_for_ext_batch,
+        fetch_cash_flow_rows_for_ext_batch,
+        fetch_income_ext_rows_batch,
+        fetch_ratios_latest_for_ext_batch,
+        fetch_short_interest_latest_batch,
+        fetch_short_volume_recent_batch,
     )
 
     if not _db_ok(status_config):
@@ -1284,7 +1447,7 @@ def run_fundamentals_local_backfill(
             "revenues": r.get("revenue"),
         }
 
-    # --- pass 1: batch-read all income rows (1 connection, 2 queries) -------------------------
+    # --- pass 1: batch-read all tables (1 connection, multiple queries) ------------------------
     params = _get_conn_params(status_config)
     params["connect_timeout"] = 15
     try:
@@ -1294,6 +1457,15 @@ def run_fundamentals_local_backfill(
 
     q_by_sym: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     a_by_sym: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+
+    # Extension data containers
+    inc_ext_by_sym: Dict[str, List[Dict[str, Any]]] = {}
+    bs_by_sym: Dict[str, List[Dict[str, Any]]] = {}
+    cf_by_sym: Dict[str, List[Dict[str, Any]]] = {}
+    ratios_by_sym: Dict[str, Dict[str, Any]] = {}
+    si_by_sym: Dict[str, List[Dict[str, Any]]] = {}
+    sv_by_sym: Dict[str, List[Dict[str, Any]]] = {}
+
     try:
         with conn_r.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
@@ -1301,6 +1473,8 @@ def run_fundamentals_local_backfill(
             )
             if not bool((cur.fetchone() or {}).get("t")):
                 return {"ok": False, "error": "stock_income_statements table not found"}
+
+            # SEPA core income reads
             cur.execute(
                 """
                 SELECT symbol, fiscal_year, fiscal_quarter, period_end, filing_date,
@@ -1325,6 +1499,33 @@ def run_fundamentals_local_backfill(
             )
             for r in cur.fetchall() or []:
                 a_by_sym[r["symbol"]].append(_map_a(r))
+
+            # Extension batch reads (best-effort; individual failures don't block SEPA core)
+            try:
+                inc_ext_by_sym = fetch_income_ext_rows_batch(cur, syms)
+            except Exception as exc:
+                logger.warning("Extension: income ext read failed: %s", exc)
+            try:
+                bs_by_sym = fetch_balance_sheet_rows_for_ext_batch(cur, syms)
+            except Exception as exc:
+                logger.warning("Extension: balance sheets read failed: %s", exc)
+            try:
+                cf_by_sym = fetch_cash_flow_rows_for_ext_batch(cur, syms)
+            except Exception as exc:
+                logger.warning("Extension: cash flows read failed: %s", exc)
+            try:
+                ratios_by_sym = fetch_ratios_latest_for_ext_batch(cur, syms)
+            except Exception as exc:
+                logger.warning("Extension: ratios read failed: %s", exc)
+            try:
+                si_by_sym = fetch_short_interest_latest_batch(cur, syms)
+            except Exception as exc:
+                logger.warning("Extension: short interest read failed: %s", exc)
+            try:
+                sv_by_sym = fetch_short_volume_recent_batch(cur, syms)
+            except Exception as exc:
+                logger.warning("Extension: short volume read failed: %s", exc)
+
     except Exception as e:
         return {"ok": False, "error": f"Batch income read failed: {e}"}
     finally:
@@ -1333,6 +1534,7 @@ def run_fundamentals_local_backfill(
     # --- pass 2: evaluate + build stock_readiness_daily upsert rows ---------------------------
     MIN_Q, MIN_A = 5, 4
     fund_cfg = FundamentalsConfig()
+    ext_cfg = FundamentalsExtConfig()
     ttl_str = str(max(60, int(cache_ttl_sec)))
 
     # (symbol, ttl_str, fundamental_pass, pass_count, insufficient, eval_json)
@@ -1358,7 +1560,58 @@ def run_fundamentals_local_backfill(
                     "issues": ["no_local_income_data"],
                 }
                 no_data += 1
+
+            # Extension evaluators (each group fails independently)
+            inc_ext = inc_ext_by_sym.get(sym, [])
+            bs_rows = bs_by_sym.get(sym, [])
+            cf_rows = cf_by_sym.get(sym, [])
+            ratios_row = ratios_by_sym.get(sym)
+            si_rows = si_by_sym.get(sym, [])
+            sv_rows = sv_by_sym.get(sym, [])
+
+            # Latest diluted shares outstanding for sentiment % of float
+            diluted_shares = None
+            if inc_ext:
+                for row in reversed(inc_ext):
+                    ds = _to_float(row.get("diluted_shares_outstanding"))
+                    if ds is not None and ds > 0:
+                        diluted_shares = ds
+                        break
+
+            ext_groups = []
+            try:
+                ext_groups.append(evaluate_quality_group(inc_ext, cf_rows, cfg=ext_cfg))
+            except Exception as exc:
+                logger.warning("Extension quality group failed for %s: %s", sym, exc)
+            try:
+                ext_groups.append(evaluate_balance_group(bs_rows, ratios_row, inc_ext, cfg=ext_cfg))
+            except Exception as exc:
+                logger.warning("Extension balance group failed for %s: %s", sym, exc)
+            try:
+                ext_groups.append(evaluate_cashflow_group(inc_ext, cf_rows, ratios_row, cfg=ext_cfg))
+            except Exception as exc:
+                logger.warning("Extension cashflow group failed for %s: %s", sym, exc)
+            try:
+                ext_groups.append(evaluate_valuation_group(ratios_row, cfg=ext_cfg))
+            except Exception as exc:
+                logger.warning("Extension valuation group failed for %s: %s", sym, exc)
+            try:
+                ext_groups.append(evaluate_profitability_group(ratios_row, cfg=ext_cfg))
+            except Exception as exc:
+                logger.warning("Extension profitability group failed for %s: %s", sym, exc)
+            try:
+                ext_groups.append(evaluate_efficiency_group(inc_ext, bs_rows, cfg=ext_cfg))
+            except Exception as exc:
+                logger.warning("Extension efficiency group failed for %s: %s", sym, exc)
+            try:
+                ext_groups.append(evaluate_sentiment_group(si_rows, sv_rows, diluted_shares, cfg=ext_cfg))
+            except Exception as exc:
+                logger.warning("Extension sentiment group failed for %s: %s", sym, exc)
+
+            result = merge_extension_into_eval(result, ext_groups)
             result["symbol"] = sym
+
+            # fundamental_pass / pass_count / insufficient stay SEPA-core only
             srd_rows.append((
                 sym,
                 ttl_str,
@@ -1420,18 +1673,18 @@ def run_technical_local_backfill(
     lookback_days: int = 420,
     source: str = "massive",
 ) -> Dict[str, Any]:
-    """Evaluate 11 SEPA technical conditions for *all* given symbols using local stock_day.
+    """Evaluate SEPA technical conditions (4 tiers) for *all* given symbols using local data.
 
-    Mirrors run_fundamentals_local_backfill:
-      1. Batch-read OHLCV (and close-only) series for ALL symbols via two read connections.
-      2. Run phase1_engine.evaluate_symbol_phase1 per symbol → 10 conditions.
-      3. Run crs_engine.compute_crs_scores across the full input set → 1 CRS condition (11th).
-      4. Merge conditions[], compute pass_count/insufficient/metrics, and executemany UPSERT
-         directly into ``stock_readiness_daily`` (technical_pass / technical_pass_count /
-         technical_insufficient / technical_eval).
+    Pipeline:
+      1. Batch-read OHLCV + close-only + SPY + short_interest + short_volume.
+      2. Run phase1_engine per symbol → 10 conditions (Core).
+      3. Run crs_engine universe-wide → 1 CRS condition (Core 11th).
+      4. Run technical_engine.evaluate_symbol_all_tiers → Momentum / Structure / Sentiment.
+      5. Merge and batch UPSERT into stock_readiness_daily.
 
-    Designed for SEPA data-quality backfill so Stock Data Readiness page can render
-    per-condition pass rates next to the Fundamental panel.
+    Core 11 backward compatibility: technical_pass / technical_pass_count /
+    technical_insufficient / top-level conditions[] and metrics[] are identical
+    to the pre-tiered version. New data lives under technical_eval.tiers.*.
     """
     import json as _json
 
@@ -1440,7 +1693,14 @@ def run_technical_local_backfill(
         Phase1Config,
         evaluate_symbol_phase1,
     )
+    from src.research.sepa.technical_engine import (
+        TechnicalConfig,
+        evaluate_symbol_all_tiers,
+    )
     from src.vendor.massive.reader import (
+        get_short_interest_recent,
+        get_short_volume_recent,
+        get_spy_close_series,
         get_stock_day_close_series_for_crs,
         get_stock_day_series_for_sepa,
     )
@@ -1459,7 +1719,7 @@ def run_technical_local_backfill(
             "error_samples": [],
         }
 
-    # pass 1: batch-read OHLCV (phase1) + close-only (CRS) ----------------------------------
+    # pass 1: batch-read OHLCV (phase1) + close-only (CRS) + SPY + short data ---------------
     rows_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
     crs_rows_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
     try:
@@ -1474,6 +1734,23 @@ def run_technical_local_backfill(
         ) or {}
     except Exception as e:
         return {"ok": False, "error": f"CRS stock_day batch read failed: {e}"}
+
+    spy_closes: List[float] = []
+    try:
+        spy_closes = get_spy_close_series(status_config, lookback_days=lookback_days, source=source)
+    except Exception as exc:
+        logger.warning("SPY close series read failed (non-fatal): %s", exc)
+
+    si_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
+    sv_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
+    try:
+        si_by_symbol = get_short_interest_recent(status_config, syms, settlements=6, source=source)
+    except Exception as exc:
+        logger.warning("short_interest read failed (non-fatal): %s", exc)
+    try:
+        sv_by_symbol = get_short_volume_recent(status_config, syms, trade_days=60, source=source)
+    except Exception as exc:
+        logger.warning("short_volume read failed (non-fatal): %s", exc)
 
     # pass 2: run phase1 evaluation per symbol (10 conditions) ------------------------------
     phase1_cfg = Phase1Config()
@@ -1504,7 +1781,8 @@ def run_technical_local_backfill(
         logger.warning("compute_crs_scores failed: %s", exc)
         crs_by_sym = {}
 
-    # pass 4: merge → 11 conditions; build upsert rows --------------------------------------
+    # pass 4: merge core 11 + run all tiers → build upsert rows -----------------------------
+    tech_cfg = TechnicalConfig()
     srd_rows: List[Tuple] = []
     no_data = 0
     errors_list: List[str] = []
@@ -1539,7 +1817,8 @@ def run_technical_local_backfill(
                 "crs_score": crs_actual,
             }
 
-            technical_eval = {
+            # Build core_result for technical_engine
+            core_result = {
                 "technical_pass": (pass_count == 11) and not insufficient,
                 "insufficient_data": insufficient,
                 "pass_count": pass_count,
@@ -1548,14 +1827,25 @@ def run_technical_local_backfill(
                 "metrics": metrics,
             }
 
+            # Run all 4 tiers through the orchestrator
+            technical_eval = evaluate_symbol_all_tiers(
+                sym,
+                core_result,
+                rows_by_symbol.get(sym, []),
+                spy_closes,
+                si_by_symbol.get(sym, []),
+                sv_by_symbol.get(sym, []),
+                cfg=tech_cfg,
+            )
+
             if insufficient and len(p1_conditions) < 10:
                 no_data += 1
 
             srd_rows.append((
                 sym,
                 bool(technical_eval["technical_pass"]),
-                int(pass_count),
-                bool(insufficient),
+                int(technical_eval["pass_count"]),
+                bool(technical_eval["insufficient_data"]),
                 _json.dumps(technical_eval),
             ))
         except Exception as exc:
@@ -1696,6 +1986,7 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                         nd = no_data_n
                     conditions.append({
                         "id": cid,
+                        "group": _FUND_COND_GROUP.get(cid, "sepa_core"),
                         "label": _FUND_COND_LABELS.get(cid, cid),
                         "pass": p,
                         "fail": f_,
@@ -1703,6 +1994,20 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                         "total": fund_result["cached_count"],
                     })
                 fund_result["conditions"] = conditions
+
+                # Build groups map for frontend
+                from collections import defaultdict as _ddict
+                _groups_map: Dict[str, Any] = {}
+                _conds_by_group: Dict[str, list] = _ddict(list)
+                for c in conditions:
+                    _conds_by_group[c["group"]].append(c)
+                for gk, gconds in _conds_by_group.items():
+                    _groups_map[gk] = {
+                        "cached_count": fund_result["cached_count"],
+                        "pass_count": sum(c["pass"] for c in gconds),
+                        "conditions": gconds,
+                    }
+                fund_result["groups"] = _groups_map
             except Exception as e:
                 logger.warning("criteria_stats fundamental query failed: %s", e)
 
@@ -1812,6 +2117,157 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                     for cid in _TECH_COND_IDS
                 ]
 
+            # --- Tier 2: Momentum per-indicator pass/fail ---
+            momentum_conditions: List[Dict[str, Any]] = []
+            try:
+                cur.execute(
+                    """
+                    SELECT
+                        ind->>'id'                                          AS id,
+                        count(*) FILTER (WHERE (ind->>'pass')::boolean)     AS pass,
+                        count(*) FILTER (WHERE NOT (ind->>'pass')::boolean) AS fail
+                    FROM public.stock_readiness_daily,
+                         jsonb_array_elements(technical_eval->'tiers'->'momentum'->'indicators') AS ind
+                    WHERE as_of_date = CURRENT_DATE
+                      AND included_in_universe = true
+                      AND technical_eval IS NOT NULL
+                      AND technical_eval->'tiers'->'momentum'->'indicators' IS NOT NULL
+                      AND coalesce((technical_eval->>'insufficient_data')::boolean, false) IS NOT TRUE
+                    GROUP BY ind->>'id'
+                    """
+                )
+                m_row_map = {
+                    str(r.get("id") or ""): {
+                        "pass": int(r.get("pass") or 0),
+                        "fail": int(r.get("fail") or 0),
+                    }
+                    for r in (cur.fetchall() or [])
+                }
+                for cid in _MOMENTUM_IND_IDS:
+                    bucket = m_row_map.get(cid, {"pass": 0, "fail": 0})
+                    momentum_conditions.append({
+                        "id": cid,
+                        "label": _MOMENTUM_IND_LABELS.get(cid, cid),
+                        "pass": int(bucket["pass"]),
+                        "fail": int(bucket["fail"]),
+                        "tier": "momentum",
+                    })
+            except Exception as e:
+                logger.debug("criteria_stats momentum per-indicator query failed: %s", e)
+                momentum_conditions = [
+                    {"id": cid, "label": _MOMENTUM_IND_LABELS.get(cid, cid), "pass": 0, "fail": 0, "tier": "momentum"}
+                    for cid in _MOMENTUM_IND_IDS
+                ]
+
+            # --- Tier 2: Momentum score distribution (0..10) ---
+            momentum_score_dist: list = []
+            try:
+                cur.execute("""
+                    SELECT
+                        coalesce((technical_eval->'tiers'->'momentum'->>'score')::int, 0) AS score,
+                        count(*)::int AS symbol_count
+                    FROM public.stock_readiness_daily
+                    WHERE as_of_date = CURRENT_DATE
+                      AND included_in_universe = true
+                      AND technical_eval IS NOT NULL
+                      AND technical_eval->'tiers'->'momentum' IS NOT NULL
+                      AND coalesce((technical_eval->>'insufficient_data')::boolean, false) IS NOT TRUE
+                    GROUP BY 1
+                    ORDER BY 1 DESC
+                """)
+                dist_rows = cur.fetchall() or []
+                m_dist_map = {int(r.get("score") or 0): int(r.get("symbol_count") or 0) for r in dist_rows}
+                momentum_score_dist = [
+                    {"score": i, "symbol_count": m_dist_map.get(i, 0)}
+                    for i in range(10, -1, -1)
+                ]
+            except Exception as e:
+                logger.debug("criteria_stats momentum_score_distribution query failed: %s", e)
+
+            # --- Tier 3: Structure per-diagnostic active/inactive ---
+            structure_conditions: List[Dict[str, Any]] = []
+            try:
+                cur.execute(
+                    """
+                    SELECT
+                        diag->>'id'                                            AS id,
+                        count(*) FILTER (WHERE (diag->>'active')::boolean)     AS active,
+                        count(*) FILTER (WHERE NOT (diag->>'active')::boolean) AS inactive
+                    FROM public.stock_readiness_daily,
+                         jsonb_array_elements(technical_eval->'tiers'->'structure'->'diagnostics') AS diag
+                    WHERE as_of_date = CURRENT_DATE
+                      AND included_in_universe = true
+                      AND technical_eval IS NOT NULL
+                      AND technical_eval->'tiers'->'structure'->'diagnostics' IS NOT NULL
+                      AND coalesce((technical_eval->>'insufficient_data')::boolean, false) IS NOT TRUE
+                    GROUP BY diag->>'id'
+                    """
+                )
+                s_row_map = {
+                    str(r.get("id") or ""): {
+                        "pass": int(r.get("active") or 0),
+                        "fail": int(r.get("inactive") or 0),
+                    }
+                    for r in (cur.fetchall() or [])
+                }
+                for cid in _STRUCTURE_DIAG_IDS:
+                    bucket = s_row_map.get(cid, {"pass": 0, "fail": 0})
+                    structure_conditions.append({
+                        "id": cid,
+                        "label": _STRUCTURE_DIAG_LABELS.get(cid, cid),
+                        "pass": int(bucket["pass"]),
+                        "fail": int(bucket["fail"]),
+                        "tier": "structure",
+                    })
+            except Exception as e:
+                logger.debug("criteria_stats structure per-diagnostic query failed: %s", e)
+                structure_conditions = [
+                    {"id": cid, "label": _STRUCTURE_DIAG_LABELS.get(cid, cid), "pass": 0, "fail": 0, "tier": "structure"}
+                    for cid in _STRUCTURE_DIAG_IDS
+                ]
+
+            # --- Tier 4: Sentiment per-indicator pass/fail ---
+            sentiment_conditions: List[Dict[str, Any]] = []
+            try:
+                cur.execute(
+                    """
+                    SELECT
+                        ind->>'id'                                          AS id,
+                        count(*) FILTER (WHERE (ind->>'pass')::boolean)     AS pass,
+                        count(*) FILTER (WHERE NOT (ind->>'pass')::boolean) AS fail
+                    FROM public.stock_readiness_daily,
+                         jsonb_array_elements(technical_eval->'tiers'->'sentiment'->'indicators') AS ind
+                    WHERE as_of_date = CURRENT_DATE
+                      AND included_in_universe = true
+                      AND technical_eval IS NOT NULL
+                      AND technical_eval->'tiers'->'sentiment'->'indicators' IS NOT NULL
+                      AND coalesce((technical_eval->>'insufficient_data')::boolean, false) IS NOT TRUE
+                    GROUP BY ind->>'id'
+                    """
+                )
+                st_row_map = {
+                    str(r.get("id") or ""): {
+                        "pass": int(r.get("pass") or 0),
+                        "fail": int(r.get("fail") or 0),
+                    }
+                    for r in (cur.fetchall() or [])
+                }
+                for cid in _SENTIMENT_IND_IDS:
+                    bucket = st_row_map.get(cid, {"pass": 0, "fail": 0})
+                    sentiment_conditions.append({
+                        "id": cid,
+                        "label": _SENTIMENT_IND_LABELS.get(cid, cid),
+                        "pass": int(bucket["pass"]),
+                        "fail": int(bucket["fail"]),
+                        "tier": "sentiment",
+                    })
+            except Exception as e:
+                logger.debug("criteria_stats sentiment per-indicator query failed: %s", e)
+                sentiment_conditions = [
+                    {"id": cid, "label": _SENTIMENT_IND_LABELS.get(cid, cid), "pass": 0, "fail": 0, "tier": "sentiment"}
+                    for cid in _SENTIMENT_IND_IDS
+                ]
+
             # --- Technical pass-count distribution (0–11 conditions) ---
             tech_dist: list = []
             try:
@@ -1846,6 +2302,10 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                 "failure_reasons": failure_reasons,
                 "conditions": tech_conditions,
                 "pass_count_distribution": tech_dist,
+                "momentum_conditions": momentum_conditions,
+                "momentum_score_distribution": momentum_score_dist,
+                "structure_conditions": structure_conditions,
+                "sentiment_conditions": sentiment_conditions,
             },
             "computed_at": datetime.now(timezone.utc).isoformat(),
         }
