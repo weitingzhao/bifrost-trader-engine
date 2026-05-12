@@ -179,127 +179,77 @@ export function StockBarStatsPanel({
 
   if (!symU) return null
 
-  const headerRow = embedded ? (
-    <div className="wl2-analysis__header riv-stock-bar-stats__header--embedded">
-      <h3 className="wl2-analysis__title" id="riv-stock-bar-stats-head">
-        Bar data
-        <span className="wl2-analysis__sub">{symU}</span>
-      </h3>
-      <button
-        type="button"
-        className="wl2-btn wl2-btn--primary"
-        disabled={!!fetchMarketDataStep}
-        onClick={() => void handleFetchMarketData()}
+  if (embedded) {
+    // ── Compact embedded layout ──────────────────────────────────────────────
+    return (
+      <section
+        className="wl2-analysis riv-stock-bar-stats riv-stock-bar-stats--embedded"
+        aria-labelledby="riv-stock-bar-stats-head"
+        style={{ minWidth: 0 }}
       >
-        {fetchMarketDataStep || 'Fetch from Massive'}
-      </button>
-    </div>
-  ) : (
-    <div className="wl2-analysis__header">
-      <h3 className="wl2-analysis__title" id="riv-stock-bar-stats-head">
-        {symU}
-        <span className="wl2-analysis__sub">bar stats</span>
-      </h3>
-      <button
-        type="button"
-        className="wl2-btn wl2-btn--primary"
-        disabled={!!fetchMarketDataStep}
-        onClick={() => void handleFetchMarketData()}
-      >
-        {fetchMarketDataStep || 'Fetch from Massive'}
-      </button>
-      {onClose != null ? (
-        <button type="button" className="wl2-act-icon" onClick={onClose} title="Close" aria-label="Close bar stats">
-          ✕
-        </button>
-      ) : null}
-    </div>
-  )
+        {/* Row 1: title · kpi pills · fetch button */}
+        <div className="riv-bsp-top-row">
+          <span className="riv-bsp-label" id="riv-stock-bar-stats-head">Bar Data</span>
+          {stats != null && (
+            <div className="riv-bsp-kpi-pills">
+              <span className="riv-bsp-kpi-pill">
+                <span className="riv-bsp-kpi-k">Daily</span>
+                <span className="riv-bsp-kpi-v">{stats.stock_day.toLocaleString()}</span>
+              </span>
+              {stats.stock_min && Object.entries(stats.stock_min).map(([period, count]) => (
+                <span key={period} className="riv-bsp-kpi-pill">
+                  <span className="riv-bsp-kpi-k">{period}</span>
+                  <span className="riv-bsp-kpi-v">{(count as number).toLocaleString()}</span>
+                </span>
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            className="wl2-btn wl2-btn--primary riv-bsp-fetch-btn"
+            disabled={!!fetchMarketDataStep}
+            onClick={() => void handleFetchMarketData()}
+            title={fetchMarketDataStep ?? 'Fetch daily + intraday OHLC from Massive'}
+          >
+            {fetchMarketDataStep ? '…' : 'Fetch'}
+          </button>
+        </div>
 
-  return (
-    <section
-      className={`wl2-analysis riv-stock-bar-stats${embedded ? ' riv-stock-bar-stats--embedded' : ''}`}
-      aria-labelledby="riv-stock-bar-stats-head"
-      style={embedded ? { minWidth: 0 } : undefined}
-    >
-      {headerRow}
-      {fetchMarketDataError && <span className="wl2-error wl2-error--inline">{fetchMarketDataError}</span>}
-      {stats != null && (
-        <div className="wl2-analysis__grid">
-          <div className="wl2-analysis__kpi">
-            <span className="wl2-analysis__kpi-label">stock_day</span>
-            <span className="wl2-analysis__kpi-val">{stats.stock_day.toLocaleString()}</span>
+        {fetchMarketDataError && (
+          <span className="wl2-error wl2-error--inline" style={{ fontSize: '0.72rem' }}>{fetchMarketDataError}</span>
+        )}
+
+        {/* Row 2: period tabs · layer toggles · reload */}
+        <div className="riv-bsp-controls-row">
+          <div className="wl2-analysis__chart-tabs" role="tablist" aria-label="Period">
+            <button type="button" role="tab" aria-selected={chartPeriod === '1 D'}
+              className={`wl2-analysis__chart-tab${chartPeriod === '1 D' ? ' wl2-analysis__chart-tab--active' : ''}`}
+              onClick={() => setChartPeriod('1 D')}>Daily</button>
+            <button type="button" role="tab" aria-selected={chartPeriod === '1 min'}
+              className={`wl2-analysis__chart-tab${chartPeriod === '1 min' ? ' wl2-analysis__chart-tab--active' : ''}`}
+              onClick={() => setChartPeriod('1 min')}>1 min</button>
           </div>
-          {stats.stock_min &&
-            Object.entries(stats.stock_min).map(([period, count]) => (
-              <div className="wl2-analysis__kpi" key={period}>
-                <span className="wl2-analysis__kpi-label">{period}</span>
-                <span className="wl2-analysis__kpi-val">{(count as number).toLocaleString()}</span>
-              </div>
+          <div className="riv-bsp-toggles" aria-label="Chart layers">
+            {[
+              { label: 'Vol', state: chartShowVolume, set: setChartShowVolume },
+              { label: 'VWAP', state: chartShowVwap, set: setChartShowVwap },
+              { label: 'MACD', state: chartShowMacd, set: setChartShowMacd },
+              { label: 'BB', state: chartShowBb, set: setChartShowBb },
+              { label: 'RSI', state: chartShowRsi, set: setChartShowRsi },
+              { label: 'S/R', state: chartShowSr, set: setChartShowSr },
+            ].map(({ label, state, set }) => (
+              <label key={label} className="wl2-analysis__toggle">
+                <input type="checkbox" checked={state} onChange={e => set(e.target.checked)} />
+                {label}
+              </label>
             ))}
-        </div>
-      )}
-
-      <div className="wl2-analysis__chart-toolbar">
-        <div className="wl2-analysis__chart-tabs" role="tablist" aria-label="K-line from database">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={chartPeriod === '1 D'}
-            className={`wl2-analysis__chart-tab${chartPeriod === '1 D' ? ' wl2-analysis__chart-tab--active' : ''}`}
-            onClick={() => setChartPeriod('1 D')}
-          >
-            Daily
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={chartPeriod === '1 min'}
-            className={`wl2-analysis__chart-tab${chartPeriod === '1 min' ? ' wl2-analysis__chart-tab--active' : ''}`}
-            onClick={() => setChartPeriod('1 min')}
-          >
-            1 min
+          </div>
+          <button type="button" className="wl2-btn wl2-btn--ghost riv-bsp-reload-btn"
+            disabled={chartLoading || !!fetchMarketDataStep}
+            onClick={() => void loadChartFromDb(symU, chartPeriod)}>
+            {chartLoading ? '…' : '↻'}
           </button>
         </div>
-        <button
-          type="button"
-          className="wl2-btn wl2-btn--ghost wl2-analysis__chart-reload"
-          disabled={chartLoading || !!fetchMarketDataStep}
-          onClick={() => void loadChartFromDb(symU, chartPeriod)}
-        >
-          {chartLoading ? 'Loading…' : 'Reload chart'}
-        </button>
-      </div>
-      <div className="wl2-analysis__chart-toggles" aria-label="Chart layers">
-        <label className="wl2-analysis__toggle">
-          <input type="checkbox" checked={chartShowVolume} onChange={e => setChartShowVolume(e.target.checked)} />
-          Volume
-        </label>
-        <label className="wl2-analysis__toggle">
-          <input type="checkbox" checked={chartShowVwap} onChange={e => setChartShowVwap(e.target.checked)} />
-          VWAP
-        </label>
-        <label className="wl2-analysis__toggle">
-          <input type="checkbox" checked={chartShowMacd} onChange={e => setChartShowMacd(e.target.checked)} />
-          MACD
-        </label>
-        <label className="wl2-analysis__toggle">
-          <input type="checkbox" checked={chartShowBb} onChange={e => setChartShowBb(e.target.checked)} />
-          Bollinger
-        </label>
-        <label className="wl2-analysis__toggle">
-          <input type="checkbox" checked={chartShowRsi} onChange={e => setChartShowRsi(e.target.checked)} />
-          RSI
-        </label>
-        <label className="wl2-analysis__toggle">
-          <input type="checkbox" checked={chartShowSr} onChange={e => setChartShowSr(e.target.checked)} />
-          S/R
-        </label>
-      </div>
-      <p className="wl2-analysis__chart-hint section-hint">
-        Candles are read from PostgreSQL <code>stock_day</code> / <code>stock_min</code> via <code>GET /bars</code> (Massive and other sources may be present).{' '}
-        <strong>Fetch from Massive</strong> enqueues Celery <code>feed_stocks_aggregate</code> jobs (daily + intraday); after they complete, use <strong>Reload chart</strong> or switch Daily / 1 min.
-      </p>
       {chartError && (
         <p className="msg-error" role="alert" style={{ marginTop: 'var(--space-2)' }}>
           {chartError}
@@ -331,6 +281,108 @@ export function StockBarStatsPanel({
       ) : (
         !chartLoading &&
         !chartInfo && (
+          <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>
+            No bars in the database for this symbol and period. Use <strong>Fetch from Massive</strong>, wait for jobs to finish, then reload the chart.
+          </p>
+        )
+      )}
+    </section>
+  )
+  }
+
+  // ── Full standalone layout ──────────────────────────────────────────────────
+  return (
+    <section className="wl2-analysis riv-stock-bar-stats" aria-labelledby="riv-stock-bar-stats-head">
+      <div className="riv-bsp-top-row">
+        <span className="riv-bsp-label" id="riv-stock-bar-stats-head">Bar Data · {symU}</span>
+        {stats != null && (
+          <div className="riv-bsp-kpi-pills">
+            <span className="riv-bsp-kpi-pill">
+              <span className="riv-bsp-kpi-k">Daily</span>
+              <span className="riv-bsp-kpi-v">{stats.stock_day.toLocaleString()}</span>
+            </span>
+            {stats.stock_min && Object.entries(stats.stock_min).map(([period, count]) => (
+              <span key={period} className="riv-bsp-kpi-pill">
+                <span className="riv-bsp-kpi-k">{period}</span>
+                <span className="riv-bsp-kpi-v">{(count as number).toLocaleString()}</span>
+              </span>
+            ))}
+          </div>
+        )}
+        <div style={{ flex: 1 }} />
+        <button
+          type="button"
+          className="wl2-btn wl2-btn--primary riv-bsp-fetch-btn"
+          disabled={!!fetchMarketDataStep}
+          onClick={() => void handleFetchMarketData()}
+          title={fetchMarketDataStep ?? 'Fetch daily + intraday OHLC from Massive'}
+        >
+          {fetchMarketDataStep ? '…' : 'Fetch'}
+        </button>
+        {onClose && (
+          <button type="button" className="wl2-btn wl2-btn--ghost" onClick={onClose} aria-label="Close">✕</button>
+        )}
+      </div>
+
+      {fetchMarketDataError && (
+        <p className="msg-error" role="alert" style={{ marginTop: 'var(--space-2)' }}>{fetchMarketDataError}</p>
+      )}
+
+      <div className="riv-bsp-controls-row">
+        <div className="wl2-analysis__chart-tabs" role="tablist" aria-label="Period">
+          <button type="button" role="tab" aria-selected={chartPeriod === '1 D'}
+            className={`wl2-analysis__chart-tab${chartPeriod === '1 D' ? ' wl2-analysis__chart-tab--active' : ''}`}
+            onClick={() => setChartPeriod('1 D')}>Daily</button>
+          <button type="button" role="tab" aria-selected={chartPeriod === '1 min'}
+            className={`wl2-analysis__chart-tab${chartPeriod === '1 min' ? ' wl2-analysis__chart-tab--active' : ''}`}
+            onClick={() => setChartPeriod('1 min')}>1 min</button>
+        </div>
+        <div className="riv-bsp-toggles" aria-label="Chart layers">
+          {[
+            { label: 'Vol', state: chartShowVolume, set: setChartShowVolume },
+            { label: 'VWAP', state: chartShowVwap, set: setChartShowVwap },
+            { label: 'MACD', state: chartShowMacd, set: setChartShowMacd },
+            { label: 'BB', state: chartShowBb, set: setChartShowBb },
+            { label: 'RSI', state: chartShowRsi, set: setChartShowRsi },
+            { label: 'S/R', state: chartShowSr, set: setChartShowSr },
+          ].map(({ label, state, set }) => (
+            <label key={label} className="wl2-analysis__toggle">
+              <input type="checkbox" checked={state} onChange={e => set(e.target.checked)} />
+              {label}
+            </label>
+          ))}
+        </div>
+        <button type="button" className="wl2-btn wl2-btn--ghost riv-bsp-reload-btn"
+          disabled={chartLoading || !!fetchMarketDataStep}
+          onClick={() => void loadChartFromDb(symU, chartPeriod)}>
+          {chartLoading ? '…' : '↻'}
+        </button>
+      </div>
+
+      {chartError && (
+        <p className="msg-error" role="alert" style={{ marginTop: 'var(--space-2)' }}>{chartError}</p>
+      )}
+      {chartInfo && !chartError && (
+        <p className="section-hint" role="status" style={{ marginTop: 'var(--space-2)' }}>{chartInfo}</p>
+      )}
+      {chartLoading && chartBarsSorted.length === 0 && (
+        <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>Loading chart from database…</p>
+      )}
+      {chartBarsSorted.length > 0 ? (
+        <div className="wl2-analysis__chart-wrap">
+          <BarsCandlestickChart
+            bars={chartBarsSorted}
+            period={chartPeriod}
+            showVolume={chartShowVolume}
+            showVwap={chartShowVwap}
+            showMacd={chartShowMacd}
+            showBollinger={chartShowBb}
+            showRsi={chartShowRsi}
+            showSr={chartShowSr}
+          />
+        </div>
+      ) : (
+        !chartLoading && !chartInfo && (
           <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>
             No bars in the database for this symbol and period. Use <strong>Fetch from Massive</strong>, wait for jobs to finish, then reload the chart.
           </p>

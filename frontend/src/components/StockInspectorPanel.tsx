@@ -2,17 +2,172 @@ import { useEffect, useMemo, useState } from 'react'
 import { fetchBarsBenchmark } from '../api'
 import {
   fetchSymbolFundamentalConditions,
+  fetchSymbolTechnicalConditions,
   fetchSymbolFundRawData,
+  fetchSymbolStatements,
+  fetchTickerOverview,
   type SymbolFundamentalConditionsResponse,
   type SymbolFundamentalConditionRow,
+  type SymbolTechnicalConditionsResponse,
+  type SymbolTechnicalConditionRow,
   type FundRawQuarterRow,
   type FundRawAnnualRow,
   type SymbolFundRawDataResponse,
+  type SymbolStatementsResponse,
+  type TickerOverviewResponse,
 } from '../api/research/dataReadiness'
 import type { LivePositionRow } from '../pages/portfolio/types'
 import { fmtPctCompact, fmtUsd } from '../utils/format'
 import { StockBarStatsPanel } from './StockBarStatsPanel'
 import '../styles/stock-inspector.css'
+
+/** Render a tiny inline bar that encodes relative magnitude for a table cell. */
+function MiniBar({ value, min, max }: { value: number | null | undefined; min: number; max: number }) {
+  if (value == null || !Number.isFinite(value) || max === min) return null
+  const pct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100))
+  const color = value >= 0 ? 'rgba(74,222,128,0.28)' : 'rgba(248,113,113,0.28)'
+  return <div className="sip-mini-bar" style={{ width: `${pct}%`, background: color }} />
+}
+
+function colRange(vals: (number | null | undefined)[]): [number, number] {
+  const ns = vals.filter((v): v is number => v != null && Number.isFinite(v as number))
+  if (ns.length === 0) return [0, 0]
+  return [Math.min(...ns), Math.max(...ns)]
+}
+
+// ── Inline SVG chart helpers (no external dependencies) ──────────────────
+
+function fmtMini(v: number): string {
+  const abs = Math.abs(v), sign = v < 0 ? '-' : ''
+  if (abs >= 1e12) return `${sign}${(abs / 1e12).toFixed(1)}T`
+  if (abs >= 1e9)  return `${sign}${(abs / 1e9).toFixed(1)}B`
+  if (abs >= 1e6)  return `${sign}${(abs / 1e6).toFixed(0)}M`
+  if (abs >= 1e3)  return `${sign}${(abs / 1e3).toFixed(0)}K`
+  return `${sign}${abs.toFixed(1)}`
+}
+
+interface ChartSeries {
+  key: string
+  color: string
+  negColor?: string    // colour for negative values; falls back to color
+  values: (number | null)[]
+}
+
+/**
+ * Grouped bar chart.
+ * vw: coordinate-space width (matches typical rendered px so font sizes are predictable).
+ *     Use ~500 for half-width columns, ~960 for full-width.
+ */
+function SvgBarChart({ labels, series, h = 110, vw = 500 }: {
+  labels: string[]; series: ChartSeries[]; h?: number; vw?: number
+}) {
+  const n = labels.length
+  if (n === 0 || series.length === 0) return null
+  const allVals = series.flatMap(s => s.values.filter((v): v is number => v != null && Number.isFinite(v)))
+  if (allVals.length === 0) return null
+
+  const vMin = Math.min(0, ...allVals)
+  const vMax = Math.max(0, ...allVals)
+  const range = vMax - vMin || 1
+
+  const VW = vw, PL = 46, PR = 6, PT = 10, PB = 22
+  const cW = VW - PL - PR, cH = h - PT - PB
+  const zY = PT + (vMax / range) * cH
+  const ns = series.length
+  const gW = cW / n
+  const bW = Math.max(3, (gW * 0.74) / ns)
+
+  const ticks = [vMin, vMin + range * 0.5, vMax]
+
+  return (
+    <svg viewBox={`0 0 ${VW} ${h}`} width="100%" height={h} style={{ display: 'block' }}>
+      {ticks.map((tv, ti) => {
+        const ty = PT + ((vMax - tv) / range) * cH
+        return (
+          <g key={ti}>
+            <line x1={PL} y1={ty} x2={VW - PR} y2={ty} stroke="rgba(148,163,184,0.12)" strokeWidth={0.7} />
+            <text x={PL - 4} y={ty + 4} textAnchor="end" fontSize={9} fill="rgba(148,163,184,0.65)">{fmtMini(tv)}</text>
+          </g>
+        )
+      })}
+      <line x1={PL} y1={zY} x2={VW - PR} y2={zY} stroke="rgba(148,163,184,0.35)" strokeWidth={1} />
+      {labels.map((lbl, gi) => {
+        const gX = PL + gi * gW + gW * 0.12
+        return (
+          <g key={gi}>
+            {series.map((s, si) => {
+              const v = s.values[gi]
+              if (v == null || !Number.isFinite(v)) return null
+              const bH = Math.max(1, Math.abs((v / range) * cH))
+              const bY = v >= 0 ? zY - bH : zY
+              const fill = v < 0 && s.negColor ? s.negColor : s.color
+              return (
+                <rect key={si} x={gX + si * (bW + 2)} y={bY} width={bW} height={bH}
+                  fill={fill} rx={1.5} opacity={0.9}>
+                  <title>{s.key}: {fmtMini(v)}</title>
+                </rect>
+              )
+            })}
+            <text x={gX + ns * (bW + 2) / 2} y={h - 4} textAnchor="middle" fontSize={8}
+              fill="rgba(148,163,184,0.65)">{lbl}</text>
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
+/** Area / line chart for a single time-series metric. */
+function SvgAreaChart({ labels, values, color, areaColor, h = 88, vw = 500 }: {
+  labels: string[]; values: (number | null)[];
+  color: string; areaColor: string; h?: number; vw?: number
+}) {
+  const pts = values
+    .map((v, i) => (v != null && Number.isFinite(v) ? { i, v } : null))
+    .filter(Boolean) as { i: number; v: number }[]
+  if (pts.length < 2) return null
+
+  const VW = vw, PL = 46, PR = 6, PT = 10, PB = 22
+  const cW = VW - PL - PR, cH = h - PT - PB
+  const vMin = Math.min(...pts.map(p => p.v))
+  const vMax = Math.max(...pts.map(p => p.v))
+  const range = vMax - vMin || 1
+  const n = values.length
+
+  const xOf = (i: number) => PL + (i / Math.max(n - 1, 1)) * cW
+  const yOf = (v: number) => PT + (1 - (v - vMin) / range) * cH
+
+  const linePts = pts.map(p => `${xOf(p.i).toFixed(1)},${yOf(p.v).toFixed(1)}`).join(' ')
+  const areaPath =
+    `M${xOf(pts[0].i).toFixed(1)},${(PT + cH).toFixed(1)} ` +
+    pts.map(p => `L${xOf(p.i).toFixed(1)},${yOf(p.v).toFixed(1)}`).join(' ') +
+    ` L${xOf(pts[pts.length - 1].i).toFixed(1)},${(PT + cH).toFixed(1)} Z`
+
+  const step = Math.max(1, Math.ceil(n / 6))
+
+  return (
+    <svg viewBox={`0 0 ${VW} ${h}`} width="100%" height={h} style={{ display: 'block' }}>
+      {[0, 0.5, 1].map((t, ti) => {
+        const tv = vMin + t * range
+        const ty = PT + (1 - t) * cH
+        return (
+          <g key={ti}>
+            <line x1={PL} y1={ty} x2={VW - PR} y2={ty} stroke="rgba(148,163,184,0.12)" strokeWidth={0.7} />
+            <text x={PL - 4} y={ty + 4} textAnchor="end" fontSize={9} fill="rgba(148,163,184,0.65)">{fmtMini(tv)}</text>
+          </g>
+        )
+      })}
+      <path d={areaPath} fill={areaColor} />
+      <polyline points={linePts} fill="none" stroke={color} strokeWidth={1.8} strokeLinejoin="round" />
+      {pts
+        .filter(p => p.i % step === 0 || p.i === n - 1)
+        .map(p => (
+          <text key={p.i} x={xOf(p.i)} y={h - 4} textAnchor="middle" fontSize={8}
+            fill="rgba(148,163,184,0.65)">{labels[p.i]}</text>
+        ))}
+    </svg>
+  )
+}
 
 function fmtMarketValue(position: LivePositionRow): string {
   const q = Number(position.position)
@@ -31,6 +186,21 @@ const SEPA_COND_ORDER: { id: string; label: string }[] = [
   { id: 'rev_3y_ge_15pct',  label: 'Revenue 3-Year CAGR ≥ 15%' },
   { id: 'eps_acc_fy',       label: 'EPS Accelerating (FY)' },
   { id: 'rev_acc_fy',       label: 'Revenue Accelerating (FY)' },
+]
+
+/** Display order + labels for the 11 SEPA technical conditions. */
+const TECH_COND_ORDER: { id: string; label: string }[] = [
+  { id: 'avg_volume_50_gt_threshold', label: 'Avg Volume 50D > 100K' },
+  { id: 'crs_ge_70',                  label: 'CRS ≥ 70' },
+  { id: 'close_ge_low52_x_1_3',       label: 'Close ≥ Low52W × 1.3' },
+  { id: 'close_ge_high52_x_0_75',     label: 'Close ≥ High52W × 0.75' },
+  { id: 'sma50_gt_sma150',            label: 'SMA50 > SMA150' },
+  { id: 'sma50_gt_sma200',            label: 'SMA50 > SMA200' },
+  { id: 'sma150_gt_sma200',           label: 'SMA150 > SMA200' },
+  { id: 'sma200_rising_1m',           label: 'SMA200 Rising (1M)' },
+  { id: 'price_gt_sma50',             label: 'Price > SMA50' },
+  { id: 'price_gt_sma150',            label: 'Price > SMA150' },
+  { id: 'price_gt_sma200',            label: 'Price > SMA200' },
 ]
 
 /** Optional pre-loaded fundamental snapshot passed by the caller (e.g. from a distribution chip). */
@@ -254,6 +424,80 @@ export function StockInspectorPanel({
     }
   }, [activeCond, rawData])
 
+  // ── SEPA technical conditions (today's snapshot) ─────────────────────────
+  const [tech, setTech] = useState<SymbolTechnicalConditionsResponse | null>(null)
+  const [techLoading, setTechLoading] = useState(false)
+  const [techError, setTechError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!symU) return
+    let cancelled = false
+    setTechLoading(true)
+    setTechError(null)
+    fetchSymbolTechnicalConditions(symU)
+      .then((res) => {
+        if (cancelled) return
+        if (!res.ok) {
+          setTechError(res.error ?? 'Failed')
+          setTech(null)
+        } else {
+          setTech(res)
+        }
+      })
+      .catch((e) => { if (!cancelled) setTechError(e instanceof Error ? e.message : 'Network error') })
+      .finally(() => { if (!cancelled) setTechLoading(false) })
+    return () => { cancelled = true }
+  }, [symU])
+
+  const techPassCount = tech?.pass_count ?? null
+  const techInsufficient = tech?.insufficient_data ?? false
+  const techOverallPass = tech?.technical_pass ?? null
+  const hasAnyTechData = tech?.found === true
+
+  const displayTechConditions = useMemo(() => {
+    const apiById = new Map<string, SymbolTechnicalConditionRow>()
+    if (tech?.conditions) {
+      for (const c of tech.conditions) apiById.set(c.id, c)
+    }
+    return TECH_COND_ORDER.map(({ id, label }) => {
+      const api = apiById.get(id)
+      if (api) return { id, label, pass: api.pass, actual: api.actual, threshold: api.threshold, reason: api.reason, source: 'api' as const }
+      return { id, label, pass: false, actual: null, threshold: null, reason: null, source: 'placeholder' as const }
+    })
+  }, [tech])
+
+  // ── Ticker overview (tickers + ticker_overview + related_tickers) ───────────
+  const [overview, setOverview] = useState<TickerOverviewResponse | null>(null)
+  const [descExpanded, setDescExpanded] = useState(false)
+
+  useEffect(() => {
+    if (!symU) return
+    let cancelled = false
+    setOverview(null)
+    setDescExpanded(false)
+    fetchTickerOverview(symU)
+      .then((res) => { if (!cancelled) setOverview(res) })
+      .catch(() => { /* silently ignore */ })
+    return () => { cancelled = true }
+  }, [symU])
+
+  // ── Statements data (balance sheet, cash flow, ratios, short data) ──────────
+  const [stmts, setStmts] = useState<SymbolStatementsResponse | null>(null)
+  const [stmtsLoading, setStmtsLoading] = useState(false)
+  const [stmtsExpanded, setStmtsExpanded] = useState(true)
+
+  useEffect(() => {
+    if (!symU || !stmtsExpanded) return
+    if (stmts?.symbol === symU) return
+    let cancelled = false
+    setStmtsLoading(true)
+    fetchSymbolStatements(symU)
+      .then((res) => { if (!cancelled) setStmts(res.ok ? res : null) })
+      .catch(() => { if (!cancelled) setStmts(null) })
+      .finally(() => { if (!cancelled) setStmtsLoading(false) })
+    return () => { cancelled = true }
+  }, [symU, stmtsExpanded, stmts?.symbol])
+
   function fmtVal(v: number | string | null | undefined): string {
     if (v === null || v === undefined) return '—'
     if (typeof v === 'number') {
@@ -263,6 +507,33 @@ export function StockInspectorPanel({
       return v.toLocaleString(undefined, { maximumFractionDigits: 2 })
     }
     return String(v)
+  }
+
+  /** Format large monetary values as $XB / $XM / $XK */
+  function fmtM(v: number | null | undefined): string {
+    if (v == null || !Number.isFinite(v)) return '—'
+    const abs = Math.abs(v)
+    const sign = v < 0 ? '-' : ''
+    if (abs >= 1e12) return `${sign}$${(abs / 1e12).toFixed(2)}T`
+    if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(2)}B`
+    if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(1)}M`
+    if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(0)}K`
+    return `${sign}$${abs.toFixed(0)}`
+  }
+
+  function cfCls(v: number | null | undefined): string {
+    if (v == null) return ''
+    return v >= 0 ? 'sip-stmts-pos' : 'sip-stmts-neg'
+  }
+
+  function fmtRatio(v: number | null | undefined): string {
+    if (v == null || !Number.isFinite(v)) return '—'
+    return v.toFixed(1)
+  }
+
+  function fmtPct2(v: number | null | undefined): string {
+    if (v == null || !Number.isFinite(v)) return '—'
+    return `${(v * 100).toFixed(1)}%`
   }
 
   function passBadgeTone(n: number | null): string {
@@ -294,7 +565,12 @@ export function StockInspectorPanel({
           {accountId && <span className="od-detail-expiry"> · {accountId}</span>}
           {resolvedPassCount != null && (
             <span className={`sip-pass-badge ${passBadgeTone(resolvedPassCount)}`}>
-              {resolvedPassCount} / 8
+              F {resolvedPassCount}/8
+            </span>
+          )}
+          {techPassCount != null && (
+            <span className={`sip-pass-badge ${techPassCount === 11 ? 'sip-pass-badge--full' : techPassCount >= 7 ? 'sip-pass-badge--partial' : 'sip-pass-badge--poor'}`}>
+              T {techPassCount}/11
             </span>
           )}
         </h3>
@@ -304,6 +580,81 @@ export function StockInspectorPanel({
       </div>
 
       <div className="od-contract-detail-stack">
+
+        {/* Ticker Overview — company name, sector/industry, market cap, description, related */}
+        {overview?.found && (
+          <section className="sip-overview-section">
+            {/* Row 1: meta chips */}
+            <div className="sip-overview-meta-row">
+              {overview.name && (
+                <span className="sip-overview-name">{overview.name}</span>
+              )}
+              {overview.sector && <span className="sip-overview-chip sip-overview-chip--sector">{overview.sector}</span>}
+              {overview.industry && overview.industry !== overview.sector && (
+                <span className="sip-overview-chip">{overview.industry}</span>
+              )}
+              {(overview.primary_exchange || overview.exchange) && (
+                <span className="sip-overview-chip sip-overview-chip--exch">{overview.primary_exchange || overview.exchange}</span>
+              )}
+              {overview.market_cap != null && (
+                <span className="sip-overview-chip sip-overview-chip--num" title="Market Cap">
+                  {overview.market_cap >= 1e12
+                    ? `$${(overview.market_cap / 1e12).toFixed(2)}T`
+                    : overview.market_cap >= 1e9
+                    ? `$${(overview.market_cap / 1e9).toFixed(1)}B`
+                    : `$${(overview.market_cap / 1e6).toFixed(0)}M`}
+                </span>
+              )}
+              {overview.total_employees != null && (
+                <span className="sip-overview-chip sip-overview-chip--num" title="Employees">
+                  {overview.total_employees >= 1000
+                    ? `${(overview.total_employees / 1000).toFixed(0)}K emp`
+                    : `${overview.total_employees} emp`}
+                </span>
+              )}
+              {overview.list_date && (
+                <span className="sip-overview-chip sip-overview-chip--dim" title="IPO / List Date">
+                  est. {overview.list_date.slice(0, 4)}
+                </span>
+              )}
+              {overview.homepage_url && (
+                <a
+                  className="sip-overview-chip sip-overview-chip--link"
+                  href={overview.homepage_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={overview.homepage_url}
+                >
+                  ↗
+                </a>
+              )}
+            </div>
+
+            {/* Row 2: description */}
+            {overview.description && (
+              <div className="sip-overview-desc-wrap">
+                <p
+                  className={`sip-overview-desc${descExpanded ? ' sip-overview-desc--expanded' : ''}`}
+                  onClick={() => setDescExpanded((v) => !v)}
+                  title={descExpanded ? 'Click to collapse' : 'Click to expand'}
+                >
+                  {overview.description}
+                </p>
+              </div>
+            )}
+
+            {/* Row 3: related tickers */}
+            {overview.related_tickers && overview.related_tickers.length > 0 && (
+              <div className="sip-overview-related">
+                <span className="sip-overview-related-label">Related</span>
+                {overview.related_tickers.map((sym) => (
+                  <span key={sym} className="sip-overview-related-chip">{sym}</span>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
         {position && (
           <section className="od-detail-section" aria-labelledby="riv-stock-sec-position">
             <h4 id="riv-stock-sec-position" className="od-detail-section-title">
@@ -356,7 +707,10 @@ export function StockInspectorPanel({
           </section>
         )}
 
-        {/* SEPA Fundamental Conditions — formerly only in the Stock Screener sidebar */}
+        {/* SEPA Fundamental + Technical — side by side two-column grid */}
+        <div className="sip-conditions-grid">
+
+        {/* SEPA Fundamental Conditions */}
         <section className="od-detail-section sip-fund-section" aria-labelledby="riv-stock-sec-fund">
           <h4 id="riv-stock-sec-fund" className="od-detail-section-title sip-fund-title">
             <span>SEPA Fundamental Conditions</span>
@@ -439,6 +793,83 @@ export function StockInspectorPanel({
           )}
         </section>
 
+        {/* SEPA Technical Conditions */}
+        <section className="od-detail-section sip-fund-section sip-tech-section" aria-labelledby="riv-stock-sec-tech">
+          <h4 id="riv-stock-sec-tech" className="od-detail-section-title sip-fund-title">
+            <span>SEPA Technical Conditions</span>
+            {tech?.as_of_date && (
+              <span className="sip-fund-asof" title="as_of_date">{tech.as_of_date}</span>
+            )}
+          </h4>
+
+          {techLoading && !tech && (
+            <p className="section-hint sip-fund-hint">Loading conditions…</p>
+          )}
+          {techError && !hasAnyTechData && (
+            <p className="section-hint sip-fund-hint sip-fund-hint--err">{techError}</p>
+          )}
+          {!techLoading && !techError && !hasAnyTechData && (
+            <p className="section-hint sip-fund-hint">
+              No technical snapshot recorded for this symbol yet. Run the technical backfill.
+            </p>
+          )}
+
+          {hasAnyTechData && (
+            <>
+              {techInsufficient && (
+                <p className="sip-fund-callout sip-fund-callout--warn">
+                  Insufficient data: fewer than 252 bars available.
+                </p>
+              )}
+              <ul className="sip-cond-list">
+                {displayTechConditions.map((c) => (
+                  <li
+                    key={c.id}
+                    className={`sip-cond-row sip-cond-row--${c.pass ? 'pass' : 'fail'}`}
+                  >
+                    <span className={`sip-cond-icon sip-cond-icon--${c.pass ? 'pass' : 'fail'}`} aria-hidden>
+                      {c.pass ? '✓' : '✕'}
+                    </span>
+                    <span className="sip-cond-label">{c.label}</span>
+                    {c.source === 'api' && (c.actual != null || c.threshold != null) ? (
+                      <span className="sip-cond-metric" title={c.reason ?? undefined}>
+                        <span className="sip-cond-actual">
+                          {c.actual != null
+                            ? (Math.abs(Number(c.actual)) < 1e4 ? Number(c.actual).toLocaleString(undefined, { maximumFractionDigits: 0 }) : Number(c.actual).toLocaleString())
+                            : '—'}
+                        </span>
+                        {c.threshold != null && (
+                          <>
+                            <span className="sip-cond-vs"> / </span>
+                            <span className="sip-cond-threshold">
+                              {Number(c.threshold).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            </span>
+                          </>
+                        )}
+                      </span>
+                    ) : (
+                      <span className={`sip-cond-pill ${c.pass ? 'sip-cond-pill--pass' : 'sip-cond-pill--fail'}`}>
+                        {c.pass ? 'PASS' : 'FAIL'}
+                      </span>
+                    )}
+                    <span />
+                  </li>
+                ))}
+              </ul>
+              {techOverallPass != null && (
+                <div className={`sip-fund-summary ${techOverallPass ? 'sip-fund-summary--ok' : 'sip-fund-summary--warn'}`}>
+                  <span className="sip-fund-summary-label">Overall</span>
+                  <span className="sip-fund-summary-value">
+                    {techOverallPass ? 'PASS (11/11)' : `${techPassCount ?? 0} / 11`}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+
+        </div>{/* end sip-conditions-grid */}
+
         {/* Raw income statement data — highlighted by active condition */}
         {(rawData || rawLoading) && (
           <section className="od-detail-section sip-raw-section" aria-labelledby="riv-stock-sec-raw">
@@ -456,69 +887,77 @@ export function StockInspectorPanel({
 
             {rawLoading && <p className="section-hint">Loading source data…</p>}
 
-            {rawData && rawData.quarterly.length > 0 && (
-              <>
-                <div className="sip-raw-table-label">Quarterly</div>
-                <table className="sip-raw-table">
-                  <thead>
-                    <tr>
-                      <th>Period</th>
-                      <th className={highlight.col === 'eps' ? 'sip-raw-th--active' : ''}>EPS</th>
-                      <th className={highlight.col === 'revenues' ? 'sip-raw-th--active' : ''}>Revenue</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rawData.quarterly.map((r) => {
-                      const k = qKey(r)
-                      const rowHit = highlight.qKeys.has(k)
-                      return (
-                        <tr key={k} className={rowHit ? 'sip-raw-row--hit' : ''}>
-                          <td className="sip-raw-period">Q{r.fiscal_quarter}-{r.fiscal_year}</td>
-                          <td className={rowHit && highlight.col === 'eps' ? 'sip-raw-cell--highlight' : ''}>
-                            {fmtEps(r.eps)}
-                          </td>
-                          <td className={rowHit && highlight.col === 'revenues' ? 'sip-raw-cell--highlight' : ''}>
-                            {fmtRev(r.revenues)}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </>
-            )}
+            {rawData && rawData.quarterly.length > 0 && (() => {
+              const [minQEps, maxQEps] = colRange(rawData.quarterly.map(r => r.eps))
+              const [minQRev, maxQRev] = colRange(rawData.quarterly.map(r => r.revenues))
+              return (
+                <>
+                  <div className="sip-raw-table-label">Quarterly</div>
+                  <table className="sip-raw-table">
+                    <thead>
+                      <tr>
+                        <th>Period</th>
+                        <th className={highlight.col === 'eps' ? 'sip-raw-th--active' : ''}>EPS</th>
+                        <th className={highlight.col === 'revenues' ? 'sip-raw-th--active' : ''}>Revenue</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rawData.quarterly.map((r) => {
+                        const k = qKey(r)
+                        const rowHit = highlight.qKeys.has(k)
+                        return (
+                          <tr key={k} className={rowHit ? 'sip-raw-row--hit' : ''}>
+                            <td className="sip-raw-period">Q{r.fiscal_quarter}-{r.fiscal_year}</td>
+                            <td className={`sip-mini-bar-cell${rowHit && highlight.col === 'eps' ? ' sip-raw-cell--highlight' : ''}`}>
+                              {fmtEps(r.eps)}<MiniBar value={r.eps} min={minQEps} max={maxQEps} />
+                            </td>
+                            <td className={`sip-mini-bar-cell${rowHit && highlight.col === 'revenues' ? ' sip-raw-cell--highlight' : ''}`}>
+                              {fmtRev(r.revenues)}<MiniBar value={r.revenues} min={minQRev} max={maxQRev} />
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </>
+              )
+            })()}
 
-            {rawData && rawData.annual.length > 0 && (
-              <>
-                <div className="sip-raw-table-label" style={{ marginTop: 12 }}>Annual</div>
-                <table className="sip-raw-table">
-                  <thead>
-                    <tr>
-                      <th>Year</th>
-                      <th className={highlight.col === 'eps' ? 'sip-raw-th--active' : ''}>EPS</th>
-                      <th className={highlight.col === 'revenues' ? 'sip-raw-th--active' : ''}>Revenue</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rawData.annual.map((r) => {
-                      const k = aKey(r)
-                      const rowHit = highlight.aKeys.has(k)
-                      return (
-                        <tr key={k} className={rowHit ? 'sip-raw-row--hit' : ''}>
-                          <td className="sip-raw-period">FY{r.fiscal_year}</td>
-                          <td className={rowHit && highlight.col === 'eps' ? 'sip-raw-cell--highlight' : ''}>
-                            {fmtEps(r.eps)}
-                          </td>
-                          <td className={rowHit && highlight.col === 'revenues' ? 'sip-raw-cell--highlight' : ''}>
-                            {fmtRev(r.revenues)}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </>
-            )}
+            {rawData && rawData.annual.length > 0 && (() => {
+              const [minAEps, maxAEps] = colRange(rawData.annual.map(r => r.eps))
+              const [minARev, maxARev] = colRange(rawData.annual.map(r => r.revenues))
+              return (
+                <>
+                  <div className="sip-raw-table-label" style={{ marginTop: 12 }}>Annual</div>
+                  <table className="sip-raw-table">
+                    <thead>
+                      <tr>
+                        <th>Year</th>
+                        <th className={highlight.col === 'eps' ? 'sip-raw-th--active' : ''}>EPS</th>
+                        <th className={highlight.col === 'revenues' ? 'sip-raw-th--active' : ''}>Revenue</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rawData.annual.map((r) => {
+                        const k = aKey(r)
+                        const rowHit = highlight.aKeys.has(k)
+                        return (
+                          <tr key={k} className={rowHit ? 'sip-raw-row--hit' : ''}>
+                            <td className="sip-raw-period">FY{r.fiscal_year}</td>
+                            <td className={`sip-mini-bar-cell${rowHit && highlight.col === 'eps' ? ' sip-raw-cell--highlight' : ''}`}>
+                              {fmtEps(r.eps)}<MiniBar value={r.eps} min={minAEps} max={maxAEps} />
+                            </td>
+                            <td className={`sip-mini-bar-cell${rowHit && highlight.col === 'revenues' ? ' sip-raw-cell--highlight' : ''}`}>
+                              {fmtRev(r.revenues)}<MiniBar value={r.revenues} min={minARev} max={maxARev} />
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </>
+              )
+            })()}
 
             {rawData && rawData.quarterly.length === 0 && rawData.annual.length === 0 && (
               <p className="section-hint">No income statement data found for this symbol.</p>
@@ -526,10 +965,263 @@ export function StockInspectorPanel({
           </section>
         )}
 
-        {/* BarStats (price action / chart / massive sync) only depends on `symbol`,
-            so it renders on both Positions (with persistence context) and the
-            Stock Screener (where there is no LivePositionRow). */}
+        {/* Bar Stats — price action, chart, massive sync (symbol-only dependency) */}
         {symU && <StockBarStatsPanel symbol={symU} embedded />}
+
+        {/* Statements section (balance sheet, cash flow, ratios, short interest/volume) */}
+        <section className="od-detail-section sip-stmts-section" aria-labelledby="riv-stock-sec-stmts">
+          <h4
+            id="riv-stock-sec-stmts"
+            className="od-detail-section-title sip-stmts-toggle"
+            onClick={() => setStmtsExpanded((v) => !v)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setStmtsExpanded((v) => !v) }}
+            title={stmtsExpanded ? 'Collapse statements' : 'Load statements data'}
+          >
+            <span>Statements</span>
+            <span className="sip-stmts-toggle-arrow">{stmtsExpanded ? '▴' : '▾'}</span>
+          </h4>
+
+          {stmtsExpanded && (
+            <>
+              {stmtsLoading && <p className="section-hint">Loading…</p>}
+
+              {/* Balance Sheet — chart left | key-column table right */}
+              {stmts && stmts.balance_sheets.length > 0 && (() => {
+                const bs = [...stmts.balance_sheets].reverse()
+                const lbls = bs.map(r => `Q${r.fiscal_quarter}'${String(r.fiscal_year).slice(2)}`)
+                return (
+                  <div className="sip-stmts-block">
+                    <div className="sip-stmt-block-head">
+                      <span className="sip-stmts-block-title">Balance Sheet</span>
+                      <div className="sip-chart-legend">
+                        <span className="sip-legend-dot" style={{ background: 'rgba(74,222,128,0.85)' }} />Cash
+                        <span className="sip-legend-dot" style={{ background: 'rgba(56,189,248,0.85)' }} />Equity
+                        <span className="sip-legend-dot" style={{ background: 'rgba(248,113,113,0.75)' }} />LT Debt
+                      </div>
+                    </div>
+                    <div className="sip-stmt-chart-table">
+                      <div className="sip-stmt-chart-col">
+                        <SvgBarChart labels={lbls} h={110} vw={500} series={[
+                          { key: 'Cash',    color: 'rgba(74,222,128,0.82)',  values: bs.map(r => r.cash_and_equivalents) },
+                          { key: 'Equity',  color: 'rgba(56,189,248,0.82)',  values: bs.map(r => r.total_equity) },
+                          { key: 'LT Debt', color: 'rgba(248,113,113,0.72)', values: bs.map(r => r.long_term_debt_and_capital_lease_obligations) },
+                        ]} />
+                      </div>
+                      <div className="sip-stmt-table-col">
+                        <table className="sip-raw-table sip-stmt-compact-table">
+                          <thead>
+                            <tr><th>Period</th><th>Cash</th><th>Equity</th><th>LT Debt</th><th>Retained</th></tr>
+                          </thead>
+                          <tbody>
+                            {stmts.balance_sheets.map((r) => (
+                              <tr key={r.period_end}>
+                                <td className="sip-raw-period">Q{r.fiscal_quarter}'{String(r.fiscal_year).slice(2)}</td>
+                                <td>{fmtM(r.cash_and_equivalents)}</td>
+                                <td>{fmtM(r.total_equity)}</td>
+                                <td>{fmtM(r.long_term_debt_and_capital_lease_obligations)}</td>
+                                <td className={r.retained_earnings_deficit != null && r.retained_earnings_deficit < 0 ? 'sip-stmts-neg' : ''}>
+                                  {fmtM(r.retained_earnings_deficit)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* Cash Flow — chart left | compact table right */}
+              {stmts && stmts.cash_flows.length > 0 && (() => {
+                const cf = [...stmts.cash_flows].reverse()
+                const lbls = cf.map(r => `Q${r.fiscal_quarter}'${String(r.fiscal_year).slice(2)}`)
+                const allCf = stmts.cash_flows
+                const [minNI, maxNI] = colRange(allCf.map(r => r.net_income))
+                const [minOp, maxOp] = colRange(allCf.map(r => r.net_cash_from_operating_activities))
+                return (
+                  <div className="sip-stmts-block">
+                    <div className="sip-stmt-block-head">
+                      <span className="sip-stmts-block-title">Cash Flow</span>
+                      <div className="sip-chart-legend">
+                        <span className="sip-legend-dot" style={{ background: 'rgba(74,222,128,0.85)' }} />Net Inc
+                        <span className="sip-legend-dot" style={{ background: 'rgba(99,179,237,0.85)' }} />Op CF
+                      </div>
+                    </div>
+                    <div className="sip-stmt-chart-table">
+                      <div className="sip-stmt-chart-col">
+                        <SvgBarChart labels={lbls} h={110} vw={500} series={[
+                          { key: 'Net Income', color: 'rgba(74,222,128,0.82)', negColor: 'rgba(248,113,113,0.75)', values: cf.map(r => r.net_income) },
+                          { key: 'Op CF',      color: 'rgba(99,179,237,0.82)', negColor: 'rgba(248,113,113,0.65)',  values: cf.map(r => r.net_cash_from_operating_activities) },
+                        ]} />
+                      </div>
+                      <div className="sip-stmt-table-col">
+                        <table className="sip-raw-table sip-stmt-compact-table">
+                          <thead>
+                            <tr><th>Period</th><th>Net Inc</th><th>Op CF</th><th>Inv CF</th><th>Capex</th></tr>
+                          </thead>
+                          <tbody>
+                            {allCf.map((r) => (
+                              <tr key={r.period_end}>
+                                <td className="sip-raw-period">Q{r.fiscal_quarter}'{String(r.fiscal_year).slice(2)}</td>
+                                <td className={`sip-mini-bar-cell ${cfCls(r.net_income)}`}>
+                                  {fmtM(r.net_income)}<MiniBar value={r.net_income} min={minNI} max={maxNI} />
+                                </td>
+                                <td className={`sip-mini-bar-cell ${cfCls(r.net_cash_from_operating_activities)}`}>
+                                  {fmtM(r.net_cash_from_operating_activities)}<MiniBar value={r.net_cash_from_operating_activities} min={minOp} max={maxOp} />
+                                </td>
+                                <td className={cfCls(r.net_cash_from_investing_activities)}>{fmtM(r.net_cash_from_investing_activities)}</td>
+                                <td>{fmtM(r.purchase_of_property_plant_and_equipment)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* Ratios */}
+              {stmts && stmts.ratios.length > 0 && (
+                <div className="sip-stmts-block">
+                  <div className="sip-stmts-block-title">Ratios (TTM)</div>
+                  <div className="sip-stmts-scroll">
+                    <table className="sip-raw-table sip-stmts-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>P/E</th>
+                          <th>P/S</th>
+                          <th>P/B</th>
+                          <th>D/E</th>
+                          <th>ROE</th>
+                          <th>ROA</th>
+                          <th>EPS</th>
+                          <th>Mkt Cap</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stmts.ratios.map((r) => (
+                          <tr key={r.date}>
+                            <td className="sip-raw-period">{r.date}</td>
+                            <td>{fmtRatio(r.price_to_earnings)}</td>
+                            <td>{fmtRatio(r.price_to_sales)}</td>
+                            <td>{fmtRatio(r.price_to_book)}</td>
+                            <td>{fmtRatio(r.debt_to_equity)}</td>
+                            <td>{fmtPct2(r.return_on_equity)}</td>
+                            <td>{fmtPct2(r.return_on_assets)}</td>
+                            <td>{r.earnings_per_share != null ? `$${r.earnings_per_share.toFixed(2)}` : '—'}</td>
+                            <td>{fmtM(r.market_cap)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Short Interest — chart left (shares short bar) | compact table right */}
+              {stmts && stmts.short_interest.length > 0 && (() => {
+                const si = [...stmts.short_interest].reverse()
+                const lbls = si.map(r => r.settlement_date.slice(5).replace('-', '/'))
+                return (
+                  <div className="sip-stmts-block">
+                    <div className="sip-stmt-block-head">
+                      <span className="sip-stmts-block-title">Short Interest</span>
+                      <div className="sip-chart-legend">
+                        <span className="sip-legend-dot" style={{ background: 'rgba(248,113,113,0.8)' }} />Shares Short
+                        <span className="sip-legend-dot" style={{ background: 'rgba(251,191,36,0.8)' }} />Days-to-Cover
+                      </div>
+                    </div>
+                    <div className="sip-stmt-chart-table">
+                      <div className="sip-stmt-chart-col">
+                        <SvgBarChart labels={lbls} h={110} vw={500} series={[
+                          { key: 'Short Interest', color: 'rgba(248,113,113,0.75)', values: si.map(r => r.short_interest) },
+                        ]} />
+                        <SvgAreaChart labels={lbls} values={si.map(r => r.days_to_cover)}
+                          color="rgba(251,191,36,0.9)" areaColor="rgba(251,191,36,0.1)" h={60} vw={500} />
+                      </div>
+                      <div className="sip-stmt-table-col">
+                        <table className="sip-raw-table sip-stmt-compact-table">
+                          <thead>
+                            <tr><th>Settlement</th><th>Short Int</th><th>Avg Vol</th><th>Days</th></tr>
+                          </thead>
+                          <tbody>
+                            {stmts.short_interest.map((r) => (
+                              <tr key={r.settlement_date}>
+                                <td className="sip-raw-period">{r.settlement_date.slice(5)}</td>
+                                <td>{fmtM(r.short_interest)}</td>
+                                <td>{fmtM(r.avg_daily_volume)}</td>
+                                <td>{r.days_to_cover != null ? r.days_to_cover.toFixed(1) : '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* Short Volume — area chart (short ratio %) left | compact table right */}
+              {stmts && stmts.short_volume.length > 0 && (() => {
+                const sv = [...stmts.short_volume].reverse()
+                const lbls = sv.map(r => r.trade_date.slice(5).replace('-', '/'))
+                return (
+                  <div className="sip-stmts-block">
+                    <div className="sip-stmt-block-head">
+                      <span className="sip-stmts-block-title">Short Volume</span>
+                      <div className="sip-chart-legend">
+                        <span className="sip-legend-dot" style={{ background: 'rgba(239,68,68,0.8)' }} />Short Vol Ratio (%)
+                      </div>
+                    </div>
+                    <div className="sip-stmt-chart-table">
+                      <div className="sip-stmt-chart-col">
+                        <SvgAreaChart
+                          labels={lbls}
+                          values={sv.map(r => r.short_volume_ratio != null ? r.short_volume_ratio * 100 : null)}
+                          color="rgba(239,68,68,0.9)"
+                          areaColor="rgba(239,68,68,0.12)"
+                          h={110} vw={500}
+                        />
+                      </div>
+                      <div className="sip-stmt-table-col">
+                        <table className="sip-raw-table sip-stmt-compact-table">
+                          <thead>
+                            <tr><th>Date</th><th>Short Vol</th><th>Ratio</th><th>Total</th></tr>
+                          </thead>
+                          <tbody>
+                            {stmts.short_volume.map((r) => (
+                              <tr key={r.trade_date}>
+                                <td className="sip-raw-period">{r.trade_date.slice(5)}</td>
+                                <td>{fmtM(r.short_volume)}</td>
+                                <td>{r.short_volume_ratio != null ? `${(r.short_volume_ratio * 100).toFixed(1)}%` : '—'}</td>
+                                <td>{fmtM(r.total_volume)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {stmts && !stmtsLoading &&
+                stmts.balance_sheets.length === 0 &&
+                stmts.cash_flows.length === 0 &&
+                stmts.ratios.length === 0 &&
+                stmts.short_interest.length === 0 &&
+                stmts.short_volume.length === 0 && (
+                  <p className="section-hint">No statements data found for this symbol.</p>
+                )}
+            </>
+          )}
+        </section>
+
       </div>
     </div>
   )

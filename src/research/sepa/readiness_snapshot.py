@@ -1812,6 +1812,31 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                     for cid in _TECH_COND_IDS
                 ]
 
+            # --- Technical pass-count distribution (0–11 conditions) ---
+            tech_dist: list = []
+            try:
+                cur.execute("""
+                    SELECT
+                        coalesce(technical_pass_count, 0) AS conditions_passed,
+                        count(*)::int AS symbol_count
+                    FROM public.stock_readiness_daily
+                    WHERE as_of_date = CURRENT_DATE
+                      AND included_in_universe = true
+                      AND technical_eval IS NOT NULL
+                      AND coalesce((technical_eval->>'insufficient_data')::boolean, false) IS NOT TRUE
+                    GROUP BY 1
+                    ORDER BY 1 DESC
+                """)
+                dist_rows = cur.fetchall() or []
+                dist_map = {int(r.get("conditions_passed") or 0): int(r.get("symbol_count") or 0) for r in dist_rows}
+                tech_dist = [
+                    {"conditions_passed": i, "symbol_count": dist_map.get(i, 0)}
+                    for i in range(11, -1, -1)
+                ]
+            except Exception as e:
+                logger.debug("criteria_stats tech_pass_count_distribution query failed: %s", e)
+                tech_dist = []
+
         return {
             "ok": True,
             "universe_count": universe_count,
@@ -1820,6 +1845,7 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                 **tech_result,
                 "failure_reasons": failure_reasons,
                 "conditions": tech_conditions,
+                "pass_count_distribution": tech_dist,
             },
             "computed_at": datetime.now(timezone.utc).isoformat(),
         }

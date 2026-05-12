@@ -68,9 +68,19 @@
   align-items: stretch;
 }
 
-/* 3-column layout: Fundamental Distribution · Filter by Conditions · Symbols */
+/* 2-column layout */
+.ssp-top-grid--dual {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* 3-column layout */
 .ssp-top-grid--triple {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* 4-column layout: Tech Dist · Fund Dist · Tech Conditions · Fund Conditions */
+.ssp-top-grid--quad {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .ssp-top-grid > .ssp-card {
@@ -78,11 +88,16 @@
   flex-direction: column;
 }
 
+@media (max-width: 1600px) {
+  .ssp-top-grid--quad {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 1400px) {
   .ssp-top-grid--triple {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
-  /* Push Symbols card to span both columns when stacking to 2 */
   .ssp-top-grid--triple > .ssp-card:nth-child(3) {
     grid-column: 1 / -1;
   }
@@ -90,12 +105,115 @@
 
 @media (max-width: 880px) {
   .ssp-top-grid,
-  .ssp-top-grid--triple {
+  .ssp-top-grid--triple,
+  .ssp-top-grid--dual,
+  .ssp-top-grid--quad {
     grid-template-columns: 1fr;
   }
   .ssp-top-grid--triple > .ssp-card:nth-child(3) {
     grid-column: auto;
   }
+}
+
+/* ── Filter action bar ──────────────────────────────────────────────────── */
+
+.ssp-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 8px 14px;
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-accent) 22%, var(--color-border));
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.ssp-filter-bar-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.ssp-filter-bar-tag {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 12px;
+  letter-spacing: 0.02em;
+}
+
+.ssp-filter-bar-tag--fund {
+  background: color-mix(in srgb, var(--color-eps) 14%, transparent);
+  color: var(--color-eps);
+  border: 1px solid color-mix(in srgb, var(--color-eps) 30%, transparent);
+}
+
+.ssp-filter-bar-tag--tech {
+  background: color-mix(in srgb, var(--color-violet, #8b5cf6) 14%, transparent);
+  color: var(--color-violet, #8b5cf6);
+  border: 1px solid color-mix(in srgb, var(--color-violet, #8b5cf6) 30%, transparent);
+}
+
+.ssp-filter-bar-and {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.ssp-filter-bar-status {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  margin-left: var(--space-1);
+}
+
+.ssp-filter-bar-status--loading {
+  color: var(--color-accent);
+  font-style: italic;
+}
+
+.ssp-filter-bar-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.72rem;
+}
+
+.ssp-filter-bar-count {
+  font-size: 0.85rem;
+  color: var(--color-accent);
+}
+
+.ssp-filter-bar-arrow {
+  font-size: 0.68rem;
+  color: var(--color-text-dim);
+  font-style: italic;
+}
+
+/* Secondary button variant */
+.ssp-btn--secondary {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-accent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.ssp-btn--secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 28%, transparent);
+}
+
+/* ── Condition column in Results table (pill + dots stacked) ───────────── */
+
+.ssp-cond-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 /* ── Distribution card — compact histogram ─────────────────────────────── */
@@ -112,6 +230,39 @@
   font-size: 0.68rem;
   color: var(--color-text-dim);
   line-height: 1.4;
+}
+
+/* Active-bucket status line */
+.ssp-dist-active-hint {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  padding: 4px var(--space-2);
+  margin-bottom: var(--space-1);
+  background: rgba(125, 211, 252, 0.06);
+  border-left: 2px solid var(--color-accent);
+  border-radius: 0 4px 4px 0;
+}
+
+.ssp-dist-active-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--color-accent);
+  color: #0a0c0f;
+  font-size: 0.65rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+/* Technical distribution variants */
+.ssp-dist-active-hint--tech {
+  background: rgba(167, 139, 250, 0.08);
+  border-left-color: #a78bfa;
+}
+
+.ssp-dist-active-badge--tech {
+  background: #a78bfa;
+  color: #0a0c0f;
 }
 
 .ssp-dist-rows {
@@ -157,6 +308,11 @@
   font-weight: 700;
 }
 
+.ssp-dist-label--full-tech {
+  color: #a78bfa;
+  font-weight: 700;
+}
+
 .ssp-dist-chevron {
   color: var(--color-text-dim);
   font-size: 9px;
@@ -179,11 +335,19 @@
   transition: width 0.3s ease;
 }
 
+/* Fundamental distribution bar fills */
 .ssp-dist-bar-fill--ok    { background: var(--color-success); }
 .ssp-dist-bar-fill--good  { background: #84cc16; }
 .ssp-dist-bar-fill--warn  { background: var(--color-warning); }
 .ssp-dist-bar-fill--poor  { background: #f97316; }
 .ssp-dist-bar-fill--error { background: var(--color-danger); }
+
+/* Technical distribution bar fills — purple/violet palette */
+.ssp-dist-bar-fill--tech-ok    { background: #a78bfa; }   /* 11/11  violet */
+.ssp-dist-bar-fill--tech-good  { background: #7c3aed; }   /* 9-10   deep violet */
+.ssp-dist-bar-fill--tech-warn  { background: #6366f1; }   /* 7-8    indigo */
+.ssp-dist-bar-fill--tech-poor  { background: #818cf8; opacity: 0.7; }  /* 4-6 */
+.ssp-dist-bar-fill--tech-error { background: #6b7280; opacity: 0.5; }  /* 0-3 */
 
 .ssp-dist-stat {
   color: var(--color-text-muted);
@@ -278,6 +442,36 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 4px;
+}
+
+/* ── Grouped condition chips ─────────────────────────────────────────────── */
+
+.ssp-cond-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.ssp-cond-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ssp-cond-group-header {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ssp-cond-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
 }
 
 .ssp-cond-chip {
@@ -824,6 +1018,20 @@
   background: rgba(255, 255, 255, 0.015);
 }
 
+.ssp-th-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.ssp-th-sortable:hover {
+  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.ssp-th-sortable--active {
+  color: var(--color-accent);
+}
+
 .ssp-table td {
   padding: 5px 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
@@ -904,6 +1112,20 @@
 .ssp-sym-open:hover {
   color: var(--color-accent);
   border-bottom-color: var(--color-accent);
+}
+
+.ssp-sym-open-hint {
+  display: inline-block;
+  font-size: 0.55rem;
+  opacity: 0;
+  margin-left: 2px;
+  color: var(--color-accent);
+  vertical-align: super;
+  transition: opacity 0.15s;
+}
+
+.ssp-sym-open:hover .ssp-sym-open-hint {
+  opacity: 0.9;
 }
 
 .ssp-row-active .ssp-sym-open {
@@ -1208,6 +1430,106 @@
 .ssp-results-summary-tech { color: #a78bfa; }
 .ssp-results-summary-warn { color: var(--color-warning); }
 
+/* ── Filter result status (inline, no chip list) ────────────────────────── */
+
+.ssp-cond-filter-status {
+  margin-top: var(--space-2);
+  padding: 5px var(--space-2);
+  border-left: 2px solid var(--color-accent);
+  background: rgba(125, 211, 252, 0.04);
+  border-radius: 0 4px 4px 0;
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+
+.ssp-cond-filter-status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.ssp-cond-status-arrow {
+  color: var(--color-accent);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+/* ── Symbols strip (standalone row between filter grid and Results) ──────── */
+
+.ssp-symbols-strip {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.ssp-symbols-strip-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 56px;
+}
+
+.ssp-symbols-strip-title {
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  line-height: 1;
+}
+
+.ssp-symbols-strip-aux {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--color-text-muted);
+}
+
+.ssp-symbols-strip-loading {
+  color: var(--color-accent);
+}
+
+.ssp-symbols-textarea--strip {
+  width: 100%;
+  min-height: unset;
+  resize: none;
+}
+
+.ssp-symbols-strip-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  font-size: 0.7rem;
+  color: var(--color-text-dim);
+  font-family: var(--font-mono);
+  min-width: 160px;
+}
+
+.ssp-symbols-strip-count {
+  white-space: nowrap;
+}
+
+.ssp-symbols-strip-sep {
+  display: inline-block;
+  width: 1px;
+  height: 12px;
+  background: var(--color-border-strong);
+}
+
+@media (max-width: 880px) {
+  .ssp-symbols-strip {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+}
+
 /* ── Light theme overrides ─────────────────────────────────────────────── */
 
 [data-theme="light"] .ssp-card {
@@ -1253,4 +1575,88 @@
 
 [data-theme="light"] .ssp-filter-tab-badge {
   color: #fff;
+}
+
+/* ── Funnel distribution rows ────────────────────────────────────────────── */
+
+.ssp-funnel-row {
+  display: grid;
+  grid-template-columns: 3.4rem 1fr 5rem;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  min-height: 26px;
+}
+
+.ssp-funnel-row--clickable {
+  cursor: pointer;
+}
+
+.ssp-funnel-row--clickable:hover {
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.ssp-funnel-row--active {
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.ssp-funnel-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--color-text-muted);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ssp-funnel-label--full {
+  color: var(--color-success);
+}
+
+.ssp-funnel-label--full-tech {
+  color: #a78bfa;
+}
+
+/* Center-aligned bar = funnel taper effect when sorted by conditions_passed DESC */
+.ssp-funnel-bar-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 16px;
+  width: 100%;
+}
+
+.ssp-funnel-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  min-width: 2px;
+  transition: width 0.25s ease;
+}
+
+.ssp-funnel-stat {
+  font-size: 0.68rem;
+  font-family: var(--font-mono);
+  color: var(--color-text-main);
+  white-space: nowrap;
+  text-align: right;
+}
+
+.ssp-funnel-stat-sub {
+  font-size: 0.62rem;
+  color: var(--color-text-dim);
+  margin-left: 2px;
+}
+
+/* Light-theme tweaks */
+[data-theme="light"] .ssp-funnel-row--active {
+  background: rgba(79, 70, 229, 0.06);
+}
+
+[data-theme="light"] .ssp-funnel-label--full {
+  color: #15803d;
+}
+
+[data-theme="light"] .ssp-funnel-label--full-tech {
+  color: #7c3aed;
 }

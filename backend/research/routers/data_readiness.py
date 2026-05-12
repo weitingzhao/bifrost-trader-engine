@@ -753,6 +753,63 @@ def get_fundamental_distribution_symbols(
         conn.close()
 
 
+@router.get("/research/data/readiness/technical-distribution/symbols")
+def get_technical_distribution_symbols(
+    request: Request,
+    conditions_passed: int = 0,
+) -> Dict[str, Any]:
+    """Return symbols that passed exactly N out of 11 SEPA technical conditions today."""
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    from src.persistence.postgres.connection import _get_conn_params
+
+    if conditions_passed < 0 or conditions_passed > 11:
+        return {"ok": False, "error": "conditions_passed must be 0–11"}
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    params = _get_conn_params(db)
+    params["connect_timeout"] = 10
+    try:
+        conn = psycopg2.connect(**params)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SET statement_timeout = 15000")
+            cur.execute(
+                """
+                SELECT
+                    symbol,
+                    coalesce(technical_pass_count, 0) AS pass_count,
+                    technical_eval->'conditions'      AS conditions
+                FROM public.stock_readiness_daily
+                WHERE as_of_date = CURRENT_DATE
+                  AND included_in_universe = true
+                  AND technical_eval IS NOT NULL
+                  AND coalesce((technical_eval->>'insufficient_data')::boolean, false) IS NOT TRUE
+                  AND coalesce(technical_pass_count, 0) = %(n)s
+                ORDER BY symbol
+                """,
+                {"n": conditions_passed},
+            )
+            rows = cur.fetchall() or []
+        symbols = []
+        for r in rows:
+            cond_list = r.get("conditions") or []
+            passed_ids = [c.get("id") for c in cond_list if c.get("pass") is True] if isinstance(cond_list, list) else []
+            symbols.append({
+                "symbol": r["symbol"],
+                "pass_count": int(r.get("pass_count") or 0),
+                "passed_conditions": passed_ids,
+            })
+        return {"ok": True, "conditions_passed": conditions_passed, "count": len(symbols), "symbols": symbols}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        conn.close()
+
+
 @router.get("/research/data/readiness/data-inventory")
 def get_sepa_data_inventory(request: Request) -> Dict[str, Any]:
     db = _db_config(request)
@@ -843,6 +900,97 @@ def get_fundamental_conditions_by_symbol(
         "fundamental_pass": bool(row.get("fundamental_pass") or False),
         "insufficient_data": bool(row.get("insufficient_data") or False),
         "conditions": conditions,
+    }
+
+
+@router.get("/research/data/readiness/symbol-technical-conditions")
+def get_symbol_technical_conditions(
+    request: Request,
+    symbol: str = "",
+) -> Dict[str, Any]:
+    """Return today's SEPA technical conditions snapshot for a single symbol.
+
+    Reads from ``public.stock_readiness_daily.technical_eval`` (jsonb) for the latest
+    ``as_of_date <= CURRENT_DATE``. Falls back to the most recent stored row when today's
+    snapshot is missing.
+    """
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+
+    from src.persistence.postgres.connection import _get_conn_params
+
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"ok": False, "error": "symbol is required"}
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    params = _get_conn_params(db)
+    params["connect_timeout"] = 10
+    try:
+        conn = psycopg2.connect(**params)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SET statement_timeout = 8000")
+            cur.execute(
+                """
+                SELECT
+                    symbol,
+                    as_of_date::text                                       AS as_of_date,
+                    coalesce(technical_pass, false)                        AS technical_pass,
+                    coalesce(technical_pass_count, 0)                      AS pass_count,
+                    coalesce(technical_insufficient, false)                AS insufficient_data,
+                    technical_eval
+                FROM public.stock_readiness_daily
+                WHERE symbol = %(sym)s
+                  AND technical_eval IS NOT NULL
+                ORDER BY as_of_date DESC, universe_rule_version DESC, price_source DESC
+                LIMIT 1
+                """,
+                {"sym": sym},
+            )
+            row = cur.fetchone()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        conn.close()
+
+    if not row:
+        return {"ok": True, "symbol": sym, "found": False}
+
+    eval_json = row.get("technical_eval") or {}
+    conditions_raw = eval_json.get("conditions") if isinstance(eval_json, dict) else []
+    conditions = []
+    if isinstance(conditions_raw, list):
+        for c in conditions_raw:
+            if not isinstance(c, dict):
+                continue
+            conditions.append(
+                {
+                    "id": str(c.get("id") or ""),
+                    "pass": bool(c.get("pass") or False),
+                    "actual": c.get("actual"),
+                    "threshold": c.get("threshold"),
+                    "reason": c.get("reason"),
+                }
+            )
+
+    metrics: Dict[str, Any] = {}
+    if isinstance(eval_json, dict):
+        metrics = eval_json.get("metrics") or {}
+
+    return {
+        "ok": True,
+        "symbol": sym,
+        "found": True,
+        "as_of_date": row.get("as_of_date"),
+        "pass_count": int(row.get("pass_count") or 0),
+        "technical_pass": bool(row.get("technical_pass") or False),
+        "insufficient_data": bool(row.get("insufficient_data") or False),
+        "conditions": conditions,
+        "metrics": metrics,
     }
 
 
@@ -1309,3 +1457,226 @@ def get_symbol_fundamental_raw_data(
         "annual": annual,
         "metrics": metrics,
     }
+
+
+@router.get("/research/data/readiness/symbol-statements")
+def get_symbol_statements(
+    request: Request,
+    symbol: str = "",
+) -> Dict[str, Any]:
+    """Return latest balance sheet, cash flow, ratios, short interest, and short volume rows for a symbol."""
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+
+    from src.persistence.postgres.connection import _get_conn_params
+
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"ok": False, "error": "symbol is required"}
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    params = _get_conn_params(db)
+    params["connect_timeout"] = 10
+    try:
+        conn = psycopg2.connect(**params)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SET statement_timeout = 8000")
+
+            # Balance sheets — last 6 quarterly rows, key fields
+            cur.execute(
+                """
+                SELECT
+                    period_end, fiscal_year, fiscal_quarter,
+                    cash_and_equivalents,
+                    total_current_assets, total_current_liabilities,
+                    total_assets, total_liabilities, total_equity,
+                    receivables, inventories, debt_current,
+                    long_term_debt_and_capital_lease_obligations,
+                    property_plant_equipment_net,
+                    retained_earnings_deficit
+                FROM public.stock_balance_sheets
+                WHERE symbol = %(sym)s AND source = 'massive' AND timeframe = 'quarterly'
+                ORDER BY period_end DESC
+                LIMIT 6
+                """,
+                {"sym": sym},
+            )
+            balance_sheets = [dict(r) for r in cur.fetchall()]
+
+            # Cash flows — last 6 quarterly rows, key fields
+            cur.execute(
+                """
+                SELECT
+                    period_end, fiscal_year, fiscal_quarter,
+                    net_income,
+                    net_cash_from_operating_activities,
+                    net_cash_from_investing_activities,
+                    net_cash_from_financing_activities,
+                    depreciation_depletion_and_amortization,
+                    purchase_of_property_plant_and_equipment,
+                    change_in_cash_and_equivalents
+                FROM public.stock_cash_flows
+                WHERE symbol = %(sym)s AND source = 'massive' AND timeframe = 'quarterly'
+                ORDER BY period_end DESC
+                LIMIT 6
+                """,
+                {"sym": sym},
+            )
+            cash_flows = [dict(r) for r in cur.fetchall()]
+
+            # Ratios — last 8 rows by date
+            cur.execute(
+                """
+                SELECT
+                    date,
+                    price_to_earnings, price_to_sales, price_to_book,
+                    price_to_free_cash_flow,
+                    debt_to_equity, return_on_equity, return_on_assets,
+                    market_cap, free_cash_flow, earnings_per_share,
+                    average_volume, dividend_yield
+                FROM public.stock_ratios
+                WHERE symbol = %(sym)s AND source = 'massive'
+                ORDER BY date DESC
+                LIMIT 8
+                """,
+                {"sym": sym},
+            )
+            ratios = [dict(r) for r in cur.fetchall()]
+
+            # Short interest — last 8 settlement dates
+            cur.execute(
+                """
+                SELECT
+                    settlement_date, short_interest, avg_daily_volume, days_to_cover
+                FROM public.stock_short_interest
+                WHERE symbol = %(sym)s AND source = 'massive'
+                ORDER BY settlement_date DESC
+                LIMIT 8
+                """,
+                {"sym": sym},
+            )
+            short_interest = [dict(r) for r in cur.fetchall()]
+
+            # Short volume — last 12 trade dates
+            cur.execute(
+                """
+                SELECT
+                    trade_date, short_volume, short_volume_ratio, total_volume
+                FROM public.stock_short_volume
+                WHERE symbol = %(sym)s AND source = 'massive'
+                ORDER BY trade_date DESC
+                LIMIT 12
+                """,
+                {"sym": sym},
+            )
+            short_volume = [dict(r) for r in cur.fetchall()]
+
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        conn.close()
+
+    def _serialize(rows: list) -> list:
+        import datetime
+        out = []
+        for row in rows:
+            d: Dict[str, Any] = {}
+            for k, v in row.items():
+                if isinstance(v, (datetime.date, datetime.datetime)):
+                    d[k] = str(v)
+                elif v is not None and not isinstance(v, (str, int, float, bool)):
+                    d[k] = str(v)
+                else:
+                    d[k] = v
+            out.append(d)
+        return out
+
+    return {
+        "ok": True,
+        "symbol": sym,
+        "balance_sheets": _serialize(balance_sheets),
+        "cash_flows": _serialize(cash_flows),
+        "ratios": _serialize(ratios),
+        "short_interest": _serialize(short_interest),
+        "short_volume": _serialize(short_volume),
+    }
+
+
+@router.get("/research/data/ticker-overview/{symbol}")
+def get_ticker_overview(symbol: str, request: Request) -> Dict[str, Any]:
+    """Return tickers + ticker_overview + ticker_related_tickers for a single symbol."""
+    import datetime
+
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+
+    from src.persistence.postgres.connection import _get_conn_params
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+
+    sym = symbol.strip().upper()
+    params = _get_conn_params(db)
+    params["connect_timeout"] = 10
+    try:
+        conn = psycopg2.connect(**params)
+    except Exception as e:
+        return {"ok": False, "error": f"DB connect failed: {e}"}
+
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SET statement_timeout = 10000")
+            cur.execute(
+                """
+                SELECT
+                    t.ticker, t.name, t.primary_exchange, t.instrument_type,
+                    t.active, t.currency_name, t.cik,
+                    o.sector, o.industry, o.sic_description,
+                    o.market_cap, o.total_employees,
+                    o.description, o.homepage_url,
+                    o.address_city, o.address_state,
+                    o.list_date, o.exchange,
+                    o.share_class_shares_outstanding,
+                    o.weighted_shares_outstanding
+                FROM public.tickers t
+                LEFT JOIN public.ticker_overview o ON o.tickers_id = t.tickers_id
+                WHERE t.ticker = %s
+                """,
+                (sym,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return {"ok": True, "found": False, "symbol": sym}
+
+            cur.execute(
+                """
+                SELECT rt.to_symbol
+                FROM public.ticker_related_tickers rt
+                INNER JOIN public.tickers t ON t.tickers_id = rt.from_tickers_id
+                WHERE t.ticker = %s
+                ORDER BY rt.rank ASC
+                LIMIT 12
+                """,
+                (sym,),
+            )
+            related = [r["to_symbol"] for r in cur.fetchall()]
+
+        data: Dict[str, Any] = {}
+        for k, v in dict(row).items():
+            if isinstance(v, (datetime.date, datetime.datetime)):
+                data[k] = str(v)
+            elif v is not None and not isinstance(v, (str, int, float, bool)):
+                data[k] = str(v)
+            else:
+                data[k] = v
+
+        return {"ok": True, "found": True, "symbol": sym, **data, "related_tickers": related}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        conn.close()

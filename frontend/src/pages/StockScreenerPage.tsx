@@ -1,16 +1,15 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import { RightInspectorDrawer } from '../components/RightInspectorDrawer'
 import { StockInspectorPanel } from '../components/StockInspectorPanel'
 import {
   fetchSepaCriteriaStats,
   fetchFundamentalDistributionSymbols,
+  fetchTechnicalDistributionSymbols,
   fetchFundamentalFilter,
   fetchTechnicalFilter,
   fetchSymbolsReadinessSnapshot,
   type SepaCriteriaStats,
-  type FundDistSymbolRow,
-  type TechFilterSymbolRow,
   type ReadinessSnapshotRow,
 } from '../api/research/dataReadiness'
 import '../styles/data-readiness.css'
@@ -33,6 +32,17 @@ function parseSymbols(text: string): string[] {
 }
 
 /** 8 canonical SEPA fundamental conditions in display order. */
+const FUND_GROUP_LABELS: Record<string, string> = {
+  eps: 'EPS',
+  rev: 'Revenue',
+}
+const TECH_GROUP_LABELS: Record<string, string> = {
+  vol:     'Volume / Momentum',
+  price52: '52-Week Range',
+  sma:     'SMA Slope',
+  price:   'Price Position',
+}
+
 const SEPA_COND_CATALOG: { id: string; label: string; short: string; group: 'eps' | 'rev' }[] = [
   { id: 'eps_q2q_ge_25pct', label: 'EPS QoQ ≥ 25%',         short: 'EPS Q2Q',    group: 'eps' },
   { id: 'rev_q2q_ge_25pct', label: 'Revenue QoQ ≥ 25%',     short: 'Rev Q2Q',    group: 'rev' },
@@ -68,7 +78,7 @@ function boolMark(v: boolean | undefined | null): ReactNode {
 }
 
 export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Stock Screener' }: StockScreenerPageProps) {
-  const [symbolText, setSymbolText] = useState('AAPL,MSFT,NVDA,AMZN')
+  const [symbolText, setSymbolText] = useState('')
 
   // ── Right-hand Stock inspector ──────────────────────────────────────────
   const [inspector, setInspector] = useState<InspectorState | null>(null)
@@ -80,14 +90,24 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
   }, [])
   const closeInspector = useCallback(() => setInspector(null), [])
 
-  // ── Fundamental Distribution (top-left card) ────────────────────────────
+  // ── Fundamental & Technical Distribution (top two cards) ────────────────
   const [criteriaStats, setCriteriaStats] = useState<SepaCriteriaStats | null>(null)
   const [criteriaLoading, setCriteriaLoading] = useState(false)
   const [criteriaErr, setCriteriaErr] = useState<string | null>(null)
-  const [expandedDistBucket, setExpandedDistBucket] = useState<number | null>(null)
-  const [distSymbolsCache, setDistSymbolsCache] = useState<
-    Map<number, { loading: boolean; symbols: FundDistSymbolRow[]; error: string | null }>
-  >(new Map())
+
+  // Fundamental distribution — active bucket
+  const [activeBucket, setActiveBucket] = useState<number | null>(null)
+  const [bucketLoading, setBucketLoading] = useState(false)
+  const [bucketLoadedCount, setBucketLoadedCount] = useState<number | null>(null)
+  const [bucketError, setBucketError] = useState<string | null>(null)
+  const distCacheRef = useRef<Map<number, string[]>>(new Map())
+
+  // Technical distribution — active bucket
+  const [activeTechBucket, setActiveTechBucket] = useState<number | null>(null)
+  const [techBucketLoading, setTechBucketLoading] = useState(false)
+  const [techBucketLoadedCount, setTechBucketLoadedCount] = useState<number | null>(null)
+  const [techBucketError, setTechBucketError] = useState<string | null>(null)
+  const techDistCacheRef = useRef<Map<number, string[]>>(new Map())
 
   const loadCriteriaStats = useCallback(async () => {
     setCriteriaLoading(true)
@@ -105,50 +125,9 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
 
   useEffect(() => { void loadCriteriaStats() }, [loadCriteriaStats])
 
-  // ── Filter by Conditions (top-middle card) ──────────────────────────────
-  const [filterTab, setFilterTab] = useState<'fund' | 'tech'>('fund')
-
-  // Fundamental condition filter
+  // ── Condition filter chips (no auto-fetch; triggered by Apply Filter button) ──
   const [condFilter, setCondFilter] = useState<Set<string>>(new Set())
-  const [condResult, setCondResult] = useState<FundDistSymbolRow[] | null>(null)
-  const [condFilterLoading, setCondFilterLoading] = useState(false)
-  const [condFilterError, setCondFilterError] = useState<string | null>(null)
-  const condFilterKey = useMemo(() => Array.from(condFilter).sort().join(','), [condFilter])
-
-  useEffect(() => {
-    if (condFilter.size === 0) {
-      setCondResult(null)
-      setCondFilterError(null)
-      return
-    }
-    let cancelled = false
-    setCondFilterLoading(true)
-    setCondFilterError(null)
-    const include = Array.from(condFilter)
-    const handle = window.setTimeout(() => {
-      fetchFundamentalFilter({ include, limit: 1000 })
-        .then((res) => {
-          if (cancelled) return
-          if (!res.ok) {
-            setCondResult([])
-            setCondFilterError(res.error ?? 'Failed')
-            return
-          }
-          const syms = res.symbols ?? []
-          setCondResult(syms)
-        })
-        .catch((e) => {
-          if (!cancelled) setCondFilterError(e instanceof Error ? e.message : 'Network error')
-        })
-        .finally(() => {
-          if (!cancelled) setCondFilterLoading(false)
-        })
-    }, 180)
-    return () => {
-      cancelled = true
-      window.clearTimeout(handle)
-    }
-  }, [condFilter, condFilterKey])
+  const [techCondFilter, setTechCondFilter] = useState<Set<string>>(new Set())
 
   const toggleCondFilter = useCallback((id: string) => {
     setCondFilter((prev) => {
@@ -157,50 +136,10 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
       else next.add(id)
       return next
     })
+    setFilterPreview(null)
+    setFilterError(null)
   }, [])
-  const clearCondFilter = useCallback(() => setCondFilter(new Set()), [])
-
-  // Technical condition filter
-  const [techCondFilter, setTechCondFilter] = useState<Set<string>>(new Set())
-  const [techCondResult, setTechCondResult] = useState<TechFilterSymbolRow[] | null>(null)
-  const [techCondFilterLoading, setTechCondFilterLoading] = useState(false)
-  const [techCondFilterError, setTechCondFilterError] = useState<string | null>(null)
-  const techCondFilterKey = useMemo(() => Array.from(techCondFilter).sort().join(','), [techCondFilter])
-
-  useEffect(() => {
-    if (techCondFilter.size === 0) {
-      setTechCondResult(null)
-      setTechCondFilterError(null)
-      return
-    }
-    let cancelled = false
-    setTechCondFilterLoading(true)
-    setTechCondFilterError(null)
-    const include = Array.from(techCondFilter)
-    const handle = window.setTimeout(() => {
-      fetchTechnicalFilter({ include, limit: 1000 })
-        .then((res) => {
-          if (cancelled) return
-          if (!res.ok) {
-            setTechCondResult([])
-            setTechCondFilterError(res.error ?? 'Failed')
-            return
-          }
-          const syms = res.symbols ?? []
-          setTechCondResult(syms)
-        })
-        .catch((e) => {
-          if (!cancelled) setTechCondFilterError(e instanceof Error ? e.message : 'Network error')
-        })
-        .finally(() => {
-          if (!cancelled) setTechCondFilterLoading(false)
-        })
-    }, 180)
-    return () => {
-      cancelled = true
-      window.clearTimeout(handle)
-    }
-  }, [techCondFilter, techCondFilterKey])
+  const clearCondFilter = useCallback(() => { setCondFilter(new Set()); setFilterPreview(null) }, [])
 
   const toggleTechCondFilter = useCallback((id: string) => {
     setTechCondFilter((prev) => {
@@ -209,51 +148,80 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
       else next.add(id)
       return next
     })
+    setFilterPreview(null)
+    setFilterError(null)
   }, [])
-  const clearTechCondFilter = useCallback(() => setTechCondFilter(new Set()), [])
+  const clearTechCondFilter = useCallback(() => { setTechCondFilter(new Set()); setFilterPreview(null) }, [])
 
-  // Combined filter result: intersection of fund + tech results (when both active)
-  const combinedFilterResult = useMemo<{ symbols: Array<{ symbol: string; fundPassed: number; techPassed: number }> | null; loading: boolean; error: string | null }>(() => {
+  // ── Apply Filter — two-step: 1) preview count  2) apply to Symbols/Results ──
+  const [filterLoading, setFilterLoading] = useState(false)
+  const [filterError, setFilterError] = useState<string | null>(null)
+  // Preview state: pending symbols ready to be applied
+  const [filterPreview, setFilterPreview] = useState<{ symbols: string[]; parts: string } | null>(null)
+
+  /** Step 1: fetch count/symbols and show preview without pushing to Results yet */
+  const previewFilter = useCallback(async () => {
     const fundActive = condFilter.size > 0
     const techActive = techCondFilter.size > 0
-    if (!fundActive && !techActive) return { symbols: null, loading: false, error: null }
-    if (condFilterLoading || techCondFilterLoading) return { symbols: null, loading: true, error: null }
-    const err = condFilterError ?? techCondFilterError
-    if (err) return { symbols: null, loading: false, error: err }
-
-    if (fundActive && techActive) {
-      // AND intersection
-      const fundSet = new Map((condResult ?? []).map((r) => [r.symbol, r.pass_count]))
-      const techSet = new Map((techCondResult ?? []).map((r) => [r.symbol, r.pass_count]))
-      const intersection = [...fundSet.entries()]
-        .filter(([sym]) => techSet.has(sym))
-        .map(([sym, fp]) => ({ symbol: sym, fundPassed: fp, techPassed: techSet.get(sym) ?? 0 }))
-        .sort((a, b) => b.fundPassed - a.fundPassed || a.symbol.localeCompare(b.symbol))
-      return { symbols: intersection, loading: false, error: null }
-    }
-    if (fundActive) {
-      return {
-        symbols: (condResult ?? []).map((r) => ({ symbol: r.symbol, fundPassed: r.pass_count, techPassed: 0 })),
-        loading: false,
-        error: null,
+    if (!fundActive && !techActive) return
+    setFilterLoading(true)
+    setFilterError(null)
+    setFilterPreview(null)
+    try {
+      let fundSyms: string[] | null = null
+      let techSyms: string[] | null = null
+      if (fundActive) {
+        const res = await fetchFundamentalFilter({ include: Array.from(condFilter), limit: 2000 })
+        if (!res.ok) throw new Error(res.error ?? 'Fundamental filter failed')
+        fundSyms = (res.symbols ?? []).map((s) => s.symbol)
       }
+      if (techActive) {
+        const res = await fetchTechnicalFilter({ include: Array.from(techCondFilter), limit: 2000 })
+        if (!res.ok) throw new Error(res.error ?? 'Technical filter failed')
+        techSyms = (res.symbols ?? []).map((s) => s.symbol)
+      }
+      let result: string[]
+      if (fundSyms && techSyms) {
+        const ts = new Set(techSyms)
+        result = fundSyms.filter((s) => ts.has(s))
+      } else {
+        result = fundSyms ?? techSyms ?? []
+      }
+      const parts = [
+        fundActive && `${condFilter.size}F`,
+        techActive && `${techCondFilter.size}T`,
+      ].filter(Boolean).join(' ∩ ')
+      setFilterPreview({ symbols: result, parts })
+    } catch (e) {
+      setFilterError(e instanceof Error ? e.message : 'Filter failed')
+    } finally {
+      setFilterLoading(false)
     }
-    // techActive only
-    return {
-      symbols: (techCondResult ?? []).map((r) => ({ symbol: r.symbol, fundPassed: 0, techPassed: r.pass_count })),
-      loading: false,
-      error: null,
-    }
-  }, [
-    condFilter.size, techCondFilter.size,
-    condFilterLoading, techCondFilterLoading,
-    condFilterError, techCondFilterError,
-    condResult, techCondResult,
-  ])
+  }, [condFilter, techCondFilter])
 
-  // ── Symbols & readiness-driven main table (top-right + below) ───────────
-  const [loadedFromDist, setLoadedFromDist] = useState<FundDistSymbolRow[]>([])
-  const [loadedFromBucket, setLoadedFromBucket] = useState<number | null>(null)
+  /** Step 2: push previewed symbols to Symbols / Results */
+  const applyFilter = useCallback(() => {
+    if (!filterPreview) return
+    setActiveBucket(null)
+    setActiveTechBucket(null)
+    setSymbolText(filterPreview.symbols.join(','))
+  }, [filterPreview])
+
+  // ── Results table sort state ────────────────────────────────────────────
+  const [sortCol, setSortCol] = useState<'tech' | 'fund' | null>(null)
+  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc')
+  const toggleSort = useCallback((col: 'tech' | 'fund') => {
+    setSortCol((prev) => {
+      if (prev === col) {
+        setSortDir((d) => d === 'desc' ? 'asc' : 'desc')
+        return col
+      }
+      setSortDir('desc')
+      return col
+    })
+  }, [])
+
+  // ── Symbols & readiness-driven main table ───────────────────────────────
   const symbols = useMemo(() => parseSymbols(symbolText), [symbolText])
   const symbolsKey = useMemo(() => symbols.join(','), [symbols])
 
@@ -299,37 +267,77 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
     // symbolsKey is the canonical dependency; including `symbols` for ESLint exhaustive-deps.
   }, [symbolsKey, symbols])
 
-  const applyDistSymbolsToScreener = useCallback((syms: FundDistSymbolRow[], bucketN: number | null) => {
-    if (syms.length === 0) return
-    setLoadedFromDist(syms)
-    setLoadedFromBucket(bucketN)
-    setSymbolText(syms.map((s) => s.symbol).join(','))
-  }, [])
-
   const handleBucketClick = useCallback((n: number, count: number) => {
     if (count === 0) return
-    const isExpanding = expandedDistBucket !== n
-    setExpandedDistBucket(isExpanding ? n : null)
-    if (!isExpanding) return
+    const isActivating = activeBucket !== n
+    setActiveBucket(isActivating ? n : null)
+    // Deactivate technical bucket when fundamental is clicked
+    setActiveTechBucket(null)
+    if (!isActivating) return
 
-    const cached = distSymbolsCache.get(n)
-    if (cached && !cached.loading && !cached.error) {
-      applyDistSymbolsToScreener(cached.symbols, n)
+    const cached = distCacheRef.current.get(n)
+    if (cached) {
+      setSymbolText(cached.join(','))
+      setBucketLoadedCount(cached.length)
+      setBucketError(null)
       return
     }
-    setDistSymbolsCache((prev) => new Map(prev).set(n, { loading: true, symbols: [], error: null }))
+    setBucketLoading(true)
+    setBucketError(null)
+    setBucketLoadedCount(null)
     fetchFundamentalDistributionSymbols(n).then((res) => {
-      const syms = res.ok ? res.symbols : []
-      setDistSymbolsCache((prev) =>
-        new Map(prev).set(n, {
-          loading: false,
-          symbols: syms,
-          error: res.ok ? null : (res.error ?? 'Failed'),
-        }),
-      )
-      if (res.ok) applyDistSymbolsToScreener(syms, n)
+      setBucketLoading(false)
+      if (!res.ok) {
+        setBucketError(res.error ?? 'Failed')
+        return
+      }
+      const syms = (res.symbols ?? []).map((s) => s.symbol)
+      distCacheRef.current.set(n, syms)
+      setSymbolText(syms.join(','))
+      setBucketLoadedCount(syms.length)
     })
-  }, [expandedDistBucket, distSymbolsCache, applyDistSymbolsToScreener])
+  }, [activeBucket])
+
+  const handleTechBucketClick = useCallback((n: number, count: number) => {
+    if (count === 0) return
+    const isActivating = activeTechBucket !== n
+    setActiveTechBucket(isActivating ? n : null)
+    // Deactivate fundamental bucket when technical is clicked
+    setActiveBucket(null)
+    if (!isActivating) return
+
+    const cached = techDistCacheRef.current.get(n)
+    if (cached) {
+      setSymbolText(cached.join(','))
+      setTechBucketLoadedCount(cached.length)
+      setTechBucketError(null)
+      return
+    }
+    setTechBucketLoading(true)
+    setTechBucketError(null)
+    setTechBucketLoadedCount(null)
+    fetchTechnicalDistributionSymbols(n).then((res) => {
+      setTechBucketLoading(false)
+      if (!res.ok) {
+        setTechBucketError(res.error ?? 'Failed')
+        return
+      }
+      const syms = (res.symbols ?? []).map((s) => s.symbol)
+      techDistCacheRef.current.set(n, syms)
+      setSymbolText(syms.join(','))
+      setTechBucketLoadedCount(syms.length)
+    })
+  }, [activeTechBucket])
+
+  // Sorted rows for display
+  const sortedRows = useMemo(() => {
+    if (!sortCol) return readinessRows
+    return [...readinessRows].sort((a, b) => {
+      const va = sortCol === 'tech' ? (a.technical_pass_count ?? -1) : (a.fundamental_pass_count ?? -1)
+      const vb = sortCol === 'tech' ? (b.technical_pass_count ?? -1) : (b.fundamental_pass_count ?? -1)
+      return sortDir === 'desc' ? vb - va : va - vb
+    })
+  }, [readinessRows, sortCol, sortDir])
 
   // Summary derived from readiness rows
   const summary = useMemo(() => {
@@ -347,16 +355,83 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
     }
   }, [readinessRows])
 
-  // Fundamental distribution data prep
-  const dist = criteriaStats?.fundamental?.pass_count_distribution ?? null
+  // Fundamental distribution — sorted by conditions_passed DESC (funnel: most conditions at top)
+  const distRaw = criteriaStats?.fundamental?.pass_count_distribution ?? null
+  const distBase = distRaw ? distRaw.reduce((s, d) => s + d.symbol_count, 0) || 1 : 1
+  const dist = distRaw
+    ? [...distRaw].filter((d) => d.symbol_count > 0).sort((a, b) => b.conditions_passed - a.conditions_passed)
+    : null
   const distMaxCount = dist ? Math.max(...dist.map((d) => d.symbol_count), 1) : 1
-  const distBase = dist ? dist.reduce((s, d) => s + d.symbol_count, 0) || 1 : 1
   const barColorForN = (n: number) =>
     n === 8 ? 'ssp-dist-bar-fill--ok'
     : n >= 6  ? 'ssp-dist-bar-fill--good'
     : n >= 4  ? 'ssp-dist-bar-fill--warn'
     : n >= 2  ? 'ssp-dist-bar-fill--poor'
     :           'ssp-dist-bar-fill--error'
+
+  // Technical distribution — sorted by conditions_passed DESC, top 8 shown
+  const techDistRaw = criteriaStats?.technical?.pass_count_distribution ?? null
+  const techDistBase = techDistRaw ? techDistRaw.reduce((s, d) => s + d.symbol_count, 0) || 1 : 1
+  const techDist = techDistRaw
+    ? [...techDistRaw].filter((d) => d.symbol_count > 0).sort((a, b) => b.conditions_passed - a.conditions_passed).slice(0, 8)
+    : null
+  const techDistMaxCount = techDist ? Math.max(...techDist.map((d) => d.symbol_count), 1) : 1
+  const techBarColorForN = (n: number) =>
+    n === 11 ? 'ssp-dist-bar-fill--tech-ok'
+    : n >= 9  ? 'ssp-dist-bar-fill--tech-good'
+    : n >= 7  ? 'ssp-dist-bar-fill--tech-warn'
+    : n >= 4  ? 'ssp-dist-bar-fill--tech-poor'
+    :           'ssp-dist-bar-fill--tech-error'
+
+  // Auto-load: on first criteria load, populate Results with the top fundamental bucket
+  const hasAutoLoadedRef = useRef(false)
+  useEffect(() => {
+    if (hasAutoLoadedRef.current || !dist || dist.length === 0) return
+    const top = dist[0]
+    if (!top || top.symbol_count === 0) return
+    hasAutoLoadedRef.current = true
+    handleBucketClick(top.conditions_passed, top.symbol_count)
+  }, [dist, handleBucketClick])
+
+  // Funnel-style row: centered bar gives visual taper when sorted by conditions_passed DESC
+  const funnelRow = (
+    conditions_passed: number,
+    symbol_count: number,
+    maxCount: number,
+    base: number,
+    colorFn: (n: number) => string,
+    activeBucketVal: number | null,
+    clickFn: (n: number, c: number) => void,
+    suffix: string,
+  ) => {
+    const widthPct = Math.round(symbol_count / maxCount * 100)
+    const sharePct = Math.round(symbol_count / base * 100)
+    const isActive = activeBucketVal === conditions_passed
+    const isClickable = symbol_count > 0
+    const isFull = conditions_passed === parseInt(suffix)
+    return (
+      <div
+        key={conditions_passed}
+        className={`ssp-funnel-row${isClickable ? ' ssp-funnel-row--clickable' : ''}${isActive ? ' ssp-funnel-row--active' : ''}`}
+        onClick={() => clickFn(conditions_passed, symbol_count)}
+        role={isClickable ? 'button' : undefined}
+        tabIndex={isClickable ? 0 : undefined}
+        onKeyDown={isClickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') clickFn(conditions_passed, symbol_count) } : undefined}
+        title={isClickable ? `Load ${symbol_count} symbols → Results` : undefined}
+      >
+        <span className={`ssp-funnel-label${isFull ? (suffix === '11' ? ' ssp-funnel-label--full-tech' : ' ssp-funnel-label--full') : ''}`}>
+          {isFull ? `${suffix}/${suffix} ★` : `${conditions_passed}/${suffix}`}
+        </span>
+        <div className="ssp-funnel-bar-wrap">
+          <div className={`ssp-funnel-bar-fill ${colorFn(conditions_passed)}`} style={{ width: `${widthPct}%` }} />
+        </div>
+        <span className="ssp-funnel-stat">
+          {symbol_count.toLocaleString()}
+          <span className="ssp-funnel-stat-sub">({sharePct}%)</span>
+        </span>
+      </div>
+    )
+  }
 
   return (
     <div className="card process-section stock-screener-page wl2 ssp-page">
@@ -366,336 +441,247 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
           pageTitle={breadcrumbLabel}
           onMenuClick={onBreadcrumbResearch}
           menuNavigateAriaLabel="Go to Research home"
-          infoText="Discover symbols by SEPA fundamental conditions and inspect their daily readiness snapshot. All calculations come from the unified Stock Data Readiness pipeline; this page only filters and views."
+          infoText="Discover symbols by SEPA conditions and inspect their daily readiness snapshot. All calculations come from the unified Stock Data Readiness pipeline; this page only filters and views."
           style={{ margin: 0 }}
         />
       </div>
 
-      {/* Top: 3-column equal grid (Fund Dist · Filter Cond · Symbols) */}
-      <div className="ssp-top-grid ssp-top-grid--triple">
-        {/* ── Card 1: Fundamental Distribution ───────────────────────────── */}
+      {/* Top: 4-column grid (Tech Dist · Fund Dist · Tech Conditions · Fund Conditions) */}
+      <div className="ssp-top-grid ssp-top-grid--quad">
+        {/* ── Card 1: Technical Distribution (top-left) ───────────────────── */}
         <section className="ssp-card">
           <header className="ssp-card-head ssp-card-head--tight">
             <h3 className="ssp-card-title">
-              Fundamental Distribution
-              <span className="ssp-card-title-aux">conditions passed</span>
+              Technical Dist.
             </h3>
-            <button
-              type="button"
-              className="ssp-btn ssp-btn--ghost"
-              onClick={() => void loadCriteriaStats()}
-              disabled={criteriaLoading}
-              title="Refresh distribution"
-            >
+            <button type="button" className="ssp-btn ssp-btn--ghost" onClick={() => void loadCriteriaStats()} disabled={criteriaLoading} title="Refresh">
               {criteriaLoading ? '…' : '↻'}
             </button>
           </header>
-
+          {activeTechBucket != null && (
+            <div className="ssp-dist-active-hint ssp-dist-active-hint--tech">
+              {techBucketLoading && <span>Loading…</span>}
+              {techBucketError && <span className="ssp-status-err">{techBucketError}</span>}
+              {!techBucketLoading && !techBucketError && techBucketLoadedCount != null && (
+                <span><span className="ssp-dist-active-badge ssp-dist-active-badge--tech">{activeTechBucket}/11</span> — {techBucketLoadedCount} → Results</span>
+              )}
+            </div>
+          )}
           <div className="ssp-dist-body">
             {criteriaErr && <div className="ssp-empty-line ssp-status-err">{criteriaErr}</div>}
-            {dist ? (
-              <>
-                <div className="ssp-dist-hint">Click a row to load that bucket's symbols.</div>
-                <div className="ssp-dist-rows">
-                  {dist.map(({ conditions_passed, symbol_count }) => {
-                    const widthPct = Math.round(symbol_count / distMaxCount * 100)
-                    const sharePct = Math.round(symbol_count / distBase * 100)
-                    const isExpanded = expandedDistBucket === conditions_passed
-                    const bucketData = distSymbolsCache.get(conditions_passed)
-                    const isClickable = symbol_count > 0
+            {techDist
+              ? <div className="ssp-dist-rows">{techDist.map(({ conditions_passed, symbol_count }) => funnelRow(conditions_passed, symbol_count, techDistMaxCount, techDistBase, techBarColorForN, activeTechBucket, handleTechBucketClick, '11'))}</div>
+              : !criteriaLoading && <div className="ssp-empty-line">No data — run technical backfill first.</div>}
+          </div>
+        </section>
+
+        {/* ── Card 2: Fundamental Distribution ────────────────────────────── */}
+        <section className="ssp-card">
+          <header className="ssp-card-head ssp-card-head--tight">
+            <h3 className="ssp-card-title">
+              Fundamental Dist.
+            </h3>
+            <button type="button" className="ssp-btn ssp-btn--ghost" onClick={() => void loadCriteriaStats()} disabled={criteriaLoading} title="Refresh">
+              {criteriaLoading ? '…' : '↻'}
+            </button>
+          </header>
+          {activeBucket != null && (
+            <div className="ssp-dist-active-hint">
+              {bucketLoading && <span>Loading…</span>}
+              {bucketError && <span className="ssp-status-err">{bucketError}</span>}
+              {!bucketLoading && !bucketError && bucketLoadedCount != null && (
+                <span><span className="ssp-dist-active-badge">{activeBucket}/8</span> — {bucketLoadedCount} → Results</span>
+              )}
+            </div>
+          )}
+          <div className="ssp-dist-body">
+            {criteriaErr && <div className="ssp-empty-line ssp-status-err">{criteriaErr}</div>}
+            {dist
+              ? <div className="ssp-dist-rows">{dist.map(({ conditions_passed, symbol_count }) => funnelRow(conditions_passed, symbol_count, distMaxCount, distBase, barColorForN, activeBucket, handleBucketClick, '8'))}</div>
+              : !criteriaLoading && <div className="ssp-empty-line">No distribution data.</div>}
+          </div>
+        </section>
+
+        {/* ── Card 3: Technical Conditions filter ─────────────────────────── */}
+        <section className="ssp-card">
+          <header className="ssp-card-head ssp-card-head--tight">
+            <h3 className="ssp-card-title">
+              Technical Conditions
+              {techCondFilter.size > 0 && <span className="ssp-filter-tab-badge ssp-filter-tab-badge--tech" style={{ marginLeft: 6 }}>{techCondFilter.size}</span>}
+            </h3>
+            {techCondFilter.size > 0 && (
+              <button type="button" className="ssp-btn ssp-btn--ghost" onClick={clearTechCondFilter} title="Clear technical conditions">Clear</button>
+            )}
+          </header>
+          <div className="ssp-cond-groups">
+            {(['vol', 'price52', 'sma', 'price'] as const).map((g) => (
+              <div key={g} className="ssp-cond-group">
+                <div className="ssp-cond-group-header">{TECH_GROUP_LABELS[g]}</div>
+                <div className="ssp-cond-chips-row">
+                  {TECH_COND_CATALOG.filter(c => c.group === g).map(({ id, label }) => {
+                    const active = techCondFilter.has(id)
                     return (
-                      <div key={conditions_passed}>
-                        <div
-                          className={`ssp-dist-row${isClickable ? ' ssp-dist-row--clickable' : ''}${isExpanded ? ' ssp-dist-row--expanded' : ''}`}
-                          onClick={() => handleBucketClick(conditions_passed, symbol_count)}
-                          role={isClickable ? 'button' : undefined}
-                          tabIndex={isClickable ? 0 : undefined}
-                          onKeyDown={isClickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') handleBucketClick(conditions_passed, symbol_count) } : undefined}
-                          title={isClickable ? `Click to load ${symbol_count} symbols` : undefined}
-                        >
-                          <span className={`ssp-dist-label${conditions_passed === 8 ? ' ssp-dist-label--full' : ''}`}>
-                            {conditions_passed === 8 ? '8/8 ★' : `${conditions_passed}/8`}
-                            {isClickable && <span className="ssp-dist-chevron">{isExpanded ? ' ▴' : ' ▾'}</span>}
-                          </span>
-                          <div className="ssp-dist-bar">
-                            <div
-                              className={`ssp-dist-bar-fill ${barColorForN(conditions_passed)}`}
-                              style={{ width: `${widthPct}%` }}
-                            />
-                          </div>
-                          <span className="ssp-dist-stat">
-                            {symbol_count.toLocaleString()}
-                            <span className="ssp-dist-stat-sub">({sharePct}%)</span>
-                          </span>
-                        </div>
-                        {isExpanded && (
-                          <div className="ssp-dist-syms">
-                            {bucketData?.loading && <span className="ssp-empty-line">Loading symbols…</span>}
-                            {bucketData?.error && <span className="ssp-empty-line ssp-status-err">{bucketData.error}</span>}
-                            {bucketData && !bucketData.loading && !bucketData.error && (
-                              <div className="ssp-dist-syms-chips">
-                                {bucketData.symbols.map((s) => (
-                                  <span
-                                    key={s.symbol}
-                                    className="ssp-dist-chip"
-                                    title={`${s.symbol} — ${s.pass_count}/8 · click to view detail`}
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      openInspector(s.symbol, {
-                                        passCount: s.pass_count,
-                                        passedConditions: s.passed_conditions,
-                                      })
-                                    }}
-                                  >
-                                    {s.symbol}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
+                      <button key={id} type="button"
+                        className={`ssp-cond-chip ssp-cond-chip--tech-${g}${active ? ' ssp-cond-chip--active' : ''}`}
+                        onClick={() => toggleTechCondFilter(id)}
+                        title={active ? `Remove ${label}` : `Add ${label}`}
+                      >
+                        <span className="ssp-cond-chip-check" aria-hidden>{active ? '✓' : ''}</span>
+                        <span className="ssp-cond-chip-label">{label}</span>
+                      </button>
                     )
                   })}
                 </div>
-              </>
-            ) : (
-              !criteriaLoading && <div className="ssp-empty-line">No distribution data.</div>
-            )}
-          </div>
-        </section>
-
-        {/* ── Card 2: Filter by Conditions ────────────────────────────────── */}
-        <section className="ssp-card">
-          <header className="ssp-card-head ssp-card-head--tight">
-            <h3 className="ssp-card-title">
-              Filter by Conditions
-              {(condFilter.size > 0 || techCondFilter.size > 0) && (
-                <span className="ssp-card-title-aux">
-                  {[condFilter.size > 0 && `${condFilter.size}F`, techCondFilter.size > 0 && `${techCondFilter.size}T`]
-                    .filter(Boolean).join(' · ')} selected
-                </span>
-              )}
-            </h3>
-            {(condFilter.size > 0 || techCondFilter.size > 0) && (
-              <button
-                type="button"
-                className="ssp-btn ssp-btn--ghost ssp-cond-filter-clear"
-                onClick={() => { clearCondFilter(); clearTechCondFilter() }}
-                title="Clear all filters"
-              >
-                Clear all
-              </button>
-            )}
-          </header>
-
-          {/* Tab switcher */}
-          <div className="ssp-filter-tabs">
-            <button
-              type="button"
-              className={`ssp-filter-tab${filterTab === 'fund' ? ' ssp-filter-tab--active' : ''}`}
-              onClick={() => setFilterTab('fund')}
-            >
-              Fundamental
-              {condFilter.size > 0 && <span className="ssp-filter-tab-badge">{condFilter.size}</span>}
-            </button>
-            <button
-              type="button"
-              className={`ssp-filter-tab${filterTab === 'tech' ? ' ssp-filter-tab--active' : ''}`}
-              onClick={() => setFilterTab('tech')}
-            >
-              Technical
-              {techCondFilter.size > 0 && <span className="ssp-filter-tab-badge ssp-filter-tab-badge--tech">{techCondFilter.size}</span>}
-            </button>
-          </div>
-
-          {/* Fundamental chips */}
-          {filterTab === 'fund' && (
-            <div className="ssp-cond-filter-chips">
-              {SEPA_COND_CATALOG.map(({ id, label, group }) => {
-                const active = condFilter.has(id)
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    className={`ssp-cond-chip ssp-cond-chip--${group}${active ? ' ssp-cond-chip--active' : ''}`}
-                    onClick={() => toggleCondFilter(id)}
-                    title={active ? `Remove ${label} from filter` : `Add ${label} to filter`}
-                  >
-                    <span className="ssp-cond-chip-check" aria-hidden>{active ? '✓' : ''}</span>
-                    <span className="ssp-cond-chip-label">{label}</span>
-                  </button>
-                )
-              })}
-            </div>
-          )}
-
-          {/* Technical chips */}
-          {filterTab === 'tech' && (
-            <div className="ssp-cond-filter-chips">
-              {TECH_COND_CATALOG.map(({ id, label, group }) => {
-                const active = techCondFilter.has(id)
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    className={`ssp-cond-chip ssp-cond-chip--tech-${group}${active ? ' ssp-cond-chip--active' : ''}`}
-                    onClick={() => toggleTechCondFilter(id)}
-                    title={active ? `Remove ${label} from filter` : `Add ${label} to filter`}
-                  >
-                    <span className="ssp-cond-chip-check" aria-hidden>{active ? '✓' : ''}</span>
-                    <span className="ssp-cond-chip-label">{label}</span>
-                  </button>
-                )
-              })}
-            </div>
-          )}
-
-          {/* Combined result */}
-          {(condFilter.size > 0 || techCondFilter.size > 0) && (
-            <div className="ssp-cond-filter-result">
-              {combinedFilterResult.loading && (
-                <div className="ssp-empty-line">Loading…</div>
-              )}
-              {combinedFilterResult.error && !combinedFilterResult.loading && (
-                <div className="ssp-empty-line ssp-status-err">{combinedFilterResult.error}</div>
-              )}
-              {!combinedFilterResult.loading && !combinedFilterResult.error && combinedFilterResult.symbols != null && (
-                <>
-                  <div className="ssp-cond-filter-hint" style={{ marginBottom: 4 }}>
-                    {combinedFilterResult.symbols.length === 0
-                      ? 'No symbols match all selected conditions.'
-                      : `${combinedFilterResult.symbols.length.toLocaleString()} match${combinedFilterResult.symbols.length === 1 ? '' : 'es'}`
-                        + (condFilter.size > 0 && techCondFilter.size > 0 ? ` (${condFilter.size}F ∩ ${techCondFilter.size}T)` : '')}
-                  </div>
-                  {combinedFilterResult.symbols.length > 0 && (
-                    <>
-                      <div className="ssp-cond-result-chips">
-                        {combinedFilterResult.symbols.map((s) => (
-                          <span
-                            key={s.symbol}
-                            className="ssp-dist-chip"
-                            title={`${s.symbol}${condFilter.size > 0 ? ` — F:${s.fundPassed}/8` : ''}${techCondFilter.size > 0 ? ` T:${s.techPassed}/11` : ''}`}
-                            onClick={() => openInspector(s.symbol)}
-                          >
-                            {s.symbol}
-                            <span className="ssp-cond-result-frac">
-                              {condFilter.size > 0 && <span>{s.fundPassed}/8</span>}
-                              {condFilter.size > 0 && techCondFilter.size > 0 && <span className="ssp-cond-result-sep">·</span>}
-                              {techCondFilter.size > 0 && <span className="ssp-cond-result-tech">{s.techPassed}/11</span>}
-                            </span>
-                          </span>
-                        ))}
-                      </div>
-                      <div className="ssp-cond-result-actions">
-                        <button
-                          type="button"
-                          className="ssp-btn ssp-btn--secondary"
-                          onClick={() => {
-                            const syms = combinedFilterResult.symbols ?? []
-                            setSymbolText(syms.map((s) => s.symbol).join(','))
-                            setLoadedFromDist(syms.map((s) => ({ symbol: s.symbol, pass_count: s.fundPassed, passed_conditions: [] })))
-                            setLoadedFromBucket(null)
-                          }}
-                          title="Replace the Symbols input with these matches"
-                        >
-                          Load into Screener
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-        </section>
-
-        {/* ── Card 3: Symbols (input + summary) ──────────────────────────── */}
-        <section className="ssp-card">
-          <header className="ssp-card-head ssp-card-head--tight">
-            <h3 className="ssp-card-title">
-              Symbols
-              <span className="ssp-card-title-aux">
-                {readinessAsOf ? `as-of ${readinessAsOf}` : 'live readiness'}
-              </span>
-            </h3>
-            {readinessLoading && <span className="ssp-loaded-sub">Loading…</span>}
-          </header>
-
-          <div className="ssp-input-block">
-            <textarea
-              className="ssp-symbols-textarea"
-              rows={5}
-              value={symbolText}
-              onChange={(e) => setSymbolText(e.target.value)}
-              placeholder="AAPL,MSFT,NVDA"
-            />
-            <div className="ssp-symbols-meta">
-              <span>
-                Parsed: <strong style={{ color: 'var(--color-text-main)' }}>{symbols.length}</strong>
-              </span>
-              {summary && (
-                <span className="ssp-symbols-summary">
-                  <span>Found <strong>{summary.found}</strong>/<strong>{summary.total}</strong></span>
-                  <span className="ssp-results-summary-good"> · F8/8 <strong>{summary.fundPass}</strong></span>
-                  {summary.techPass > 0 && (
-                    <span className="ssp-results-summary-tech"> · T11/11 <strong>{summary.techPass}</strong></span>
-                  )}
-                  {summary.insufficient > 0 && (
-                    <span className="ssp-results-summary-warn"> · insuff <strong>{summary.insufficient}</strong></span>
-                  )}
-                </span>
-              )}
-            </div>
-            {readinessError && <div className="ssp-empty-line ssp-status-err">{readinessError}</div>}
-          </div>
-        </section>
-      </div>
-
-      {/* Loaded-from chips */}
-      {loadedFromDist.length > 0 && (
-        <div className="ssp-loaded-strip">
-          <div className="ssp-loaded-meta">
-            <span className="ssp-loaded-title">
-              Loaded from{' '}
-              {loadedFromBucket == null
-                ? <span style={{ color: 'var(--color-accent)' }}>condition filter</span>
-                : loadedFromBucket === 8
-                  ? <span style={{ color: 'var(--color-success)' }}>8/8 ★</span>
-                  : `${loadedFromBucket}/8`}
-            </span>
-            <span className="ssp-loaded-sub">
-              {loadedFromDist.length} symbol{loadedFromDist.length !== 1 ? 's' : ''} · click chip for detail
-            </span>
-          </div>
-          <div className="ssp-loaded-chips">
-            {loadedFromDist.map((s) => (
-              <span
-                key={s.symbol}
-                className={`ssp-loaded-chip${inspector?.symbol === s.symbol ? ' ssp-loaded-chip--active' : ''}`}
-                onClick={() => openInspector(s.symbol, {
-                  passCount: s.pass_count,
-                  passedConditions: s.passed_conditions,
-                })}
-                title={`${s.symbol} — ${s.pass_count}/8 conditions passed`}
-              >
-                {s.symbol}
-                <span className="ssp-loaded-chip-frac">{s.pass_count}/8</span>
-              </span>
+              </div>
             ))}
           </div>
-          <div className="ssp-loaded-actions">
+        </section>
+
+        {/* ── Card 4: Fundamental Conditions filter ───────────────────────── */}
+        <section className="ssp-card">
+          <header className="ssp-card-head ssp-card-head--tight">
+            <h3 className="ssp-card-title">
+              Fundamental Conditions
+              {condFilter.size > 0 && <span className="ssp-filter-tab-badge" style={{ marginLeft: 6 }}>{condFilter.size}</span>}
+            </h3>
+            {condFilter.size > 0 && (
+              <button type="button" className="ssp-btn ssp-btn--ghost" onClick={clearCondFilter} title="Clear fundamental conditions">Clear</button>
+            )}
+          </header>
+          <div className="ssp-cond-groups">
+            {(['eps', 'rev'] as const).map((g) => (
+              <div key={g} className="ssp-cond-group">
+                <div className="ssp-cond-group-header">{FUND_GROUP_LABELS[g]}</div>
+                <div className="ssp-cond-chips-row">
+                  {SEPA_COND_CATALOG.filter(c => c.group === g).map(({ id, label }) => {
+                    const active = condFilter.has(id)
+                    return (
+                      <button key={id} type="button"
+                        className={`ssp-cond-chip ssp-cond-chip--${g}${active ? ' ssp-cond-chip--active' : ''}`}
+                        onClick={() => toggleCondFilter(id)}
+                        title={active ? `Remove ${label}` : `Add ${label}`}
+                      >
+                        <span className="ssp-cond-chip-check" aria-hidden>{active ? '✓' : ''}</span>
+                        <span className="ssp-cond-chip-label">{label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+      </div>
+
+      {/* ── Filter action bar ────────────────────────────────────────────── */}
+      {(condFilter.size > 0 || techCondFilter.size > 0) && (
+        <div className="ssp-filter-bar">
+          <div className="ssp-filter-bar-info">
+            {condFilter.size > 0 && <span className="ssp-filter-bar-tag ssp-filter-bar-tag--fund">{condFilter.size} Fundamental</span>}
+            {condFilter.size > 0 && techCondFilter.size > 0 && <span className="ssp-filter-bar-and">∩</span>}
+            {techCondFilter.size > 0 && <span className="ssp-filter-bar-tag ssp-filter-bar-tag--tech">{techCondFilter.size} Technical</span>}
+            {filterLoading && <span className="ssp-filter-bar-status ssp-filter-bar-status--loading">Searching…</span>}
+            {!filterLoading && filterPreview && !filterError && (
+              <span className="ssp-filter-bar-preview">
+                <strong className="ssp-filter-bar-count">{filterPreview.symbols.length}</strong>
+                <span className="ssp-filter-bar-status"> match{filterPreview.symbols.length !== 1 ? 'es' : ''} ({filterPreview.parts})</span>
+                <span className="ssp-filter-bar-arrow"> — click Apply →</span>
+              </span>
+            )}
+            {filterError && <span className="ssp-status-err ssp-filter-bar-status">{filterError}</span>}
+          </div>
+          {/* Step 1: preview count */}
+          {!filterPreview && (
+            <button
+              type="button"
+              className="ssp-btn ssp-btn--secondary"
+              onClick={() => void previewFilter()}
+              disabled={filterLoading}
+            >
+              {filterLoading ? 'Searching…' : 'Search'}
+            </button>
+          )}
+          {/* Step 2: apply previewed symbols to Results */}
+          {filterPreview && (
+            <button
+              type="button"
+              className="ssp-btn ssp-btn--primary"
+              onClick={applyFilter}
+            >
+              Apply ({filterPreview.symbols.length})
+            </button>
+          )}
+          {filterPreview && (
             <button
               type="button"
               className="ssp-btn ssp-btn--ghost"
-              onClick={() => { setLoadedFromDist([]); setLoadedFromBucket(null) }}
-              title="Clear loaded symbols"
+              onClick={() => setFilterPreview(null)}
             >
-              Clear
+              Retry
             </button>
-          </div>
+          )}
+          <button
+            type="button"
+            className="ssp-btn ssp-btn--ghost"
+            onClick={() => { clearCondFilter(); clearTechCondFilter(); setFilterPreview(null); setFilterError(null) }}
+          >
+            Clear
+          </button>
         </div>
       )}
+
+      {/* Symbols strip — compact single row above Results */}
+      <div className="ssp-symbols-strip">
+        <div className="ssp-symbols-strip-label">
+          <span className="ssp-symbols-strip-title">Symbols</span>
+          {readinessAsOf && <span className="ssp-symbols-strip-aux">as-of {readinessAsOf}</span>}
+          {readinessLoading && <span className="ssp-symbols-strip-aux ssp-symbols-strip-loading">loading…</span>}
+        </div>
+        <div className="ssp-symbols-strip-input">
+          <textarea
+            className="ssp-symbols-textarea ssp-symbols-textarea--strip"
+            rows={2}
+            value={symbolText}
+            onChange={(e) => {
+              setActiveBucket(null)
+              setActiveTechBucket(null)
+              setFilterPreview(null)
+              setSymbolText(e.target.value)
+            }}
+            placeholder="AAPL,MSFT,NVDA  — or select conditions above"
+          />
+        </div>
+        <div className="ssp-symbols-strip-meta">
+          <span className="ssp-symbols-strip-count">
+            <span className="ssp-num--dim">Parsed </span>
+            <strong>{symbols.length}</strong>
+          </span>
+          {summary && (
+            <>
+              <span className="ssp-symbols-strip-sep" />
+              <span>
+                <span className="ssp-num--dim">Found </span>
+                <strong>{summary.found}</strong><span className="ssp-num--dim">/{summary.total}</span>
+              </span>
+              <span className="ssp-results-summary-good">
+                F8/8 <strong>{summary.fundPass}</strong>
+              </span>
+              {summary.techPass > 0 && (
+                <span className="ssp-results-summary-tech">
+                  T11/11 <strong>{summary.techPass}</strong>
+                </span>
+              )}
+              {summary.insufficient > 0 && (
+                <span className="ssp-results-summary-warn">
+                  insuff <strong>{summary.insufficient}</strong>
+                </span>
+              )}
+            </>
+          )}
+          {readinessError && <span className="ssp-status-err">{readinessError}</span>}
+        </div>
+      </div>
 
       {/* Results — readiness-driven */}
       <section className="ssp-card">
@@ -711,31 +697,42 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
             <thead>
               <tr>
                 <th style={{ width: 110 }}>Symbol</th>
-                <th style={{ width: 68 }}>Fund</th>
-                <th style={{ width: 68 }}>Tech</th>
-                <th>Conditions</th>
+                <th
+                  className={`ssp-th-sortable${sortCol === 'tech' ? ' ssp-th-sortable--active' : ''}`}
+                  onClick={() => toggleSort('tech')}
+                  title="Sort by Technical pass count"
+                >
+                  Technical {sortCol === 'tech' ? (sortDir === 'desc' ? '↓' : '↑') : '⇅'}
+                </th>
+                <th
+                  className={`ssp-th-sortable${sortCol === 'fund' ? ' ssp-th-sortable--active' : ''}`}
+                  onClick={() => toggleSort('fund')}
+                  title="Sort by Fundamental pass count"
+                >
+                  Fundamental {sortCol === 'fund' ? (sortDir === 'desc' ? '↓' : '↑') : '⇅'}
+                </th>
                 <th style={{ width: 70, textAlign: 'center' }}>Univ</th>
                 <th style={{ width: 100 }}>Price</th>
                 <th style={{ width: 150 }}>Statements</th>
                 <th style={{ width: 90 }}>Short</th>
-                <th style={{ width: 100 }}>As-of</th>
+                <th style={{ width: 90 }}>As-of</th>
               </tr>
             </thead>
             <tbody>
               {readinessRows.length === 0 && (
                 <tr className="ssp-table-empty">
-                  <td colSpan={9}>
+                  <td colSpan={8}>
                     {readinessLoading
-                      ? 'Loading readiness for parsed symbols…'
+                      ? 'Loading readiness…'
                       : symbols.length === 0
-                        ? 'No symbols yet. Click a Fundamental Distribution bucket, use Filter by Conditions (Fundamental or Technical), or paste symbols above.'
+                        ? 'Select a distribution bucket, apply a condition filter, or type symbols below.'
                         : readinessError
                           ? 'Failed to load readiness — see error above.'
-                          : 'No readiness rows.'}
+                          : 'No readiness rows found.'}
                   </td>
                 </tr>
               )}
-              {readinessRows.map((r) => {
+              {sortedRows.map((r) => {
                 if (!r.found) {
                   return (
                     <tr key={r.symbol} className="ssp-row-missing">
@@ -749,7 +746,7 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
                           {r.symbol}
                         </button>
                       </td>
-                      <td colSpan={8} className="ssp-num--dim">
+                      <td colSpan={7} className="ssp-num--dim">
                         No row in stock_readiness_daily — run the universe snapshot from Stock Data Readiness.
                       </td>
                     </tr>
@@ -789,58 +786,47 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
                         onClick={() => openInspector(r.symbol, seed)}
                         title={isActive ? 'Close inspector' : `Open ${r.symbol} inspector`}
                       >
-                        {r.symbol}
+                        {r.symbol}<span className="ssp-sym-open-hint" aria-hidden>↗</span>
                       </button>
                     </td>
+                    {/* Technical column: pill + 11 condition dots */}
                     <td>
-                      <span
-                        className={`ssp-fund-cell ${fundCls}`}
-                        title={insuf ? 'Fundamental: insufficient data' : `${passCount}/8 fundamental conditions passed`}
-                      >
-                        {insuf ? 'INS' : `${passCount}/8`}
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        className={`ssp-fund-cell ${techCls}`}
-                        title={
-                          !techEvalPresent ? 'Technical: not yet evaluated'
-                          : techInsuf ? 'Technical: insufficient data'
-                          : `${techPassCount}/11 technical conditions passed`
-                        }
-                      >
-                        {!techEvalPresent ? '—' : techInsuf ? 'INS' : `${techPassCount}/11`}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="ssp-cond-dots">
-                        {SEPA_COND_CATALOG.map(({ id, short, group }) => {
-                          const pass = passed.has(id)
-                          return (
-                            <span
-                              key={id}
-                              className={`ssp-cond-dot ssp-cond-dot--${group}${pass ? ' ssp-cond-dot--pass' : ' ssp-cond-dot--fail'}${insuf ? ' ssp-cond-dot--dim' : ''}`}
-                              title={`${short}: ${insuf ? 'insufficient' : pass ? 'pass' : 'fail'}`}
-                            >
-                              {pass ? '✓' : ''}
-                            </span>
-                          )
-                        })}
+                      <div className="ssp-cond-col">
+                        <span className={`ssp-fund-cell ${techCls}`} title={!techEvalPresent ? 'Not evaluated' : techInsuf ? 'Insufficient data' : `${techPassCount}/11 passed`}>
+                          {!techEvalPresent ? '—' : techInsuf ? 'INS' : `${techPassCount}/11`}
+                        </span>
                         {techEvalPresent && (
-                          <span className="ssp-cond-dots-sep" aria-hidden title="Technical conditions below" />
+                          <div className="ssp-cond-dots">
+                            {TECH_COND_CATALOG.map(({ id, short, group }) => {
+                              const pass = passedTech.has(id)
+                              return (
+                                <span key={id}
+                                  className={`ssp-cond-dot ssp-cond-dot--tech-${group}${pass ? ' ssp-cond-dot--pass' : ' ssp-cond-dot--fail'}${techInsuf ? ' ssp-cond-dot--dim' : ''}`}
+                                  title={`${short}: ${techInsuf ? 'insufficient' : pass ? 'pass' : 'fail'}`}
+                                >{pass ? '✓' : ''}</span>
+                              )
+                            })}
+                          </div>
                         )}
-                        {techEvalPresent && TECH_COND_CATALOG.map(({ id, short, group }) => {
-                          const pass = passedTech.has(id)
-                          return (
-                            <span
-                              key={id}
-                              className={`ssp-cond-dot ssp-cond-dot--tech-${group}${pass ? ' ssp-cond-dot--pass' : ' ssp-cond-dot--fail'}${techInsuf ? ' ssp-cond-dot--dim' : ''}`}
-                              title={`${short}: ${techInsuf ? 'insufficient' : pass ? 'pass' : 'fail'}`}
-                            >
-                              {pass ? '✓' : ''}
-                            </span>
-                          )
-                        })}
+                      </div>
+                    </td>
+                    {/* Fundamental column: pill + 8 condition dots */}
+                    <td>
+                      <div className="ssp-cond-col">
+                        <span className={`ssp-fund-cell ${fundCls}`} title={insuf ? 'Insufficient data' : `${passCount}/8 passed`}>
+                          {insuf ? 'INS' : `${passCount}/8`}
+                        </span>
+                        <div className="ssp-cond-dots">
+                          {SEPA_COND_CATALOG.map(({ id, short, group }) => {
+                            const pass = passed.has(id)
+                            return (
+                              <span key={id}
+                                className={`ssp-cond-dot ssp-cond-dot--${group}${pass ? ' ssp-cond-dot--pass' : ' ssp-cond-dot--fail'}${insuf ? ' ssp-cond-dot--dim' : ''}`}
+                                title={`${short}: ${insuf ? 'insufficient' : pass ? 'pass' : 'fail'}`}
+                              >{pass ? '✓' : ''}</span>
+                            )
+                          })}
+                        </div>
                       </div>
                     </td>
                     <td style={{ textAlign: 'center' }}>{boolMark(r.included_in_universe)}</td>

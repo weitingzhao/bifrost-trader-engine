@@ -517,7 +517,14 @@ export interface SepaConditionStat {
 }
 
 export interface FundPassCountBucket {
-  /** Number of SEPA conditions passed (0–8). */
+  /** Number of SEPA fundamental conditions passed (0–8). */
+  conditions_passed: number
+  /** Symbols in this bucket (insufficient_data excluded). */
+  symbol_count: number
+}
+
+export interface TechPassCountBucket {
+  /** Number of SEPA technical conditions passed (0–11). */
   conditions_passed: number
   /** Symbols in this bucket (insufficient_data excluded). */
   symbol_count: number
@@ -554,6 +561,8 @@ export interface SepaCriteriaStats {
     tech_insufficient_count: number
     /** Per-condition pass/fail counts, one entry per known condition id. */
     conditions: TechConditionStat[]
+    /** Distribution: how many symbols passed exactly N out of 11 conditions. Ordered 11→0. */
+    pass_count_distribution?: TechPassCountBucket[]
   }
   computed_at: string
 }
@@ -617,6 +626,39 @@ export async function fetchFundamentalDistributionSymbols(
       return { ok: false, error: msg, conditions_passed: conditionsPassed, count: 0, symbols: [] }
     }
     return j as FundDistSymbolsResponse
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error', conditions_passed: conditionsPassed, count: 0, symbols: [] }
+  }
+}
+
+export interface TechDistSymbolRow {
+  symbol: string
+  pass_count: number
+  passed_conditions: string[]
+}
+
+export interface TechDistSymbolsResponse {
+  ok: boolean
+  error?: string
+  conditions_passed: number
+  count: number
+  symbols: TechDistSymbolRow[]
+}
+
+export async function fetchTechnicalDistributionSymbols(
+  conditionsPassed: number,
+): Promise<TechDistSymbolsResponse> {
+  const url = researchApiUrl(
+    `/research/data/readiness/technical-distribution/symbols?conditions_passed=${conditionsPassed}`,
+  )
+  try {
+    const r = await fetchWithTimeout(url, { method: 'GET' }, 20_000)
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) {
+      const msg = typeof j?.detail === 'string' ? j.detail : (j?.error ?? `HTTP ${r.status}`)
+      return { ok: false, error: msg, conditions_passed: conditionsPassed, count: 0, symbols: [] }
+    }
+    return j as TechDistSymbolsResponse
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'Network error', conditions_passed: conditionsPassed, count: 0, symbols: [] }
   }
@@ -803,6 +845,50 @@ export async function fetchSymbolFundamentalConditions(
   }
 }
 
+// ── Per-symbol technical conditions (today's snapshot) ──────────────────────
+
+export interface SymbolTechnicalConditionRow {
+  id: string
+  pass: boolean
+  actual: number | null
+  threshold: number | null
+  reason: string | null
+}
+
+export interface SymbolTechnicalConditionsResponse {
+  ok: boolean
+  error?: string
+  symbol?: string
+  found?: boolean
+  as_of_date?: string
+  pass_count?: number
+  technical_pass?: boolean
+  insufficient_data?: boolean
+  conditions?: SymbolTechnicalConditionRow[]
+  metrics?: Record<string, number | null>
+}
+
+export async function fetchSymbolTechnicalConditions(
+  symbol: string,
+): Promise<SymbolTechnicalConditionsResponse> {
+  const sym = (symbol || '').trim().toUpperCase()
+  if (!sym) return { ok: false, error: 'symbol is required' }
+  const url = researchApiUrl(
+    `/research/data/readiness/symbol-technical-conditions?symbol=${encodeURIComponent(sym)}`,
+  )
+  try {
+    const r = await fetchWithTimeout(url, { method: 'GET' }, 15_000)
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) {
+      const msg = typeof j?.detail === 'string' ? j.detail : (j?.error ?? `HTTP ${r.status}`)
+      return { ok: false, error: msg }
+    }
+    return j as SymbolTechnicalConditionsResponse
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
+
 export async function fetchSepaDataInventory(): Promise<SepaDataInventoryStats> {
   const url = researchApiUrl('/research/data/readiness/data-inventory')
   try {
@@ -884,3 +970,147 @@ export async function fetchSymbolFundRawData(symbol: string): Promise<SymbolFund
     return { ...empty, error: e instanceof Error ? e.message : 'Network error' }
   }
 }
+
+// ── Symbol Statements (balance sheets, cash flows, ratios, short data) ───────
+
+export interface BalanceSheetRow {
+  period_end: string
+  fiscal_year: number
+  fiscal_quarter: number
+  cash_and_equivalents: number | null
+  total_current_assets: number | null
+  total_current_liabilities: number | null
+  total_assets: number | null
+  total_liabilities: number | null
+  total_equity: number | null
+  receivables: number | null
+  inventories: number | null
+  debt_current: number | null
+  long_term_debt_and_capital_lease_obligations: number | null
+  property_plant_equipment_net: number | null
+  retained_earnings_deficit: number | null
+}
+
+export interface CashFlowRow {
+  period_end: string
+  fiscal_year: number
+  fiscal_quarter: number
+  net_income: number | null
+  net_cash_from_operating_activities: number | null
+  net_cash_from_investing_activities: number | null
+  net_cash_from_financing_activities: number | null
+  depreciation_depletion_and_amortization: number | null
+  purchase_of_property_plant_and_equipment: number | null
+  change_in_cash_and_equivalents: number | null
+}
+
+export interface RatiosRow {
+  date: string
+  price_to_earnings: number | null
+  price_to_sales: number | null
+  price_to_book: number | null
+  price_to_free_cash_flow: number | null
+  debt_to_equity: number | null
+  return_on_equity: number | null
+  return_on_assets: number | null
+  market_cap: number | null
+  free_cash_flow: number | null
+  earnings_per_share: number | null
+  average_volume: number | null
+  dividend_yield: number | null
+}
+
+export interface ShortInterestRow {
+  settlement_date: string
+  short_interest: number | null
+  avg_daily_volume: number | null
+  days_to_cover: number | null
+}
+
+export interface ShortVolumeRow {
+  trade_date: string
+  short_volume: number | null
+  short_volume_ratio: number | null
+  total_volume: number | null
+}
+
+export interface SymbolStatementsResponse {
+  ok: boolean
+  error?: string
+  symbol?: string
+  balance_sheets: BalanceSheetRow[]
+  cash_flows: CashFlowRow[]
+  ratios: RatiosRow[]
+  short_interest: ShortInterestRow[]
+  short_volume: ShortVolumeRow[]
+}
+
+const _emptyStatements: SymbolStatementsResponse = {
+  ok: false,
+  balance_sheets: [],
+  cash_flows: [],
+  ratios: [],
+  short_interest: [],
+  short_volume: [],
+}
+
+export async function fetchSymbolStatements(symbol: string): Promise<SymbolStatementsResponse> {
+  const sym = (symbol || '').trim().toUpperCase()
+  if (!sym) return { ..._emptyStatements, error: 'symbol is required' }
+  const url = researchApiUrl(
+    `/research/data/readiness/symbol-statements?symbol=${encodeURIComponent(sym)}`,
+  )
+  try {
+    const r = await fetchWithTimeout(url, { method: 'GET' }, 15_000)
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) return { ..._emptyStatements, error: j?.error ?? `HTTP ${r.status}` }
+    return j as SymbolStatementsResponse
+  } catch (e) {
+    return { ..._emptyStatements, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
+
+export interface TickerOverviewResponse {
+  ok: boolean
+  error?: string
+  found?: boolean
+  symbol?: string
+  // from tickers
+  name?: string | null
+  primary_exchange?: string | null
+  instrument_type?: string | null
+  active?: boolean | null
+  currency_name?: string | null
+  cik?: string | null
+  // from ticker_overview
+  sector?: string | null
+  industry?: string | null
+  sic_description?: string | null
+  market_cap?: number | null
+  total_employees?: number | null
+  description?: string | null
+  homepage_url?: string | null
+  address_city?: string | null
+  address_state?: string | null
+  list_date?: string | null
+  exchange?: string | null
+  share_class_shares_outstanding?: number | null
+  weighted_shares_outstanding?: number | null
+  // from ticker_related_tickers
+  related_tickers?: string[]
+}
+
+export async function fetchTickerOverview(symbol: string): Promise<TickerOverviewResponse> {
+  const sym = (symbol || '').trim().toUpperCase()
+  if (!sym) return { ok: false, error: 'symbol is required' }
+  const url = researchApiUrl(`/research/data/ticker-overview/${encodeURIComponent(sym)}`)
+  try {
+    const r = await fetchWithTimeout(url, { method: 'GET' }, 15_000)
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) return { ok: false, error: j?.error ?? `HTTP ${r.status}` }
+    return j as TickerOverviewResponse
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' }
+  }
+}
+
