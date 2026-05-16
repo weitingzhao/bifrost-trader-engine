@@ -4,6 +4,7 @@
  */
 import { fetchWithTimeout } from './fetchTimeout'
 import { API_HEALTH_FETCH_TIMEOUT_MS } from './fetchTimeout'
+import { publicEnv } from '@/lib/publicEnv'
 
 export interface HealthRoutingFields {
   config_profile?: 'dev' | 'prod'
@@ -142,8 +143,8 @@ function baseForEnvRole(
     | 'research',
   h: HealthRoutingFields,
 ): string {
-  const devEnv = trimEnv(import.meta.env.VITE_DEV_API_ORIGIN)
-  const prodEnv = trimEnv(import.meta.env.VITE_PROD_API_ORIGIN)
+  const devEnv = trimEnv(publicEnv('VITE_DEV_API_ORIGIN'))
+  const prodEnv = trimEnv(publicEnv('VITE_PROD_API_ORIGIN'))
   const cfgDev = trimEnv(h.frontend_dev_path)
   const cfgProd = trimEnv(h.frontend_prod_path)
   const pub = trimEnv(h.frontend_public_origin)
@@ -185,16 +186,16 @@ function resolveBasesFromHealth(health: HealthRoutingFields | null): {
   market: string
   research: string
 } {
-  const serverEntry = trimEnv(import.meta.env.VITE_API_BASE) ?? ''
+  const serverEntry = trimEnv(publicEnv('VITE_API_BASE')) ?? ''
 
-  const explicitMassive = trimEnv(import.meta.env.VITE_MASSIVE_API_ORIGIN)
-  const explicitDocs = trimEnv(import.meta.env.VITE_DOCS_API_ORIGIN)
-  const explicitOps = trimEnv(import.meta.env.VITE_OPS_API_ORIGIN)
-  const explicitTrading = trimEnv(import.meta.env.VITE_TRADING_API_ORIGIN)
-  const explicitStrategy = trimEnv(import.meta.env.VITE_STRATEGY_API_ORIGIN)
-  const explicitPortfolio = trimEnv(import.meta.env.VITE_PORTFOLIO_API_ORIGIN)
-  const explicitMarket = trimEnv(import.meta.env.VITE_MARKET_API_ORIGIN)
-  const explicitResearch = trimEnv(import.meta.env.VITE_RESEARCH_API_ORIGIN)
+  const explicitMassive = trimEnv(publicEnv('VITE_MASSIVE_API_ORIGIN'))
+  const explicitDocs = trimEnv(publicEnv('VITE_DOCS_API_ORIGIN'))
+  const explicitOps = trimEnv(publicEnv('VITE_OPS_API_ORIGIN'))
+  const explicitTrading = trimEnv(publicEnv('VITE_TRADING_API_ORIGIN'))
+  const explicitStrategy = trimEnv(publicEnv('VITE_STRATEGY_API_ORIGIN'))
+  const explicitPortfolio = trimEnv(publicEnv('VITE_PORTFOLIO_API_ORIGIN'))
+  const explicitMarket = trimEnv(publicEnv('VITE_MARKET_API_ORIGIN'))
+  const explicitResearch = trimEnv(publicEnv('VITE_RESEARCH_API_ORIGIN'))
 
   if (!health) {
     return {
@@ -286,7 +287,7 @@ function resolveBasesFromHealth(health: HealthRoutingFields | null): {
   return { server, massive, docs, ops, trading, strategy, portfolio, market, research }
 }
 
-let serverBase = trimEnv(import.meta.env.VITE_API_BASE) ?? ''
+let serverBase = trimEnv(publicEnv('VITE_API_BASE')) ?? ''
 let massiveBase = ''
 let docsBase = ''
 let opsBase = ''
@@ -401,7 +402,7 @@ export function getResearchApiBaseForBrowser(): string {
 }
 
 async function loadHealth(): Promise<HealthRoutingFields | null> {
-  const entry = trimEnv(import.meta.env.VITE_API_BASE) ?? ''
+  const entry = trimEnv(publicEnv('VITE_API_BASE')) ?? ''
   const url = joinServiceBase(entry, '/health')
   try {
     const credentials: RequestCredentials = entry ? 'omit' : 'same-origin'

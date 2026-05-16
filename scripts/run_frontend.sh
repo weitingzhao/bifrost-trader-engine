@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Bifrost frontend: single entry for dev / build (run from project root).
+# Stack: Next.js App Router (dev: next dev; prod preview: next start after build).
 #
 # Usage:
-#   ./scripts/run_frontend.sh dev    # Dev mode, listen 0.0.0.0, port from config/config.yaml frontend.port; kills process on port first
-#   ./scripts/run_frontend.sh build  # Production build to frontend/dist
-#   ./scripts/run_frontend.sh install # Install deps only (first run or after package.json change)
+#   ./scripts/run_frontend.sh dev     # Dev: 0.0.0.0, port from config/config.yaml frontend.port (default 5173); frees port first
+#   ./scripts/run_frontend.sh build   # next build (output under frontend/.next)
+#   ./scripts/run_frontend.sh start   # next start — run after build; same host/port as dev
+#   ./scripts/run_frontend.sh install # npm install only
 #
-# Use dev for daily React/style work and debugging (status server on 8765).
-# Use build before deploy or to serve static assets; then http://localhost:8765/ serves the React app.
+# Local UI: open http://127.0.0.1:<frontend.port>/ (rewrites in next.config.mjs proxy APIs in NODE_ENV=development).
+# Monitor can still embed or reverse-proxy this origin per your ops layout.
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -65,7 +67,7 @@ case "$cmd" in
       echo "node_modules not found, running npm install..."
       npm install
     fi
-    exec npm run dev -- --port "$FRONTEND_PORT" --host 0.0.0.0
+    exec npx next dev -H 0.0.0.0 -p "$FRONTEND_PORT"
     ;;
   build)
     cd "$FRONTEND_DIR"
@@ -74,7 +76,18 @@ case "$cmd" in
       npm install
     fi
     npm run build
-    echo "Build complete: $FRONTEND_DIR/dist"
+    echo "Build complete: Next output in $FRONTEND_DIR/.next (use '$0 start' to run production server)"
+    ;;
+  start)
+    FRONTEND_PORT=$(get_frontend_port)
+    echo "Frontend production server: 0.0.0.0:$FRONTEND_PORT (run ./scripts/run_frontend.sh build first)"
+    kill_port "$FRONTEND_PORT"
+    cd "$FRONTEND_DIR"
+    if [[ ! -d node_modules ]]; then
+      echo "node_modules not found, running npm install..."
+      npm install
+    fi
+    exec npx next start -H 0.0.0.0 -p "$FRONTEND_PORT"
     ;;
   install)
     cd "$FRONTEND_DIR"
@@ -82,11 +95,12 @@ case "$cmd" in
     echo "Dependencies installed."
     ;;
   *)
-    echo "Usage: $0 <dev|build|install>"
+    echo "Usage: $0 <dev|build|start|install>"
     echo ""
-    echo "  dev     - Start dev server (0.0.0.0, port from config/config.yaml frontend.port, default 5173)"
-    echo "  build   - Production build to frontend/dist for status server or static deploy"
-    echo "  install - Install npm dependencies only"
+    echo "  dev     - next dev on 0.0.0.0, port from config/config.yaml frontend.port (default 5173)"
+    echo "  build   - next build → .next/"
+    echo "  start   - next start on 0.0.0.0 (after build)"
+    echo "  install - npm install in frontend/"
     exit 1
     ;;
 esac

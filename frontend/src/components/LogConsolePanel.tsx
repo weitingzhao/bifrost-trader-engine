@@ -23,7 +23,7 @@ export interface LogConsoleController {
   /** Set when status is error (API message or network failure). */
   errorDetail: string | null
   heightPx: number
-  consoleRef: RefObject<HTMLPreElement>
+  consoleRef: RefObject<HTMLPreElement | null>
   selectAll: () => void
   clear: () => Promise<void>
   onResizeStart: (e: MouseEvent<HTMLDivElement>) => void

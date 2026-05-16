@@ -1,0 +1,5 @@
+@import './shadcn-tokens.css';
+
+/* @tailwind base intentionally omitted — preflight is disabled in tailwind.config.ts */
+@tailwind components;
+@tailwind utilities;

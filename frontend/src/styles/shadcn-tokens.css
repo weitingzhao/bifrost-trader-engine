@@ -1,0 +1,99 @@
+/* shadcn/ui CSS variable bridge — dark theme (default) */
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background:         210 21% 6%;
+  --foreground:         213 26% 91%;
+  --card:               215 18% 9%;
+  --card-foreground:    213 26% 91%;
+  --popover:            215 18% 12%;
+  --popover-foreground: 213 26% 91%;
+  --primary:            77 77% 56%;
+  --primary-foreground: 77 100% 4%;
+  --secondary:          215 18% 9%;
+  --secondary-foreground: 215 9% 52%;
+  --muted:              215 18% 12%;
+  --muted-foreground:   215 9% 52%;
+  --accent:             77 77% 18%;
+  --accent-foreground:  77 77% 56%;
+  --destructive:        0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+  --border:             215 17% 20%;
+  --input:              215 17% 20%;
+  --ring:               77 77% 56%;
+  --radius:             0.5rem;
+
+  --sidebar:                      #0a0c0f;
+  --sidebar-foreground:           #e4e9ef;
+  --sidebar-primary:              #a3e635;
+  --sidebar-primary-foreground:   #0a0c0f;
+  --sidebar-accent:               #1a1f26;
+  --sidebar-accent-foreground:    #e4e9ef;
+  --sidebar-border:               #2a313c;
+  --sidebar-ring:                 #a3e635;
+}
+
+/* Light theme override */
+[data-theme='light'] {
+  --background:         210 40% 95%;
+  --foreground:         213 13% 12%;
+  --card:               0 0% 100%;
+  --card-foreground:    213 13% 12%;
+  --popover:            0 0% 97%;
+  --popover-foreground: 213 13% 12%;
+  --primary:            199 89% 48%;
+  --primary-foreground: 199 100% 4%;
+  --secondary:          0 0% 100%;
+  --secondary-foreground: 215 9% 42%;
+  --muted:              0 0% 97%;
+  --muted-foreground:   215 9% 42%;
+  --accent:             199 89% 92%;
+  --accent-foreground:  199 89% 48%;
+  --destructive:        0 72% 51%;
+  --destructive-foreground: 0 0% 98%;
+  --border:             220 13% 91%;
+  --input:              220 13% 91%;
+  --ring:               199 89% 48%;
+
+  --sidebar:                      #f0f2f5;
+  --sidebar-foreground:           #1a1d21;
+  --sidebar-primary:              #0ea5e9;
+  --sidebar-primary-foreground:   #ffffff;
+  --sidebar-accent:               #e5e7eb;
+  --sidebar-accent-foreground:    #1a1d21;
+  --sidebar-border:               #e5e7eb;
+  --sidebar-ring:                 #0ea5e9;
+}
+
+@theme inline {
+  --color-background:              hsl(var(--background));
+  --color-foreground:              hsl(var(--foreground));
+  --color-card:                    hsl(var(--card));
+  --color-card-foreground:         hsl(var(--card-foreground));
+  --color-popover:                 hsl(var(--popover));
+  --color-popover-foreground:      hsl(var(--popover-foreground));
+  --color-primary:                 hsl(var(--primary));
+  --color-primary-foreground:      hsl(var(--primary-foreground));
+  --color-secondary:               hsl(var(--secondary));
+  --color-secondary-foreground:    hsl(var(--secondary-foreground));
+  --color-muted:                   hsl(var(--muted));
+  --color-muted-foreground:        hsl(var(--muted-foreground));
+  --color-accent:                  hsl(var(--accent));
+  --color-accent-foreground:       hsl(var(--accent-foreground));
+  --color-destructive:             hsl(var(--destructive));
+  --color-destructive-foreground:  hsl(var(--destructive-foreground));
+  --color-border:                  hsl(var(--border));
+  --color-input:                   hsl(var(--input));
+  --color-ring:                    hsl(var(--ring));
+  --radius:                        var(--radius);
+
+  --color-sidebar:                 var(--sidebar);
+  --color-sidebar-foreground:      var(--sidebar-foreground);
+  --color-sidebar-primary:         var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent:          var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border:          var(--sidebar-border);
+  --color-sidebar-ring:            var(--sidebar-ring);
+}

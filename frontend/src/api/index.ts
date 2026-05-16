@@ -170,6 +170,7 @@ export {
   fetchMassiveCeleryBeatSchedule,
   fetchMaxPainCompute,
   fetchMaxPainComputeHistory,
+  fetchPutCallRatioHistory,
   fetchIvTermStructure,
   fetchIvVolatilityCone,
   fetchStockDayGap,
@@ -244,6 +245,8 @@ export type {
   StockDayGapBatchResponse,
   StockDayQualityDailyRow,
   StockDayQualityDetailResponse,
+  PutCallRatioHistoryPoint,
+  PutCallRatioHistoryResponse,
 } from './research/research'
 export {
   fetchTradingCapabilities,

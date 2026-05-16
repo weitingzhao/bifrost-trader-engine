@@ -1,0 +1,14 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "../styles/shadcn-tokens.css";
+
+@source "../../src/**/*.{ts,tsx}";
+
+/* Full-width shell when using sidebar (legacy .app caps at 1440px) */
+.app-shell-next {
+  max-width: none !important;
+  margin: 0 !important;
+  width: 100%;
+}
+
+@import "../styles/legacy.css";

@@ -1,3 +1,5 @@
+import type { ReactElement } from 'react'
+
 export type TabId = 'live' | 'replay' | 'research' | 'strategy' | 'settings'
 export type TabGroup = 'market' | 'portfolio' | 'research' | 'strategy'
 
@@ -10,7 +12,7 @@ export function NavGroupDivider() {
 export function SubmenuIcon({ name }: { name: string }) {
   const size = 16
   const className = 'app-submenu-icon'
-  const icons: Record<string, JSX.Element> = {
+  const icons: Record<string, ReactElement> = {
     accounts: (
       <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
@@ -196,7 +198,7 @@ export function MainTabIcon({ id }: { id: TabId }) {
   const size = 18
   const className = 'app-tab-icon'
   const svgProps = { width: size, height: size, className, fill: 'none' as const, stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
-  const icons: Record<TabId, JSX.Element> = {
+  const icons: Record<TabId, ReactElement> = {
     live: (
       <svg viewBox="0 0 24 24" {...svgProps}>
         <polygon points="5 3 19 12 5 21 5 3" />

@@ -1,0 +1,33 @@
+import { publicEnv } from '@/lib/publicEnv'
+import { getPortfolioApiBase, getPortfolioApiBaseForBrowser, getTradingApiBase } from '../../api/shared/apiRouting'
+
+/** Monitor GET /health fields used to infer host:port when routing bases are empty. */
+export type MonitorHealthForAccountBases = {
+  trading_port?: number
+  portfolio_port?: number
+} | null
+
+export function tradingServiceBase(monitorHealth: MonitorHealthForAccountBases): string {
+  const explicit = publicEnv('VITE_TRADING_API_ORIGIN')?.trim()
+  if (explicit) return explicit.replace(/\/$/, '')
+  const routed = getTradingApiBase().replace(/\/$/, '')
+  if (routed) return routed
+  const p = monitorHealth?.trading_port
+  if (typeof p === 'number' && Number.isFinite(p) && typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.hostname}:${p}`
+  }
+  return ''
+}
+
+export function portfolioServiceBase(monitorHealth: MonitorHealthForAccountBases): string {
+  const explicit = publicEnv('VITE_PORTFOLIO_API_ORIGIN')?.trim()
+  if (explicit) return explicit.replace(/\/$/, '')
+  // LAN + split-stack: raw getPortfolioApiBase() may be http://127.0.0.1:<port> — align or fall back before using it.
+  const browserAligned = getPortfolioApiBaseForBrowser().replace(/\/$/, '')
+  if (browserAligned) return browserAligned
+  const p = monitorHealth?.portfolio_port
+  if (typeof p === 'number' && Number.isFinite(p) && typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.hostname}:${p}`
+  }
+  return getPortfolioApiBase().replace(/\/$/, '')
+}

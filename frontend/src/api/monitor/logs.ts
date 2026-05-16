@@ -1,3 +1,4 @@
+import { isDevBuild } from '@/lib/publicEnv'
 import { apiBase, getOpsApiBase, joinServiceBase } from '../shared/constants'
 import { getOpsToken, workerConsoleUrl } from '../ops/ops'
 
@@ -9,7 +10,7 @@ import { getOpsToken, workerConsoleUrl } from '../ops/ops'
 function bifrostMonitorApiUrl(path: string): string {
   const p = path.startsWith('/') ? path : `/${path}`
   const base = apiBase().replace(/\/$/, '')
-  if (import.meta.env.DEV && typeof window !== 'undefined' && base) {
+  if (isDevBuild() && typeof window !== 'undefined' && base) {
     try {
       const apiOrigin = new URL(base, window.location.origin).origin
       if (apiOrigin !== window.location.origin) {

@@ -139,6 +139,180 @@
   }
 }
 
+/* ── Section containers (Technical / Fundamental) ───────────────────────── */
+
+.ssp-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ssp-section-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: 2px;
+}
+
+.ssp-section-label {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 2px 10px;
+  border-radius: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ssp-section-label--tech {
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.1);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+}
+
+.ssp-section-label--fund {
+  color: #7dd3fc;
+  background: rgba(125, 211, 252, 0.1);
+  border: 1px solid rgba(125, 211, 252, 0.25);
+}
+
+.ssp-section-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+  opacity: 0.6;
+}
+
+/* Sub-rows within a section */
+.ssp-section-row {
+  display: grid;
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.ssp-section-row > .ssp-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Technical section: 4-col layout — Dist | Conditions | Momentum | Structure+Sentiment */
+.ssp-tech-layout {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 6px;
+  align-items: stretch;
+}
+
+.ssp-tech-cell-stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ssp-tech-cell-stacked > .ssp-card {
+  flex: 1;
+}
+
+.ssp-tech-layout > .ssp-card,
+.ssp-tech-cell-stacked > .ssp-card {
+  padding: var(--space-2) var(--space-3);
+}
+
+.ssp-tech-layout .ssp-card-head--tight,
+.ssp-tech-cell-stacked .ssp-card-head--tight {
+  margin-bottom: 4px;
+}
+
+/* ── Fundamental section: 3/12 dist + 9/12 right grid ────────────────── */
+
+.ssp-fund-layout {
+  display: grid;
+  grid-template-columns: 3fr 9fr;
+  gap: 6px;
+  margin-top: 6px;
+  align-items: stretch;
+}
+
+.ssp-fund-dist {
+  min-width: 0;
+}
+
+/* Right side: 4-col × 2-row grid */
+.ssp-fund-right-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: auto auto;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* SEPA Conditions spans both rows */
+.ssp-fund-cell-sepa {
+  grid-row: 1 / 3;
+}
+
+/* Valuation + Profitability stacked in one grid cell */
+.ssp-fund-cell-stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* SEPA Conditions card */
+.ssp-fund-sepa-conds {
+  padding: var(--space-2) var(--space-3);
+}
+
+/* All cards in the right grid: compact padding */
+.ssp-fund-right-grid > .ssp-card,
+.ssp-fund-cell-stacked > .ssp-card {
+  padding: var(--space-2) var(--space-3);
+}
+
+.ssp-fund-right-grid .ssp-card-head--tight,
+.ssp-fund-cell-stacked .ssp-card-head--tight {
+  margin-bottom: 4px;
+}
+
+@media (max-width: 1400px) {
+  .ssp-tech-layout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1100px) {
+  .ssp-tech-layout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ssp-fund-layout {
+    grid-template-columns: 1fr;
+  }
+  .ssp-fund-right-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .ssp-fund-cell-sepa {
+    grid-row: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .ssp-tech-layout {
+    grid-template-columns: 1fr;
+  }
+  .ssp-fund-right-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 500px) {
+  .ssp-fund-right-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ── Tier mini-card left border accents ────────────────────────────────── */
 .ssp-card--tier-momentum { border-left: 3px solid rgba(245, 158, 11, 0.55); }
 .ssp-card--tier-structure { border-left: 3px solid rgba(52, 211, 153, 0.55); }

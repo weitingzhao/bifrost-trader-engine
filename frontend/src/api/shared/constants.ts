@@ -26,7 +26,7 @@ export {
   joinServiceBase,
 }
 
-/** Main bifrost-server API prefix (empty = same origin). Set after `initApiRouting()` in main.tsx. */
+/** Main bifrost-server API prefix (empty = same origin). Set after `initApiRouting()` in `providers.tsx`. */
 export function apiBase(): string {
   return getServerApiBaseForBrowser()
 }

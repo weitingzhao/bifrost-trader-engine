@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Bar, BarStatsResponse } from '../types'
 import { fetchBarStats, fetchBars, postMassiveSync } from '../api'
-import { BarsCandlestickChart } from '../pages/data/BarsCandlestickChart'
-import { inspectBarsLimitForPeriod } from '../pages/data/dataCoverageUtils'
-import { findLastNyTradingDayForBarsSync } from '../pages/data/findLastNyTradingDay'
+import { BarsCandlestickChart } from '../views/data/BarsCandlestickChart'
+import { inspectBarsLimitForPeriod } from '../views/data/dataCoverageUtils'
+import { findLastNyTradingDayForBarsSync } from '../views/data/findLastNyTradingDay'
 import {
   nyCalendarDateIso,
   presetNyRegularSessionForDate,
-} from '../pages/massive/customBarsTimePresets'
+} from '../views/massive/customBarsTimePresets'
 
 export function StockBarStatsPanel({
   symbol,

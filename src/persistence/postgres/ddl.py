@@ -3326,6 +3326,34 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             "CREATE INDEX IF NOT EXISTS report_atm_iv_symbol_date ON report_option_atm_iv_daily (symbol, trade_date DESC)"
         )
 
+        _log_table(
+            "report_option_put_call_ratio_daily",
+            "Daily Put/Call Ratio rollup per symbol (Option Discovery PCR panel)",
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS report_option_put_call_ratio_daily (
+                report_option_put_call_ratio_daily_id bigserial PRIMARY KEY,
+                symbol          text NOT NULL,
+                trade_date      date NOT NULL,
+                source          text NOT NULL DEFAULT 'massive',
+                put_oi_total    integer,
+                call_oi_total   integer,
+                ratio_oi        double precision,
+                put_vol_total   double precision,
+                call_vol_total  double precision,
+                ratio_volume    double precision,
+                underlying_close double precision,
+                computation_detail jsonb,
+                created_at      timestamptz DEFAULT now(),
+                UNIQUE (symbol, trade_date, source)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS report_pcr_symbol_date ON report_option_put_call_ratio_daily (symbol, trade_date DESC)"
+        )
+
         _log_table("option_open_interest_daily", "Option daily open interest (Massive)")
         cur.execute(
             """

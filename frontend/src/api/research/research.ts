@@ -1,3 +1,4 @@
+import { isDevBuild } from '@/lib/publicEnv'
 import {
   getMassiveApiBase,
   getDocsApiBase,
@@ -13,12 +14,12 @@ import { opsAuthHeaders, opsControlFailureMessage, type OpsCapabilities } from '
  * Massive REST + PostgreSQL reference routes live on the Massive FastAPI process.
  * In Vite dev, GET /health often resolves this base to ``http://127.0.0.1:<massive_port>`` while the UI is
  * ``http://localhost:5173`` — a cross-origin fetch hits CORS and surfaces as "Failed to fetch".
- * The dev server proxies ``/research/massive`` (see vite.config.ts); use a same-origin path so the proxy applies.
+ * The Next.js dev server rewrites ``/research/massive`` (see `next.config.mjs`); use a same-origin path so the proxy applies.
  */
 function massiveUrl(path: string): string {
   const base = getMassiveApiBase()
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
-  if (import.meta.env.DEV && typeof window !== 'undefined') {
+  if (isDevBuild() && typeof window !== 'undefined') {
     const b = base.replace(/\/$/, '')
     if (!b) {
       return normalizedPath
@@ -1271,6 +1272,58 @@ export async function fetchMaxPainComputeHistory(params: {
         : null,
   }))
   return { ok: true, expiry: typeof j.expiry === 'string' ? j.expiry : undefined, series }
+}
+
+// ── Put/Call Ratio ────────────────────────────────────────────────────────────
+
+export interface PutCallRatioHistoryPoint {
+  trade_date: string
+  put_oi_total: number | null
+  call_oi_total: number | null
+  ratio_oi: number | null
+  put_vol_total: number | null
+  call_vol_total: number | null
+  ratio_volume: number | null
+  underlying_close: number | null
+}
+
+export interface PutCallRatioHistoryResponse {
+  ok: boolean
+  error?: string
+  symbol?: string
+  count?: number
+  series: PutCallRatioHistoryPoint[]
+}
+
+export async function fetchPutCallRatioHistory(params: {
+  symbol: string
+  lookbackDays?: number
+}): Promise<PutCallRatioHistoryResponse> {
+  const sym = (params.symbol || '').trim().toUpperCase()
+  if (!sym) return { ok: false, error: 'symbol is required', series: [] }
+  const q = new URLSearchParams({ symbol: sym })
+  if (params.lookbackDays != null && params.lookbackDays > 0) q.set('lookback_days', String(params.lookbackDays))
+  try {
+    const r = await fetch(`${researchApiUrl('/research/put-call-ratio/history')}?${q.toString()}`)
+    const j = await r.json().catch(() => ({}))
+    if (!j.ok) {
+      return { ok: false, error: typeof j.error === 'string' ? j.error : 'Request failed', series: [] }
+    }
+    const raw = Array.isArray(j.series) ? j.series : []
+    const series: PutCallRatioHistoryPoint[] = raw.map((row: Record<string, unknown>) => ({
+      trade_date: String(row.trade_date ?? ''),
+      put_oi_total: row.put_oi_total != null ? Number(row.put_oi_total) : null,
+      call_oi_total: row.call_oi_total != null ? Number(row.call_oi_total) : null,
+      ratio_oi: row.ratio_oi != null && Number.isFinite(Number(row.ratio_oi)) ? Number(row.ratio_oi) : null,
+      put_vol_total: row.put_vol_total != null ? Number(row.put_vol_total) : null,
+      call_vol_total: row.call_vol_total != null ? Number(row.call_vol_total) : null,
+      ratio_volume: row.ratio_volume != null && Number.isFinite(Number(row.ratio_volume)) ? Number(row.ratio_volume) : null,
+      underlying_close: row.underlying_close != null && Number.isFinite(Number(row.underlying_close)) ? Number(row.underlying_close) : null,
+    }))
+    return { ok: true, symbol: sym, count: series.length, series }
+  } catch {
+    return { ok: false, error: 'Network error', series: [] }
+  }
 }
 
 export async function postMassiveSync(

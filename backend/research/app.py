@@ -68,9 +68,11 @@ def create_research_app(
     from backend.research.routers.sepa_fundamentals import router as sepa_fundamentals_router
     from backend.research.routers.sepa_phase4_jobs import router as sepa_phase4_jobs_router
     from backend.research.routers.data_readiness import router as data_readiness_router
+    from backend.research.routers.put_call_ratio import router as put_call_ratio_router
 
     app.include_router(option_discovery_router)
     app.include_router(max_pain_router)
+    app.include_router(put_call_ratio_router)
     app.include_router(screener_router)
     app.include_router(greeks_router)
     app.include_router(sepa_screening_router)

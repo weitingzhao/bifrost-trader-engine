@@ -8,8 +8,8 @@ import {
 import { API_HEALTH_FETCH_TIMEOUT_MS } from '../api/shared/fetchTimeout'
 import { fetchOpsHealth } from '../api/ops/ops'
 import { normalizeUtilizedServices, type UtilizedServiceRow } from '../utils/utilizedServices'
-import { portfolioServiceBase, tradingServiceBase } from '../pages/account/accountSidecarBases'
-import { marketServiceBase, researchServiceBase, strategyServiceBase } from '../pages/research/researchApiBases'
+import { portfolioServiceBase, tradingServiceBase } from '../views/account/accountSidecarBases'
+import { marketServiceBase, researchServiceBase, strategyServiceBase } from '../views/research/researchApiBases'
 
 const POLL_MS = 20_000
 

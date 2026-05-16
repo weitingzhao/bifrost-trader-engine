@@ -757,7 +757,32 @@ Phase4 / `evaluate_fundamentals` 在存在足够 `stock_income_statements` 行�
 - **索引**：`(symbol, expiry, trade_date DESC)`、`(symbol, trade_date DESC)`。
 - **保留**：可与 `option_snapshots` 热数据窗口对齐（约 90 天），旧行可按运维策略归档或删除。
 
-### 2.16.5c 表 `job_sepa_phase4`（R-A8：SEPA Phase4 异步筛选任务）
+### 2.16.5c 表 `report_option_put_call_ratio_daily`（Option Discovery：PCR 日汇总）
+
+- **用途**：按**交易日**、**标的**预计算 **Put/Call Ratio**（OI 维度 + Volume 维度），供 Option Discovery PCR 面板快速读取时序图表，避免每次查询对 `option_open_interest_daily` / `option_day` 做全量聚合。真源为 `option_open_interest_daily`（OI）和 `option_day`（Volume）；本表为派生报表，由 Massive Worker 在 `eod_pipeline` 执行后 UPSERT，或通过 `kind=report_option_put_call_ratio` 手动触发回填。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| report_option_put_call_ratio_daily_id | bigserial | 自增主键 |
+| symbol | text NOT NULL | 标的代码 |
+| trade_date | date NOT NULL | 交易日 |
+| source | text NOT NULL DEFAULT 'massive' | 数据来源 |
+| put_oi_total | integer | 所有合约 Put OI 合计（可空） |
+| call_oi_total | integer | 所有合约 Call OI 合计（可空） |
+| ratio_oi | double precision | put_oi_total / call_oi_total（可空：分母为 0 时不写） |
+| put_vol_total | double precision | 所有合约 Put 成交量合计（来自 option_day，可空） |
+| call_vol_total | double precision | 所有合约 Call 成交量合计（来自 option_day，可空） |
+| ratio_volume | double precision | put_vol_total / call_vol_total（可空） |
+| underlying_close | double precision | 标的收盘价（来自 stock_day，可空） |
+| computation_detail | jsonb | 按到期日的 put/call OI 明细，供前端 by-expiry 展示 |
+| created_at | timestamptz | 写入时间（默认 now()） |
+
+- **唯一约束**：`UNIQUE(symbol, trade_date, source)`（注意：此表聚合粒度为 symbol×trade_date，与 Max Pain 不同，无 expiry 维度）。
+- **索引**：`(symbol, trade_date DESC)`。
+- **保留**：无强制保留策略，历史数据可按需归档。
+
+### 2.16.5d 表 `job_sepa_phase4`（R-A8：SEPA Phase4 异步筛选任务）
 
 - **用途**：SEPA Phase4（候选漏斗 + fundamentals 复筛）的异步任务持久化队列。替代进程内存 job registry，支持服务重启后查询历史任务。
 - **写入**：`POST /research/screening/sepa/phase4/jobs` 提交任务时 INSERT `queued`；引擎运行中持续 UPDATE `progress/status`；结束后写入 `summary/result/errors`。
@@ -1692,6 +1717,7 @@ python scripts/db/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-04-19 Massive 股票参考 overview 任务 kind 更名 | `job_massive_backfill.kind`：标的详情 / `ticker_overview` 拉取由 `ticker_reference_overview` 更名为 **`feed_stocks_tickers_overview`**；`normalize_ticker_ref_kind` 将 `ticker_reference_overview` 与 `stock_reference_overview` 映射至新名；路由仍为 `massive_stocks` / `massive_stocks_high`。§2.14 / §2.16。 | Massive |
 | 2026-04-19 Massive 期权 Trade & Quotes 代理任务 kind 更名 | `job_massive_backfill.kind`：期权 last trade / quotes / historical trades 代理由 `trades_quotes` 更名为 **`feed_options_trades_quotes`**；`normalize_ticker_ref_kind` 仍接受旧名；路由仍为 `massive` / `massive_high`。§2.16。 | Massive |
 | 2026-04-19 Massive 期权 reference contracts 任务 kind 更名 | `job_massive_backfill.kind`：期权合约参考 API 任务由 `contracts` 更名为 **`feed_option_contracts`**；`normalize_ticker_ref_kind` 仍接受旧名；路由仍为 `massive` / `massive_high`。§2.16。 | Massive |
+| 2026-05-16 report_option_put_call_ratio_daily | 新增表 `report_option_put_call_ratio_daily`（§2.16.5c）：按交易日汇总 Put/Call Ratio（OI 维度 + Volume 维度），供 Option Discovery PCR 面板时序图使用；Worker 在 `eod_pipeline` 末尾 UPSERT，`kind=report_option_put_call_ratio` 支持独立手动触发；`pg_ddl` 建表与索引；新增 Reader 函数、Research API `/research/put-call-ratio/history`、前端 `OptionDiscoveryPutCallRatioPanel`。 | Option Discovery |
 | 2026-04-19 Massive 股票参考 universe 任务 kind 合并更名 | `job_massive_backfill.kind`：`ticker_reference_universe` 与 `stock_reference_universe` 合并规范名为 **`feed_stocks_tickers_reference_universe`**；`normalize_ticker_ref_kind` 将两旧名映射至新名；路由仍为 `massive_stocks` / `massive_stocks_high`。§2.16。 | Massive |
 | 2026-04-19 Massive ticker types 任务 kind 合并更名 | `job_massive_backfill.kind`：`ticker_reference_ticker_types` 与 `ticker_reference_instrument_types` / `stock_reference_instrument_types` 合并规范名为 **`feed_stocks_tickers_types`**；`normalize_ticker_ref_kind` 将旧名映射至新名；路由仍为 `massive_stocks` / `massive_stocks_high`。§2.14 / §2.16。 | Massive |
 | 2026-04-19 Massive 股票公司行动任务 kind 更名与 API | `job_massive_backfill.kind`：公司行动同步（dividends / splits / IPOs / ticker events → `massive_corporate_action`）规范名为 **`feed_stocks_corporate_action`**；`normalize_ticker_ref_kind` 将 `corporate_action` 映射至新名；REST 使用 `GET /stocks/v1/dividends`、`GET /stocks/v1/splits`（替代已弃用的 v3 reference），并补充 `GET /v3/reference/ipos`、`GET /v3/reference/tickers/{ticker}/events`。§2.16。 | Massive |

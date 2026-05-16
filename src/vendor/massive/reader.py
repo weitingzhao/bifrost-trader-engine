@@ -1702,6 +1702,98 @@ def get_report_max_pain_latest_batch(
         return [], None
 
 
+def get_report_putcall_ratio_rows(
+    status_config: dict,
+    *,
+    symbol: Optional[str] = None,
+    trade_date_gte: Optional[str] = None,
+    trade_date_lte: Optional[str] = None,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """Query report_option_put_call_ratio_daily (source=massive)."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return []
+    lim = max(1, min(int(limit), 500))
+    sym = (symbol or "").strip().upper() or None
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                conds = ["source = 'massive'"]
+                args: List[Any] = []
+                if sym:
+                    conds.append("symbol = %s")
+                    args.append(sym)
+                if trade_date_gte:
+                    conds.append("trade_date >= %s")
+                    args.append(trade_date_gte)
+                if trade_date_lte:
+                    conds.append("trade_date <= %s")
+                    args.append(trade_date_lte)
+                where = " AND ".join(conds)
+                args.append(lim)
+                cur.execute(
+                    f"""
+                    SELECT symbol, trade_date, source,
+                           put_oi_total, call_oi_total, ratio_oi,
+                           put_vol_total, call_vol_total, ratio_volume,
+                           underlying_close, computation_detail, created_at
+                    FROM report_option_put_call_ratio_daily
+                    WHERE {where}
+                    ORDER BY trade_date DESC, symbol
+                    LIMIT %s
+                    """,
+                    tuple(args),
+                )
+                return [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("get_report_putcall_ratio_rows failed: %s", e)
+        return []
+
+
+def get_report_putcall_ratio_history(
+    status_config: dict,
+    symbol: str,
+    lookback_days: int = 90,
+) -> List[Dict[str, Any]]:
+    """Time series for PCR chart: last N calendar days for one symbol, ascending by trade_date."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return []
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return []
+    lim = max(1, min(int(lookback_days), 730))
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT trade_date, symbol,
+                           put_oi_total, call_oi_total, ratio_oi,
+                           put_vol_total, call_vol_total, ratio_volume,
+                           underlying_close
+                    FROM report_option_put_call_ratio_daily
+                    WHERE symbol = %s AND source = 'massive'
+                    ORDER BY trade_date DESC
+                    LIMIT %s
+                    """,
+                    (sym, lim),
+                )
+                rows = [dict(r) for r in cur.fetchall()]
+                rows.reverse()
+                return rows
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("get_report_putcall_ratio_history failed: %s", e)
+        return []
+
+
 def get_massive_daily_checklist_data(
     status_config: dict,
     symbols: List[str],

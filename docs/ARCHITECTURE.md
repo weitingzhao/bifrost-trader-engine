@@ -354,6 +354,280 @@ flowchart LR
 
 ---
 
+## 3. Monorepo 目录结构
+
+本仓库为**单一 Monorepo**，包含 Python 后端（Daemon + 多个 FastAPI 微服务）、React/TypeScript 前端、DBT 数据转换层（`transform/`）、部署配置与文档，所有代码共享同一 Git 历史与依赖声明。
+
+### 3.1 顶层目录一览
+
+```
+bifrost-trader-engine/
+├── src/                   # 核心 Python 库：Daemon、FSM、Guard、Persistence、SEPA 研究、Workers
+├── backend/               # FastAPI 微服务（每域独立进程）
+├── frontend/              # React/TypeScript 监控 SPA
+├── transform/             # DBT 数据转换项目（staging → intermediate → marts）
+├── scripts/               # 启动脚本、DB 维护、文档生成
+├── tests/                 # pytest 测试套件
+├── config/                # YAML 运行时配置（dev / prod / example）
+├── deploy/                # systemd 单元、nginx 模板、sudoers
+├── docs/                  # 架构文档、FSM 图、研究笔记
+├── CLAUDE.md              # Claude Code 项目指引
+├── AGENTS.md              # Agent 协作约定
+├── setup.py / pyproject.toml
+└── .venv/                 # （本机）Python 虚拟环境，不入库
+```
+
+### 3.2 `src/` — Python 核心库
+
+```
+src/
+├── app/                        # 全局应用入口辅助（config 加载入口）
+├── bars/                       # K 线 backfill 任务（IB / Massive）与 Celery 任务定义
+├── bifrost/                    # 跨域工具：消息中心、Ops Lease、Redis Console Streams
+├── config/                     # YAML 配置加载（settings.py / yaml_config.py）
+├── connector/                  # IB API 连接（ib.py）、Flex XML 客户端（flex_client.py）
+├── core/                       # 共享工具
+│   ├── realtime/               # Redis 行情键、报价读写、订阅
+│   └── sse/                    # SSE 队列工具
+├── daemon/                     # 交易守护进程核心
+│   ├── app/                    # 主进程入口（gs_trading.py）、心跳、快照、hedge 流程
+│   ├── account_sync/           # IB Account Agent → PostgreSQL 持仓同步
+│   ├── core/                   # 状态分类器（classifier.py）、状态枚举、快照
+│   │   └── state/
+│   ├── execution/              # 订单管理（order_manager.py）
+│   ├── fsm/                    # DaemonFSM / TradingFSM / HedgeFSM
+│   ├── guards/                 # ExecutionGuard（风控过滤）、TradingGuard
+│   ├── market/                 # 市场数据适配（market_data.py）
+│   ├── pricing/                # Black-Scholes、Greeks 计算
+│   ├── realtime/               # 实时行情 Redis 消费（目标架构路径）
+│   ├── sink/                   # StatusSink 接口实现（PostgreSQLSink 等）
+│   └── strategy/               # gamma_scalper.py、hedge_gate.py
+├── ib/                         # IB 连接策略（connection_policy.py）
+├── persistence/                # PostgreSQL 连接、DDL、accounts sync、OHLC 写入
+│   └── postgres/
+├── portfolio/                  # 持仓解析、PnL 计算、portfolio facade
+│   ├── integrations/
+│   ├── model/
+│   ├── positions/
+│   ├── reader/
+│   └── services/
+├── research/
+│   └── sepa/                   # SEPA 筛选引擎：基本面、技术面、CRS、快照刷新
+│       ├── fundamentals_engine.py
+│       ├── fundamentals_ext_engine.py
+│       ├── technical_engine.py
+│       ├── momentum_indicators.py
+│       ├── structure_indicators.py
+│       ├── short_indicators.py
+│       ├── phase1_engine.py
+│       ├── phase4_engine.py
+│       ├── readiness_snapshot.py
+│       └── stock_unified_snapshot_refresh.py
+├── vendor/                     # 第三方服务适配层（不直接暴露外部 SDK）
+│   ├── ib_ingestor/            # IB Ingestor Redis 写入协议
+│   ├── ib_account_agent/       # IB Account Agent Redis 写入协议
+│   ├── ib_market_ingest/       # IB 市场数据 ingest 工具
+│   └── massive/                # Massive/Polygon 客户端、gap 分析、参考数据
+│       ├── client.py
+│       ├── stock_day_gap.py
+│       ├── bars_contracts_gap.py
+│       ├── contracts_reference_gap.py
+│       └── snapshots_contracts_gap.py
+└── workers/                    # Celery 应用、队列名称定义
+```
+
+### 3.3 `backend/` — FastAPI 微服务
+
+每个子目录为独立 FastAPI 应用，对应一个进程（端口见 §4.0）。
+
+```
+backend/
+├── monitor/                    # 状态、控制、日志、心跳（:8765）
+│   └── routers/
+│       ├── core.py / status.py / daemon.py
+│       ├── config.py / logs.py / messages.py
+│       └── deps.py
+├── massive/                    # Massive 数据 ingest、SEPA 数据查询（:8766）
+│   └── routers/
+│       ├── routes.py           # 主路由（2700+ 行，股票/期权/SEPA/覆盖率）
+│       └── stream.py           # SSE 流
+├── ops/                        # 运维控制：systemd、Celery、IB Operator RPC（:8768）
+│   ├── agent/                  # Agent 协议（client / server / protocol）
+│   ├── models/
+│   ├── routers/
+│   │   ├── market_ingest.py    # Engine 启停、Ingestor 控制
+│   │   ├── job_queues.py
+│   │   └── workers.py
+│   └── services/               # celery_capabilities / executor_agent / executor_local
+├── trading/                    # 成交记录、PnL（:8769）
+│   └── routers/
+│       └── executions.py
+├── strategy/                   # 策略结构、Opportunity、Gate Safety（:8770）
+│   └── routers/
+│       └── strategies.py
+├── portfolio/                  # 持仓、账户、配置（:8771）
+│   └── routers/
+│       ├── model.py
+│       └── config.py
+├── market/                     # 实时行情、Watchlist（:8772）
+│   └── routers/
+│       ├── quotes.py / watchlist.py / market_data.py
+├── research/                   # Greeks、SEPA Screening、Data Readiness（:8773）
+│   └── routers/
+│       ├── data_readiness.py / screener.py
+│       ├── sepa_fundamentals.py / sepa_crs.py
+│       ├── sepa_readiness.py / sepa_screening.py
+│       ├── sepa_phase4_jobs.py
+│       ├── greeks.py / max_pain.py / option_discovery.py
+└── docs/                       # OpenAPI 文档聚合（:8767）
+```
+
+### 3.4 `frontend/` — React/TypeScript SPA
+
+```
+frontend/
+├── index.html
+├── src/
+│   ├── main.tsx                # 入口：initApiRouting() → App.tsx
+│   ├── App.tsx                 # 顶层路由（tab + submenu）
+│   ├── App.css                 # 全局样式
+│   ├── api/                    # API 客户端（按域组织）
+│   │   ├── monitor/            # status / control / logs / config
+│   │   ├── ops/                # bars / ops
+│   │   ├── trading/            # executions / performance
+│   │   ├── strategy/           # strategies / strategyInstances
+│   │   ├── portfolio/          # positionCategories
+│   │   ├── market/             # quotes / watchlist
+│   │   ├── research/           # sepa / screener / dataReadiness / risk
+│   │   ├── account/            # accountSidecarControl
+│   │   └── shared/             # apiRouting / fetchTimeout / constants
+│   ├── pages/                  # ~57 页面组件（按域 / 功能命名）
+│   ├── components/             # 可复用 UI 组件
+│   ├── hooks/                  # 自定义 React hooks
+│   ├── constants/              # 枚举、tier 定义等
+│   └── styles/                 # 模块级 CSS（data-readiness / stock-screener 等）
+└── package.json
+```
+
+### 3.5 `transform/` — DBT 数据转换项目
+
+基于 **dbt-core + PostgreSQL**，将原始 ingest 数据分层转换为 SEPA 研究与运维分析所需的 mart 表。**当前为规划层（proposed）**，尚未纳入 CI；待 SEPA Phase 4 成熟后与现有 `src/research/sepa/` 对齐并逐步迁入。
+
+```
+transform/                               # DBT 项目根（project: bifrost_research）
+├── dbt_project.yml                      # 项目声明、模型配置、路径映射
+├── profiles.yml.example                 # 连接模板（bifrost_dev / bifrost_prod）
+├── packages.yml                         # 依赖（dbt-utils 等）
+│
+├── models/
+│   ├── staging/                         # Layer 1：原始表 → 标准化列名 / 类型
+│   │   ├── sources.yml                  # PG 源表声明（stock_day / option_contracts 等）
+│   │   ├── stg_stock_day.sql            # 股票日 K 线（标准化 + source 过滤）
+│   │   ├── stg_option_day.sql           # 期权日 K 线
+│   │   ├── stg_option_min.sql           # 期权分钟 K 线
+│   │   ├── stg_option_contracts.sql     # 期权合约参考数据
+│   │   ├── stg_fundamental_cache.sql    # 季度财报缓存（Massive）
+│   │   └── stg_stock_short_interest.sql # 空头兴趣
+│   │
+│   ├── intermediate/                    # Layer 2：中间计算（按 symbol × date）
+│   │   ├── int_stock_bar_coverage.sql      # 每个 symbol 的有效 bar 天数 / 区间
+│   │   ├── int_stock_sma.sql               # SMA 10/21/50/150/200（对应 SEPA 条件）
+│   │   ├── int_stock_relative_strength.sql # RS vs SPY（SEPA RS 计算）
+│   │   ├── int_sepa_fundamental_eval.sql   # 每条件 pass/fail（对应 fundamentals_engine）
+│   │   ├── int_sepa_technical_eval.sql     # 技术面条件 pass/fail（对应 technical_engine）
+│   │   ├── int_option_coverage_gap.sql     # contracts ref vs bars covered（gap 分析）
+│   │   └── int_fund_cache_freshness.sql    # 财报数据新鲜度（最近季度 vs 今日）
+│   │
+│   └── marts/                           # Layer 3：对外分析视图
+│       ├── research/                    # SEPA 研究 marts
+│       │   ├── mart_sepa_universe_snapshot.sql   # 每日 symbol 全量 readiness 快照
+│       │   ├── mart_sepa_pass_rates.sql          # 条件级聚合通过率（对应 criteria stats API）
+│       │   ├── mart_option_coverage_matrix.sql   # 期权 day/min 覆盖率矩阵
+│       │   └── mart_stock_readiness_daily.sql    # 镜像 stock_readiness_daily（质量对账）
+│       ├── trading/                     # 交易 marts
+│       │   ├── mart_position_delta_exposure.sql  # 净 Delta 敞口（按账户/策略）
+│       │   └── mart_execution_pnl_summary.sql    # 已实现 PnL 汇总
+│       └── ops/                         # 运维 marts
+│           ├── mart_data_gap_audit.sql           # 每 symbol × source 的 bar gap 审计
+│           └── mart_ingest_coverage_report.sql   # 每日 ingest 完整性报告
+│
+├── seeds/
+│   └── sepa_condition_definitions.csv   # SEPA 条件元数据（id / label / tier / weight）
+│
+├── tests/
+│   ├── generic/                         # 标准测试（not_null / unique / accepted_values）
+│   └── singular/
+│       ├── test_sepa_pass_rate_bounds.sql        # pass_rate ∈ [0, 100]
+│       └── test_option_coverage_non_negative.sql # gap ≥ 0
+│
+├── macros/
+│   ├── coverage_pct.sql                 # coverage_pct(covered, total) 宏
+│   ├── sepa_bar_thresholds.sql          # ≥252 / ≥200 / ≥60 bar 判断宏
+│   └── date_spine_trading_days.sql      # 交易日日历脊柱生成
+│
+└── analyses/
+    └── sepa_condition_debug.sql         # 单 symbol SEPA 条件逐步调试查询
+```
+
+**DBT 层与现有代码的对应关系：**
+
+| DBT 模型 | 对应现有代码 / DB 对象 | 说明 |
+|----------|----------------------|------|
+| `stg_stock_day` | `stock_day` 表 | 源表，staging 做类型标准化 |
+| `int_stock_sma` | `src/research/sepa/technical_engine.py` | SMA 计算下移至 DBT，Python 层消费 |
+| `int_sepa_fundamental_eval` | `fundamentals_engine.py` | 条件级 pass/fail 逻辑迁移 |
+| `mart_sepa_universe_snapshot` | `stock_readiness_daily` | mart 可作为 PG 物化视图替代 |
+| `mart_sepa_pass_rates` | `GET /research/sepa/criteria-stats` API | 聚合直接从 mart 读 |
+| `mart_data_gap_audit` | `bars_contracts_gap.py` / `stock_day_gap.py` | gap 审计下移至 DBT |
+
+### 3.6 其余顶层目录
+
+```
+scripts/
+├── run_server*.py              # 各域 FastAPI 进程启动（参见 §4.0 端口表）
+├── systemd/                    # systemd 进程启动封装
+│   ├── run_engine.py           # 交易守护进程
+│   ├── run_celery.py           # Celery Worker
+│   ├── run_ib_ingestor.py      # IB Ingestor
+│   ├── run_ib_account_agent.py # IB Account Agent
+│   └── run_ib_operator.py      # IB Operator（RPC）
+├── db/                         # DB 维护
+│   ├── db_refresh_schema.py    # 初始化 / 刷新 PostgreSQL schema
+│   └── run_sepa_readiness_snapshot.py
+├── init/db_init/               # DB 种子数据
+├── check/                      # 连接自检（IB、账户）
+└── docs/                       # FSM 图生成
+
+tests/
+├── conftest.py
+├── fixtures/                   # 回放事件 JSONL（FSM 重放测试）
+├── research/sepa/              # SEPA 引擎单测 / 集成测试
+└── test_*.py                   # 覆盖 FSM、Guard、Connector、Massive、路由等
+
+config/
+├── config.yaml.example         # 完整默认值模板（单一真源）
+├── config.dev.yaml             # 本机开发覆盖
+└── config.prod.yaml            # 生产覆盖
+
+deploy/
+├── systemd/                    # .service 单元文件（engine / celery / ib-* / api 等）
+├── nginx/                      # 反向代理配置模板
+└── sudoers/                    # bifrost-agent systemctl 白名单
+
+docs/
+├── ARCHITECTURE.md             # 本文档
+├── REQUIREMENTS.md             # 产品需求（唯一真源）
+├── DATABASE.md                 # PostgreSQL schema（变更日志）
+├── plans/
+│   ├── CAPABILITY_TRACKING.md  # 能力进度
+│   └── SEPA_IMPLEMENTATION_PLAN.md
+├── research/                   # 状态空间、CONFIG_SAFETY、技术指标 Tier 设计
+├── fsm/                        # FSM 文档 + HTML 可视化图
+└── deploy/                     # Linux SSH 部署指引
+```
+
+---
+
 ## 4. 组件总览
 
 ### 4.0 HTTP 服务拆分（backend/*）

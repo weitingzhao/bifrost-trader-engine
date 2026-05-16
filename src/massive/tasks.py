@@ -416,6 +416,174 @@ def _run_max_pain(
     }
 
 
+def _run_putcall_ratio(
+    conn: Any,
+    status_cfg: dict,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Compute Put/Call Ratio from option_open_interest_daily (OI) and option_day (Volume).
+
+    Aggregates per symbol × trade_date across all expirations/strikes.
+    UPSERTs into report_option_put_call_ratio_daily.
+    """
+    import json as _json
+
+    from src.vendor.massive.reader import get_watchlist_optionable_stk_symbols
+
+    td_s = _eod_trade_date_str_et(payload)
+    try:
+        trade_date = date.fromisoformat(td_s)
+    except ValueError as e:
+        raise ValueError(f"invalid trade_date: {td_s}") from e
+
+    symbols = payload.get("symbols")
+    if isinstance(symbols, list) and symbols:
+        sym_list = [str(s).strip().upper() for s in symbols if s]
+    else:
+        sym_list = get_watchlist_optionable_stk_symbols(status_cfg)
+
+    if not sym_list:
+        return {"ok": True, "kind": "report_option_put_call_ratio", "rows_upserted": 0, "trade_date": td_s, "message": "no symbols"}
+
+    rows_written = 0
+    detail_out: List[Dict[str, Any]] = []
+    with conn.cursor() as cur:
+        for sym in sym_list:
+            # OI 聚合：按 option_right 分组求和
+            cur.execute(
+                """
+                SELECT option_right, SUM(open_interest) AS oi_sum, COUNT(*) AS contracts
+                FROM option_open_interest_daily
+                WHERE symbol = %s AND trade_date = %s AND source = 'massive'
+                GROUP BY option_right
+                """,
+                (sym, trade_date),
+            )
+            oi_by_right: Dict[str, int] = {}
+            for right, oi_sum, _ in cur.fetchall():
+                oi_by_right[str(right).strip().upper()] = int(oi_sum or 0)
+
+            put_oi = oi_by_right.get("P", 0)
+            call_oi = oi_by_right.get("C", 0)
+            ratio_oi: Optional[float] = (put_oi / call_oi) if call_oi > 0 else None
+
+            # Volume 聚合：从 option_day 按 bar_time 日期匹配
+            cur.execute(
+                """
+                SELECT option_right, SUM(volume) AS vol_sum
+                FROM option_day
+                WHERE symbol = %s AND bar_time::date = %s AND source = 'massive'
+                  AND volume IS NOT NULL
+                GROUP BY option_right
+                """,
+                (sym, trade_date),
+            )
+            vol_by_right: Dict[str, float] = {}
+            for right, vol_sum in cur.fetchall():
+                vol_by_right[str(right).strip().upper()] = float(vol_sum or 0.0)
+
+            put_vol = vol_by_right.get("P", 0.0)
+            call_vol = vol_by_right.get("C", 0.0)
+            ratio_vol: Optional[float] = (put_vol / call_vol) if call_vol > 0 else None
+
+            # by-expiry 明细（仅 OI）
+            cur.execute(
+                """
+                SELECT expiry, option_right, SUM(open_interest)
+                FROM option_open_interest_daily
+                WHERE symbol = %s AND trade_date = %s AND source = 'massive'
+                GROUP BY expiry, option_right
+                ORDER BY expiry
+                """,
+                (sym, trade_date),
+            )
+            by_expiry: Dict[str, Dict[str, int]] = {}
+            for exp, right, oi_s in cur.fetchall():
+                by_expiry.setdefault(exp, {})[str(right).strip().upper()] = int(oi_s or 0)
+            expiry_detail = [
+                {
+                    "expiry": exp,
+                    "call_oi": d.get("C", 0),
+                    "put_oi": d.get("P", 0),
+                    "ratio": round(d.get("P", 0) / d["C"], 4) if d.get("C") else None,
+                }
+                for exp, d in by_expiry.items()
+            ]
+
+            # 标的收盘价（来自 stock_day）
+            cur.execute(
+                "SELECT close FROM stock_day WHERE symbol = %s AND bar_time = %s AND source = 'massive' LIMIT 1",
+                (sym, trade_date),
+            )
+            row_close = cur.fetchone()
+            underlying_close: Optional[float] = float(row_close[0]) if row_close and row_close[0] is not None else None
+
+            if put_oi == 0 and call_oi == 0 and put_vol == 0.0 and call_vol == 0.0:
+                logger.debug("report_pcr: %s trade_date=%s no data, skipping upsert", sym, td_s)
+                continue
+
+            cur.execute(
+                """
+                INSERT INTO report_option_put_call_ratio_daily (
+                  symbol, trade_date, source,
+                  put_oi_total, call_oi_total, ratio_oi,
+                  put_vol_total, call_vol_total, ratio_volume,
+                  underlying_close, computation_detail, created_at
+                )
+                VALUES (%s, %s, 'massive', %s, %s, %s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (symbol, trade_date, source)
+                DO UPDATE SET
+                  put_oi_total = EXCLUDED.put_oi_total,
+                  call_oi_total = EXCLUDED.call_oi_total,
+                  ratio_oi = EXCLUDED.ratio_oi,
+                  put_vol_total = EXCLUDED.put_vol_total,
+                  call_vol_total = EXCLUDED.call_vol_total,
+                  ratio_volume = EXCLUDED.ratio_volume,
+                  underlying_close = EXCLUDED.underlying_close,
+                  computation_detail = EXCLUDED.computation_detail,
+                  created_at = now()
+                """,
+                (
+                    sym,
+                    trade_date,
+                    int(put_oi) if put_oi else None,
+                    int(call_oi) if call_oi else None,
+                    round(ratio_oi, 6) if ratio_oi is not None else None,
+                    put_vol if put_vol else None,
+                    call_vol if call_vol else None,
+                    round(ratio_vol, 6) if ratio_vol is not None else None,
+                    underlying_close,
+                    _json.dumps({"by_expiry": expiry_detail}),
+                ),
+            )
+            rows_written += 1
+            detail_out.append({
+                "symbol": sym,
+                "put_oi": put_oi,
+                "call_oi": call_oi,
+                "ratio_oi": ratio_oi,
+                "put_vol": put_vol,
+                "call_vol": call_vol,
+                "ratio_volume": ratio_vol,
+            })
+            logger.info(
+                "report_pcr: %s trade_date=%s ratio_oi=%.3f ratio_vol=%s",
+                sym, td_s,
+                ratio_oi if ratio_oi is not None else -1,
+                f"{ratio_vol:.3f}" if ratio_vol is not None else "N/A",
+            )
+
+    conn.commit()
+    logger.info("report_option_put_call_ratio: trade_date=%s rows=%s", td_s, rows_written)
+    return {
+        "ok": True,
+        "kind": "report_option_put_call_ratio",
+        "trade_date": td_s,
+        "rows_upserted": rows_written,
+        "per_symbol": detail_out,
+    }
+
+
 def _run_reconcile(
     conn: Any,
     client: Any,
@@ -1062,7 +1230,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
     client = MassiveClient(ms["api_key"], ms["rest_base"])
 
     try:
-        if not client.configured and kind not in ("trim_jobs", "report_option_max_pain"):
+        if not client.configured and kind not in ("trim_jobs", "report_option_max_pain", "report_option_put_call_ratio"):
             update_job_massive_backfill_result(status_cfg, job_id, "failed", {"ok": False, "error": "Massive API key not configured"})
             return {"ok": False, "error": "no api key"}
 
@@ -1905,12 +2073,24 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     return result
                 oi_res = _run_oi_watchlist_eod(conn, client, status_cfg, payload)
                 mp_res = _run_max_pain(conn, status_cfg, payload)
-                result = {"ok": True, "kind": kind, "oi": oi_res, "report_option_max_pain": mp_res}
+                pcr_res = _run_putcall_ratio(conn, status_cfg, payload)
+                result = {
+                    "ok": True,
+                    "kind": kind,
+                    "oi": oi_res,
+                    "report_option_max_pain": mp_res,
+                    "report_option_put_call_ratio": pcr_res,
+                }
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 
             if kind == "report_option_max_pain":
                 result = _run_max_pain(conn, status_cfg, payload)
+                update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                return result
+
+            if kind == "report_option_put_call_ratio":
+                result = _run_putcall_ratio(conn, status_cfg, payload)
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 

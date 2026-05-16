@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { fetchBarsBenchmark } from '../api'
+import { fetchBarsBenchmark, fetchPutCallRatioHistory } from '../api'
+import type { PutCallRatioHistoryPoint } from '../api'
 import {
   fetchSymbolFundamentalConditions,
   fetchSymbolTechnicalConditions,
@@ -16,7 +17,7 @@ import {
   type SymbolStatementsResponse,
   type TickerOverviewResponse,
 } from '../api/research/dataReadiness'
-import type { LivePositionRow } from '../pages/portfolio/types'
+import type { LivePositionRow } from '../views/portfolio/types'
 import { fmtPctCompact, fmtUsd } from '../utils/format'
 import { StockBarStatsPanel } from './StockBarStatsPanel'
 import '../styles/stock-inspector.css'
@@ -165,6 +166,150 @@ function SvgAreaChart({ labels, values, color, areaColor, h = 88, vw = 500 }: {
           <text key={p.i} x={xOf(p.i)} y={h - 4} textAnchor="middle" fontSize={8}
             fill="rgba(148,163,184,0.65)">{labels[p.i]}</text>
         ))}
+    </svg>
+  )
+}
+
+/**
+ * Compact P/C Ratio time-series chart for the stock sidebar.
+ * Renders OI Ratio (solid) and Vol Ratio (dashed) lines with a 1.0 reference
+ * line plus light red/green tinted zones. Matches Balance Sheet chart dims
+ * (h=110, vw=500) so it slots into .sip-stmt-chart-col cleanly.
+ */
+function SvgPcrRatioChart({ points, h = 130, vw = 500 }: {
+  points: PutCallRatioHistoryPoint[]; h?: number; vw?: number
+}) {
+  const n = points.length
+  if (n < 2) return null
+
+  const oi = points.map(p => p.ratio_oi).filter((v): v is number => v != null && Number.isFinite(v))
+  const vol = points.map(p => p.ratio_volume).filter((v): v is number => v != null && Number.isFinite(v))
+  const all = [...oi, ...vol]
+  if (all.length === 0) return null
+
+  const rawMin = Math.min(...all)
+  const rawMax = Math.max(...all)
+  const pad = Math.max(0.05, (rawMax - rawMin) * 0.15)
+  const yMin = Math.max(0, Math.min(rawMin, 1.0) - pad)
+  const yMax = Math.max(rawMax, 1.0) + pad
+
+  const PL = 32, PR = 8, PT = 8, PB = 18
+  const cW = vw - PL - PR, cH = h - PT - PB
+  const xOf = (i: number) => PL + (i / Math.max(n - 1, 1)) * cW
+  const yOf = (v: number) => PT + ((yMax - v) / (yMax - yMin || 1)) * cH
+  const refY = yOf(1.0)
+
+  const oiPolyline = points
+    .map((p, i) => (p.ratio_oi != null ? `${xOf(i).toFixed(1)},${yOf(p.ratio_oi).toFixed(1)}` : null))
+    .filter(Boolean).join(' ')
+  const volPolyline = points
+    .map((p, i) => (p.ratio_volume != null ? `${xOf(i).toFixed(1)},${yOf(p.ratio_volume).toFixed(1)}` : null))
+    .filter(Boolean).join(' ')
+
+  const yTicks = [yMin, (yMin + yMax) / 2, yMax]
+  const labelStep = Math.max(1, Math.ceil(n / 6))
+
+  return (
+    <svg viewBox={`0 0 ${vw} ${h}`} width="100%" height={h} style={{ display: 'block' }}>
+      {/* zones */}
+      <rect x={PL} y={PT} width={cW} height={Math.max(0, refY - PT)}
+        fill="var(--color-lamp-red, #ef5350)" opacity={0.06} />
+      <rect x={PL} y={refY} width={cW} height={Math.max(0, PT + cH - refY)}
+        fill="var(--color-lamp-green, #66bb6a)" opacity={0.06} />
+      {/* y grid + ticks */}
+      {yTicks.map((tv, ti) => {
+        const ty = yOf(tv)
+        return (
+          <g key={ti}>
+            <line x1={PL} y1={ty} x2={vw - PR} y2={ty}
+              stroke="rgba(148,163,184,0.12)" strokeWidth={0.7} />
+            <text x={PL - 4} y={ty + 3} textAnchor="end" fontSize={9}
+              fill="rgba(148,163,184,0.65)">{tv.toFixed(2)}</text>
+          </g>
+        )
+      })}
+      {/* 1.0 reference */}
+      <line x1={PL} x2={vw - PR} y1={refY} y2={refY}
+        stroke="rgba(255,255,255,0.28)" strokeWidth={1} strokeDasharray="4 3" />
+      <text x={vw - PR + 2} y={refY + 3} fontSize={8.5}
+        fill="rgba(148,163,184,0.7)">1.0</text>
+      {/* lines */}
+      {volPolyline && (
+        <polyline points={volPolyline} fill="none" stroke="#f59e0b"
+          strokeWidth={1.2} strokeDasharray="5 3" strokeLinejoin="round" />
+      )}
+      {oiPolyline && (
+        <polyline points={oiPolyline} fill="none"
+          stroke="var(--color-accent, #a3e635)" strokeWidth={1.6} strokeLinejoin="round" />
+      )}
+      {/* x labels */}
+      {points.map((p, i) => {
+        if (i % labelStep !== 0 && i !== n - 1) return null
+        return (
+          <text key={i} x={xOf(i)} y={h - 4} textAnchor="middle" fontSize={8}
+            fill="rgba(148,163,184,0.65)">{(p.trade_date ?? '').slice(5)}</text>
+        )
+      })}
+    </svg>
+  )
+}
+
+/**
+ * Compact Put vs Call OI absolute-volume chart for the stock sidebar.
+ * Two-line area chart in contract units. Same dims as SvgPcrRatioChart so it
+ * slots into the second Balance-Sheet-style block consistently.
+ */
+function SvgPcrOiChart({ points, h = 130, vw = 500 }: {
+  points: PutCallRatioHistoryPoint[]; h?: number; vw?: number
+}) {
+  const n = points.length
+  if (n < 2) return null
+  const all = points.flatMap(p => [p.put_oi_total, p.call_oi_total])
+    .filter((v): v is number => v != null && Number.isFinite(v))
+  if (all.length === 0) return null
+
+  const yMax = Math.max(...all, 1) * 1.08
+  const PL = 38, PR = 8, PT = 8, PB = 18
+  const cW = vw - PL - PR, cH = h - PT - PB
+  const xOf = (i: number) => PL + (i / Math.max(n - 1, 1)) * cW
+  const yOf = (v: number) => PT + ((yMax - v) / (yMax || 1)) * cH
+
+  const putPts = points.map((p, i) => p.put_oi_total != null
+    ? `${xOf(i).toFixed(1)},${yOf(p.put_oi_total).toFixed(1)}` : null).filter(Boolean).join(' ')
+  const callPts = points.map((p, i) => p.call_oi_total != null
+    ? `${xOf(i).toFixed(1)},${yOf(p.call_oi_total).toFixed(1)}` : null).filter(Boolean).join(' ')
+
+  const yTicks = [0, yMax / 2, yMax]
+  const labelStep = Math.max(1, Math.ceil(n / 6))
+
+  return (
+    <svg viewBox={`0 0 ${vw} ${h}`} width="100%" height={h} style={{ display: 'block' }}>
+      {yTicks.map((tv, ti) => {
+        const ty = yOf(tv)
+        return (
+          <g key={ti}>
+            <line x1={PL} y1={ty} x2={vw - PR} y2={ty}
+              stroke="rgba(148,163,184,0.12)" strokeWidth={0.7} />
+            <text x={PL - 4} y={ty + 3} textAnchor="end" fontSize={9}
+              fill="rgba(148,163,184,0.65)">{fmtMini(tv)}</text>
+          </g>
+        )
+      })}
+      {putPts && (
+        <polyline points={putPts} fill="none"
+          stroke="var(--color-lamp-red, #ef5350)" strokeWidth={1.5} strokeLinejoin="round" />
+      )}
+      {callPts && (
+        <polyline points={callPts} fill="none"
+          stroke="var(--color-lamp-green, #66bb6a)" strokeWidth={1.5} strokeLinejoin="round" />
+      )}
+      {points.map((p, i) => {
+        if (i % labelStep !== 0 && i !== n - 1) return null
+        return (
+          <text key={i} x={xOf(i)} y={h - 4} textAnchor="middle" fontSize={8}
+            fill="rgba(148,163,184,0.65)">{(p.trade_date ?? '').slice(5)}</text>
+        )
+      })}
     </svg>
   )
 }
@@ -492,6 +637,22 @@ export function StockInspectorPanel({
   }, [symU])
 
   // ── Statements data (balance sheet, cash flow, ratios, short data) ──────────
+  // Put/Call Ratio
+  const [pcrSeries, setPcrSeries] = useState<PutCallRatioHistoryPoint[]>([])
+  const [pcrLoading, setPcrLoading] = useState(false)
+  const [pcrExpanded, setPcrExpanded] = useState(true)
+
+  useEffect(() => {
+    if (!symU || !pcrExpanded) return
+    let cancelled = false
+    setPcrLoading(true)
+    fetchPutCallRatioHistory({ symbol: symU, lookbackDays: 60 })
+      .then((res) => { if (!cancelled) setPcrSeries(res.ok ? res.series : []) })
+      .catch(() => { if (!cancelled) setPcrSeries([]) })
+      .finally(() => { if (!cancelled) setPcrLoading(false) })
+    return () => { cancelled = true }
+  }, [symU, pcrExpanded])
+
   const [stmts, setStmts] = useState<SymbolStatementsResponse | null>(null)
   const [stmtsLoading, setStmtsLoading] = useState(false)
   const [stmtsExpanded, setStmtsExpanded] = useState(true)
@@ -1117,6 +1278,151 @@ export function StockInspectorPanel({
 
         {/* Bar Stats — price action, chart, massive sync (symbol-only dependency) */}
         {symU && <StockBarStatsPanel symbol={symU} embedded />}
+
+        {/* Put/Call Ratio section */}
+        {symU && (
+          <section className="od-detail-section sip-stmts-section" aria-labelledby="riv-stock-sec-pcr">
+            <h4
+              id="riv-stock-sec-pcr"
+              className="od-detail-section-title sip-stmts-toggle"
+              onClick={() => setPcrExpanded((v) => !v)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setPcrExpanded((v) => !v) }}
+              title={pcrExpanded ? 'Collapse Put/Call Ratio' : 'Expand Put/Call Ratio'}
+            >
+              <span>Put/Call Ratio</span>
+              <span className="sip-stmts-toggle-arrow">{pcrExpanded ? '▴' : '▾'}</span>
+            </h4>
+
+            {pcrExpanded && (
+              <>
+                {pcrLoading && <p className="section-hint">Loading PCR data…</p>}
+                {!pcrLoading && pcrSeries.length === 0 && (
+                  <p className="section-hint">No PCR data. Run EOD pipeline from Stock Data Readiness.</p>
+                )}
+                {!pcrLoading && pcrSeries.length > 0 && (() => {
+                  const latest = pcrSeries[pcrSeries.length - 1]
+                  const prev5 = pcrSeries.slice(-6, -1)
+                  const validPrev5 = prev5.filter(p => p.ratio_oi != null)
+                  const avg5Oi = validPrev5.length > 0
+                    ? validPrev5.reduce((s, p) => s + p.ratio_oi!, 0) / validPrev5.length
+                    : null
+                  const fmtR = (v: number | null) => v != null ? v.toFixed(3) : '—'
+                  const fmtKi = (v: number | null) => {
+                    if (v == null) return '—'
+                    if (Math.abs(v) >= 1e6) return `${(v / 1e6).toFixed(1)}M`
+                    if (Math.abs(v) >= 1e3) return `${(v / 1e3).toFixed(0)}k`
+                    return `${v.toFixed(0)}`
+                  }
+                  // Newest-first rows (cap at 12 for compact display, mirroring Balance Sheet)
+                  const tableRows = [...pcrSeries].reverse().slice(0, 12)
+
+                  return (
+                    <div className="sip-pcr-block">
+                      {/* Headline metrics — kept compact above the blocks */}
+                      <div className="sip-pcr-metrics">
+                        <div className="sip-pcr-metric">
+                          <span className="sip-pcr-label">OI Ratio</span>
+                          <span className={`sip-pcr-value ${latest.ratio_oi != null && latest.ratio_oi > 1 ? 'sip-pcr-value--bearish' : 'sip-pcr-value--bullish'}`}>
+                            {fmtR(latest.ratio_oi)}
+                          </span>
+                        </div>
+                        <div className="sip-pcr-metric">
+                          <span className="sip-pcr-label">Vol Ratio</span>
+                          <span className={`sip-pcr-value ${latest.ratio_volume != null && latest.ratio_volume > 1 ? 'sip-pcr-value--bearish' : 'sip-pcr-value--bullish'}`}>
+                            {fmtR(latest.ratio_volume)}
+                          </span>
+                        </div>
+                        <div className="sip-pcr-metric">
+                          <span className="sip-pcr-label">5d Avg OI</span>
+                          <span className="sip-pcr-value">{avg5Oi != null ? avg5Oi.toFixed(3) : '—'}</span>
+                        </div>
+                        <div className="sip-pcr-metric">
+                          <span className="sip-pcr-label">Latest</span>
+                          <span className="sip-pcr-value sip-pcr-value--neutral">{latest.trade_date.slice(5)}</span>
+                        </div>
+                      </div>
+
+                      {/* Block 1: P/C Ratio Trend — chart left | table right */}
+                      <div className="sip-stmts-block">
+                        <div className="sip-stmt-block-head">
+                          <span className="sip-stmts-block-title">P/C Ratio Trend</span>
+                          <div className="sip-chart-legend">
+                            <span className="sip-legend-dot" style={{ background: 'var(--color-accent, #a3e635)' }} />OI Ratio
+                            <span className="sip-legend-dot" style={{ background: '#f59e0b' }} />Vol Ratio
+                            <span className="sip-legend-dot sip-legend-dot--ref" />1.0 ref
+                          </div>
+                        </div>
+                        <div className="sip-stmt-chart-table">
+                          <div className="sip-stmt-chart-col">
+                            <SvgPcrRatioChart points={pcrSeries} />
+                          </div>
+                          <div className="sip-stmt-table-col">
+                            <table className="sip-raw-table sip-stmt-compact-table">
+                              <thead>
+                                <tr><th>Date</th><th>OI Rt</th><th>Vol Rt</th></tr>
+                              </thead>
+                              <tbody>
+                                {tableRows.map((r) => (
+                                  <tr key={r.trade_date}>
+                                    <td className="sip-raw-period">{r.trade_date.slice(5)}</td>
+                                    <td className={r.ratio_oi != null && r.ratio_oi > 1 ? 'sip-pcr-cell--bearish' : 'sip-pcr-cell--bullish'}>
+                                      {fmtR(r.ratio_oi)}
+                                    </td>
+                                    <td className={r.ratio_volume != null && r.ratio_volume > 1 ? 'sip-pcr-cell--bearish' : 'sip-pcr-cell--bullish'}>
+                                      {fmtR(r.ratio_volume)}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Block 2: Open Interest — chart left | table right */}
+                      <div className="sip-stmts-block">
+                        <div className="sip-stmt-block-head">
+                          <span className="sip-stmts-block-title">Open Interest</span>
+                          <div className="sip-chart-legend">
+                            <span className="sip-legend-dot" style={{ background: 'var(--color-lamp-red, #ef5350)' }} />Put OI
+                            <span className="sip-legend-dot" style={{ background: 'var(--color-lamp-green, #66bb6a)' }} />Call OI
+                          </div>
+                        </div>
+                        <div className="sip-stmt-chart-table">
+                          <div className="sip-stmt-chart-col">
+                            <SvgPcrOiChart points={pcrSeries} />
+                          </div>
+                          <div className="sip-stmt-table-col">
+                            <table className="sip-raw-table sip-stmt-compact-table">
+                              <thead>
+                                <tr><th>Date</th><th>Put OI</th><th>Call OI</th></tr>
+                              </thead>
+                              <tbody>
+                                {tableRows.map((r) => (
+                                  <tr key={r.trade_date}>
+                                    <td className="sip-raw-period">{r.trade_date.slice(5)}</td>
+                                    <td style={{ color: 'var(--color-lamp-red, #ef5350)' }}>{fmtKi(r.put_oi_total)}</td>
+                                    <td style={{ color: 'var(--color-lamp-green, #66bb6a)' }}>{fmtKi(r.call_oi_total)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+
+                      <p className="section-hint sip-pcr-hint">
+                        OI ratio &gt; 1 = more puts (bearish lean) · {pcrSeries.length}d history
+                      </p>
+                    </div>
+                  )
+                })()}
+              </>
+            )}
+          </section>
+        )}
 
         {/* Statements section (balance sheet, cash flow, ratios, short interest/volume) */}
         <section className="od-detail-section sip-stmts-section" aria-labelledby="riv-stock-sec-stmts">

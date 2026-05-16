@@ -903,12 +903,16 @@
   min-width: 0;
 }
 
-/* Status indicator dot */
+/* Status indicator dot.
+   All variants must occupy the same 7×7 box so adjacent stage titles stay
+   horizontally aligned. The `void` variant uses an outer box-shadow ring
+   instead of a real `border`, which keeps the layout size unchanged. */
 .sdp-check-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .sdp-check-dot--ok { background: var(--color-success); }
@@ -916,7 +920,10 @@
 .sdp-check-dot--error { background: var(--color-danger); }
 .sdp-check-dot--loading { background: var(--color-text-dim); animation: sdp-pulse 1.4s ease-in-out infinite; }
 .sdp-check-dot--unknown { background: var(--color-border-strong); }
-.sdp-check-dot--void { background: rgba(148, 163, 184, 0.5); border: 1.5px solid rgba(148, 163, 184, 0.65); }
+.sdp-check-dot--void {
+  background: rgba(148, 163, 184, 0.5);
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.65);
+}
 
 /* Primary metric */
 .sdp-check-primary {
@@ -2601,6 +2608,20 @@
   color: #38bdf8;
 }
 
+/* `void` = source acknowledged as N/A. Run Book treats this as `done`
+   (green), so the Check Results badge must use the same green palette to
+   stay visually consistent between the two views. */
+.sdp-result-num--void {
+  border-color: rgba(34, 197, 94, 0.65);
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.sdp-result-num--unknown {
+  border-color: rgba(148, 163, 184, 0.35);
+  color: var(--color-text-muted);
+}
+
 .sdp-result-entry-name {
   font-size: 0.7rem;
   font-weight: 600;
@@ -3051,6 +3072,24 @@
   border-color: rgba(147, 51, 234, 0.2);
 }
 
+[data-theme="light"] .sdp-criteria-group-badge--momentum {
+  background: rgba(59, 130, 246, 0.09);
+  color: #2563eb;
+  border-color: rgba(59, 130, 246, 0.22);
+}
+
+[data-theme="light"] .sdp-criteria-group-badge--structure {
+  background: rgba(147, 51, 234, 0.08);
+  color: #7c3aed;
+  border-color: rgba(147, 51, 234, 0.2);
+}
+
+[data-theme="light"] .sdp-criteria-group-badge--sentiment {
+  background: rgba(234, 88, 12, 0.08);
+  color: #ea580c;
+  border-color: rgba(234, 88, 12, 0.2);
+}
+
 [data-theme="light"] .sdp-crit-field-chip {
   background: rgba(0, 0, 0, 0.03);
   border-color: #e5e7eb;
@@ -3161,7 +3200,7 @@
 
 .sdp-criteria-row {
   display: grid;
-  grid-template-columns: 14rem 1fr 10rem 20px;
+  grid-template-columns: 11rem 1fr 5.5rem 20px;
   align-items: center;
   gap: var(--space-2);
   font-size: var(--text-caption);
@@ -3238,6 +3277,56 @@
 .sdp-eval-combined-sep {
   color: var(--color-border);
   margin: 0 var(--space-1);
+}
+
+/* Two-column eval layout (Fundamental | Technical) */
+.sdp-eval-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.sdp-eval-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* Tier sub-section (Momentum / Structure / Sentiment) */
+.sdp-eval-tier-section {
+  margin-top: var(--space-3);
+}
+
+.sdp-eval-tier-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.sdp-eval-tier-sub {
+  font-size: 0.70rem;
+}
+
+/* Tier badge color variants */
+.sdp-criteria-group-badge--momentum {
+  background: rgba(59, 130, 246, 0.12);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.28);
+}
+
+.sdp-criteria-group-badge--structure {
+  background: rgba(168, 85, 247, 0.12);
+  color: #c4b5fd;
+  border: 1px solid rgba(168, 85, 247, 0.28);
+}
+
+.sdp-criteria-group-badge--sentiment {
+  background: rgba(249, 115, 22, 0.12);
+  color: #fdba74;
+  border: 1px solid rgba(249, 115, 22, 0.28);
 }
 
 /* Fundamental pass-count distribution histogram */
@@ -3525,6 +3614,10 @@
   border-radius: 3px;
 }
 
+.sdp-inventory-fill-bar-inner--ok   { background: var(--color-success, #22c55e); }
+.sdp-inventory-fill-bar-inner--warn { background: var(--color-warning, #fb923c); }
+.sdp-inventory-fill-bar-inner--err  { background: var(--color-danger, #ef4444); }
+
 .sdp-inventory-fill-pct {
   font-variant-numeric: tabular-nums;
   color: var(--color-text-secondary);
@@ -3532,27 +3625,53 @@
 }
 
 .sdp-inventory-category {
+  display: inline-flex;
+  align-items: center;
   font-size: 0.68rem;
-  font-weight: 500;
-  padding: 1px 5px;
-  border-radius: 3px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 4px;
   background: var(--color-surface-2, rgba(148, 163, 184, 0.1));
+  border: 1px solid var(--color-border-subtle, rgba(148, 163, 184, 0.2));
   white-space: nowrap;
 }
 
-.sdp-inventory-category--valuation { color: var(--color-info, #60a5fa); }
-.sdp-inventory-category--quality   { color: var(--color-success, #4ade80); }
-.sdp-inventory-category--cashflow  { color: var(--color-teal, #2dd4bf); }
-.sdp-inventory-category--short     { color: var(--color-warning, #fb923c); }
+.sdp-inventory-category--valuation {
+  color: var(--color-info, #60a5fa);
+  border-color: rgba(96, 165, 250, 0.25);
+  background: rgba(96, 165, 250, 0.08);
+}
+.sdp-inventory-category--quality {
+  color: var(--color-success, #4ade80);
+  border-color: rgba(74, 222, 128, 0.25);
+  background: rgba(74, 222, 128, 0.08);
+}
+.sdp-inventory-category--cashflow {
+  color: var(--color-teal, #2dd4bf);
+  border-color: rgba(45, 212, 191, 0.25);
+  background: rgba(45, 212, 191, 0.08);
+}
+.sdp-inventory-category--short {
+  color: var(--color-warning, #fb923c);
+  border-color: rgba(251, 146, 60, 0.25);
+  background: rgba(251, 146, 60, 0.08);
+}
 
 .sdp-inventory-indicator {
   color: var(--color-text-secondary);
   max-width: 24rem;
 }
 
+@media (max-width: 1100px) {
+  .sdp-eval-cols {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 900px) {
   .sdp-criteria-row {
-    grid-template-columns: 10rem 1fr 8rem 20px;
+    grid-template-columns: 9rem 1fr 5rem 20px;
   }
 
   .sdp-inventory-table-name,

@@ -1,5 +1,5 @@
 import type { Execution } from '../types'
-import { sortExecByExecutionDateThenTime } from '../pages/performance/performanceUtils'
+import { sortExecByExecutionDateThenTime } from '../views/performance/performanceUtils'
 
 const QTY_EPS = 1e-9
 

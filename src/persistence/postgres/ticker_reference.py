@@ -819,5 +819,7 @@ def normalize_ticker_ref_kind(kind: str) -> str:
         "corporate_action": "feed_stocks_corporate_action",
         # Max Pain report job (DB-only; was ``max_pain``)
         "max_pain": "report_option_max_pain",
+        # Put/Call Ratio report job (DB-only; was ``put_call_ratio``)
+        "put_call_ratio": "report_option_put_call_ratio",
     }
     return legacy.get(k, k)

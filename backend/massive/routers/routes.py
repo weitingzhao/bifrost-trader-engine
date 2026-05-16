@@ -3416,6 +3416,8 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
             "eod_pipeline",
             "report_option_max_pain",
             "max_pain",
+            "report_option_put_call_ratio",
+            "put_call_ratio",
             "reconcile",
             "trim_jobs",
             "feed_stocks_tickers_reference_universe",
