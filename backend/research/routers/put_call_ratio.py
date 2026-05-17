@@ -35,6 +35,21 @@ def get_putcall_ratio_report(
     return {"ok": True, "count": len(rows), "rows": rows}
 
 
+@router.get("/put-call-ratio/chain-summary")
+def get_chain_expiry_summary(
+    request: Request,
+    symbol: str = Query(..., description="Underlying symbol (e.g. NVDA)"),
+    trade_date: Optional[str] = Query(None, description="Trade date YYYY-MM-DD; defaults to latest"),
+) -> Dict[str, Any]:
+    """Per-expiry option chain summary (OI + Volume) for Barchart-style table."""
+    from src.vendor.massive.reader import get_option_chain_expiry_summary
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured", "rows": []}
+    return get_option_chain_expiry_summary(db, symbol=symbol, trade_date=trade_date)
+
+
 @router.get("/put-call-ratio/history")
 def get_putcall_ratio_history(
     request: Request,

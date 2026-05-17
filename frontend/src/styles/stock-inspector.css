@@ -1122,3 +1122,393 @@
   margin: 2px 0 0 !important;
   color: var(--color-text-dim, #64748b) !important;
 }
+
+.sip-pcr-tables-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+  gap: 8px;
+}
+
+.sip-pcr-tab-btn {
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border, #334155);
+  background: var(--color-surface-raised, rgba(30, 41, 59, 0.6));
+  color: var(--color-text-muted);
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.sip-pcr-tab-btn:hover {
+  border-color: var(--color-accent, #6ea8fe);
+  color: var(--color-text-main);
+}
+
+.sip-pcr-tables-body {
+  padding: 4px 0 6px;
+}
+
+.sip-pcr-tables-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.sip-pcr-tables-grid .sip-stmts-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.sip-pcr-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sip-pcr-section-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sip-pcr-retrieve-block {
+  padding: 8px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.sip-pcr-action-btn {
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border, #334155);
+  background: var(--color-surface-raised, #1e293b);
+  color: var(--color-text-main, #e2e8f0);
+  cursor: pointer;
+}
+
+.sip-pcr-action-btn:hover:not(:disabled) {
+  border-color: var(--color-accent, #6ea8fe);
+  color: var(--color-accent, #6ea8fe);
+}
+
+.sip-pcr-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.sip-pcr-action-btn--primary {
+  border-color: var(--color-accent, #6ea8fe);
+  background: rgba(110, 168, 254, 0.12);
+}
+
+/* Unified Refresh button: shows "as of DATE Nd ago  Refresh" */
+.sip-pcr-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border, #334155);
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.62rem;
+  font-family: var(--font-mono);
+  color: var(--color-text-dim);
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+
+.sip-pcr-refresh-btn:hover:not(:disabled) {
+  border-color: rgba(110, 168, 254, 0.5);
+  background: rgba(110, 168, 254, 0.06);
+  color: var(--color-text-muted);
+}
+
+.sip-pcr-refresh-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sip-pcr-refresh-asof {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-text-muted);
+}
+
+.sip-pcr-refresh-asof strong {
+  color: var(--color-text-main);
+  font-weight: 600;
+}
+
+.sip-pcr-refresh-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-accent, #6ea8fe);
+  padding-left: 6px;
+  border-left: 1px solid var(--color-border, #334155);
+}
+
+.sip-chain-shared-refresh {
+  font-size: 0.6rem;
+  font-style: italic;
+  color: var(--color-text-dim);
+  font-family: var(--font-mono);
+  opacity: 0.75;
+}
+
+.sip-pcr-job-status {
+  padding: 6px 12px 0;
+}
+
+.sip-pcr-job-status .section-hint {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Option Chain by Expiry (Barchart-inspired table) ─────────────────────── */
+
+.sip-chain-section {
+  margin-top: 6px;
+  border-top: 1px solid var(--color-border);
+}
+
+.sip-chain-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sip-chain-header:hover {
+  background: rgba(148, 163, 184, 0.05);
+}
+
+.sip-chain-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  border-left: 2px solid var(--color-primary, #6366f1);
+  padding-left: 6px;
+}
+
+.sip-chain-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sip-chain-asof {
+  font-size: 0.66rem;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sip-chain-asof strong {
+  color: var(--color-text-main);
+  font-weight: 600;
+}
+
+.sip-chain-fresh {
+  font-size: 0.58rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.02em;
+}
+
+.sip-chain-fresh--ok {
+  background: rgba(34, 197, 94, 0.12);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+.sip-chain-fresh--warn {
+  background: rgba(234, 179, 8, 0.12);
+  color: #facc15;
+  border: 1px solid rgba(234, 179, 8, 0.25);
+}
+
+.sip-chain-fresh--stale {
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+[data-theme="light"] .sip-chain-fresh--ok {
+  background: rgba(22, 163, 74, 0.08);
+  color: #15803d;
+  border-color: rgba(22, 163, 74, 0.2);
+}
+
+[data-theme="light"] .sip-chain-fresh--warn {
+  background: rgba(202, 138, 4, 0.08);
+  color: #a16207;
+  border-color: rgba(202, 138, 4, 0.2);
+}
+
+[data-theme="light"] .sip-chain-fresh--stale {
+  background: rgba(220, 38, 38, 0.06);
+  color: #b91c1c;
+  border-color: rgba(220, 38, 38, 0.18);
+}
+
+.sip-chain-scroll {
+  overflow-x: auto;
+  padding: 0 4px 10px;
+}
+
+.sip-chain-table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.sip-chain-th {
+  padding: 5px 6px;
+  text-align: left;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  background: #1a2744;
+  color: rgba(255, 255, 255, 0.85);
+  border-bottom: 2px solid rgba(56, 189, 248, 0.35);
+}
+
+.sip-chain-th--num {
+  text-align: right;
+}
+
+.sip-chain-th--put {
+  color: rgba(248, 113, 113, 0.85);
+}
+
+.sip-chain-th--call {
+  color: rgba(74, 222, 128, 0.85);
+}
+
+.sip-chain-row {
+  transition: background 0.12s;
+}
+
+.sip-chain-row:hover {
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.sip-chain-row:nth-child(even) {
+  background: rgba(148, 163, 184, 0.03);
+}
+
+.sip-chain-row:nth-child(even):hover {
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.sip-chain-td {
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.sip-chain-td--num {
+  text-align: right;
+}
+
+.sip-chain-td--exp {
+  color: var(--color-text-main);
+  font-weight: 600;
+  font-size: 0.66rem;
+}
+
+.sip-chain-td--dte {
+  font-weight: 700;
+  color: var(--color-text-main);
+}
+
+.sip-chain-td--put {
+  color: var(--color-lamp-red, #ef5350);
+}
+
+.sip-chain-td--call {
+  color: var(--color-lamp-green, #66bb6a);
+}
+
+.sip-chain-td--bearish {
+  color: var(--color-lamp-red, #ef5350);
+  font-weight: 600;
+}
+
+.sip-chain-td--bullish {
+  color: var(--color-lamp-green, #66bb6a);
+  font-weight: 600;
+}
+
+/* Volume/OI cells now use inline background gradients via style prop */
+
+.sip-chain-row--total {
+  border-top: 2px solid var(--color-border);
+  background: rgba(148, 163, 184, 0.06) !important;
+}
+
+.sip-chain-row--total .sip-chain-td {
+  font-weight: 700;
+  color: var(--color-text-main);
+  border-bottom: none;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+/* Light theme */
+[data-theme="light"] .sip-chain-th {
+  background: #1e3a5f;
+  color: rgba(255, 255, 255, 0.9);
+  border-bottom-color: rgba(37, 99, 235, 0.4);
+}
+
+[data-theme="light"] .sip-chain-td--put {
+  color: #dc2626;
+}
+
+[data-theme="light"] .sip-chain-td--call {
+  color: #16a34a;
+}
+
+[data-theme="light"] .sip-chain-td--bearish {
+  color: #dc2626;
+}
+
+[data-theme="light"] .sip-chain-td--bullish {
+  color: #16a34a;
+}
+
+[data-theme="light"] .sip-chain-row:nth-child(even) {
+  background: rgba(148, 163, 184, 0.04);
+}
+
+[data-theme="light"] .sip-chain-row--total {
+  background: rgba(148, 163, 184, 0.08) !important;
+}
+
+/* Bar fills rendered as inline gradients; no light-theme overrides needed */

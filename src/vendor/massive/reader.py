@@ -1794,6 +1794,137 @@ def get_report_putcall_ratio_history(
         return []
 
 
+def get_option_chain_expiry_summary(
+    status_config: dict,
+    symbol: str,
+    trade_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Per-expiry aggregated option chain summary (OI + Volume) for Barchart-style table.
+
+    Returns the latest trade_date's data grouped by expiry, with DTE computed from today (ET).
+    """
+    from datetime import date as _date
+    from zoneinfo import ZoneInfo
+
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return {"ok": False, "error": "PostgreSQL not configured", "rows": []}
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"ok": False, "error": "symbol is required", "rows": []}
+
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                if trade_date:
+                    td = trade_date.strip()[:10]
+                else:
+                    cur.execute(
+                        "SELECT MAX(trade_date) FROM option_open_interest_daily WHERE symbol = %s AND source = 'massive'",
+                        (sym,),
+                    )
+                    row = cur.fetchone()
+                    td = str(row["max"]) if row and row["max"] else None
+                if not td:
+                    return {"ok": True, "symbol": sym, "trade_date": None, "rows": []}
+
+                cur.execute(
+                    """
+                    WITH oi AS (
+                        SELECT expiry, option_right, SUM(open_interest) AS oi_sum
+                        FROM option_open_interest_daily
+                        WHERE symbol = %s AND trade_date = %s AND source = 'massive'
+                        GROUP BY expiry, option_right
+                    ),
+                    vol AS (
+                        SELECT expiry, option_right, SUM(volume) AS vol_sum
+                        FROM option_day
+                        WHERE symbol = %s
+                          AND (bar_time AT TIME ZONE 'America/New_York')::date = %s
+                          AND source = 'massive'
+                          AND volume IS NOT NULL
+                        GROUP BY expiry, option_right
+                    ),
+                    expiries AS (
+                        SELECT DISTINCT expiry FROM (
+                            SELECT expiry FROM oi UNION SELECT expiry FROM vol
+                        ) u
+                    )
+                    SELECT
+                        e.expiry,
+                        COALESCE((SELECT oi_sum FROM oi WHERE oi.expiry = e.expiry AND oi.option_right = 'P'), 0) AS put_oi,
+                        COALESCE((SELECT oi_sum FROM oi WHERE oi.expiry = e.expiry AND oi.option_right = 'C'), 0) AS call_oi,
+                        COALESCE((SELECT vol_sum FROM vol WHERE vol.expiry = e.expiry AND vol.option_right = 'P'), 0) AS put_vol,
+                        COALESCE((SELECT vol_sum FROM vol WHERE vol.expiry = e.expiry AND vol.option_right = 'C'), 0) AS call_vol
+                    FROM expiries e
+                    ORDER BY e.expiry
+                    """,
+                    (sym, td, sym, td),
+                )
+                rows_raw = cur.fetchall() or []
+
+            today = _date.today()
+            et = ZoneInfo("America/New_York")
+            from datetime import datetime as _datetime
+            today_et = _datetime.now(et).date()
+
+            rows_out: list = []
+            for r in rows_raw:
+                exp_str = str(r["expiry"]).strip()
+                put_oi = int(r["put_oi"] or 0)
+                call_oi = int(r["call_oi"] or 0)
+                put_vol = float(r["put_vol"] or 0)
+                call_vol = float(r["call_vol"] or 0)
+                total_oi = put_oi + call_oi
+                total_vol = put_vol + call_vol
+                pc_oi = round(put_oi / call_oi, 4) if call_oi > 0 else None
+                pc_vol = round(put_vol / call_vol, 4) if call_vol > 0 else None
+
+                try:
+                    if len(exp_str) == 8:
+                        exp_date = _date(int(exp_str[:4]), int(exp_str[4:6]), int(exp_str[6:8]))
+                    else:
+                        exp_date = _date.fromisoformat(exp_str[:10])
+                    dte = (exp_date - today_et).days
+                    exp_label = exp_date.strftime("%m/%d/%y")
+                    is_monthly = exp_date.weekday() == 4 and 15 <= exp_date.day <= 21
+                    exp_label += " (m)" if is_monthly else " (w)"
+                except Exception:
+                    dte = None
+                    exp_label = exp_str
+
+                if total_oi == 0 and total_vol == 0:
+                    continue
+
+                rows_out.append({
+                    "expiry": exp_str,
+                    "expiry_label": exp_label,
+                    "dte": dte,
+                    "put_vol": int(put_vol),
+                    "call_vol": int(call_vol),
+                    "total_vol": int(total_vol),
+                    "pc_vol_ratio": pc_vol,
+                    "put_oi": put_oi,
+                    "call_oi": call_oi,
+                    "total_oi": total_oi,
+                    "pc_oi_ratio": pc_oi,
+                })
+
+            return {
+                "ok": True,
+                "symbol": sym,
+                "trade_date": td,
+                "count": len(rows_out),
+                "rows": rows_out,
+            }
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("get_option_chain_expiry_summary failed: %s", e)
+        return {"ok": False, "error": str(e), "rows": []}
+
+
 def get_massive_daily_checklist_data(
     status_config: dict,
     symbols: List[str],

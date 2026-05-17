@@ -296,8 +296,14 @@ let strategyBase = ''
 let portfolioBase = ''
 let marketBase = ''
 let researchBase = ''
+let configProfile: 'dev' | 'prod' | null = null
 
 let initPromise: Promise<void> | null = null
+
+/** Returns the config_profile from GET /health after initApiRouting() resolves ('dev' | 'prod' | null). */
+export function getConfigProfile(): 'dev' | 'prod' | null {
+  return configProfile
+}
 
 export function getServerApiBase(): string {
   return serverBase
@@ -428,6 +434,7 @@ export function initApiRouting(): Promise<void> {
       portfolioBase = b.portfolio
       marketBase = b.market
       researchBase = b.research
+      configProfile = health?.config_profile ?? null
     })()
   }
   return initPromise

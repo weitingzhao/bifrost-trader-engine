@@ -41,6 +41,8 @@ RESTART_ALL_APIS=0
 RESTART_CATEGORY=""
 # Ops taxonomy: four HTTP groups (see ARCHITECTURE §4.0, bifrost_ssh.sh usage).
 BIFROST_CATEGORY_ARCHITECTURE=(bifrost-server bifrost-ops bifrost-docs)
+# Next.js frontend server — separate from FastAPI HTTP APIs; restarted alongside deploy and architecture.
+BIFROST_FRONTEND_UNIT=bifrost-frontend
 BIFROST_CATEGORY_ACCOUNT=(bifrost-trading bifrost-portfolio)
 BIFROST_CATEGORY_RESEARCH=(bifrost-market bifrost-research bifrost-strategy)
 BIFROST_CATEGORY_FEED=(bifrost-massive)
@@ -64,12 +66,14 @@ for _u in "${BIFROST_HTTP_UNITS[@]}"; do
   [[ "${_u}" == bifrost-server ]] && continue
   BIFROST_FULL_STACK_UNITS+=("${_u}")
 done
+BIFROST_FULL_STACK_UNITS+=(bifrost-frontend)
 BIFROST_FULL_STACK_UNITS+=(bifrost-agent)
 BIFROST_FULL_STACK_UNITS+=(bifrost-account-sync)
 BIFROST_FULL_STACK_UNITS+=("${BIFROST_CATEGORY_SOCKET_SERVICES[@]}")
 # TUI status / --status: HTTP by category order, Socket Services, then Daemon (engine+agent+account-sync; no bifrost-celery — use Ops UI).
 BIFROST_STATUS_ROWS=(
   "${BIFROST_CATEGORY_ARCHITECTURE[@]}"
+  bifrost-frontend
   "${BIFROST_CATEGORY_ACCOUNT[@]}"
   "${BIFROST_CATEGORY_RESEARCH[@]}"
   "${BIFROST_CATEGORY_FEED[@]}"
@@ -81,6 +85,7 @@ BIFROST_STATUS_ROWS=(
 # Remote --remote-services-status / menu tl5: sectioned scan (see _cli_remote_services_systemd_scan); flat list for reference only.
 BIFROST_REMOTE_SCAN_UNITS=(
   bifrost-server bifrost-engine bifrost-celery
+  bifrost-frontend
   "${BIFROST_HTTP_UNITS[@]}"
   bifrost-agent
   bifrost-account-sync
@@ -162,6 +167,7 @@ _emit_result_banner() {
 _bifrost_unit_display_label() {
   case "$1" in
     bifrost-server) printf '%s' 'Server' ;;
+    bifrost-frontend) printf '%s' 'Frontend' ;;
     bifrost-engine) printf '%s' 'Engine' ;;
     bifrost-massive) printf '%s' 'Massive' ;;
     bifrost-research) printf '%s' 'Research' ;;
@@ -335,7 +341,7 @@ _interactive_paint_remote_status_block() {
   fi
   echo "${C_BLUE}${C_BOLD}  Units on ${DEPLOY_HOST}${C_RESET} ${C_DIM}· refreshed ${BIFROST_INTERACTIVE_STATUS_AT:-?}${C_RESET}"
   # sudo may prefix stderr merged into capture (2>&1)
-  if ! echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | grep -qE 'bifrost-(server|engine|massive|docs|ops|trading|strategy|portfolio|market|research|agent|massive-ws|ib-operator|ib-ingestor|ib-account-agent):'; then
+  if ! echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | grep -qE 'bifrost-(server|frontend|engine|massive|docs|ops|trading|strategy|portfolio|market|research|agent|massive-ws|ib-operator|ib-ingestor|ib-account-agent):'; then
     echo "${C_YELLOW}  $(echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | head -n 1)${C_RESET}"
   fi
   echo "${C_MAGENTA}${C_BOLD}  Architecture${C_RESET}"
@@ -497,6 +503,9 @@ Usage (from repo root):
     --show-last-deploy            print the full output of the last deploy/pipeline run (saved to
                                   logs/.bifrost-deploy-last.log) using less -R (or cat if less is absent).
                                   Does not SSH or deploy. Use after a failed deploy to see the full log.
+
+    --cat-deploy-log              dump the last deploy log as plain text to stdout (no pager, no ANSI
+                                  colors). For piping or copy-paste: ./scripts/bifrost_ssh.sh --cat-deploy-log | pbcopy
 
     --deploy-mkdocs               Docs publish: run scripts/docs/fsm_build_docs.py (FSM diagram MD/HTML), then
                                   mkdocs build -f mkdocs.prod.yml locally, then rsync site/ to DEPLOY_PATH/site/
@@ -994,6 +1003,7 @@ _run_pipeline() {
         --exclude='.eggs/'
         --exclude='*.egg-info/'
         --exclude='frontend/node_modules/'
+        --exclude='frontend/.next/'
         --exclude='frontend/dist/'
         --exclude='.DS_Store'
         --exclude='site/'
@@ -1045,6 +1055,12 @@ python -m pip install -r requirements.txt
 cd frontend
 npm ci
 npm run build
+# standalone: copy static assets + public into the self-contained server tree
+if [[ -d .next/standalone ]]; then
+  cp -r .next/static .next/standalone/.next/static 2>/dev/null || true
+  cp -r public .next/standalone/public 2>/dev/null || true
+  echo "[OK] Next.js standalone assets prepared."
+fi
 cd ..
 if [[ "${DO_MIGRATE}" == "1" ]]; then
   echo "Running db_refresh_schema.py --prod ..."
@@ -1064,8 +1080,6 @@ REMOTE_EOF
       if [[ -n "${SUDO_PASSWORD}" ]]; then
         printf '%s\n' "${SUDO_PASSWORD}" | ssh_remote_stdin_pipe "${REMOTE}" "sudo -S -p '' systemctl ${ACTION} ${_units_str}"
       else
-        # Interactive sudo: must read from the real terminal. A plain `cmd | tee` runs cmd in a subshell
-        # where `ssh -tt` + sudo may not get a usable TTY — use /dev/tty when available.
         if [[ -r /dev/tty ]]; then
           ssh_remote -tt "${REMOTE}" "sudo systemctl ${ACTION} ${_units_str}" </dev/tty
         elif [[ -t 0 ]]; then
@@ -1073,6 +1087,25 @@ REMOTE_EOF
         else
           ssh_remote "${REMOTE}" "sudo -n systemctl ${ACTION} ${_units_str}" 2>/dev/null || \
             echo "WARN: sudo -n failed; use interactive TTY or set NOPASSWD, or enter sudo password when prompted in interactive mode."
+        fi
+      fi
+      # Always restart the Next.js frontend when deploying HTTP APIs (not a FastAPI unit; runs separately).
+      if [[ "${DO_SYNC}" == "1" ]]; then
+        _msg_info "Restarting ${BIFROST_FRONTEND_UNIT} (Next.js frontend)…"
+        if [[ -n "${SUDO_PASSWORD}" ]]; then
+          printf '%s\n' "${SUDO_PASSWORD}" | ssh_remote_stdin_pipe "${REMOTE}" "sudo -S -p '' systemctl restart ${BIFROST_FRONTEND_UNIT}" || \
+            echo "WARN: ${BIFROST_FRONTEND_UNIT} restart failed (service may not be registered yet; run tl1 / --install-systemd-units)."
+        else
+          if [[ -r /dev/tty ]]; then
+            ssh_remote -tt "${REMOTE}" "sudo systemctl restart ${BIFROST_FRONTEND_UNIT}" </dev/tty || \
+              echo "WARN: ${BIFROST_FRONTEND_UNIT} restart failed."
+          elif [[ -t 0 ]]; then
+            ssh_remote -tt "${REMOTE}" "sudo systemctl restart ${BIFROST_FRONTEND_UNIT}" || \
+              echo "WARN: ${BIFROST_FRONTEND_UNIT} restart failed."
+          else
+            ssh_remote "${REMOTE}" "sudo -n systemctl restart ${BIFROST_FRONTEND_UNIT}" 2>/dev/null || \
+              echo "WARN: ${BIFROST_FRONTEND_UNIT} restart failed (sudo -n)."
+          fi
         fi
       fi
     elif [[ "${DO_DEPLOY_ONLY}" == "1" ]]; then
@@ -1117,7 +1150,7 @@ REMOTE_EOF
     _emit_result_banner "${_ec}" "${_pipeline_label}"
     if [[ "${_ec}" -ne 0 ]]; then
       _msg_info "Full log saved to: ${BIFROST_PERSIST_DEPLOY_LOG}"
-      _msg_info "View with: ./scripts/bifrost_ssh.sh --show-last-deploy"
+      _msg_info "View: ./scripts/bifrost_ssh.sh --show-last-deploy  |  Dump: ./scripts/bifrost_ssh.sh --cat-deploy-log"
     fi
   fi
   set -e
@@ -1136,7 +1169,7 @@ _interactive_quick_deploy() {
   echo "  ${C_GREEN}1${C_RESET} agent  ${C_GREEN}2${C_RESET} monitor  ${C_GREEN}3${C_RESET} ops"
   echo "  ${C_GREEN}a${C_RESET} architecture  ${C_GREEN}b${C_RESET} account  ${C_GREEN}c${C_RESET} research  ${C_GREEN}d${C_RESET} feed ${C_DIM}(massive)${C_RESET}"
   echo "  Examples: ${C_DIM}0${C_RESET} = sync+build+restart all HTTP · ${C_DIM}2R${C_RESET} = +restart bifrost-server · ${C_DIM}cR${C_RESET} = +restart research category · ${C_DIM}2${C_RESET} = deploy only (no systemctl)"
-  echo "  ${C_DIM}Tip: use ${C_BOLD}2R${C_RESET} after UI changes so bifrost-server remounts frontend/dist. ${C_BOLD}q${C_RESET} or empty = cancel.${C_RESET}"
+  echo "  ${C_DIM}Tip: use ${C_BOLD}aR${C_RESET} after UI changes (deploy + restart architecture incl. frontend). ${C_BOLD}q${C_RESET} or empty = cancel.${C_RESET}"
   while true; do
     echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[0, 1-3, a-d, optional R, q to cancel]${C_RESET} "
     read -r _raw
@@ -1373,7 +1406,7 @@ _block() {
 echo "=== Bifrost systemd scan (${DEPLOY_USER}@${DEPLOY_HOST}) ==="
 echo "Repo on server (expected): ${DEPLOY_PATH}"
 echo "Time: \$(date '+%Y-%m-%d %H:%M:%S %z')"
-_block "Core (server+celery)" bifrost-server bifrost-celery
+_block "Core (server+frontend+celery)" bifrost-server bifrost-frontend bifrost-celery
 _block "HTTP · Architecture" ${_arch}
 _block "HTTP · Account (trading+portfolio)" ${_acct}
 _block "HTTP · Research (market+research+strategy)" ${_res}
@@ -2450,11 +2483,13 @@ CLI_LOCAL_MAC_SERVICES=0
 CLI_REMOTE_SERVICES_STATUS=0
 CLI_INSTALL_SYSTEMD=0
 CLI_SHOW_LAST_DEPLOY=0
+CLI_CAT_DEPLOY_LOG=0
 CLI_DEPLOY_MKDOCS=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --show-last-deploy) CLI_SHOW_LAST_DEPLOY=1 ;;
+    --cat-deploy-log) CLI_CAT_DEPLOY_LOG=1 ;;
     --deploy-mkdocs) CLI_DEPLOY_MKDOCS=1 ;;
     --db-refresh) CLI_DB_REFRESH=1 ;;
     --db-refresh-dev) CLI_DB_REFRESH_DEV=1 ;;
@@ -2548,6 +2583,17 @@ if [[ "${CLI_SHOW_LAST_DEPLOY}" == "1" ]]; then
     fi
   else
     _msg_warn "No deploy log found at ${BIFROST_PERSIST_DEPLOY_LOG}. Run a deploy first."
+    exit 1
+  fi
+  exit 0
+fi
+
+# Dump last deploy log as plain text to stdout (no pager, no colors — for copy-paste / piping).
+if [[ "${CLI_CAT_DEPLOY_LOG}" == "1" ]]; then
+  if [[ -f "${BIFROST_PERSIST_DEPLOY_LOG}" ]] && [[ -s "${BIFROST_PERSIST_DEPLOY_LOG}" ]]; then
+    cat "${BIFROST_PERSIST_DEPLOY_LOG}"
+  else
+    echo "No deploy log found at ${BIFROST_PERSIST_DEPLOY_LOG}. Run a deploy first." >&2
     exit 1
   fi
   exit 0

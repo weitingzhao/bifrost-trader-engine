@@ -68,6 +68,7 @@ function devRewrites() {
     { source: '/research/iv-term-structure/:path*', destination: `${RESEARCH}/research/iv-term-structure/:path*` },
     { source: '/research/iv-volatility-cone/:path*', destination: `${RESEARCH}/research/iv-volatility-cone/:path*` },
     { source: '/research/max-pain/:path*', destination: `${RESEARCH}/research/max-pain/:path*` },
+    { source: '/research/put-call-ratio/:path*', destination: `${RESEARCH}/research/put-call-ratio/:path*` },
     { source: '/risk_summary/:path*', destination: `${MONITOR}/risk_summary/:path*` },
     { source: '/executions/:path*', destination: `${TRADING}/executions/:path*` },
     { source: '/performance/:path*', destination: `${TRADING}/performance/:path*` },
@@ -91,6 +92,7 @@ function devRewrites() {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'standalone',
   reactStrictMode: true,
   env: {
     NEXT_PUBLIC_UI_BUILD_LABEL: loadUiBuildLabelSync(),

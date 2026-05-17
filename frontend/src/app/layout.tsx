@@ -19,6 +19,7 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: 'Bifrost Trader',
   description: 'Bifrost Trader Engine monitoring UI',
+  icons: { icon: '/favicon.svg' },
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

@@ -5,10 +5,10 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import APIRouter, Request
+from fastapi.responses import HTMLResponse
 
 logger = logging.getLogger(__name__)
 
@@ -22,47 +22,18 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent.parent
 
 
-def _frontend_dist() -> Path:
-    return _project_root() / "frontend" / "dist"
-
-
-_FALLBACK_INDEX_HTML = """<!DOCTYPE html>
+_API_STUB_HTML = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><title>Bifrost Trader API</title></head>
 <body style="font-family:system-ui;padding:1rem;">
-  <p><strong>Bifrost Trader API</strong> — No production build found. Run <code>cd frontend && npm run build</code>, or use dev UI: <code>./scripts/run_frontend.sh dev</code>.</p>
-  <p><a href="/docs">/docs</a> · <a href="/status">/status</a> (JSON schema v8, nested) · <a href="/operations">/operations</a></p>
+  <p><strong>Bifrost Trader API</strong> — Monitor API is running. Frontend is served by the Next.js server (bifrost-frontend.service).</p>
+  <p><a href="/docs">/docs</a> · <a href="/status">/status</a> (JSON) · <a href="/operations">/operations</a></p>
 </body></html>"""
 
 
 @router.get("/", response_model=None)
-def get_root() -> Union[FileResponse, HTMLResponse]:
-    """Serve SPA from ``frontend/dist`` when present (same port as API after ``npm run build``); else stub."""
-    index = _frontend_dist() / "index.html"
-    if index.is_file():
-        return FileResponse(index, media_type="text/html")
-    return HTMLResponse(_FALLBACK_INDEX_HTML)
-
-
-def _favicon_file_for_profile(profile: Optional[str]) -> str:
-    if profile == "dev":
-        return "favicon-dev.svg"
-    if profile == "prod":
-        return "favicon-prod.svg"
-    return "favicon.svg"
-
-
-@router.get("/favicon.svg", response_model=None)
-def get_favicon(request: Request) -> FileResponse:
-    """Same path as SPA; file picked from env profile (config.dev.yaml / config.prod.yaml) when known."""
-    dist = _frontend_dist()
-    profile = getattr(request.app.state, "bifrost_config_profile", None)
-    name = _favicon_file_for_profile(profile)
-    p = dist / name
-    if not p.is_file():
-        p = dist / "favicon.svg"
-    if not p.is_file():
-        raise HTTPException(status_code=404, detail="favicon not found (run npm run build)")
-    return FileResponse(p, media_type="image/svg+xml")
+def get_root() -> HTMLResponse:
+    """API stub — production frontend is served by Next.js (bifrost-frontend.service via nginx)."""
+    return HTMLResponse(_API_STUB_HTML)
 
 
 @router.get("/health")

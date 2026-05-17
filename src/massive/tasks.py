@@ -163,6 +163,15 @@ def _eod_trade_date_str_et(payload: Dict[str, Any]) -> str:
     return datetime.now(et).date().isoformat()
 
 
+def _snapshot_day_float(x: Any) -> Optional[float]:
+    if x is None:
+        return None
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
 def _apply_oi_daily_from_chain(
     conn: Any,
     underlying: str,
@@ -221,6 +230,399 @@ def _apply_oi_daily_from_chain(
             )
             n += 1
     return n
+
+
+def _apply_option_day_from_chain(
+    conn: Any,
+    underlying: str,
+    trade_date: date,
+    snap_results: List[Dict[str, Any]],
+) -> int:
+    """Upsert option_day daily bars from chain snapshot ``day`` OHLCV (Massive snapshot API)."""
+    underlying = (underlying or "").strip().upper()
+    z = ZoneInfo("America/New_York")
+    bar_time = datetime.combine(trade_date, time.min, tzinfo=z)
+    n = 0
+    with conn.cursor() as cur:
+        for item in snap_results:
+            if not isinstance(item, dict):
+                continue
+            det = item.get("details") or {}
+            exp_raw = det.get("expiration_date") or det.get("expiration")
+            if not exp_raw:
+                continue
+            exp = _norm_expiry(str(exp_raw)[:10])
+            try:
+                strike = float(det.get("strike_price"))
+            except (TypeError, ValueError):
+                continue
+            ort = _right_from_contract_type(det.get("contract_type", "call"))
+            day = item.get("day") if isinstance(item.get("day"), dict) else {}
+            o = day.get("open")
+            h = day.get("high")
+            l = day.get("low")
+            c = day.get("close")
+            v = day.get("volume")
+            vw = day.get("vwap")
+            if o is None and h is None and l is None and c is None and v is None:
+                continue
+            cur.execute(
+                """
+                INSERT INTO option_day (
+                  symbol, expiry, strike, option_right, bar_time,
+                  open, high, low, close, volume, vwap, source, created_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'massive', now())
+                ON CONFLICT (symbol, expiry, strike, option_right, bar_time, source)
+                DO UPDATE SET
+                  open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
+                  close = EXCLUDED.close, volume = EXCLUDED.volume,
+                  vwap = EXCLUDED.vwap
+                """,
+                (
+                    underlying,
+                    exp,
+                    strike,
+                    ort,
+                    bar_time,
+                    _snapshot_day_float(o),
+                    _snapshot_day_float(h),
+                    _snapshot_day_float(l),
+                    _snapshot_day_float(c),
+                    _snapshot_day_float(v),
+                    _snapshot_day_float(vw),
+                ),
+            )
+            n += 1
+    return n
+
+
+def _resolve_pcr_trade_date(status_cfg: dict, payload: Dict[str, Any]) -> date:
+    """Trade date for on-demand PCR: explicit payload or latest US session day (ET)."""
+    raw = (payload.get("trade_date") or "").strip()
+    if raw:
+        return date.fromisoformat(raw[:10])
+    from src.massive.stock_ohlc_daily_smart import latest_trading_day_on_or_before
+
+    et = ZoneInfo("America/New_York")
+    anchor = datetime.now(et).date()
+    return latest_trading_day_on_or_before(status_cfg, anchor)
+
+
+def _pcr_lookback_days(payload: Dict[str, Any]) -> int:
+    """Calendar trading days of option history to backfill before PCR recompute."""
+    try:
+        n = int(payload.get("lookback_days") or 252)
+    except (TypeError, ValueError):
+        n = 252
+    return max(1, min(n, 504))
+
+
+def _list_symbol_contracts_for_history(
+    conn: Any,
+    symbol: str,
+    *,
+    max_expiries: int,
+    max_contracts: int,
+) -> List[Tuple[str, str, str, float, str]]:
+    """Contracts with Massive tickers for per-contract daily aggs backfill."""
+    sym = (symbol or "").strip().upper()
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH expiries AS (
+                SELECT DISTINCT expiry
+                FROM option_contracts
+                WHERE UPPER(TRIM(symbol)) = %s
+                ORDER BY expiry DESC
+                LIMIT %s
+            )
+            SELECT oc.massive_option_ticker, oc.symbol, oc.expiry, oc.strike, oc.option_right
+            FROM option_contracts oc
+            INNER JOIN expiries e ON oc.expiry = e.expiry
+            WHERE UPPER(TRIM(oc.symbol)) = %s
+              AND oc.massive_option_ticker IS NOT NULL
+              AND TRIM(oc.massive_option_ticker) <> ''
+            ORDER BY oc.expiry DESC, oc.strike, oc.option_right
+            LIMIT %s
+            """,
+            (sym, max(1, int(max_expiries)), sym, max(1, int(max_contracts))),
+        )
+        rows = cur.fetchall() or []
+    out: List[Tuple[str, str, str, float, str]] = []
+    for r in rows:
+        if not r or len(r) < 5:
+            continue
+        out.append(
+            (
+                str(r[0]).strip(),
+                str(r[1]).strip().upper(),
+                str(r[2]).strip(),
+                float(r[3]),
+                str(r[4]).strip(),
+            )
+        )
+    return out
+
+
+def _existing_option_day_coverage(
+    conn: Any,
+    symbol: str,
+    start_date: date,
+    end_date: date,
+) -> Dict[Tuple[str, float, str], Tuple[date, date]]:
+    """Return {(expiry, strike, right): (min_date, max_date)} for rows already in option_day.
+
+    Used to decide whether a contract needs a Massive API call or can be skipped / trimmed.
+    """
+    sym = (symbol or "").strip().upper()
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT expiry, strike, option_right,
+                   MIN((bar_time AT TIME ZONE 'America/New_York')::date) AS dmin,
+                   MAX((bar_time AT TIME ZONE 'America/New_York')::date) AS dmax
+            FROM option_day
+            WHERE UPPER(TRIM(symbol)) = %s
+              AND source = 'massive'
+              AND (bar_time AT TIME ZONE 'America/New_York')::date >= %s
+              AND (bar_time AT TIME ZONE 'America/New_York')::date <= %s
+            GROUP BY expiry, strike, option_right
+            """,
+            (sym, start_date, end_date),
+        )
+        out: Dict[Tuple[str, float, str], Tuple[date, date]] = {}
+        for row in cur.fetchall() or []:
+            if not row or len(row) < 5:
+                continue
+            exp = str(row[0]).strip()
+            strike = float(row[1])
+            right = str(row[2]).strip().upper()
+            dmin = row[3] if isinstance(row[3], date) else date.fromisoformat(str(row[3])[:10])
+            dmax = row[4] if isinstance(row[4], date) else date.fromisoformat(str(row[4])[:10])
+            out[(exp, strike, right)] = (dmin, dmax)
+    return out
+
+
+def _backfill_symbol_option_day_history(
+    conn: Any,
+    client: Any,
+    symbol: str,
+    *,
+    start_date: date,
+    end_date: date,
+    max_expiries: int,
+    max_contracts: int,
+) -> Dict[str, Any]:
+    """Fetch Massive v2 daily aggs per contract; upsert option_day for PCR volume history.
+
+    Incremental: checks existing coverage in option_day and only fetches missing date ranges.
+    A contract is skipped entirely when its stored data already spans [start_date, end_date].
+    """
+    from src.massive.option_day_pool_fill import fetch_option_aggs_with_retry
+
+    sym = (symbol or "").strip().upper()
+    z = ZoneInfo("America/New_York")
+
+    targets = _list_symbol_contracts_for_history(
+        conn, sym, max_expiries=max_expiries, max_contracts=max_contracts
+    )
+
+    # One batch query for existing coverage — avoids N per-contract DB round-trips
+    existing = _existing_option_day_coverage(conn, sym, start_date, end_date)
+
+    errors: List[str] = []
+    contracts_processed = 0
+    contracts_skipped = 0
+    bars_upserted = 0
+
+    for ot, u_sym, exp, strike, opt_right in targets:
+        # Determine the fetch window: skip or trim based on what's already in DB
+        cov = existing.get((exp, strike, opt_right.strip().upper()))
+        if cov is not None:
+            db_min, db_max = cov
+            if db_min <= start_date and db_max >= end_date:
+                # Full coverage already exists — skip the API call entirely
+                contracts_skipped += 1
+                continue
+            # Partial: determine what's still missing
+            # Fetch only the gap(s). Simplest safe heuristic: fetch from start_date up to
+            # one day before db_min (left gap) plus from db_max+1 day to end_date (right gap).
+            # We issue at most two API calls per contract when there's a gap on both sides.
+            # In practice the right-side gap (recent missing days) is the common case.
+            fetch_ranges: List[Tuple[date, date]] = []
+            if db_min > start_date:
+                fetch_ranges.append((start_date, db_min - timedelta(days=1)))
+            if db_max < end_date:
+                fetch_ranges.append((db_max + timedelta(days=1), end_date))
+        else:
+            fetch_ranges = [(start_date, end_date)]
+
+        contract_ok = True
+        for fetch_start, fetch_end in fetch_ranges:
+            s_ms = int(datetime.combine(fetch_start, time.min, tzinfo=z).timestamp() * 1000)
+            e_ms = int(datetime.combine(fetch_end + timedelta(days=1), time.min, tzinfo=z).timestamp() * 1000) - 1
+            try:
+                aggs = fetch_option_aggs_with_retry(
+                    client, ot, 1, "day", s_ms, e_ms, _rest_throttle, max_attempts=3
+                )
+                if aggs.get("error"):
+                    errors.append(f"{ot}: {aggs.get('error')}")
+                    _rest_throttle()
+                    contract_ok = False
+                    continue
+                n = _apply_option_day_aggs(conn, u_sym, exp, strike, opt_right, aggs)
+                conn.commit()
+                bars_upserted += n
+            except Exception as ex:  # noqa: BLE001
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                errors.append(f"{ot}: {ex}")
+                logger.warning("symbol_pcr_history option_day: %s failed: %s", ot, ex)
+                contract_ok = False
+            _rest_throttle()
+
+        if contract_ok:
+            contracts_processed += 1
+
+    logger.info(
+        "symbol_pcr_history backfill: %s processed=%s skipped=%s upserted=%s errors=%s",
+        sym, contracts_processed, contracts_skipped, bars_upserted, len(errors),
+    )
+    return {
+        "contracts_found": len(targets),
+        "contracts_processed": contracts_processed,
+        "contracts_skipped": contracts_skipped,
+        "bars_upserted": bars_upserted,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "errors": errors[:15],
+        "errors_truncated": len(errors) > 15,
+    }
+
+
+def _pcr_trade_dates_with_option_day(
+    conn: Any,
+    symbol: str,
+    *,
+    start_date: date,
+    end_date: date,
+) -> List[date]:
+    """Distinct NY session dates with option_day rows for symbol (volume source for PCR)."""
+    sym = (symbol or "").strip().upper()
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT (bar_time AT TIME ZONE 'America/New_York')::date AS td
+            FROM option_day
+            WHERE UPPER(TRIM(symbol)) = %s
+              AND source = 'massive'
+              AND (bar_time AT TIME ZONE 'America/New_York')::date >= %s
+              AND (bar_time AT TIME ZONE 'America/New_York')::date <= %s
+            ORDER BY td
+            """,
+            (sym, start_date, end_date),
+        )
+        out: List[date] = []
+        for row in cur.fetchall() or []:
+            if not row or row[0] is None:
+                continue
+            td = row[0]
+            if not isinstance(td, date):
+                td = date.fromisoformat(str(td)[:10])
+            out.append(td)
+    return out
+
+
+def _run_symbol_pcr_snapshot(
+    conn: Any,
+    client: Any,
+    status_cfg: dict,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Fetch chain snapshot + optional historical option_day backfill; compute PCR series."""
+    symbol = (payload.get("symbol") or "").strip().upper()
+    if not symbol:
+        raise ValueError("payload.symbol is required")
+
+    lookback_days = _pcr_lookback_days(payload)
+    max_contracts = max(1, min(int(payload.get("max_contracts") or 400), 800))
+    max_expiries = max(1, min(int(payload.get("max_expiries") or 48), 120))
+
+    trade_date = _resolve_pcr_trade_date(status_cfg, payload)
+    td_s = trade_date.isoformat()
+
+    from src.massive.stock_ohlc_daily_smart import subtract_n_trading_days_before_calendar_day
+
+    start_date = subtract_n_trading_days_before_calendar_day(status_cfg, trade_date, lookback_days)
+
+    _rest_throttle()
+    data = client.fetch_options_snapshot_all_pages(symbol, limit=250)
+    if data.get("error"):
+        raise RuntimeError(str(data.get("error")))
+    results = data.get("results") or []
+    if not isinstance(results, list):
+        results = []
+
+    oi_rows = _apply_oi_daily_from_chain(conn, symbol, trade_date, results)
+    day_rows_snapshot = _apply_option_day_from_chain(conn, symbol, trade_date, results)
+    conn.commit()
+
+    history = _backfill_symbol_option_day_history(
+        conn,
+        client,
+        symbol,
+        start_date=start_date,
+        end_date=trade_date,
+        max_expiries=max_expiries,
+        max_contracts=max_contracts,
+    )
+
+    trade_dates = _pcr_trade_dates_with_option_day(
+        conn, symbol, start_date=start_date, end_date=trade_date
+    )
+    if trade_date not in trade_dates:
+        trade_dates.append(trade_date)
+        trade_dates.sort()
+
+    total_pcr_rows = 0
+    pcr_detail_last: List[Dict[str, Any]] = []
+    for td in trade_dates:
+        n, detail = _pcr_for_single_date(conn, [symbol], td)
+        total_pcr_rows += n
+        if td == trade_date:
+            pcr_detail_last = detail
+
+    logger.info(
+        "symbol_pcr_snapshot: %s trade_date=%s lookback=%s oi=%s snapshot_day=%s "
+        "history_contracts=%s pcr_dates=%s pcr_rows=%s",
+        symbol,
+        td_s,
+        lookback_days,
+        oi_rows,
+        day_rows_snapshot,
+        history.get("contracts_processed"),
+        len(trade_dates),
+        total_pcr_rows,
+    )
+    return {
+        "ok": True,
+        "kind": "symbol_pcr_snapshot",
+        "symbol": symbol,
+        "trade_date": td_s,
+        "lookback_days": lookback_days,
+        "start_date": start_date.isoformat(),
+        "oi_rows_upserted": oi_rows,
+        "option_day_rows_snapshot": day_rows_snapshot,
+        "option_day_history": history,
+        "pcr_dates_computed": len(trade_dates),
+        "pcr_rows_upserted": total_pcr_rows,
+        "snapshot_pages": data.get("pages", 0),
+        "truncated": bool(data.get("truncated")),
+        "per_symbol": pcr_detail_last,
+    }
 
 
 def _run_oi_watchlist_eod(
@@ -416,40 +818,19 @@ def _run_max_pain(
     }
 
 
-def _run_putcall_ratio(
+def _pcr_for_single_date(
     conn: Any,
-    status_cfg: dict,
-    payload: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Compute Put/Call Ratio from option_open_interest_daily (OI) and option_day (Volume).
-
-    Aggregates per symbol × trade_date across all expirations/strikes.
-    UPSERTs into report_option_put_call_ratio_daily.
-    """
+    sym_list: List[str],
+    trade_date: "date",
+) -> Tuple[int, List[Dict[str, Any]]]:
+    """Compute and upsert PCR for *sym_list* on a single *trade_date*. Returns (rows_written, detail)."""
     import json as _json
-
-    from src.vendor.massive.reader import get_watchlist_optionable_stk_symbols
-
-    td_s = _eod_trade_date_str_et(payload)
-    try:
-        trade_date = date.fromisoformat(td_s)
-    except ValueError as e:
-        raise ValueError(f"invalid trade_date: {td_s}") from e
-
-    symbols = payload.get("symbols")
-    if isinstance(symbols, list) and symbols:
-        sym_list = [str(s).strip().upper() for s in symbols if s]
-    else:
-        sym_list = get_watchlist_optionable_stk_symbols(status_cfg)
-
-    if not sym_list:
-        return {"ok": True, "kind": "report_option_put_call_ratio", "rows_upserted": 0, "trade_date": td_s, "message": "no symbols"}
 
     rows_written = 0
     detail_out: List[Dict[str, Any]] = []
+    td_s = trade_date.isoformat()
     with conn.cursor() as cur:
         for sym in sym_list:
-            # OI 聚合：按 option_right 分组求和
             cur.execute(
                 """
                 SELECT option_right, SUM(open_interest) AS oi_sum, COUNT(*) AS contracts
@@ -467,7 +848,6 @@ def _run_putcall_ratio(
             call_oi = oi_by_right.get("C", 0)
             ratio_oi: Optional[float] = (put_oi / call_oi) if call_oi > 0 else None
 
-            # Volume 聚合：从 option_day 按 bar_time 日期匹配
             cur.execute(
                 """
                 SELECT option_right, SUM(volume) AS vol_sum
@@ -486,7 +866,6 @@ def _run_putcall_ratio(
             call_vol = vol_by_right.get("C", 0.0)
             ratio_vol: Optional[float] = (put_vol / call_vol) if call_vol > 0 else None
 
-            # by-expiry 明细（仅 OI）
             cur.execute(
                 """
                 SELECT expiry, option_right, SUM(open_interest)
@@ -510,7 +889,6 @@ def _run_putcall_ratio(
                 for exp, d in by_expiry.items()
             ]
 
-            # 标的收盘价（来自 stock_day）
             cur.execute(
                 "SELECT close FROM stock_day WHERE symbol = %s AND bar_time = %s AND source = 'massive' LIMIT 1",
                 (sym, trade_date),
@@ -546,11 +924,11 @@ def _run_putcall_ratio(
                 (
                     sym,
                     trade_date,
-                    int(put_oi) if put_oi else None,
-                    int(call_oi) if call_oi else None,
+                    int(put_oi),
+                    int(call_oi),
                     round(ratio_oi, 6) if ratio_oi is not None else None,
-                    put_vol if put_vol else None,
-                    call_vol if call_vol else None,
+                    put_vol,
+                    call_vol,
                     round(ratio_vol, 6) if ratio_vol is not None else None,
                     underlying_close,
                     _json.dumps({"by_expiry": expiry_detail}),
@@ -559,6 +937,7 @@ def _run_putcall_ratio(
             rows_written += 1
             detail_out.append({
                 "symbol": sym,
+                "trade_date": td_s,
                 "put_oi": put_oi,
                 "call_oi": call_oi,
                 "ratio_oi": ratio_oi,
@@ -574,13 +953,101 @@ def _run_putcall_ratio(
             )
 
     conn.commit()
-    logger.info("report_option_put_call_ratio: trade_date=%s rows=%s", td_s, rows_written)
+    return rows_written, detail_out
+
+
+def _run_putcall_ratio(
+    conn: Any,
+    status_cfg: dict,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Compute Put/Call Ratio from option_open_interest_daily (OI) and option_day (Volume).
+
+    Aggregates per symbol × trade_date across all expirations/strikes.
+    UPSERTs into report_option_put_call_ratio_daily.
+
+    When invoked standalone (not as part of eod_pipeline) without an explicit
+    trade_date, backfills all OI dates that are missing from the PCR report table.
+    """
+    from src.vendor.massive.reader import get_watchlist_optionable_stk_symbols
+
+    symbols = payload.get("symbols")
+    if isinstance(symbols, list) and symbols:
+        sym_list = [str(s).strip().upper() for s in symbols if s]
+    else:
+        sym_list = get_watchlist_optionable_stk_symbols(status_cfg)
+
+    if not sym_list:
+        return {"ok": True, "kind": "report_option_put_call_ratio", "rows_upserted": 0, "message": "no symbols"}
+
+    explicit_td = (payload.get("trade_date") or "").strip()
+    called_from_eod = payload.get("_from_eod_pipeline", False)
+
+    if explicit_td or called_from_eod:
+        td_s = explicit_td if explicit_td else _eod_trade_date_str_et(payload)
+        try:
+            trade_date = date.fromisoformat(td_s[:10])
+        except ValueError as e:
+            raise ValueError(f"invalid trade_date: {td_s}") from e
+        rows_written, detail_out = _pcr_for_single_date(conn, sym_list, trade_date)
+        logger.info("report_option_put_call_ratio: trade_date=%s rows=%s", td_s, rows_written)
+        return {
+            "ok": True,
+            "kind": "report_option_put_call_ratio",
+            "trade_date": td_s,
+            "rows_upserted": rows_written,
+            "per_symbol": detail_out,
+        }
+
+    # Standalone manual trigger: backfill all OI dates missing from PCR report
+    placeholders = ",".join(["%s"] * len(sym_list))
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT DISTINCT oi.trade_date
+            FROM option_open_interest_daily oi
+            WHERE oi.source = 'massive'
+              AND oi.symbol IN ({placeholders})
+              AND NOT EXISTS (
+                  SELECT 1 FROM report_option_put_call_ratio_daily pcr
+                  WHERE pcr.symbol = oi.symbol
+                    AND pcr.trade_date = oi.trade_date
+                    AND pcr.source = 'massive'
+              )
+            ORDER BY oi.trade_date
+            """,
+            tuple(sym_list),
+        )
+        missing_dates = [r[0] for r in cur.fetchall()]
+
+    if not missing_dates:
+        td_fallback = _eod_trade_date_str_et(payload)
+        logger.info("report_option_put_call_ratio: no missing dates to backfill (checked %s symbols)", len(sym_list))
+        return {
+            "ok": True,
+            "kind": "report_option_put_call_ratio",
+            "trade_date": td_fallback,
+            "rows_upserted": 0,
+            "message": "all OI dates already have PCR data",
+            "dates_checked": len(sym_list),
+        }
+
+    total_rows = 0
+    all_detail: List[Dict[str, Any]] = []
+    for td in missing_dates:
+        if not isinstance(td, date):
+            td = date.fromisoformat(str(td)[:10])
+        n, detail = _pcr_for_single_date(conn, sym_list, td)
+        total_rows += n
+        all_detail.extend(detail)
+        logger.info("report_option_put_call_ratio: backfill trade_date=%s rows=%s", td.isoformat(), n)
+
     return {
         "ok": True,
         "kind": "report_option_put_call_ratio",
-        "trade_date": td_s,
-        "rows_upserted": rows_written,
-        "per_symbol": detail_out,
+        "trade_dates_backfilled": [d.isoformat() if isinstance(d, date) else str(d) for d in missing_dates],
+        "rows_upserted": total_rows,
+        "per_symbol": all_detail,
     }
 
 
@@ -2058,6 +2525,11 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 
+            if kind == "symbol_pcr_snapshot":
+                result = _run_symbol_pcr_snapshot(conn, client, status_cfg, payload)
+                update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                return result
+
             if kind == "eod_pipeline":
                 from src.monitor.reader.market import get_is_us_trading_day
 
@@ -2073,7 +2545,8 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     return result
                 oi_res = _run_oi_watchlist_eod(conn, client, status_cfg, payload)
                 mp_res = _run_max_pain(conn, status_cfg, payload)
-                pcr_res = _run_putcall_ratio(conn, status_cfg, payload)
+                pcr_payload = {**payload, "_from_eod_pipeline": True}
+                pcr_res = _run_putcall_ratio(conn, status_cfg, pcr_payload)
                 result = {
                     "ok": True,
                     "kind": kind,

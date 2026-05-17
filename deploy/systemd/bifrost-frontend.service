@@ -1,0 +1,19 @@
+[Unit]
+Description=Bifrost Frontend (Next.js production server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vision
+Group=vision
+WorkingDirectory=/home/vision/bifrost-trader-engine/frontend/.next/standalone
+Environment=NODE_ENV=production
+Environment=PORT=5173
+Environment=HOSTNAME=0.0.0.0
+ExecStart=/bin/bash -lc 'exec node server.js'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

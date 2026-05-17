@@ -1,6 +1,7 @@
 """Phase 2: FastAPI app for GET /status, GET /operations, POST /control/*.
 
-When ``frontend/dist`` exists (``npm run build``), GET ``/`` serves the SPA and ``/assets`` is mounted; otherwise GET ``/`` returns a small API stub. Dev hot-reload: ``./scripts/run_frontend.sh dev``.
+Production frontend is served by the Next.js server (bifrost-frontend.service); nginx routes page
+requests to it while API paths hit this Monitor process directly. Dev hot-reload: ``./scripts/run_frontend.sh dev``.
 
 Monitoring runs on a separate host from the Strategy Trading Daemon (RE-5). Start of the daemon is only on the trading machine (run_engine.py); no subprocess/start on this server.
 """
@@ -17,7 +18,6 @@ import asyncio
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
 
 from src.app.config import (
     config_profile_from_resolved_path,
@@ -112,9 +112,9 @@ def create_app(
     """
     app = FastAPI(
         title="Bifrost Trader API",
-        description="Phase 2: status and control API; monitoring UI when frontend/dist is built.",
+        description="Phase 2: status and control API. Frontend served by Next.js (bifrost-frontend).",
     )
-    # Browser fetch from Vite / another host to this API (e.g. Settings → API Health split probes).
+    # Browser fetch from Next.js / another host to this API (e.g. Settings → API Health split probes).
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -285,16 +285,9 @@ def create_app(
     app.include_router(status_router)
     app.include_router(daemon_router)
     app.include_router(config_router)
-    # Same StatusReader + DB as Portfolio API: dev often runs Monitor only (run_server.py); Vite proxies here.
+    # Same StatusReader + DB as Portfolio API: dev often runs Monitor only (run_server.py); Next.js proxies here.
     app.include_router(portfolio_position_categories_router)
 
-    # backend/monitor/app.py -> repo root (not backend/)
-    _root = Path(__file__).resolve().parent.parent.parent
-    _dist_assets = _root / "frontend" / "dist" / "assets"
-    if _dist_assets.is_dir():
-        app.mount(
-            "/assets", StaticFiles(directory=str(_dist_assets)), name="dist_assets"
-        )
 
     @app.on_event("startup")
     async def startup_event() -> None:

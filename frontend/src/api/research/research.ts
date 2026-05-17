@@ -1274,6 +1274,62 @@ export async function fetchMaxPainComputeHistory(params: {
   return { ok: true, expiry: typeof j.expiry === 'string' ? j.expiry : undefined, series }
 }
 
+// ── Option Chain Expiry Summary ───────────────────────────────────────────────
+
+export interface OptionChainExpiryRow {
+  expiry: string
+  expiry_label: string
+  dte: number | null
+  put_vol: number
+  call_vol: number
+  total_vol: number
+  pc_vol_ratio: number | null
+  put_oi: number
+  call_oi: number
+  total_oi: number
+  pc_oi_ratio: number | null
+}
+
+export interface OptionChainExpirySummaryResponse {
+  ok: boolean
+  error?: string
+  symbol?: string
+  trade_date?: string | null
+  count?: number
+  rows: OptionChainExpiryRow[]
+}
+
+export async function fetchOptionChainExpirySummary(
+  symbol: string,
+): Promise<OptionChainExpirySummaryResponse> {
+  const sym = (symbol || '').trim().toUpperCase()
+  if (!sym) return { ok: false, error: 'symbol is required', rows: [] }
+  try {
+    const r = await fetch(
+      `${researchApiUrl('/research/put-call-ratio/chain-summary')}?symbol=${encodeURIComponent(sym)}`,
+    )
+    const j = await r.json().catch(() => ({}))
+    if (!j.ok) return { ok: false, error: j.error ?? 'Request failed', rows: [] }
+    const raw = Array.isArray(j.rows) ? j.rows : []
+    const rows: OptionChainExpiryRow[] = raw.map((row: Record<string, unknown>) => ({
+      expiry: String(row.expiry ?? ''),
+      expiry_label: String(row.expiry_label ?? ''),
+      dte: row.dte != null ? Number(row.dte) : null,
+      put_vol: Number(row.put_vol ?? 0),
+      call_vol: Number(row.call_vol ?? 0),
+      total_vol: Number(row.total_vol ?? 0),
+      pc_vol_ratio: row.pc_vol_ratio != null ? Number(row.pc_vol_ratio) : null,
+      put_oi: Number(row.put_oi ?? 0),
+      call_oi: Number(row.call_oi ?? 0),
+      total_oi: Number(row.total_oi ?? 0),
+      pc_oi_ratio: row.pc_oi_ratio != null ? Number(row.pc_oi_ratio) : null,
+    }))
+    return { ok: true, symbol: sym, trade_date: j.trade_date ?? null, count: rows.length, rows }
+  } catch {
+    return { ok: false, error: 'Network error', rows: [] }
+  }
+}
+
 // ── Put/Call Ratio ────────────────────────────────────────────────────────────
 
 export interface PutCallRatioHistoryPoint {

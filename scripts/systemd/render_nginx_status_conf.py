@@ -41,6 +41,8 @@ _PLACEHOLDER_KEYS = (
     ("@@BIFROST_RESEARCH_PORT@@", "research_port"),
 )
 
+_FRONTEND_PLACEHOLDER = ("@@BIFROST_FRONTEND_PORT@@", "frontend_port")
+
 
 def _ports_from_config(config: dict) -> dict[str, int]:
     srv = config.get("server") if isinstance(config.get("server"), dict) else {}
@@ -57,6 +59,8 @@ def _ports_from_config(config: dict) -> dict[str, int]:
             out[key] = int(srv[key])
         except (TypeError, ValueError) as e:
             raise ValueError(f"server.{key} must be an integer, got {srv[key]!r}") from e
+    fe = config.get("frontend") if isinstance(config.get("frontend"), dict) else {}
+    out["frontend_port"] = int(fe.get("port", 5173))
     return out
 
 
@@ -64,6 +68,8 @@ def render_template(text: str, ports: dict[str, int]) -> str:
     out = text
     for ph, key in _PLACEHOLDER_KEYS:
         out = out.replace(ph, str(ports[key]))
+    ph, key = _FRONTEND_PLACEHOLDER
+    out = out.replace(ph, str(ports[key]))
     return out
 
 
@@ -106,7 +112,7 @@ def main() -> int:
         f"docs={ports['docs_port']} ops={ports['ops_port']} "
         f"trading={ports['trading_port']} strategy={ports['strategy_port']} "
         f"portfolio={ports['portfolio_port']} market={ports['market_port']} "
-        f"research={ports['research_port']}",
+        f"research={ports['research_port']} frontend={ports['frontend_port']}",
         file=sys.stderr,
     )
 

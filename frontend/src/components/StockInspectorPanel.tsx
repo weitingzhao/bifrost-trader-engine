@@ -1,6 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
-import { fetchBarsBenchmark, fetchPutCallRatioHistory } from '../api'
-import type { PutCallRatioHistoryPoint } from '../api'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  fetchBarsBenchmark,
+  fetchPutCallRatioHistory,
+  fetchOptionChainExpirySummary,
+  postMassiveSync,
+  subscribeMassiveJobEvents,
+} from '../api'
+import type { PutCallRatioHistoryPoint, OptionChainExpiryRow } from '../api'
 import {
   fetchSymbolFundamentalConditions,
   fetchSymbolTechnicalConditions,
@@ -641,17 +647,157 @@ export function StockInspectorPanel({
   const [pcrSeries, setPcrSeries] = useState<PutCallRatioHistoryPoint[]>([])
   const [pcrLoading, setPcrLoading] = useState(false)
   const [pcrExpanded, setPcrExpanded] = useState(true)
+  const [pcrRetrieving, setPcrRetrieving] = useState(false)
+  const [pcrRetrieveError, setPcrRetrieveError] = useState<string | null>(null)
+  const [pcrJobId, setPcrJobId] = useState<string | null>(null)
+  const [pcrJobStatus, setPcrJobStatus] = useState<string | null>(null)
+  const pcrJobSubRef = useRef<{ close: () => void } | null>(null)
+  const closePcrJobSub = useCallback(() => {
+    pcrJobSubRef.current?.close()
+    pcrJobSubRef.current = null
+  }, [])
+
+  const [pcrShowTables, setPcrShowTables] = useState(false)
+
+  // Option chain per-expiry summary
+  const [chainRows, setChainRows] = useState<OptionChainExpiryRow[]>([])
+  const [chainExpanded, setChainExpanded] = useState(true)
+
+  const loadPcrHistory = useCallback(async (): Promise<PutCallRatioHistoryPoint[]> => {
+    if (!symU) return []
+    const res = await fetchPutCallRatioHistory({ symbol: symU, lookbackDays: 500 })
+    const series = res.ok ? res.series : []
+    setPcrSeries(series)
+    if (!res.ok && res.error) {
+      setPcrRetrieveError(res.error)
+    }
+    return series
+  }, [symU])
+
+  useEffect(() => {
+    setPcrRetrieveError(null)
+    setPcrRetrieving(false)
+    setPcrJobId(null)
+    setPcrJobStatus(null)
+    closePcrJobSub()
+  }, [symU, closePcrJobSub])
+
+  useEffect(() => () => { closePcrJobSub() }, [closePcrJobSub])
 
   useEffect(() => {
     if (!symU || !pcrExpanded) return
     let cancelled = false
     setPcrLoading(true)
-    fetchPutCallRatioHistory({ symbol: symU, lookbackDays: 60 })
+    setPcrRetrieveError(null)
+    fetchPutCallRatioHistory({ symbol: symU, lookbackDays: 500 })
       .then((res) => { if (!cancelled) setPcrSeries(res.ok ? res.series : []) })
       .catch(() => { if (!cancelled) setPcrSeries([]) })
       .finally(() => { if (!cancelled) setPcrLoading(false) })
+    fetchOptionChainExpirySummary(symU)
+      .then((res) => {
+        if (!cancelled) {
+          setChainRows(res.ok ? res.rows : [])
+        }
+      })
+      .catch(() => { if (!cancelled) setChainRows([]) })
     return () => { cancelled = true }
   }, [symU, pcrExpanded])
+
+  const retrievePcr = useCallback(async () => {
+    if (!symU || pcrRetrieving) return
+    closePcrJobSub()
+    setPcrRetrieving(true)
+    setPcrRetrieveError(null)
+    setPcrJobId(null)
+    setPcrJobStatus('enqueueing')
+    let jobFailed = false
+    let streamError: string | null = null
+    try {
+      const syncRes = await postMassiveSync('symbol_pcr_snapshot', {
+        symbol: symU,
+        lookback_days: 252,
+        max_contracts: 400,
+        max_expiries: 48,
+      })
+      if (!syncRes.ok || !syncRes.job_id) {
+        setPcrRetrieveError(syncRes.error ?? syncRes.message ?? 'Failed to enqueue')
+        setPcrJobStatus(null)
+        return
+      }
+      const jobId = syncRes.job_id
+      setPcrJobId(jobId)
+      setPcrJobStatus(syncRes.deduplicated ? 'pending (deduplicated)' : 'pending')
+
+      await new Promise<void>((resolve) => {
+        const sub = subscribeMassiveJobEvents(
+          jobId,
+          (ev) => {
+            if (!ev.ok) {
+              streamError = ev.error ?? 'Job stream error'
+              setPcrJobStatus('failed')
+              resolve()
+              return
+            }
+            const st = (ev.job?.status ?? 'pending').toLowerCase()
+            setPcrJobStatus(st)
+            if (st === 'done' || st === 'failed') {
+              if (st === 'done') {
+                const jr = ev.job?.result as Record<string, unknown> | undefined
+                const pcrDates = jr?.pcr_dates_computed
+                if (typeof pcrDates === 'number' && pcrDates > 0) {
+                  const hist = jr?.option_day_history as Record<string, unknown> | undefined
+                  const fetched = typeof hist?.contracts_processed === 'number' ? hist.contracts_processed : null
+                  const skipped = typeof hist?.contracts_skipped === 'number' ? hist.contracts_skipped : null
+                  const parts = [`${pcrDates}d PCR`]
+                  if (fetched != null) parts.push(`${fetched} fetched`)
+                  if (skipped != null && skipped > 0) parts.push(`${skipped} skipped`)
+                  setPcrJobStatus(`done · ${parts.join(', ')}`)
+                }
+              }
+              if (st === 'failed') {
+                jobFailed = true
+                const jr = ev.job?.result as Record<string, unknown> | undefined
+                streamError = typeof jr?.error === 'string' ? jr.error : 'Job failed'
+              }
+              resolve()
+            }
+          },
+          { timeoutSec: 900 },
+        )
+        pcrJobSubRef.current = sub
+      })
+      closePcrJobSub()
+
+      setPcrJobStatus('loading report')
+      const chainP = fetchOptionChainExpirySummary(symU)
+        .then((res) => {
+          setChainRows(res.ok ? res.rows : [])
+        })
+        .catch(() => {})
+      const series = await loadPcrHistory()
+      await chainP
+      if (series.length > 0) {
+        setPcrRetrieveError(null)
+        setPcrJobStatus('done')
+      } else if (jobFailed || streamError) {
+        setPcrRetrieveError(
+          streamError
+            ? `${streamError} (no PCR rows returned from Research API)`
+            : 'Job finished but no PCR rows returned from Research API',
+        )
+        setPcrJobStatus('failed')
+      } else {
+        setPcrRetrieveError('No PCR data returned after job completed.')
+        setPcrJobStatus('done')
+      }
+    } catch (e) {
+      setPcrRetrieveError(e instanceof Error ? e.message : 'Unknown error')
+      setPcrJobStatus('failed')
+    } finally {
+      closePcrJobSub()
+      setPcrRetrieving(false)
+    }
+  }, [symU, pcrRetrieving, loadPcrHistory, closePcrJobSub])
 
   const [stmts, setStmts] = useState<SymbolStatementsResponse | null>(null)
   const [stmtsLoading, setStmtsLoading] = useState(false)
@@ -1284,7 +1430,7 @@ export function StockInspectorPanel({
           <section className="od-detail-section sip-stmts-section" aria-labelledby="riv-stock-sec-pcr">
             <h4
               id="riv-stock-sec-pcr"
-              className="od-detail-section-title sip-stmts-toggle"
+              className="od-detail-section-title sip-stmts-toggle sip-pcr-section-head"
               onClick={() => setPcrExpanded((v) => !v)}
               role="button"
               tabIndex={0}
@@ -1292,16 +1438,65 @@ export function StockInspectorPanel({
               title={pcrExpanded ? 'Collapse Put/Call Ratio' : 'Expand Put/Call Ratio'}
             >
               <span>Put/Call Ratio</span>
-              <span className="sip-stmts-toggle-arrow">{pcrExpanded ? '▴' : '▾'}</span>
+              <span className="sip-pcr-section-head-actions">
+                {pcrSeries.length > 0 && !pcrRetrieving && (() => {
+                  const latestDate = pcrSeries[pcrSeries.length - 1]?.trade_date
+                  const diffDays = latestDate
+                    ? Math.max(0, Math.floor((Date.now() - new Date(latestDate + 'T00:00:00').getTime()) / 86_400_000))
+                    : null
+                  const freshLabel = diffDays == null ? '' : diffDays === 0 ? 'today' : diffDays === 1 ? '1d ago' : `${diffDays}d ago`
+                  const freshClass = diffDays == null ? '' : diffDays <= 1 ? 'sip-chain-fresh--ok' : diffDays <= 3 ? 'sip-chain-fresh--warn' : 'sip-chain-fresh--stale'
+                  return (
+                    <button
+                      type="button"
+                      className="sip-pcr-refresh-btn"
+                      onClick={(e) => { e.stopPropagation(); void retrievePcr() }}
+                      disabled={pcrLoading || pcrRetrieving}
+                      aria-label="Refresh Put/Call Ratio and Option Chain"
+                    >
+                      <span className="sip-pcr-refresh-asof">
+                        as of <strong>{latestDate}</strong>
+                        {freshLabel && <span className={`sip-chain-fresh ${freshClass}`}>{freshLabel}</span>}
+                      </span>
+                      <span className="sip-pcr-refresh-label">Refresh</span>
+                    </button>
+                  )
+                })()}
+                <span className="sip-stmts-toggle-arrow">{pcrExpanded ? '▴' : '▾'}</span>
+              </span>
             </h4>
 
             {pcrExpanded && (
               <>
-                {pcrLoading && <p className="section-hint">Loading PCR data…</p>}
-                {!pcrLoading && pcrSeries.length === 0 && (
-                  <p className="section-hint">No PCR data. Run EOD pipeline from Stock Data Readiness.</p>
+                {pcrLoading && !pcrRetrieving && <p className="section-hint">Loading PCR data…</p>}
+                {pcrRetrieving && (
+                  <div className="sip-pcr-job-status" aria-live="polite">
+                    <p className="section-hint">
+                      Fetching options chain for {symU}
+                      {pcrJobId ? ` · job ${pcrJobId}` : ''}
+                      {pcrJobStatus ? ` · ${pcrJobStatus}` : ''}
+                    </p>
+                  </div>
                 )}
-                {!pcrLoading && pcrSeries.length > 0 && (() => {
+                {!pcrLoading && !pcrRetrieving && pcrSeries.length === 0 && (
+                  <div className="sip-pcr-retrieve-block">
+                    <p className="section-hint">
+                      No PCR history for this symbol. Retrieve loads ~1 year of option volume
+                      from Massive (per-contract daily bars), then computes daily Put/Call ratios.
+                    </p>
+                    <button
+                      type="button"
+                      className="sip-pcr-action-btn sip-pcr-action-btn--primary"
+                      onClick={() => void retrievePcr()}
+                    >
+                      Retrieve Put/Call Ratio (1yr)
+                    </button>
+                  </div>
+                )}
+                {pcrRetrieveError && (
+                  <p className="section-hint sip-fund-hint--err">{pcrRetrieveError}</p>
+                )}
+                {!pcrLoading && !pcrRetrieving && pcrSeries.length > 0 && (() => {
                   const latest = pcrSeries[pcrSeries.length - 1]
                   const prev5 = pcrSeries.slice(-6, -1)
                   const validPrev5 = prev5.filter(p => p.ratio_oi != null)
@@ -1315,8 +1510,7 @@ export function StockInspectorPanel({
                     if (Math.abs(v) >= 1e3) return `${(v / 1e3).toFixed(0)}k`
                     return `${v.toFixed(0)}`
                   }
-                  // Newest-first rows (cap at 12 for compact display, mirroring Balance Sheet)
-                  const tableRows = [...pcrSeries].reverse().slice(0, 12)
+                  const tableRows = [...pcrSeries].reverse().slice(0, 30)
 
                   return (
                     <div className="sip-pcr-block">
@@ -1338,13 +1532,9 @@ export function StockInspectorPanel({
                           <span className="sip-pcr-label">5d Avg OI</span>
                           <span className="sip-pcr-value">{avg5Oi != null ? avg5Oi.toFixed(3) : '—'}</span>
                         </div>
-                        <div className="sip-pcr-metric">
-                          <span className="sip-pcr-label">Latest</span>
-                          <span className="sip-pcr-value sip-pcr-value--neutral">{latest.trade_date.slice(5)}</span>
-                        </div>
                       </div>
 
-                      {/* Block 1: P/C Ratio Trend — chart left | table right */}
+                      {/* Block 1: P/C Ratio Trend — full-width chart */}
                       <div className="sip-stmts-block">
                         <div className="sip-stmt-block-head">
                           <span className="sip-stmts-block-title">P/C Ratio Trend</span>
@@ -1354,34 +1544,10 @@ export function StockInspectorPanel({
                             <span className="sip-legend-dot sip-legend-dot--ref" />1.0 ref
                           </div>
                         </div>
-                        <div className="sip-stmt-chart-table">
-                          <div className="sip-stmt-chart-col">
-                            <SvgPcrRatioChart points={pcrSeries} />
-                          </div>
-                          <div className="sip-stmt-table-col">
-                            <table className="sip-raw-table sip-stmt-compact-table">
-                              <thead>
-                                <tr><th>Date</th><th>OI Rt</th><th>Vol Rt</th></tr>
-                              </thead>
-                              <tbody>
-                                {tableRows.map((r) => (
-                                  <tr key={r.trade_date}>
-                                    <td className="sip-raw-period">{r.trade_date.slice(5)}</td>
-                                    <td className={r.ratio_oi != null && r.ratio_oi > 1 ? 'sip-pcr-cell--bearish' : 'sip-pcr-cell--bullish'}>
-                                      {fmtR(r.ratio_oi)}
-                                    </td>
-                                    <td className={r.ratio_volume != null && r.ratio_volume > 1 ? 'sip-pcr-cell--bearish' : 'sip-pcr-cell--bullish'}>
-                                      {fmtR(r.ratio_volume)}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
+                        <SvgPcrRatioChart points={pcrSeries} vw={960} h={160} />
                       </div>
 
-                      {/* Block 2: Open Interest — chart left | table right */}
+                      {/* Block 2: Open Interest — full-width chart */}
                       <div className="sip-stmts-block">
                         <div className="sip-stmt-block-head">
                           <span className="sip-stmts-block-title">Open Interest</span>
@@ -1390,35 +1556,189 @@ export function StockInspectorPanel({
                             <span className="sip-legend-dot" style={{ background: 'var(--color-lamp-green, #66bb6a)' }} />Call OI
                           </div>
                         </div>
-                        <div className="sip-stmt-chart-table">
-                          <div className="sip-stmt-chart-col">
-                            <SvgPcrOiChart points={pcrSeries} />
-                          </div>
-                          <div className="sip-stmt-table-col">
-                            <table className="sip-raw-table sip-stmt-compact-table">
-                              <thead>
-                                <tr><th>Date</th><th>Put OI</th><th>Call OI</th></tr>
-                              </thead>
-                              <tbody>
-                                {tableRows.map((r) => (
-                                  <tr key={r.trade_date}>
-                                    <td className="sip-raw-period">{r.trade_date.slice(5)}</td>
-                                    <td style={{ color: 'var(--color-lamp-red, #ef5350)' }}>{fmtKi(r.put_oi_total)}</td>
-                                    <td style={{ color: 'var(--color-lamp-green, #66bb6a)' }}>{fmtKi(r.call_oi_total)}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
+                        <SvgPcrOiChart points={pcrSeries} vw={960} h={160} />
                       </div>
 
-                      <p className="section-hint sip-pcr-hint">
-                        OI ratio &gt; 1 = more puts (bearish lean) · {pcrSeries.length}d history
-                      </p>
+                      {/* Collapsible data tables */}
+                      <div className="sip-pcr-tables-toggle">
+                        <button
+                          type="button"
+                          className="sip-pcr-tab-btn"
+                          onClick={() => setPcrShowTables((v) => !v)}
+                        >
+                          {pcrShowTables ? '▴ Hide Data' : '▾ Show Data'} · {pcrSeries.length}d
+                        </button>
+                        <span className="section-hint sip-pcr-hint" style={{ margin: 0 }}>
+                          OI ratio &gt; 1 = more puts (bearish lean)
+                        </span>
+                      </div>
+
+                      {pcrShowTables && (
+                        <div className="sip-pcr-tables-body">
+                          <div className="sip-pcr-tables-grid">
+                            <div>
+                              <span className="sip-stmts-block-title" style={{ marginBottom: 4, display: 'block' }}>P/C Ratio</span>
+                              <div className="sip-stmts-scroll">
+                                <table className="sip-raw-table sip-stmt-compact-table">
+                                  <thead>
+                                    <tr><th>Date</th><th>OI Rt</th><th>Vol Rt</th></tr>
+                                  </thead>
+                                  <tbody>
+                                    {tableRows.map((r) => (
+                                      <tr key={r.trade_date}>
+                                        <td className="sip-raw-period">{r.trade_date.slice(5)}</td>
+                                        <td className={r.ratio_oi != null && r.ratio_oi > 1 ? 'sip-pcr-cell--bearish' : 'sip-pcr-cell--bullish'}>
+                                          {fmtR(r.ratio_oi)}
+                                        </td>
+                                        <td className={r.ratio_volume != null && r.ratio_volume > 1 ? 'sip-pcr-cell--bearish' : 'sip-pcr-cell--bullish'}>
+                                          {fmtR(r.ratio_volume)}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                            <div>
+                              <span className="sip-stmts-block-title" style={{ marginBottom: 4, display: 'block' }}>Open Interest</span>
+                              <div className="sip-stmts-scroll">
+                                <table className="sip-raw-table sip-stmt-compact-table">
+                                  <thead>
+                                    <tr><th>Date</th><th>Put OI</th><th>Call OI</th></tr>
+                                  </thead>
+                                  <tbody>
+                                    {tableRows.map((r) => (
+                                      <tr key={r.trade_date}>
+                                        <td className="sip-raw-period">{r.trade_date.slice(5)}</td>
+                                        <td style={{ color: 'var(--color-lamp-red, #ef5350)' }}>{fmtKi(r.put_oi_total)}</td>
+                                        <td style={{ color: 'var(--color-lamp-green, #66bb6a)' }}>{fmtKi(r.call_oi_total)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )
                 })()}
+
+                {/* Per-expiry option chain summary (Barchart-style) */}
+                {chainRows.length > 0 && (
+                  <div className="sip-chain-section">
+                    <div
+                      className="sip-chain-header"
+                      onClick={() => setChainExpanded((v) => !v)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setChainExpanded((v) => !v) }}
+                    >
+                      <span className="sip-chain-title">Option Chain by Expiry</span>
+                      <span className="sip-chain-header-meta">
+                        <span className="sip-chain-shared-refresh">
+                          Refreshed via Put/Call Ratio
+                        </span>
+                        <span className="sip-stmts-toggle-arrow">{chainExpanded ? '▴' : '▾'}</span>
+                      </span>
+                    </div>
+                    {chainExpanded && (() => {
+                      const maxPutVol = Math.max(...chainRows.map((r) => r.put_vol), 1)
+                      const maxCallVol = Math.max(...chainRows.map((r) => r.call_vol), 1)
+                      const maxTotalVol = Math.max(...chainRows.map((r) => r.total_vol), 1)
+                      const maxPutOi = Math.max(...chainRows.map((r) => r.put_oi), 1)
+                      const maxCallOi = Math.max(...chainRows.map((r) => r.call_oi), 1)
+                      const maxTotalOi = Math.max(...chainRows.map((r) => r.total_oi), 1)
+                      const fmtN = (v: number) => v.toLocaleString('en-US')
+                      const fmtRatio = (v: number | null) => v != null ? v.toFixed(2) : '—'
+                      const barBg = (pct: number, color: string, dir: 'right' | 'left' = 'right') => ({
+                        background: `linear-gradient(to ${dir}, ${color} 0%, ${color} ${pct}%, transparent ${pct}%)`,
+                      })
+                      const totals = chainRows.reduce(
+                        (acc, r) => ({
+                          putVol: acc.putVol + r.put_vol,
+                          callVol: acc.callVol + r.call_vol,
+                          totalVol: acc.totalVol + r.total_vol,
+                          putOi: acc.putOi + r.put_oi,
+                          callOi: acc.callOi + r.call_oi,
+                          totalOi: acc.totalOi + r.total_oi,
+                        }),
+                        { putVol: 0, callVol: 0, totalVol: 0, putOi: 0, callOi: 0, totalOi: 0 },
+                      )
+                      return (
+                        <div className="sip-chain-scroll">
+                          <table className="sip-chain-table">
+                            <thead>
+                              <tr>
+                                <th className="sip-chain-th">Expiration</th>
+                                <th className="sip-chain-th sip-chain-th--num">DTE</th>
+                                <th className="sip-chain-th sip-chain-th--num sip-chain-th--put">Put Vol</th>
+                                <th className="sip-chain-th sip-chain-th--num sip-chain-th--call">Call Vol</th>
+                                <th className="sip-chain-th sip-chain-th--num">Total Vol</th>
+                                <th className="sip-chain-th sip-chain-th--num">P/C Vol</th>
+                                <th className="sip-chain-th sip-chain-th--num sip-chain-th--put">Put OI</th>
+                                <th className="sip-chain-th sip-chain-th--num sip-chain-th--call">Call OI</th>
+                                <th className="sip-chain-th sip-chain-th--num">Total OI</th>
+                                <th className="sip-chain-th sip-chain-th--num">P/C OI</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {chainRows.map((r) => (
+                                <tr key={r.expiry} className="sip-chain-row">
+                                  <td className="sip-chain-td sip-chain-td--exp">{r.expiry_label}</td>
+                                  <td className="sip-chain-td sip-chain-td--num sip-chain-td--dte">{r.dte ?? '—'}</td>
+                                  <td className="sip-chain-td sip-chain-td--num sip-chain-td--put" style={barBg((r.put_vol / maxPutVol) * 100, 'rgba(239,83,80,0.18)', 'left')}>
+                                    {fmtN(r.put_vol)}
+                                  </td>
+                                  <td className="sip-chain-td sip-chain-td--num sip-chain-td--call" style={barBg((r.call_vol / maxCallVol) * 100, 'rgba(102,187,106,0.18)')}>
+                                    {fmtN(r.call_vol)}
+                                  </td>
+                                  <td className="sip-chain-td sip-chain-td--num" style={barBg((r.total_vol / maxTotalVol) * 100, 'rgba(56,189,248,0.18)')}>
+                                    {fmtN(r.total_vol)}
+                                  </td>
+                                  <td className={`sip-chain-td sip-chain-td--num ${r.pc_vol_ratio != null && r.pc_vol_ratio > 1 ? 'sip-chain-td--bearish' : 'sip-chain-td--bullish'}`}>
+                                    {fmtRatio(r.pc_vol_ratio)}
+                                  </td>
+                                  <td className="sip-chain-td sip-chain-td--num sip-chain-td--put" style={barBg((r.put_oi / maxPutOi) * 100, 'rgba(239,83,80,0.18)', 'left')}>
+                                    {fmtN(r.put_oi)}
+                                  </td>
+                                  <td className="sip-chain-td sip-chain-td--num sip-chain-td--call" style={barBg((r.call_oi / maxCallOi) * 100, 'rgba(102,187,106,0.18)')}>
+                                    {fmtN(r.call_oi)}
+                                  </td>
+                                  <td className="sip-chain-td sip-chain-td--num" style={barBg((r.total_oi / maxTotalOi) * 100, 'rgba(99,102,241,0.2)')}>
+                                    {fmtN(r.total_oi)}
+                                  </td>
+                                  <td className={`sip-chain-td sip-chain-td--num ${r.pc_oi_ratio != null && r.pc_oi_ratio > 1 ? 'sip-chain-td--bearish' : 'sip-chain-td--bullish'}`}>
+                                    {fmtRatio(r.pc_oi_ratio)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr className="sip-chain-row sip-chain-row--total">
+                                <td className="sip-chain-td sip-chain-td--exp">Total</td>
+                                <td className="sip-chain-td" />
+                                <td className="sip-chain-td sip-chain-td--num sip-chain-td--put">{fmtN(totals.putVol)}</td>
+                                <td className="sip-chain-td sip-chain-td--num sip-chain-td--call">{fmtN(totals.callVol)}</td>
+                                <td className="sip-chain-td sip-chain-td--num">{fmtN(totals.totalVol)}</td>
+                                <td className={`sip-chain-td sip-chain-td--num ${totals.callVol > 0 && totals.putVol / totals.callVol > 1 ? 'sip-chain-td--bearish' : 'sip-chain-td--bullish'}`}>
+                                  {totals.callVol > 0 ? (totals.putVol / totals.callVol).toFixed(2) : '—'}
+                                </td>
+                                <td className="sip-chain-td sip-chain-td--num sip-chain-td--put">{fmtN(totals.putOi)}</td>
+                                <td className="sip-chain-td sip-chain-td--num sip-chain-td--call">{fmtN(totals.callOi)}</td>
+                                <td className="sip-chain-td sip-chain-td--num">{fmtN(totals.totalOi)}</td>
+                                <td className={`sip-chain-td sip-chain-td--num ${totals.callOi > 0 && totals.putOi / totals.callOi > 1 ? 'sip-chain-td--bearish' : 'sip-chain-td--bullish'}`}>
+                                  {totals.callOi > 0 ? (totals.putOi / totals.callOi).toFixed(2) : '—'}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      )
+                    })()}
+                  </div>
+                )}
               </>
             )}
           </section>
