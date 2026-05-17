@@ -472,14 +472,20 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
   // ── Distribution helpers ────────────────────────────────────────────────────
   const distRaw = criteriaStats?.fundamental?.pass_count_distribution ?? null
   const distBase = distRaw ? distRaw.reduce((s, d) => s + d.symbol_count, 0) || 1 : 1
-  const dist = distRaw ? [...distRaw].filter((d) => d.symbol_count > 0).sort((a, b) => b.conditions_passed - a.conditions_passed) : null
+  const distFiltered = distRaw
+    ? [...distRaw].filter((d) => d.symbol_count > 0).sort((a, b) => b.conditions_passed - a.conditions_passed)
+    : []
+  const dist = distFiltered.length > 0 ? distFiltered : null
   const distMaxCount = dist ? Math.max(...dist.map((d) => d.symbol_count), 1) : 1
   const barColorForN = (n: number) =>
     n === 8 ? 'ssp-dist-bar-fill--ok' : n >= 6 ? 'ssp-dist-bar-fill--good' : n >= 4 ? 'ssp-dist-bar-fill--warn' : n >= 2 ? 'ssp-dist-bar-fill--poor' : 'ssp-dist-bar-fill--error'
 
   const techDistRaw = criteriaStats?.technical?.pass_count_distribution ?? null
   const techDistBase = techDistRaw ? techDistRaw.reduce((s, d) => s + d.symbol_count, 0) || 1 : 1
-  const techDist = techDistRaw ? [...techDistRaw].filter((d) => d.symbol_count > 0).sort((a, b) => b.conditions_passed - a.conditions_passed).slice(0, 8) : null
+  const techDistFiltered = techDistRaw
+    ? [...techDistRaw].filter((d) => d.symbol_count > 0).sort((a, b) => b.conditions_passed - a.conditions_passed).slice(0, 8)
+    : []
+  const techDist = techDistFiltered.length > 0 ? techDistFiltered : null
   const techDistMaxCount = techDist ? Math.max(...techDist.map((d) => d.symbol_count), 1) : 1
   const techBarColorForN = (n: number) =>
     n === 11 ? 'ssp-dist-bar-fill--tech-ok' : n >= 9 ? 'ssp-dist-bar-fill--tech-good' : n >= 7 ? 'ssp-dist-bar-fill--tech-warn' : n >= 4 ? 'ssp-dist-bar-fill--tech-poor' : 'ssp-dist-bar-fill--tech-error'
@@ -574,7 +580,9 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
               {criteriaErr && <div className="ssp-empty-line ssp-status-err">{criteriaErr}</div>}
               {techDist
                 ? <div className="ssp-dist-rows">{techDist.map(({ conditions_passed, symbol_count }) => funnelRow(conditions_passed, symbol_count, techDistMaxCount, techDistBase, techBarColorForN, activeTechBucket, handleTechBucketClick, '11'))}</div>
-                : !criteriaLoading && <div className="ssp-empty-line">No data — run technical backfill first.</div>}
+                : criteriaLoading
+                  ? <div className="ssp-empty-line">Loading distribution…</div>
+                  : <div className="ssp-empty-line">No technical distribution — refresh snapshot and run technical backfill in Stock Data Readiness.</div>}
             </div>
           </section>
 
@@ -743,7 +751,9 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
               {criteriaErr && <div className="ssp-empty-line ssp-status-err">{criteriaErr}</div>}
               {dist
                 ? <div className="ssp-dist-rows">{dist.map(({ conditions_passed, symbol_count }) => funnelRow(conditions_passed, symbol_count, distMaxCount, distBase, barColorForN, activeBucket, handleBucketClick, '8'))}</div>
-                : !criteriaLoading && <div className="ssp-empty-line">No distribution data.</div>}
+                : criteriaLoading
+                  ? <div className="ssp-empty-line">Loading distribution…</div>
+                  : <div className="ssp-empty-line">No fundamental distribution — refresh snapshot and run fundamental backfill in Stock Data Readiness.</div>}
             </div>
           </section>
 

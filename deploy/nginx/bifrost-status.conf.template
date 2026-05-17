@@ -7,7 +7,8 @@
 #   /strategies/ → Strategy | /portfolio/ → Portfolio | /position-categories → Monitor (same DB; optional Portfolio process)
 #   /trading/, /executions, /performance, /transactions → Trading
 #   /bars, /watchlist, /quotes, /market/, /indices/ → Market
-#   /research/ (rest) → Research API (option discovery, max pain) — longer /research/massive|docs win first
+#   /research/<api-prefix> → Research API (granular; matches frontend next.config dev rewrites)
+#   /research/{risk,sepa,…} → Next.js UI pages (must not use catch-all /research/ → API)
 #   /status, /health, /operations, /control, /positions, /account-sync, /risk_summary, /config, /api, /openapi.json → Monitor
 #   /mkdocs/ → static MkDocs (site/ from mkdocs build; publish: ./scripts/bifrost_ssh.sh --deploy-mkdocs)
 #   /_next/static/ → Next.js hashed assets (served directly by nginx)
@@ -24,6 +25,24 @@
 # Hostname: add your DNS (e.g. ai.trader) to server_name; if https://... 404s, check nginx -T | grep server_name
 #
 # Uvicorn backends speak HTTP only. Do NOT use https://host:<port> in proxy_pass — terminate TLS in nginx.
+
+# UI vs API on overlapping paths (included in http {} before server block).
+map $request_method $bifrost_research_screener_port {
+    POST    @@BIFROST_RESEARCH_PORT@@;
+    default @@BIFROST_FRONTEND_PORT@@;
+}
+map $http_rsc $bifrost_research_greeks_port_rsc {
+    "~." @@BIFROST_FRONTEND_PORT@@;
+    default "";
+}
+map $http_accept $bifrost_research_greeks_port_accept {
+    "~*text/html" @@BIFROST_FRONTEND_PORT@@;
+    default @@BIFROST_RESEARCH_PORT@@;
+}
+map $bifrost_research_greeks_port_rsc $bifrost_research_greeks_port {
+    ""      $bifrost_research_greeks_port_accept;
+    default $bifrost_research_greeks_port_rsc;
+}
 
 # --- HTTP only (no ssl_certificate — nginx -t works on fresh hosts) ---
 server {
@@ -249,8 +268,219 @@ server {
         proxy_read_timeout 86400s;
     }
 
-    # Research API (option discovery, max pain, …) — must follow /research/massive and /research/docs above
-    location ^~ /research/ {
+    # Research UI (Next.js App Router) — must precede Research API prefix locations below
+    location = /research {
+        proxy_pass http://127.0.0.1:@@BIFROST_FRONTEND_PORT@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    location ^~ /research/risk {
+        proxy_pass http://127.0.0.1:@@BIFROST_FRONTEND_PORT@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    location ^~ /research/sepa {
+        proxy_pass http://127.0.0.1:@@BIFROST_FRONTEND_PORT@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    location ^~ /research/stock-readiness {
+        proxy_pass http://127.0.0.1:@@BIFROST_FRONTEND_PORT@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    location ^~ /research/watchlist {
+        proxy_pass http://127.0.0.1:@@BIFROST_FRONTEND_PORT@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    location ^~ /research/options {
+        proxy_pass http://127.0.0.1:@@BIFROST_FRONTEND_PORT@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    location ^~ /research/backtest {
+        proxy_pass http://127.0.0.1:@@BIFROST_FRONTEND_PORT@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    # POST → Research API; GET → Next.js (Option Screener page)
+    location = /research/screener {
+        proxy_pass http://127.0.0.1:$bifrost_research_screener_port;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    # GET page vs GET data: RSC/HTML → Next.js; fetch JSON → Research API
+    location = /research/greeks {
+        proxy_pass http://127.0.0.1:$bifrost_research_greeks_port;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    # Research API — granular prefixes (same as frontend next.config.mjs dev rewrites)
+    location ^~ /research/option {
+        proxy_pass http://127.0.0.1:@@BIFROST_RESEARCH_PORT@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    location ^~ /research/screening {
+        proxy_pass http://127.0.0.1:@@BIFROST_RESEARCH_PORT@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    location ^~ /research/data {
+        proxy_pass http://127.0.0.1:@@BIFROST_RESEARCH_PORT@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    location ^~ /research/greeks/ {
+        proxy_pass http://127.0.0.1:@@BIFROST_RESEARCH_PORT@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    location ^~ /research/iv-term-structure {
+        proxy_pass http://127.0.0.1:@@BIFROST_RESEARCH_PORT@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    location ^~ /research/iv-volatility-cone {
+        proxy_pass http://127.0.0.1:@@BIFROST_RESEARCH_PORT@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    location ^~ /research/max-pain {
+        proxy_pass http://127.0.0.1:@@BIFROST_RESEARCH_PORT@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+
+    location ^~ /research/put-call-ratio {
         proxy_pass http://127.0.0.1:@@BIFROST_RESEARCH_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
