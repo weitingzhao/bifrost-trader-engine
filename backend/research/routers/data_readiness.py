@@ -12,6 +12,7 @@ from src.research.sepa.readiness_snapshot import (
     get_sepa_grouped_backfill_dates,
     get_sepa_price_gap_details,
     get_sepa_price_gap_symbols,
+    resolve_readiness_eval_as_of_date,
     run_fundamentals_local_backfill,
     run_sepa_universe_readiness_snapshot,
     run_technical_local_backfill,
@@ -727,22 +728,32 @@ def get_fundamental_distribution_symbols(
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("SET statement_timeout = 15000")
+            as_of = resolve_readiness_eval_as_of_date(cur)
+            if as_of is None:
+                return {
+                    "ok": True,
+                    "as_of_date": None,
+                    "conditions_passed": conditions_passed,
+                    "count": 0,
+                    "symbols": [],
+                }
+            as_of_iso = as_of.isoformat() if hasattr(as_of, "isoformat") else str(as_of)
             cur.execute(
                 """
                 SELECT
                     symbol,
-                    coalesce((fundamental_eval->>'pass_count')::int, 0) AS pass_count,
-                    coalesce((fundamental_eval->>'fundamental_pass')::boolean, false) AS fund_pass,
+                    coalesce(fundamental_pass_count, 0) AS pass_count,
+                    coalesce(fundamental_pass, false) AS fund_pass,
                     fundamental_eval->'conditions' AS conditions
                 FROM public.stock_readiness_daily
-                WHERE as_of_date = CURRENT_DATE
+                WHERE as_of_date = %(as_of_date)s
                   AND included_in_universe = true
                   AND fundamental_eval IS NOT NULL
-                  AND coalesce((fundamental_eval->>'insufficient_data')::boolean, false) IS NOT TRUE
-                  AND coalesce((fundamental_eval->>'pass_count')::int, 0) = %(n)s
+                  AND coalesce(fundamental_insufficient, false) IS NOT TRUE
+                  AND coalesce(fundamental_pass_count, 0) = %(n)s
                 ORDER BY symbol
                 """,
-                {"n": conditions_passed},
+                {"n": conditions_passed, "as_of_date": as_of},
             )
             rows = cur.fetchall() or []
         symbols = []
@@ -754,7 +765,13 @@ def get_fundamental_distribution_symbols(
                 "pass_count": int(r.get("pass_count") or 0),
                 "passed_conditions": passed_ids,
             })
-        return {"ok": True, "conditions_passed": conditions_passed, "count": len(symbols), "symbols": symbols}
+        return {
+            "ok": True,
+            "as_of_date": as_of_iso,
+            "conditions_passed": conditions_passed,
+            "count": len(symbols),
+            "symbols": symbols,
+        }
     except Exception as e:
         return {"ok": False, "error": str(e)}
     finally:
@@ -785,6 +802,16 @@ def get_technical_distribution_symbols(
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("SET statement_timeout = 15000")
+            as_of = resolve_readiness_eval_as_of_date(cur)
+            if as_of is None:
+                return {
+                    "ok": True,
+                    "as_of_date": None,
+                    "conditions_passed": conditions_passed,
+                    "count": 0,
+                    "symbols": [],
+                }
+            as_of_iso = as_of.isoformat() if hasattr(as_of, "isoformat") else str(as_of)
             cur.execute(
                 """
                 SELECT
@@ -792,14 +819,14 @@ def get_technical_distribution_symbols(
                     coalesce(technical_pass_count, 0) AS pass_count,
                     technical_eval->'conditions'      AS conditions
                 FROM public.stock_readiness_daily
-                WHERE as_of_date = CURRENT_DATE
+                WHERE as_of_date = %(as_of_date)s
                   AND included_in_universe = true
                   AND technical_eval IS NOT NULL
                   AND coalesce((technical_eval->>'insufficient_data')::boolean, false) IS NOT TRUE
                   AND coalesce(technical_pass_count, 0) = %(n)s
                 ORDER BY symbol
                 """,
-                {"n": conditions_passed},
+                {"n": conditions_passed, "as_of_date": as_of},
             )
             rows = cur.fetchall() or []
         symbols = []
@@ -811,7 +838,13 @@ def get_technical_distribution_symbols(
                 "pass_count": int(r.get("pass_count") or 0),
                 "passed_conditions": passed_ids,
             })
-        return {"ok": True, "conditions_passed": conditions_passed, "count": len(symbols), "symbols": symbols}
+        return {
+            "ok": True,
+            "as_of_date": as_of_iso,
+            "conditions_passed": conditions_passed,
+            "count": len(symbols),
+            "symbols": symbols,
+        }
     except Exception as e:
         return {"ok": False, "error": str(e)}
     finally:

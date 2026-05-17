@@ -1892,14 +1892,70 @@ def run_technical_local_backfill(
     }
 
 
+def resolve_readiness_eval_as_of_date(cur: Any) -> Any:
+    """Pick as_of_date for criteria stats / distribution APIs.
+
+  Prefer today's row when eval data exists; otherwise use the latest date that has
+  fundamental_eval or technical_eval (e.g. after midnight before today's snapshot).
+    """
+    cur.execute(
+        """
+        SELECT as_of_date
+        FROM public.stock_readiness_daily
+        WHERE as_of_date = CURRENT_DATE
+          AND included_in_universe = true
+          AND (
+            fundamental_eval IS NOT NULL
+            OR technical_eval IS NOT NULL
+          )
+        LIMIT 1
+        """
+    )
+    row = cur.fetchone() or {}
+    if row.get("as_of_date"):
+        return row["as_of_date"]
+    cur.execute(
+        """
+        SELECT as_of_date
+        FROM public.stock_readiness_daily
+        WHERE included_in_universe = true
+          AND (
+            fundamental_eval IS NOT NULL
+            OR technical_eval IS NOT NULL
+          )
+        ORDER BY as_of_date DESC
+        LIMIT 1
+        """
+    )
+    row = cur.fetchone() or {}
+    return row.get("as_of_date")
+
+
+def get_readiness_eval_as_of_date(status_config: dict) -> Any:
+    """Return resolved eval as_of_date for readiness stats (or None)."""
+    if not _db_ok(status_config):
+        return None
+    params = _get_conn_params(status_config)
+    params["connect_timeout"] = 10
+    try:
+        conn = psycopg2.connect(**params)
+    except Exception:
+        return None
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            return resolve_readiness_eval_as_of_date(cur)
+    finally:
+        conn.close()
+
+
 def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
     """Aggregate SEPA criteria pass rates from existing cache tables (on-demand, no writes).
 
     Sources:
     - stock_readiness_daily.fundamental_eval (jsonb containment for per-condition counts)
-    - stock_readiness_daily (technical bar coverage + price_ready for today)
+    - stock_readiness_daily (technical bar coverage + price_ready for resolved as_of_date)
     """
-    from datetime import datetime, timezone
+    from datetime import date, datetime, timezone
 
     if not _db_ok(status_config):
         return {"ok": False, "error": "PostgreSQL not configured"}
@@ -1911,12 +1967,60 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
         return {"ok": False, "error": str(e)}
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            stats_as_of = resolve_readiness_eval_as_of_date(cur)
+            stats_as_of_iso = (
+                stats_as_of.isoformat()
+                if hasattr(stats_as_of, "isoformat")
+                else (str(stats_as_of) if stats_as_of else None)
+            )
+            today = date.today()
+            as_of_is_today = (
+                stats_as_of == today
+                if isinstance(stats_as_of, date)
+                else False
+            )
+
             # Universe count
             try:
                 cur.execute("SELECT count(*) AS n FROM v_us_equity_universe")
                 universe_count = int((cur.fetchone() or {}).get("n") or 0)
             except Exception:
                 universe_count = 0
+
+            if stats_as_of is None:
+                return {
+                    "ok": True,
+                    "universe_count": universe_count,
+                    "as_of_date": None,
+                    "as_of_date_is_today": False,
+                    "fundamental": {
+                        "cached_count": 0,
+                        "fund_pass_count": 0,
+                        "no_data_count": 0,
+                        "conditions": [],
+                        "pass_count_distribution": [],
+                    },
+                    "technical": {
+                        "total_in_snapshot": 0,
+                        "price_ready_count": 0,
+                        "fund_cached_count": 0,
+                        "both_ready": 0,
+                        "bars_ge_252": 0,
+                        "bars_ge_240": 0,
+                        "bars_ge_200": 0,
+                        "bars_lt_200": 0,
+                        "no_bars": 0,
+                        "failure_reasons": [],
+                        "tech_cached_count": 0,
+                        "tech_pass_count": 0,
+                        "tech_insufficient_count": 0,
+                        "conditions": [],
+                        "pass_count_distribution": [],
+                    },
+                    "computed_at": datetime.now(timezone.utc).isoformat(),
+                }
+
+            eval_date_params = {"as_of_date": stats_as_of}
 
             # --- Fundamental stats: jsonb containment over cache ---
             fund_result: Dict[str, Any] = {
@@ -1952,7 +2056,7 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                             (fundamental_eval->>'fundamental_pass')::boolean  AS fund_pass,
                             (fundamental_eval->>'insufficient_data')::boolean AS no_data
                         FROM public.stock_readiness_daily
-                        WHERE as_of_date = CURRENT_DATE
+                        WHERE as_of_date = %(as_of_date)s
                           AND included_in_universe = true
                           AND fundamental_eval IS NOT NULL
                     ),
@@ -1970,7 +2074,7 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                         {agg_exprs}
                     FROM per_sym
                 """
-                cur.execute(sql)
+                cur.execute(sql, eval_date_params)
                 row = cur.fetchone() or {}
                 fund_result["cached_count"] = int(row.get("cached_count") or 0)
                 fund_result["fund_pass_count"] = int(row.get("fund_pass_count") or 0)
@@ -2015,16 +2119,16 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
             try:
                 cur.execute("""
                     SELECT
-                        coalesce((fundamental_eval->>'pass_count')::int, 0) AS conditions_passed,
+                        coalesce(fundamental_pass_count, 0) AS conditions_passed,
                         count(*)::int AS symbol_count
                     FROM public.stock_readiness_daily
-                    WHERE as_of_date = CURRENT_DATE
+                    WHERE as_of_date = %(as_of_date)s
                       AND included_in_universe = true
                       AND fundamental_eval IS NOT NULL
-                      AND coalesce((fundamental_eval->>'insufficient_data')::boolean, false) IS NOT TRUE
+                      AND coalesce(fundamental_insufficient, false) IS NOT TRUE
                     GROUP BY 1
                     ORDER BY 1 DESC
-                """)
+                """, eval_date_params)
                 dist_rows = cur.fetchall() or []
                 dist_map = {int(r.get("conditions_passed") or 0): int(r.get("symbol_count") or 0) for r in dist_rows}
                 fund_result["pass_count_distribution"] = [
@@ -2055,9 +2159,9 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                         count(*) FILTER (WHERE technical_pass)             AS tech_pass_count,
                         count(*) FILTER (WHERE technical_insufficient)     AS tech_insufficient_count
                     FROM public.stock_readiness_daily
-                    WHERE as_of_date = CURRENT_DATE
+                    WHERE as_of_date = %(as_of_date)s
                       AND included_in_universe = true
-                """)
+                """, eval_date_params)
                 tech_result = dict(cur.fetchone() or {})
                 for k in list(tech_result):
                     tech_result[k] = int(tech_result[k] or 0)
@@ -2068,11 +2172,11 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                 cur.execute("""
                     SELECT coalesce(notes, 'unknown') AS notes, count(*) AS cnt
                     FROM public.stock_readiness_daily
-                    WHERE as_of_date = CURRENT_DATE
+                    WHERE as_of_date = %(as_of_date)s
                       AND included_in_universe = true
                       AND price_ready = false
                     GROUP BY notes ORDER BY cnt DESC
-                """)
+                """, eval_date_params)
                 failure_reasons = [{"notes": r.get("notes"), "cnt": int(r.get("cnt") or 0)} for r in cur.fetchall()]
             except Exception as e:
                 logger.debug("criteria_stats failure_reasons query failed: %s", e)
@@ -2088,13 +2192,13 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                         count(*) FILTER (WHERE NOT (cond->>'pass')::boolean) AS fail
                     FROM public.stock_readiness_daily,
                          jsonb_array_elements(technical_eval->'conditions') AS cond
-                    WHERE as_of_date = CURRENT_DATE
+                    WHERE as_of_date = %(as_of_date)s
                       AND included_in_universe = true
                       AND technical_eval IS NOT NULL
                       AND coalesce((technical_eval->>'insufficient_data')::boolean, false) IS NOT TRUE
                     GROUP BY cond->>'id'
                     """
-                )
+                , eval_date_params)
                 row_map = {
                     str(r.get("id") or ""): {
                         "pass": int(r.get("pass") or 0),
@@ -2128,14 +2232,14 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                         count(*) FILTER (WHERE NOT (ind->>'pass')::boolean) AS fail
                     FROM public.stock_readiness_daily,
                          jsonb_array_elements(technical_eval->'tiers'->'momentum'->'indicators') AS ind
-                    WHERE as_of_date = CURRENT_DATE
+                    WHERE as_of_date = %(as_of_date)s
                       AND included_in_universe = true
                       AND technical_eval IS NOT NULL
                       AND technical_eval->'tiers'->'momentum'->'indicators' IS NOT NULL
                       AND coalesce((technical_eval->>'insufficient_data')::boolean, false) IS NOT TRUE
                     GROUP BY ind->>'id'
                     """
-                )
+                , eval_date_params)
                 m_row_map = {
                     str(r.get("id") or ""): {
                         "pass": int(r.get("pass") or 0),
@@ -2167,14 +2271,14 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                         coalesce((technical_eval->'tiers'->'momentum'->>'score')::int, 0) AS score,
                         count(*)::int AS symbol_count
                     FROM public.stock_readiness_daily
-                    WHERE as_of_date = CURRENT_DATE
+                    WHERE as_of_date = %(as_of_date)s
                       AND included_in_universe = true
                       AND technical_eval IS NOT NULL
                       AND technical_eval->'tiers'->'momentum' IS NOT NULL
                       AND coalesce((technical_eval->>'insufficient_data')::boolean, false) IS NOT TRUE
                     GROUP BY 1
                     ORDER BY 1 DESC
-                """)
+                """, eval_date_params)
                 dist_rows = cur.fetchall() or []
                 m_dist_map = {int(r.get("score") or 0): int(r.get("symbol_count") or 0) for r in dist_rows}
                 momentum_score_dist = [
@@ -2195,14 +2299,14 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                         count(*) FILTER (WHERE NOT (diag->>'active')::boolean) AS inactive
                     FROM public.stock_readiness_daily,
                          jsonb_array_elements(technical_eval->'tiers'->'structure'->'diagnostics') AS diag
-                    WHERE as_of_date = CURRENT_DATE
+                    WHERE as_of_date = %(as_of_date)s
                       AND included_in_universe = true
                       AND technical_eval IS NOT NULL
                       AND technical_eval->'tiers'->'structure'->'diagnostics' IS NOT NULL
                       AND coalesce((technical_eval->>'insufficient_data')::boolean, false) IS NOT TRUE
                     GROUP BY diag->>'id'
                     """
-                )
+                , eval_date_params)
                 s_row_map = {
                     str(r.get("id") or ""): {
                         "pass": int(r.get("active") or 0),
@@ -2237,14 +2341,14 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                         count(*) FILTER (WHERE NOT (ind->>'pass')::boolean) AS fail
                     FROM public.stock_readiness_daily,
                          jsonb_array_elements(technical_eval->'tiers'->'sentiment'->'indicators') AS ind
-                    WHERE as_of_date = CURRENT_DATE
+                    WHERE as_of_date = %(as_of_date)s
                       AND included_in_universe = true
                       AND technical_eval IS NOT NULL
                       AND technical_eval->'tiers'->'sentiment'->'indicators' IS NOT NULL
                       AND coalesce((technical_eval->>'insufficient_data')::boolean, false) IS NOT TRUE
                     GROUP BY ind->>'id'
                     """
-                )
+                , eval_date_params)
                 st_row_map = {
                     str(r.get("id") or ""): {
                         "pass": int(r.get("pass") or 0),
@@ -2276,13 +2380,13 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
                         coalesce(technical_pass_count, 0) AS conditions_passed,
                         count(*)::int AS symbol_count
                     FROM public.stock_readiness_daily
-                    WHERE as_of_date = CURRENT_DATE
+                    WHERE as_of_date = %(as_of_date)s
                       AND included_in_universe = true
                       AND technical_eval IS NOT NULL
                       AND coalesce((technical_eval->>'insufficient_data')::boolean, false) IS NOT TRUE
                     GROUP BY 1
                     ORDER BY 1 DESC
-                """)
+                """, eval_date_params)
                 dist_rows = cur.fetchall() or []
                 dist_map = {int(r.get("conditions_passed") or 0): int(r.get("symbol_count") or 0) for r in dist_rows}
                 tech_dist = [
@@ -2296,6 +2400,8 @@ def compute_sepa_criteria_stats(status_config: dict) -> Dict[str, Any]:
         return {
             "ok": True,
             "universe_count": universe_count,
+            "as_of_date": stats_as_of_iso,
+            "as_of_date_is_today": as_of_is_today,
             "fundamental": fund_result,
             "technical": {
                 **tech_result,

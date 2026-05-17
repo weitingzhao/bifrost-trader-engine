@@ -553,6 +553,9 @@ export interface SepaCriteriaStats {
   ok: boolean
   error?: string
   universe_count: number
+  /** Resolved stock_readiness_daily as_of_date (latest eval day if today is empty). */
+  as_of_date?: string | null
+  as_of_date_is_today?: boolean
   fundamental: {
     cached_count: number
     fund_pass_count: number

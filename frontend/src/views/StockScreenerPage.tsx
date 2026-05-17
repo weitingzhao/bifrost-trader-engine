@@ -490,6 +490,20 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
   const techBarColorForN = (n: number) =>
     n === 11 ? 'ssp-dist-bar-fill--tech-ok' : n >= 9 ? 'ssp-dist-bar-fill--tech-good' : n >= 7 ? 'ssp-dist-bar-fill--tech-warn' : n >= 4 ? 'ssp-dist-bar-fill--tech-poor' : 'ssp-dist-bar-fill--tech-error'
 
+  const statsAsOfHint = useMemo(() => {
+    const d = criteriaStats?.as_of_date
+    if (!d) return null
+    if (criteriaStats?.as_of_date_is_today) return `As of ${d}`
+    return `As of ${d} (not today — refresh snapshot in Stock Data Readiness)`
+  }, [criteriaStats?.as_of_date, criteriaStats?.as_of_date_is_today])
+
+  const fundDistEmptyMsg = criteriaStats?.as_of_date
+    ? `No fundamental distribution for ${criteriaStats.as_of_date}. Run fundamental backfill in Stock Data Readiness.`
+    : 'No fundamental distribution — refresh snapshot and run fundamental backfill in Stock Data Readiness.'
+  const techDistEmptyMsg = criteriaStats?.as_of_date
+    ? `No technical distribution for ${criteriaStats.as_of_date}. Run technical backfill in Stock Data Readiness.`
+    : 'No technical distribution — refresh snapshot and run technical backfill in Stock Data Readiness.'
+
   const hasAutoLoadedRef = useRef(false)
   useEffect(() => {
     if (hasAutoLoadedRef.current || !dist || dist.length === 0) return
@@ -564,7 +578,10 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
           {/* Col 1: SEPA Dist (3/12) */}
           <section className="ssp-card">
             <header className="ssp-card-head ssp-card-head--tight">
-              <h3 className="ssp-card-title">SEPA Dist.</h3>
+              <h3 className="ssp-card-title">
+                SEPA Dist.
+                {statsAsOfHint && <span className="ssp-card-title-aux">{statsAsOfHint}</span>}
+              </h3>
               <button type="button" className="ssp-btn ssp-btn--ghost" onClick={() => void loadCriteriaStats()} disabled={criteriaLoading} title="Refresh">{criteriaLoading ? '…' : '↻'}</button>
             </header>
             {activeTechBucket != null && (
@@ -582,7 +599,7 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
                 ? <div className="ssp-dist-rows">{techDist.map(({ conditions_passed, symbol_count }) => funnelRow(conditions_passed, symbol_count, techDistMaxCount, techDistBase, techBarColorForN, activeTechBucket, handleTechBucketClick, '11'))}</div>
                 : criteriaLoading
                   ? <div className="ssp-empty-line">Loading distribution…</div>
-                  : <div className="ssp-empty-line">No technical distribution — refresh snapshot and run technical backfill in Stock Data Readiness.</div>}
+                  : <div className="ssp-empty-line">{techDistEmptyMsg}</div>}
             </div>
           </section>
 
@@ -735,7 +752,10 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
           {/* Left column: SEPA Distribution (3/12) */}
           <section className="ssp-card ssp-fund-dist">
             <header className="ssp-card-head ssp-card-head--tight">
-              <h3 className="ssp-card-title">SEPA Dist.</h3>
+              <h3 className="ssp-card-title">
+                SEPA Dist.
+                {statsAsOfHint && <span className="ssp-card-title-aux">{statsAsOfHint}</span>}
+              </h3>
               <button type="button" className="ssp-btn ssp-btn--ghost" onClick={() => void loadCriteriaStats()} disabled={criteriaLoading} title="Refresh">{criteriaLoading ? '…' : '↻'}</button>
             </header>
             {activeBucket != null && (
@@ -753,7 +773,7 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
                 ? <div className="ssp-dist-rows">{dist.map(({ conditions_passed, symbol_count }) => funnelRow(conditions_passed, symbol_count, distMaxCount, distBase, barColorForN, activeBucket, handleBucketClick, '8'))}</div>
                 : criteriaLoading
                   ? <div className="ssp-empty-line">Loading distribution…</div>
-                  : <div className="ssp-empty-line">No fundamental distribution — refresh snapshot and run fundamental backfill in Stock Data Readiness.</div>}
+                  : <div className="ssp-empty-line">{fundDistEmptyMsg}</div>}
             </div>
           </section>
 
