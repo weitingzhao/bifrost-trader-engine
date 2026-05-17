@@ -69,7 +69,7 @@ EXPECTED_TABLES_BY_CATEGORY: Dict[str, List[str]] = {
         "gate_safety_strategy_earnings_dates",
     ],
     "job": ["job_bars_backfill", "job_ticker_reference_state"],
-    "option": ["option_contracts", "option_day", "option_min", "option_snapshots"],
+    "option": ["option_contracts", "option_day", "option_day_fetch_skip", "option_min", "option_snapshots"],
     "preference": [
         "preference_market_streams_symbol_order",
         "preference_position_categories",

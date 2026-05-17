@@ -1268,12 +1268,123 @@
   opacity: 0.75;
 }
 
-.sip-pcr-job-status {
+/* ── Background-refresh banner (non-blocking) ────────────────────────────── */
+
+.sip-pcr-bg-banner {
+  margin: 4px 12px 8px;
+  padding: 8px 10px;
+  background: rgba(124, 106, 247, 0.07);
+  border: 1px solid rgba(124, 106, 247, 0.2);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sip-pcr-bg-banner-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Spinning refresh icon via CSS animation */
+.sip-pcr-bg-spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(124, 106, 247, 0.25);
+  border-top-color: #7c6af7;
+  border-radius: 50%;
+  animation: sip-spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes sip-spin {
+  to { transform: rotate(360deg); }
+}
+
+.sip-pcr-bg-label {
+  font-size: 0.77rem;
+  color: var(--color-text-muted);
+  flex: 1;
+  min-width: 0;
+}
+
+.sip-pcr-progress-jobid {
+  font-size: 0.7rem;
+  opacity: 0.5;
+  font-family: monospace;
+}
+
+.sip-pcr-bg-stage {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #a78bfa;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  word-break: break-all;
+  max-width: 55%;
+  text-align: right;
+}
+
+.sip-pcr-bg-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sip-pcr-progress-bar-track {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.sip-pcr-progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #7c6af7 0%, #a78bfa 100%);
+  border-radius: 4px;
+  transition: width 0.7s ease;
+}
+
+.sip-pcr-bg-stats {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+.sip-pcr-bg-stats span { white-space: nowrap; }
+
+.sip-pcr-progress-pcr {
+  color: #a78bfa !important;
+  font-weight: 600;
+}
+
+.sip-pcr-first-fetch {
   padding: 6px 12px 0;
 }
 
-.sip-pcr-job-status .section-hint {
-  font-variant-numeric: tabular-nums;
+/* light-mode overrides */
+:root:not(.dark) .sip-pcr-bg-banner {
+  background: rgba(109, 93, 224, 0.05);
+  border-color: rgba(109, 93, 224, 0.18);
+}
+
+:root:not(.dark) .sip-pcr-progress-bar-track {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+:root:not(.dark) .sip-pcr-progress-bar-fill {
+  background: linear-gradient(90deg, #6d5de0 0%, #8b78e8 100%);
+}
+
+:root:not(.dark) .sip-pcr-bg-stage {
+  color: #6d5de0;
 }
 
 /* ── Option Chain by Expiry (Barchart-inspired table) ─────────────────────── */

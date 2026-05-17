@@ -35,6 +35,21 @@ def get_putcall_ratio_report(
     return {"ok": True, "count": len(rows), "rows": rows}
 
 
+@router.get("/put-call-ratio/backfill-progress")
+def get_backfill_progress(
+    request: Request,
+    symbol: str = Query(..., description="Underlying symbol (e.g. NVDA)"),
+    lookback_days: int = Query(252, ge=1, le=730),
+) -> Dict[str, Any]:
+    """Live progress for a running PCR backfill job: contracts written, dates covered, % done."""
+    from src.vendor.massive.reader import get_pcr_backfill_progress
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    return get_pcr_backfill_progress(db, symbol=symbol, lookback_days=lookback_days)
+
+
 @router.get("/put-call-ratio/chain-summary")
 def get_chain_expiry_summary(
     request: Request,

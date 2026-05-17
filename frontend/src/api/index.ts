@@ -177,6 +177,7 @@ export {
   postStockDayGapBatch,
   fetchStockDayQualityDetail,
   fetchOptionChainExpirySummary,
+  fetchPcrBackfillProgress,
 } from './research/research'
 export type {
   OptionSnapshotRow,
@@ -250,6 +251,7 @@ export type {
   PutCallRatioHistoryResponse,
   OptionChainExpiryRow,
   OptionChainExpirySummaryResponse,
+  PcrBackfillProgress,
 } from './research/research'
 export {
   fetchTradingCapabilities,

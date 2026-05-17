@@ -3,10 +3,11 @@ import {
   fetchBarsBenchmark,
   fetchPutCallRatioHistory,
   fetchOptionChainExpirySummary,
+  fetchPcrBackfillProgress,
   postMassiveSync,
   subscribeMassiveJobEvents,
 } from '../api'
-import type { PutCallRatioHistoryPoint, OptionChainExpiryRow } from '../api'
+import type { PutCallRatioHistoryPoint, OptionChainExpiryRow, PcrBackfillProgress } from '../api'
 import {
   fetchSymbolFundamentalConditions,
   fetchSymbolTechnicalConditions,
@@ -652,6 +653,8 @@ export function StockInspectorPanel({
   const [pcrJobId, setPcrJobId] = useState<string | null>(null)
   const [pcrJobStatus, setPcrJobStatus] = useState<string | null>(null)
   const pcrJobSubRef = useRef<{ close: () => void } | null>(null)
+  const pcrProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [pcrProgress, setPcrProgress] = useState<PcrBackfillProgress | null>(null)
   const closePcrJobSub = useCallback(() => {
     pcrJobSubRef.current?.close()
     pcrJobSubRef.current = null
@@ -679,10 +682,35 @@ export function StockInspectorPanel({
     setPcrRetrieving(false)
     setPcrJobId(null)
     setPcrJobStatus(null)
+    setPcrProgress(null)
     closePcrJobSub()
   }, [symU, closePcrJobSub])
 
   useEffect(() => () => { closePcrJobSub() }, [closePcrJobSub])
+
+  // Poll DB progress every 4s while a job is running
+  useEffect(() => {
+    if (!pcrRetrieving || !symU) {
+      if (pcrProgressTimerRef.current) {
+        clearInterval(pcrProgressTimerRef.current)
+        pcrProgressTimerRef.current = null
+      }
+      return
+    }
+    const poll = () => {
+      fetchPcrBackfillProgress(symU, 252).then((prog) => {
+        if (prog.ok) setPcrProgress(prog)
+      }).catch(() => {})
+    }
+    poll()
+    pcrProgressTimerRef.current = setInterval(poll, 4000)
+    return () => {
+      if (pcrProgressTimerRef.current) {
+        clearInterval(pcrProgressTimerRef.current)
+        pcrProgressTimerRef.current = null
+      }
+    }
+  }, [pcrRetrieving, symU])
 
   useEffect(() => {
     if (!symU || !pcrExpanded) return
@@ -706,12 +734,11 @@ export function StockInspectorPanel({
   const retrievePcr = useCallback(async () => {
     if (!symU || pcrRetrieving) return
     closePcrJobSub()
-    setPcrRetrieving(true)
     setPcrRetrieveError(null)
     setPcrJobId(null)
     setPcrJobStatus('enqueueing')
-    let jobFailed = false
-    let streamError: string | null = null
+    setPcrProgress(null)
+
     try {
       const syncRes = await postMassiveSync('symbol_pcr_snapshot', {
         symbol: symU,
@@ -726,75 +753,60 @@ export function StockInspectorPanel({
       }
       const jobId = syncRes.job_id
       setPcrJobId(jobId)
-      setPcrJobStatus(syncRes.deduplicated ? 'pending (deduplicated)' : 'pending')
+      setPcrJobStatus(syncRes.deduplicated ? 'pending (dedup)' : 'pending')
+      setPcrRetrieving(true)
 
-      await new Promise<void>((resolve) => {
-        const sub = subscribeMassiveJobEvents(
-          jobId,
-          (ev) => {
-            if (!ev.ok) {
-              streamError = ev.error ?? 'Job stream error'
-              setPcrJobStatus('failed')
-              resolve()
-              return
-            }
-            const st = (ev.job?.status ?? 'pending').toLowerCase()
+      // Fire-and-forget: subscribe to SSE — does NOT block the UI.
+      // Charts stay visible with existing data while the job runs in background.
+      const capSym = symU
+      const sub = subscribeMassiveJobEvents(
+        jobId,
+        (ev) => {
+          if (!ev.ok) {
+            setPcrJobStatus('stream error')
+            setPcrRetrieving(false)
+            closePcrJobSub()
+            return
+          }
+          const st = (ev.job?.status ?? 'pending').toLowerCase()
+          if (st === 'done') {
+            const jr = ev.job?.result as Record<string, unknown> | undefined
+            const pcrDates = jr?.pcr_dates_computed
+            const hist = jr?.option_day_history as Record<string, unknown> | undefined
+            const fetched = typeof hist?.contracts_processed === 'number' ? hist.contracts_processed : null
+            const skippedDb = typeof hist?.contracts_skipped_db === 'number' ? hist.contracts_skipped_db : null
+            const skippedEmpty = typeof hist?.contracts_skipped_empty === 'number' ? hist.contracts_skipped_empty : null
+            const parts: string[] = []
+            if (typeof pcrDates === 'number' && pcrDates > 0) parts.push(`${pcrDates}d PCR`)
+            if (fetched != null) parts.push(`${fetched} fetched`)
+            if (skippedDb != null && skippedDb > 0) parts.push(`${skippedDb} already cached`)
+            if (skippedEmpty != null && skippedEmpty > 0) parts.push(`${skippedEmpty} no data on Massive`)
+            setPcrJobStatus(parts.length > 0 ? `done · ${parts.join(' · ')}` : 'done')
+            // Silently reload data in background
+            loadPcrHistory().catch(() => {})
+            fetchOptionChainExpirySummary(capSym)
+              .then((res) => { setChainRows(res.ok ? res.rows : []) })
+              .catch(() => {})
+            setPcrRetrieving(false)
+            closePcrJobSub()
+          } else if (st === 'failed') {
+            const jr = ev.job?.result as Record<string, unknown> | undefined
+            const errMsg = typeof jr?.error === 'string' ? jr.error : 'Job failed'
+            setPcrRetrieveError(errMsg)
+            setPcrJobStatus('failed')
+            setPcrRetrieving(false)
+            closePcrJobSub()
+          } else {
             setPcrJobStatus(st)
-            if (st === 'done' || st === 'failed') {
-              if (st === 'done') {
-                const jr = ev.job?.result as Record<string, unknown> | undefined
-                const pcrDates = jr?.pcr_dates_computed
-                if (typeof pcrDates === 'number' && pcrDates > 0) {
-                  const hist = jr?.option_day_history as Record<string, unknown> | undefined
-                  const fetched = typeof hist?.contracts_processed === 'number' ? hist.contracts_processed : null
-                  const skipped = typeof hist?.contracts_skipped === 'number' ? hist.contracts_skipped : null
-                  const parts = [`${pcrDates}d PCR`]
-                  if (fetched != null) parts.push(`${fetched} fetched`)
-                  if (skipped != null && skipped > 0) parts.push(`${skipped} skipped`)
-                  setPcrJobStatus(`done · ${parts.join(', ')}`)
-                }
-              }
-              if (st === 'failed') {
-                jobFailed = true
-                const jr = ev.job?.result as Record<string, unknown> | undefined
-                streamError = typeof jr?.error === 'string' ? jr.error : 'Job failed'
-              }
-              resolve()
-            }
-          },
-          { timeoutSec: 900 },
-        )
-        pcrJobSubRef.current = sub
-      })
-      closePcrJobSub()
-
-      setPcrJobStatus('loading report')
-      const chainP = fetchOptionChainExpirySummary(symU)
-        .then((res) => {
-          setChainRows(res.ok ? res.rows : [])
-        })
-        .catch(() => {})
-      const series = await loadPcrHistory()
-      await chainP
-      if (series.length > 0) {
-        setPcrRetrieveError(null)
-        setPcrJobStatus('done')
-      } else if (jobFailed || streamError) {
-        setPcrRetrieveError(
-          streamError
-            ? `${streamError} (no PCR rows returned from Research API)`
-            : 'Job finished but no PCR rows returned from Research API',
-        )
-        setPcrJobStatus('failed')
-      } else {
-        setPcrRetrieveError('No PCR data returned after job completed.')
-        setPcrJobStatus('done')
-      }
+          }
+        },
+        { timeoutSec: 900 },
+      )
+      pcrJobSubRef.current = sub
+      // Return immediately — SSE continues in background
     } catch (e) {
       setPcrRetrieveError(e instanceof Error ? e.message : 'Unknown error')
-      setPcrJobStatus('failed')
-    } finally {
-      closePcrJobSub()
+      setPcrJobStatus(null)
       setPcrRetrieving(false)
     }
   }, [symU, pcrRetrieving, loadPcrHistory, closePcrJobSub])
@@ -1468,16 +1480,56 @@ export function StockInspectorPanel({
 
             {pcrExpanded && (
               <>
-                {pcrLoading && !pcrRetrieving && <p className="section-hint">Loading PCR data…</p>}
+                {pcrLoading && <p className="section-hint">Loading PCR data…</p>}
+
+                {/* Non-blocking background-refresh banner */}
                 {pcrRetrieving && (
-                  <div className="sip-pcr-job-status" aria-live="polite">
-                    <p className="section-hint">
-                      Fetching options chain for {symU}
-                      {pcrJobId ? ` · job ${pcrJobId}` : ''}
-                      {pcrJobStatus ? ` · ${pcrJobStatus}` : ''}
-                    </p>
+                  <div className="sip-pcr-bg-banner" aria-live="polite">
+                    <div className="sip-pcr-bg-banner-row">
+                      <span className="sip-pcr-bg-spinner" />
+                      <span className="sip-pcr-bg-label">
+                        Refreshing in background
+                        {pcrJobId ? <span className="sip-pcr-progress-jobid"> · {pcrJobId.slice(0, 8)}</span> : null}
+                      </span>
+                      <span className="sip-pcr-bg-stage">{pcrJobStatus ?? 'enqueueing'}</span>
+                    </div>
+                    {pcrProgress && pcrProgress.total_contracts > 0 && (
+                      <div className="sip-pcr-bg-progress">
+                        <div className="sip-pcr-progress-bar-track">
+                          <div
+                            className="sip-pcr-progress-bar-fill"
+                            style={{ width: `${Math.max(pcrProgress.pct, 2)}%` }}
+                          />
+                        </div>
+                        <div className="sip-pcr-bg-stats">
+                          <span>
+                            {pcrProgress.contracts_with_data.toLocaleString()}
+                            {' / '}
+                            {pcrProgress.total_contracts.toLocaleString()}
+                            {' contracts · '}{pcrProgress.pct}%
+                          </span>
+                          <span>
+                            {pcrProgress.dates_with_data > 0
+                              ? `${pcrProgress.dates_with_data}d covered`
+                              : 'awaiting first write'}
+                            {pcrProgress.latest_date ? ` · latest ${pcrProgress.latest_date}` : ''}
+                          </span>
+                          {pcrProgress.pcr_dates_computed > 0 && (
+                            <span className="sip-pcr-progress-pcr">
+                              {pcrProgress.pcr_dates_computed} PCR dates
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
+
+                {pcrRetrieveError && (
+                  <p className="section-hint sip-fund-hint--err">{pcrRetrieveError}</p>
+                )}
+
+                {/* Empty state: no data yet, not currently fetching */}
                 {!pcrLoading && !pcrRetrieving && pcrSeries.length === 0 && (
                   <div className="sip-pcr-retrieve-block">
                     <p className="section-hint">
@@ -1493,10 +1545,18 @@ export function StockInspectorPanel({
                     </button>
                   </div>
                 )}
-                {pcrRetrieveError && (
-                  <p className="section-hint sip-fund-hint--err">{pcrRetrieveError}</p>
+
+                {/* First-fetch placeholder: job running but no data written yet */}
+                {!pcrLoading && pcrRetrieving && pcrSeries.length === 0 && (
+                  <div className="sip-pcr-first-fetch">
+                    <p className="section-hint">
+                      Fetching option contracts — chart will appear automatically when ready.
+                    </p>
+                  </div>
                 )}
-                {!pcrLoading && !pcrRetrieving && pcrSeries.length > 0 && (() => {
+
+                {/* Charts & tables — always visible once data exists, even during background refresh */}
+                {!pcrLoading && pcrSeries.length > 0 && (() => {
                   const latest = pcrSeries[pcrSeries.length - 1]
                   const prev5 = pcrSeries.slice(-6, -1)
                   const validPrev5 = prev5.filter(p => p.ratio_oi != null)

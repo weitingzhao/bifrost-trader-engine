@@ -3378,6 +3378,23 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS option_oi_daily_symbol_date ON option_open_interest_daily (symbol, trade_date DESC)"
         )
+        _log_table("option_day_fetch_skip", "Tombstone: Massive confirmed 0-bar result for (ticker, date range)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS option_day_fetch_skip (
+                option_day_fetch_skip_id bigserial PRIMARY KEY,
+                massive_option_ticker text NOT NULL,
+                range_start date NOT NULL,
+                range_end date NOT NULL,
+                checked_at timestamptz NOT NULL DEFAULT now(),
+                bars_returned int NOT NULL DEFAULT 0,
+                UNIQUE (massive_option_ticker, range_start, range_end)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS option_day_fetch_skip_ticker ON option_day_fetch_skip (massive_option_ticker, range_start)"
+        )
         _log_table("option_trades", "Option trades ticks (Massive Developer tier)")
         cur.execute(
             """

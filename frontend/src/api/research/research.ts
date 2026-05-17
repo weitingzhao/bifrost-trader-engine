@@ -1330,6 +1330,63 @@ export async function fetchOptionChainExpirySummary(
   }
 }
 
+// ── PCR Backfill Progress ─────────────────────────────────────────────────────
+
+export interface PcrBackfillProgress {
+  ok: boolean
+  error?: string
+  symbol?: string
+  lookback_days?: number
+  start_date?: string | null
+  contracts_with_data: number
+  total_contracts: number
+  pct: number
+  dates_with_data: number
+  latest_date: string | null
+  earliest_date: string | null
+  pcr_dates_computed: number
+}
+
+export async function fetchPcrBackfillProgress(
+  symbol: string,
+  lookbackDays = 252,
+): Promise<PcrBackfillProgress> {
+  const sym = (symbol || '').trim().toUpperCase()
+  const fallback: PcrBackfillProgress = {
+    ok: false,
+    contracts_with_data: 0,
+    total_contracts: 0,
+    pct: 0,
+    dates_with_data: 0,
+    latest_date: null,
+    earliest_date: null,
+    pcr_dates_computed: 0,
+  }
+  if (!sym) return { ...fallback, error: 'symbol is required' }
+  try {
+    const r = await fetch(
+      `${researchApiUrl('/research/put-call-ratio/backfill-progress')}?symbol=${encodeURIComponent(sym)}&lookback_days=${lookbackDays}`,
+    )
+    const j = await r.json().catch(() => ({}))
+    if (!j.ok) return { ...fallback, error: j.error ?? 'Request failed' }
+    return {
+      ok: true,
+      symbol: j.symbol ?? sym,
+      lookback_days: j.lookback_days ?? lookbackDays,
+      start_date: j.start_date ?? null,
+      contracts_with_data: Number(j.contracts_with_data ?? 0),
+      total_contracts: Number(j.total_contracts ?? 0),
+      pct: Number(j.pct ?? 0),
+      dates_with_data: Number(j.dates_with_data ?? 0),
+      latest_date: j.latest_date ?? null,
+      earliest_date: j.earliest_date ?? null,
+      pcr_dates_computed: Number(j.pcr_dates_computed ?? 0),
+    }
+  } catch {
+    return { ...fallback, error: 'Network error' }
+  }
+}
+
 // ── Put/Call Ratio ────────────────────────────────────────────────────────────
 
 export interface PutCallRatioHistoryPoint {

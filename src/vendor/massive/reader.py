@@ -1794,6 +1794,100 @@ def get_report_putcall_ratio_history(
         return []
 
 
+def get_pcr_backfill_progress(
+    status_config: dict,
+    symbol: str,
+    lookback_days: int = 252,
+) -> Dict[str, Any]:
+    """Live progress snapshot for a running symbol_pcr_snapshot job.
+
+    Queries option_day and option_contracts directly so the UI can poll
+    during the job without waiting for SSE completion.
+    """
+    from datetime import date as _date, datetime as _datetime
+    from zoneinfo import ZoneInfo
+
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"ok": False, "error": "symbol is required"}
+
+    lim = max(1, min(int(lookback_days), 730))
+    today_et = _datetime.now(ZoneInfo("America/New_York")).date()
+    start_date = today_et - __import__("datetime").timedelta(days=lim)
+
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                # Contracts already written into option_day in the window
+                cur.execute(
+                    """
+                    SELECT
+                        COUNT(DISTINCT (expiry, strike, option_right)) AS contracts_with_data,
+                        COUNT(DISTINCT (bar_time AT TIME ZONE 'America/New_York')::date) AS dates_with_data,
+                        MAX((bar_time AT TIME ZONE 'America/New_York')::date) AS latest_date,
+                        MIN((bar_time AT TIME ZONE 'America/New_York')::date) AS earliest_date
+                    FROM option_day
+                    WHERE UPPER(TRIM(symbol)) = %s
+                      AND source = 'massive'
+                      AND (bar_time AT TIME ZONE 'America/New_York')::date >= %s
+                    """,
+                    (sym, start_date),
+                )
+                row = cur.fetchone()
+                contracts_with_data = int(row[0] or 0) if row else 0
+                dates_with_data = int(row[1] or 0) if row else 0
+                latest_date = str(row[2]) if row and row[2] else None
+                earliest_date = str(row[3]) if row and row[3] else None
+
+                # Total contracts known for the symbol
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM option_contracts
+                    WHERE UPPER(TRIM(symbol)) = %s
+                      AND massive_option_ticker IS NOT NULL
+                      AND TRIM(massive_option_ticker) <> ''
+                    """,
+                    (sym,),
+                )
+                total_row = cur.fetchone()
+                total_contracts = int(total_row[0] or 0) if total_row else 0
+
+                # PCR report rows already computed in the window
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM report_option_put_call_ratio_daily
+                    WHERE symbol = %s AND source = 'massive' AND trade_date >= %s
+                    """,
+                    (sym, start_date),
+                )
+                pcr_row = cur.fetchone()
+                pcr_dates_computed = int(pcr_row[0] or 0) if pcr_row else 0
+
+            pct = round(contracts_with_data / total_contracts * 100) if total_contracts > 0 else 0
+            return {
+                "ok": True,
+                "symbol": sym,
+                "lookback_days": lim,
+                "start_date": start_date.isoformat(),
+                "contracts_with_data": contracts_with_data,
+                "total_contracts": total_contracts,
+                "pct": pct,
+                "dates_with_data": dates_with_data,
+                "latest_date": latest_date,
+                "earliest_date": earliest_date,
+                "pcr_dates_computed": pcr_dates_computed,
+            }
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("get_pcr_backfill_progress failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
 def get_option_chain_expiry_summary(
     status_config: dict,
     symbol: str,

@@ -404,6 +404,82 @@ def _existing_option_day_coverage(
     return out
 
 
+FETCH_SKIP_TTL_DAYS = 30  # tombstone TTL: re-try after this many days
+
+
+def _load_fetch_skip_map(
+    conn: Any,
+    tickers: List[str],
+) -> Dict[str, List[Tuple[date, date]]]:
+    """Return {massive_option_ticker: [(range_start, range_end), ...]} for active tombstones.
+
+    Only returns tombstones checked within FETCH_SKIP_TTL_DAYS days (still fresh).
+    """
+    if not tickers:
+        return {}
+    placeholders = ",".join(["%s"] * len(tickers))
+    out: Dict[str, List[Tuple[date, date]]] = {}
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT massive_option_ticker, range_start, range_end
+            FROM option_day_fetch_skip
+            WHERE massive_option_ticker IN ({placeholders})
+              AND checked_at >= now() - INTERVAL '{FETCH_SKIP_TTL_DAYS} days'
+            """,
+            tuple(tickers),
+        )
+        for row in cur.fetchall() or []:
+            if not row or len(row) < 3:
+                continue
+            ot = str(row[0])
+            rs = row[1] if isinstance(row[1], date) else date.fromisoformat(str(row[1])[:10])
+            re = row[2] if isinstance(row[2], date) else date.fromisoformat(str(row[2])[:10])
+            out.setdefault(ot, []).append((rs, re))
+    return out
+
+
+def _is_range_tombstoned(
+    skip_map: Dict[str, List[Tuple[date, date]]],
+    ot: str,
+    fetch_start: date,
+    fetch_end: date,
+) -> bool:
+    """True if any active tombstone for *ot* fully covers [fetch_start, fetch_end]."""
+    for rs, re in skip_map.get(ot, []):
+        if rs <= fetch_start and re >= fetch_end:
+            return True
+    return False
+
+
+def _record_fetch_skip(
+    conn: Any,
+    ot: str,
+    range_start: date,
+    range_end: date,
+) -> None:
+    """Upsert a tombstone: Massive returned 0 bars for (ot, range_start, range_end)."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO option_day_fetch_skip
+                    (massive_option_ticker, range_start, range_end, checked_at, bars_returned)
+                VALUES (%s, %s, %s, now(), 0)
+                ON CONFLICT (massive_option_ticker, range_start, range_end)
+                DO UPDATE SET checked_at = now(), bars_returned = 0
+                """,
+                (ot, range_start, range_end),
+            )
+        conn.commit()
+    except Exception as ex:  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.debug("_record_fetch_skip failed for %s: %s", ot, ex)
+
+
 def _backfill_symbol_option_day_history(
     conn: Any,
     client: Any,
@@ -416,8 +492,10 @@ def _backfill_symbol_option_day_history(
 ) -> Dict[str, Any]:
     """Fetch Massive v2 daily aggs per contract; upsert option_day for PCR volume history.
 
-    Incremental: checks existing coverage in option_day and only fetches missing date ranges.
-    A contract is skipped entirely when its stored data already spans [start_date, end_date].
+    Incremental skip order (highest priority first):
+    1. DB already covers [start_date, end_date] → skip (db_covered)
+    2. Tombstone: Massive confirmed 0-bar for the range within TTL → skip (massive_empty)
+    3. Otherwise → call API; record tombstone if 0 bars returned
     """
     from src.massive.option_day_pool_fill import fetch_option_aggs_with_retry
 
@@ -428,28 +506,24 @@ def _backfill_symbol_option_day_history(
         conn, sym, max_expiries=max_expiries, max_contracts=max_contracts
     )
 
-    # One batch query for existing coverage — avoids N per-contract DB round-trips
+    # Batch queries for existing coverage and tombstones
     existing = _existing_option_day_coverage(conn, sym, start_date, end_date)
+    tickers = [ot for ot, *_ in targets]
+    skip_map = _load_fetch_skip_map(conn, tickers)
 
     errors: List[str] = []
     contracts_processed = 0
-    contracts_skipped = 0
+    contracts_skipped_db = 0       # already in DB
+    contracts_skipped_empty = 0    # Massive confirmed no data (tombstone)
     bars_upserted = 0
 
     for ot, u_sym, exp, strike, opt_right in targets:
-        # Determine the fetch window: skip or trim based on what's already in DB
         cov = existing.get((exp, strike, opt_right.strip().upper()))
         if cov is not None:
             db_min, db_max = cov
             if db_min <= start_date and db_max >= end_date:
-                # Full coverage already exists — skip the API call entirely
-                contracts_skipped += 1
+                contracts_skipped_db += 1
                 continue
-            # Partial: determine what's still missing
-            # Fetch only the gap(s). Simplest safe heuristic: fetch from start_date up to
-            # one day before db_min (left gap) plus from db_max+1 day to end_date (right gap).
-            # We issue at most two API calls per contract when there's a gap on both sides.
-            # In practice the right-side gap (recent missing days) is the common case.
             fetch_ranges: List[Tuple[date, date]] = []
             if db_min > start_date:
                 fetch_ranges.append((start_date, db_min - timedelta(days=1)))
@@ -458,8 +532,22 @@ def _backfill_symbol_option_day_history(
         else:
             fetch_ranges = [(start_date, end_date)]
 
+        # Filter out tombstoned sub-ranges
+        live_ranges: List[Tuple[date, date]] = []
+        tombstone_count = 0
+        for fs, fe in fetch_ranges:
+            if _is_range_tombstoned(skip_map, ot, fs, fe):
+                tombstone_count += 1
+            else:
+                live_ranges.append((fs, fe))
+
+        if not live_ranges:
+            # All sub-ranges tombstoned → skip this contract
+            contracts_skipped_empty += tombstone_count
+            continue
+
         contract_ok = True
-        for fetch_start, fetch_end in fetch_ranges:
+        for fetch_start, fetch_end in live_ranges:
             s_ms = int(datetime.combine(fetch_start, time.min, tzinfo=z).timestamp() * 1000)
             e_ms = int(datetime.combine(fetch_end + timedelta(days=1), time.min, tzinfo=z).timestamp() * 1000) - 1
             try:
@@ -474,6 +562,9 @@ def _backfill_symbol_option_day_history(
                 n = _apply_option_day_aggs(conn, u_sym, exp, strike, opt_right, aggs)
                 conn.commit()
                 bars_upserted += n
+                if n == 0:
+                    # Massive returned an empty 200 — record tombstone so we skip next time
+                    _record_fetch_skip(conn, ot, fetch_start, fetch_end)
             except Exception as ex:  # noqa: BLE001
                 try:
                     conn.rollback()
@@ -487,14 +578,17 @@ def _backfill_symbol_option_day_history(
         if contract_ok:
             contracts_processed += 1
 
+    contracts_skipped = contracts_skipped_db + contracts_skipped_empty
     logger.info(
-        "symbol_pcr_history backfill: %s processed=%s skipped=%s upserted=%s errors=%s",
-        sym, contracts_processed, contracts_skipped, bars_upserted, len(errors),
+        "symbol_pcr_history backfill: %s processed=%s skipped_db=%s skipped_empty=%s upserted=%s errors=%s",
+        sym, contracts_processed, contracts_skipped_db, contracts_skipped_empty, bars_upserted, len(errors),
     )
     return {
         "contracts_found": len(targets),
         "contracts_processed": contracts_processed,
         "contracts_skipped": contracts_skipped,
+        "contracts_skipped_db": contracts_skipped_db,
+        "contracts_skipped_empty": contracts_skipped_empty,
         "bars_upserted": bars_upserted,
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
@@ -522,6 +616,43 @@ def _pcr_trade_dates_with_option_day(
               AND (bar_time AT TIME ZONE 'America/New_York')::date >= %s
               AND (bar_time AT TIME ZONE 'America/New_York')::date <= %s
             ORDER BY td
+            """,
+            (sym, start_date, end_date),
+        )
+        out: List[date] = []
+        for row in cur.fetchall() or []:
+            if not row or row[0] is None:
+                continue
+            td = row[0]
+            if not isinstance(td, date):
+                td = date.fromisoformat(str(td)[:10])
+            out.append(td)
+    return out
+
+
+def _pcr_trade_dates_from_oi(
+    conn: Any,
+    symbol: str,
+    *,
+    start_date: date,
+    end_date: date,
+) -> List[date]:
+    """Distinct trade dates with option_open_interest_daily rows for symbol.
+
+    Used as the primary date source for PCR recomputation — OI is always populated
+    and does not depend on option_day, so this works even if option_day was cleared.
+    """
+    sym = (symbol or "").strip().upper()
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT trade_date
+            FROM option_open_interest_daily
+            WHERE UPPER(TRIM(symbol)) = %s
+              AND source = 'massive'
+              AND trade_date >= %s
+              AND trade_date <= %s
+            ORDER BY trade_date
             """,
             (sym, start_date, end_date),
         )
@@ -580,12 +711,28 @@ def _run_symbol_pcr_snapshot(
         max_contracts=max_contracts,
     )
 
-    trade_dates = _pcr_trade_dates_with_option_day(
+    # Use OI dates as primary source — works even if option_day was fully cleared.
+    # This guarantees every Refresh produces a fresh, consistent PCR series.
+    trade_dates = _pcr_trade_dates_from_oi(
         conn, symbol, start_date=start_date, end_date=trade_date
     )
     if trade_date not in trade_dates:
         trade_dates.append(trade_date)
         trade_dates.sort()
+
+    # Delete stale PCR rows in the window before recomputing so that any
+    # source-table deletions (e.g. option_day cleared) are correctly reflected.
+    if trade_dates:
+        with conn.cursor() as _cur:
+            _cur.execute(
+                """
+                DELETE FROM report_option_put_call_ratio_daily
+                WHERE symbol = %s AND source = 'massive'
+                  AND trade_date >= %s AND trade_date <= %s
+                """,
+                (symbol, trade_dates[0], trade_dates[-1]),
+            )
+        conn.commit()
 
     total_pcr_rows = 0
     pcr_detail_last: List[Dict[str, Any]] = []
