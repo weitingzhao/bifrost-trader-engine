@@ -7,6 +7,9 @@
     "build": "npm run sync:massive-coverage && next build",
     "start": "next start -p 5173",
     "lint": "next lint",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "sync:massive-coverage": "mkdir -p public/plans && cp ../docs/plans/massive_api_coverage.html public/plans/massive_api_coverage.html && cp ../docs/plans/massive_api_coverage.csv public/plans/massive_api_coverage.csv && cp ../docs/plans/ib_stock_api_coverage.html public/plans/ib_stock_api_coverage.html && cp ../docs/plans/ib_stock_coverage.csv public/plans/ib_stock_coverage.csv && cp ../docs/plans/massive_stocks_api_coverage.html public/plans/massive_stocks_api_coverage.html && cp ../docs/plans/massive_stocks_api_coverage.csv public/plans/massive_stocks_api_coverage.csv"
   },
   "dependencies": {
@@ -23,7 +26,6 @@
     "clsx": "^2.1.1",
     "lucide-react": "^0.562.0",
     "next": "^15.3.3",
-    "next-themes": "^0.4.6",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "tailwind-merge": "^3.4.0",
@@ -34,10 +36,12 @@
     "@types/node": "^22.19.3",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
+    "@vitest/coverage-v8": "^4.1.7",
     "eslint": "^9.39.2",
     "eslint-config-next": "^15.3.3",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.7"
   }
 }

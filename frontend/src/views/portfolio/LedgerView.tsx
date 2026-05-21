@@ -83,218 +83,23 @@ import {
 } from './ledgerStockCategoryBuckets'
 import { buildPositionCategoryByAccountContract, stkContractKey } from './stkLedgerBucket'
 import { AppSelect } from '../../components/AppSelect'
-
-/**
- * Signed cash-flow notional for one STK fill (green if positive, red if negative).
- * Uses quantity sign when negative; when quantity is positive, Buy → -(qty×price), Sell → +(qty×price).
- */
-/** Dollar cost basis for STK snapshot: |shares| × avg cost per share. */
-function stkCostBasisFromSnapshot(
-  snap: { position: number | null; avgCost: number | null } | null | undefined,
-): number | null {
-  if (!snap) return null
-  const { position, avgCost } = snap
-  if (position == null || avgCost == null) return null
-  if (!Number.isFinite(position) || !Number.isFinite(avgCost)) return null
-  if (Math.abs(position) < 1e-12) return null
-  return Math.abs(position) * avgCost
-}
-
-/** Percent = 100 × numer / denom; null if denominator unusable. */
-function stkPctOf(numer: number, denom: number | null): number | null {
-  if (denom == null || !Number.isFinite(denom) || Math.abs(denom) < 1e-6) return null
-  if (!Number.isFinite(numer)) return null
-  return (100 * numer) / denom
-}
-
-/** Trade size in dollars: |quantity| × price (same as summary notional sum). */
-function stkNotionalAbsUsd(ex: Execution): number | null {
-  const p = Number(ex.price)
-  const q = Math.abs(Number(ex.quantity) || 0)
-  if (!Number.isFinite(p) || q <= 0) return null
-  return q * p
-}
-
-/** Notional cell color: Buy = green, Sell = red, unknown = neutral. */
-function stkNotionalSideColorClass(ex: Execution): string {
-  const s = (ex.side ?? '').toString().trim().toUpperCase()
-  if (s === 'BUY' || s === 'BOT' || s === 'B') return 'replay-pnl-realized'
-  if (s === 'SELL' || s === 'SLD' || s === 'S') return 'replay-pnl-detail-negative'
-  return 'replay-ledger-summary-realized-zero'
-}
-
-type LedgerOptSectionGroupBy = 'opportunity' | 'structure' | 'watchlist_symbol'
-
-/** Latest activity in a stock ledger group: max execution `time`, else max parsed `trade_date`. */
-function stockGroupLatestSortKey(execs: Execution[]): number {
-  let maxTs = 0
-  for (const ex of execs) {
-    const t = Number(ex.time)
-    if (Number.isFinite(t) && t > maxTs) maxTs = t
-  }
-  if (maxTs > 0) return maxTs
-  let maxMs = 0
-  for (const ex of execs) {
-    const d = (ex.trade_date ?? '').trim()
-    if (d.length >= 8) {
-      const ms = Date.parse(`${d}T12:00:00.000Z`)
-      if (Number.isFinite(ms) && ms > maxMs) maxMs = ms
-    }
-  }
-  return maxMs / 1000
-}
-
-function getLedgerOpportunityDimensionMeta(
-  opportunityId: number | 'none',
-  opportunitiesList: StrategyOpportunity[],
-): { structureName: string; symbols: string[] } {
-  if (opportunityId === 'none') {
-    return { structureName: '—', symbols: [] }
-  }
-  const o = opportunitiesList.find(x => x.strategy_opportunity_id === opportunityId)
-  const structureName = (o?.structure_name ?? '').trim() || '—'
-  const symbols = [
-    ...new Set(
-      (o?.symbols ?? []).map(s => String(s).trim().toUpperCase()).filter(Boolean),
-    ),
-  ].sort((a, b) => a.localeCompare(b))
-  return { structureName, symbols }
-}
-
-function aggregateStrategyOgListStats(
-  ogs: {
-    instanceSubgroups: { groups: OptExecutionGroup[] }[]
-  }[],
-) {
-  let instances = 0
-  let closed = 0
-  let open = 0
-  let pnl = 0
-  for (const og of ogs) {
-    instances += og.instanceSubgroups.length
-    for (const sg of og.instanceSubgroups) {
-      for (const g of sg.groups) {
-        if (g.status === 'realized') {
-          closed++
-          pnl += Number(g.realized_pnl) || 0
-        } else {
-          open++
-        }
-      }
-    }
-  }
-  return { instances, closed, open, pnl }
-}
-
-function aggregateInstanceIgListStats(igs: { groups: OptExecutionGroup[] }[]) {
-  let closed = 0
-  let open = 0
-  let pnl = 0
-  for (const ig of igs) {
-    for (const g of ig.groups) {
-      if (g.status === 'realized') {
-        closed++
-        pnl += Number(g.realized_pnl) || 0
-      } else {
-        open++
-      }
-    }
-  }
-  return { instances: igs.length, closed, open, pnl }
-}
-
-function normalizeExpiryCompact(expiryRaw: string): string {
-  return (expiryRaw || '').trim().replace(/-/g, '')
-}
-
-/** Expiry filter: year optional; month only when year set (YYYY + MM vs OPT expiry). */
-function executionMatchesExpiryYearMonth(
-  expiryRaw: string | undefined,
-  yearStr: string,
-  monthStr: string,
-): boolean {
-  const y = yearStr.trim()
-  if (!y) return true
-  const ex = normalizeExpiryCompact(expiryRaw ?? '')
-  const ys = y.slice(0, 4)
-  if (!monthStr.trim()) {
-    const cmp = ex.length >= 4 ? ex.slice(0, 4) : ex
-    return cmp === ys
-  }
-  const mm = monthStr.trim().padStart(2, '0').slice(0, 2)
-  const target6 = `${ys}${mm}`
-  const cmp = ex.length >= 6 ? ex.slice(0, 6) : ex
-  return cmp === target6
-}
-
-function ledgerUrPnlLineClass(v: number): string {
-  if (v > 0) return 'replay-pnl-realized'
-  if (v < 0) return 'replay-pnl-detail-negative'
-  return 'replay-ledger-summary-realized-zero'
-}
-
-function LedgerStkNotionalCell({ ex }: { ex: Execution }) {
-  const n = stkNotionalAbsUsd(ex)
-  if (n == null) return <td>—</td>
-  return (
-    <td className={`ledger-stk-notional-td ${stkNotionalSideColorClass(ex)}`}>{fmtUsd(n)}</td>
-  )
-}
-
-/** Per-fill realized only; unrealized is position-level (group header + Total U, not per row). */
-function LedgerStkRowRealizedPnlCell({ realized }: { realized: number }) {
-  const isZero = !Number.isFinite(realized) || Math.abs(realized) < 0.005
-  return (
-    <td className="ledger-stk-row-realized-td">
-      {isZero ? (
-        <span className="ledger-stk-row-realized-value replay-ledger-summary-realized-zero">-</span>
-      ) : (
-        <span className={`ledger-stk-row-realized-value ${ledgerUrPnlLineClass(realized)}`}>
-          {fmtUsd0(realized)}
-        </span>
-      )}
-    </td>
-  )
-}
-
-/** Single-line group header: label + R (green/red) + U (yellow). */
-function LedgerStkUrPnlGroupInline({
-  realized,
-  unrealized,
-}: {
-  realized: number
-  unrealized: number | null | undefined
-}) {
-  const uFinite = unrealized != null && Number.isFinite(unrealized)
-  return (
-    <span className="replay-stock-group-total-pnl ledger-stk-ur-pnl-group-inline">
-      <span className="replay-stock-group-total-pnl-label">Group U/R PnL</span>
-      <span className="ledger-stk-ur-pnl-group-inline-metrics">
-        <span className={`ledger-stk-ur-pnl-inline-seg ${ledgerUrPnlLineClass(realized)}`}>
-          <span className="ledger-stk-ur-pnl-prefix">R</span> {fmtUsd0(realized)}
-        </span>
-        <span className="ledger-stk-ur-pnl-group-metric-sep" aria-hidden>
-          ·
-        </span>
-        <span
-          className={`ledger-stk-ur-pnl-inline-seg ${
-            uFinite ? 'ledger-stk-ur-pnl-unrealized' : 'replay-ledger-summary-realized-zero'
-          }`}
-        >
-          <span className="ledger-stk-ur-pnl-prefix">U</span> {uFinite ? fmtUsd0(unrealized as number) : '—'}
-        </span>
-      </span>
-    </span>
-  )
-}
-
-/** YYYY-MM-DD → M/D for compact trade-window hints */
-function fmtMdHint(iso: string): string {
-  const s = String(iso ?? '').trim()
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (!m) return s
-  return `${parseInt(m[2], 10)}/${parseInt(m[3], 10)}`
-}
+import {
+  aggregateInstanceIgListStats,
+  aggregateStrategyOgListStats,
+  executionMatchesExpiryYearMonth,
+  fmtMdHint,
+  getLedgerOpportunityDimensionMeta,
+  ledgerUrPnlLineClass,
+  stkCostBasisFromSnapshot,
+  stkPctOf,
+  stockGroupLatestSortKey,
+  type LedgerOptSectionGroupBy,
+} from './ledgerViewUtils'
+import {
+  LedgerStkNotionalCell,
+  LedgerStkRowRealizedPnlCell,
+  LedgerStkUrPnlGroupInline,
+} from './LedgerCells'
 
 export interface LedgerViewProps {
   status: StatusResponse | null

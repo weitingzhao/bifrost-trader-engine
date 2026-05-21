@@ -48,6 +48,74 @@ async def _ensure_stop_background(exc: Any, unit: str) -> None:
         logger.warning("ensure_stop: stop %s failed: %s", unit, stop_err)
 
 
+async def _ensure_restart_background(
+    exc: Any,
+    unit: str,
+    sid: str,
+    rurl: Optional[str],
+    meta_key: str,
+    ops_profile: Optional[str],
+) -> None:
+    """Run ``systemctl restart`` in the background so the HTTP handler returns immediately."""
+    ok = False
+    try:
+        await exc._systemctl("restart", unit)  # noqa: SLF001
+        logger.info("ensure_restart: %s restarted successfully", unit)
+        ok = True
+    except Exception as err:
+        logger.warning("ensure_restart: restart %s failed: %s", unit, err)
+
+    if ok and rurl and meta_key and ops_profile:
+        try:
+            if sid == "trading_engine":
+                await asyncio.to_thread(write_trading_engine_ops_lease, rurl, meta_key, ops_profile)
+            else:
+                await asyncio.to_thread(write_control_env, rurl, meta_key, ops_profile)
+        except Exception as redis_err:
+            logger.warning("ensure_restart: redis lease write failed for %s: %s", sid, redis_err)
+
+
+async def _ensure_reset_background(
+    exc: Any,
+    unit: str,
+    sid: str,
+    rurl: Optional[str],
+    meta_key: str,
+    ops_profile: Optional[str],
+    cfg: dict,
+) -> None:
+    """Run IB operator disconnect (if applicable) + ``systemctl restart`` in the background."""
+    if sid == "ib_operator":
+        try:
+            ok_rpc, rpc_err, _rpc_data = await asyncio.to_thread(
+                ib_operator_disconnect_all_sync, cfg,
+            )
+            if not ok_rpc:
+                logger.warning(
+                    "ensure_reset: ib_operator disconnect_all RPC failed (%s); continuing with restart",
+                    rpc_err,
+                )
+        except Exception as rpc_exc:
+            logger.warning("ensure_reset: ib_operator disconnect_all exception: %s", rpc_exc)
+
+    ok = False
+    try:
+        await exc._systemctl("restart", unit)  # noqa: SLF001
+        logger.info("ensure_reset: %s reset (restarted) successfully", unit)
+        ok = True
+    except Exception as err:
+        logger.warning("ensure_reset: restart %s failed: %s", unit, err)
+
+    if ok and rurl and meta_key and ops_profile:
+        try:
+            if sid == "trading_engine":
+                await asyncio.to_thread(write_trading_engine_ops_lease, rurl, meta_key, ops_profile)
+            else:
+                await asyncio.to_thread(write_control_env, rurl, meta_key, ops_profile)
+        except Exception as redis_err:
+            logger.warning("ensure_reset: redis lease write failed for %s: %s", sid, redis_err)
+
+
 async def _ensure_start_background(
     exc: Any,
     unit: str,
@@ -349,30 +417,60 @@ async def market_ingest_control(
             headers={"X-Accel-Buffering": "no"},
         )
 
+    # RESTART: background async (same pattern as START/STOP) to avoid HTTP timeout
+    # when systemd TimeoutStopSec is long (e.g. 60s for IB services).
+    if action == MarketIngestAction.RESTART:
+        if rurl and ops_profile and meta_key:
+            try:
+                if sid == "trading_engine":
+                    await asyncio.to_thread(write_trading_engine_ops_lease, rurl, meta_key, ops_profile)
+                else:
+                    await asyncio.to_thread(write_control_env, rurl, lease_key, ops_profile)
+            except Exception as _le:
+                logger.warning("market_ingest restart: pre-write lease failed for %s: %s", sid, _le)
+        background_tasks.add_task(
+            _ensure_restart_background, exc, unit, sid, rurl, meta_key, ops_profile
+        )
+        _audit(
+            request,
+            "market_ingest_restart",
+            f"{body.service_id}:{unit}",
+            "queued",
+            detail="lease written; restart dispatched to background task",
+        )
+        return JSONResponse(
+            content={"ok": True, "queued": True, "service_id": body.service_id, "action": "restart"},
+            headers={"X-Accel-Buffering": "no"},
+        )
+
+    # RESET: background async — IB operator disconnect_all + restart.
+    if action == MarketIngestAction.RESET:
+        if rurl and ops_profile and meta_key:
+            try:
+                if sid == "trading_engine":
+                    await asyncio.to_thread(write_trading_engine_ops_lease, rurl, meta_key, ops_profile)
+                else:
+                    await asyncio.to_thread(write_control_env, rurl, lease_key, ops_profile)
+            except Exception as _le:
+                logger.warning("market_ingest reset: pre-write lease failed for %s: %s", sid, _le)
+        background_tasks.add_task(
+            _ensure_reset_background, exc, unit, sid, rurl, meta_key, ops_profile, cfg
+        )
+        _audit(
+            request,
+            "market_ingest_reset",
+            f"{body.service_id}:{unit}",
+            "queued",
+            detail="lease written; reset (disconnect + restart) dispatched to background task",
+        )
+        return JSONResponse(
+            content={"ok": True, "queued": True, "service_id": body.service_id, "action": "reset"},
+            headers={"X-Accel-Buffering": "no"},
+        )
+
+    # Fallback for any future actions — synchronous (should not be reached for known actions).
     try:
-        if action == MarketIngestAction.RESET:
-            extra: Dict[str, Any] = {}
-            if sid == "ib_operator":
-                ok_rpc, rpc_err, rpc_data = await asyncio.to_thread(
-                    ib_operator_disconnect_all_sync,
-                    cfg,
-                )
-                extra["disconnect_all_rpc"] = {
-                    "ok": ok_rpc,
-                    "error": rpc_err,
-                    "result": rpc_data,
-                }
-                if not ok_rpc:
-                    logger.warning(
-                        "ib_operator reset: disconnect_all RPC failed (%s); continuing with restart",
-                        rpc_err,
-                    )
-            # massive_ws / ib_ingestor / ib_operator: ordered release + restart via systemd.
-            result = await exc._systemctl("restart", unit)  # noqa: SLF001
-            if extra:
-                result = {**result, **extra} if isinstance(result, dict) else {"result": result, **extra}
-        else:
-            result = await exc._systemctl(action.value, unit)  # noqa: SLF001
+        result = await exc._systemctl(action.value, unit)  # noqa: SLF001
     except Exception as e:
         _audit(
             request,
@@ -386,46 +484,6 @@ async def market_ingest_control(
             content={"ok": False, "error": str(e)},
             headers={"X-Accel-Buffering": "no"},
         )
-
-    if rurl and meta_key:
-        try:
-            if (
-                ops_profile
-                and action
-                in (
-                    MarketIngestAction.RESTART,
-                    MarketIngestAction.RESET,
-                )
-            ):
-                if sid == "trading_engine":
-                    await asyncio.to_thread(write_trading_engine_ops_lease, rurl, meta_key, ops_profile)
-                else:
-                    await asyncio.to_thread(write_control_env, rurl, lease_key, ops_profile)
-        except Exception as e:
-            logger.warning(
-                "market_ingest redis post-action failed: %s %s %s",
-                body.service_id,
-                action.value,
-                e,
-            )
-            _audit(
-                request,
-                f"market_ingest_{body.action.value}",
-                f"{body.service_id}:{unit}",
-                "failed",
-                detail=f"redis_control_env_or_health: {e}",
-            )
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "ok": False,
-                    "error": (
-                        "systemd action succeeded but updating Redis (lease or health) failed: "
-                        f"{e}"
-                    ),
-                },
-                headers={"X-Accel-Buffering": "no"},
-            )
 
     _audit(
         request,

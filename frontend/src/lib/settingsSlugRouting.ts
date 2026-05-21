@@ -9,6 +9,48 @@ const FEED_MASSIVE_OPTION_ID = 'feed-massive-option' as const
 const FEED_MASSIVE_STOCK_ID = 'feed-massive-stock' as const
 const FEED_MASSIVE_DAILY_DATA_ID = 'feed-massive-daily-data' as const
 
+const COVERAGE_OVERVIEW_LEGACY_ID = 'coverage-overview' as const
+const COVERAGE_OVERVIEW_SUBSECTION_IDS = ['coverage-overview-summary', 'coverage-overview-detail'] as const
+
+// ---------------------------------------------------------------------------
+// Hash query helpers — used by AppLayout header shortcuts to determine which
+// settings section is currently active.
+// ---------------------------------------------------------------------------
+
+export function settingsHashKey(hash: string): string {
+  return (hash.startsWith('#') ? hash.slice(1) : hash).trim()
+}
+
+export function isDaemonSettingsHash(hash: string): boolean {
+  const h = settingsHashKey(hash)
+  return h === 'settings-daemon' || h === 'settings-system' || h === 'settings-system-daemon'
+}
+
+export function isSocketSettingsHash(hash: string): boolean {
+  const h = settingsHashKey(hash)
+  return (
+    h === 'settings-ws-connector' ||
+    h === 'settings-market-ingest' ||
+    h === 'settings-ib-connector' ||
+    h === 'settings-ws-agent'
+  )
+}
+
+export function isCelerySettingsHash(hash: string): boolean {
+  const h = settingsHashKey(hash)
+  return h === 'settings-celery' || h === 'settings-system-celery' || h === 'settings-dashboard-celery'
+}
+
+export function isCoverageOverviewHash(hash: string): boolean {
+  const h = settingsHashKey(hash)
+  return h === COVERAGE_OVERVIEW_LEGACY_ID || (COVERAGE_OVERVIEW_SUBSECTION_IDS as readonly string[]).includes(h)
+}
+
+export function isCoverageOptionHash(hash: string): boolean {
+  const h = settingsHashKey(hash)
+  return h === 'coverage-option' || h === FEED_MASSIVE_DAILY_DATA_ID
+}
+
 export function settingsPathFromSlug(segments: readonly string[]): string {
   if (segments.length === 0) return '/settings'
   return `/settings/${segments.join('/')}`

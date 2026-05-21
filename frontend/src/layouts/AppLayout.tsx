@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { Bell, BookOpen, Moon, MoreVertical, Play, SlidersHorizontal, Sun, X, Zap } from 'lucide-react'
 import { usePathname, useRouter } from 'next/navigation'
 import { postMonitorStop } from '../api/monitor/monitor'
 import { celeryMetricsFromStatus } from '../views/status/celeryMetrics'
@@ -6,6 +7,9 @@ import { useSettingsApiHealthProbes } from '../hooks/useSettingsApiHealthProbes'
 import { UI_BUILD_LABEL } from '../uiBuildLabel'
 import { useSocketIngestProbe } from '../hooks/useSocketIngestProbe'
 import { MessageCenter, type MessageCenterHandle } from '../components/MessageCenter'
+import { DashboardStrip } from '../components/DashboardStrip'
+import { useDashboardLamps } from '../hooks/useDashboardLamps'
+import { useStreamSummaryItems } from '../hooks/useStreamSummaryItems'
 import { isMassiveCommonFeedHash, isMassiveOverviewFeedHash } from '../views/massive/feedMassiveCommonTabUtils'
 import { FEED_MASSIVE_DAILY_DATA_ID, isMassiveOptionFeedHash } from '../views/massive/feedMassiveTabUtils'
 import { isMassiveStockFeedHash } from '../views/massive/feedMassiveStockTabUtils'
@@ -14,8 +18,6 @@ import type { SettingsSidebarLampGlyphId } from '../views/settings/settingsSideb
 import {
   COVERAGE_OVERVIEW_SUBSECTION,
   COVERAGE_OVERVIEW_GROUP_LABEL,
-  COVERAGE_OVERVIEW_LEGACY_ID,
-  COVERAGE_OVERVIEW_SUBSECTIONS,
   COVERAGE_OVERVIEW_SUMMARY_ID,
   COVERAGE_OPTION_SUBSECTION,
   COVERAGE_STOCK_GROUP_LABEL,
@@ -28,17 +30,7 @@ import {
 } from '../views/settings/settingsConstants'
 import { SettingsSectionIcon } from '../views/settings/SettingsSectionIcon'
 import { useApp, type LampId } from '../contexts/AppContext'
-import { fmtPctCompact, fmtUsdCompact } from '../utils/format'
 import { aggregateDaemonProcessesHealthFromStatus } from '../utils/socketIngestLamp'
-import {
-  computeAccountSyncLamp,
-  computeMarketStreamsOk,
-  computeOpenOrdersSectionOk,
-} from '../utils/livePageLamps'
-import {
-  computeDailyChange,
-  quoteDisplayLast,
-} from '../views/accounts/accountsUtils'
 import {
   SidebarInset,
   SidebarProvider,
@@ -48,7 +40,15 @@ import { TradingSidebar } from '@/components/layout/trading-sidebar'
 import { TradingPathBreadcrumb } from '@/components/layout/trading-path-breadcrumb'
 import { TradingLayoutOutletProvider } from '../contexts/TradingLayoutOutletContext'
 import { isDevBuild, publicEnv } from '@/lib/publicEnv'
-import { settingsBasePathForHash } from '@/lib/settingsSlugRouting'
+import {
+  settingsBasePathForHash,
+  settingsHashKey,
+  isDaemonSettingsHash,
+  isSocketSettingsHash,
+  isCelerySettingsHash,
+  isCoverageOverviewHash,
+  isCoverageOptionHash,
+} from '@/lib/settingsSlugRouting'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -69,11 +69,12 @@ function loadTheme(): ThemeId {
     const t = localStorage.getItem(THEME_KEY)
     if (t === 'light' || t === 'dark') return t
   } catch {}
-  return 'light'
+  return 'dark'
 }
 
 function applyTheme(theme: ThemeId) {
   document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : '')
+  document.documentElement.classList.toggle('dark', theme !== 'light')
 }
 
 function mkdocsHandbookHref(): string {
@@ -85,104 +86,14 @@ function mkdocsHandbookHref(): string {
 
 function useUrlHash(): string {
   const pathname = usePathname()
-  const [urlHash, setUrlHash] = useState(() => (typeof window !== 'undefined' ? window.location.hash : ''))
+  const [urlHash, setUrlHash] = useState('')
   useEffect(() => {
-    setUrlHash(typeof window !== 'undefined' ? window.location.hash : '')
+    setUrlHash(window.location.hash)
     const onHash = () => setUrlHash(window.location.hash)
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [pathname])
   return urlHash
-}
-
-type StreamTone = 'neutral' | 'positive' | 'negative'
-interface StreamSummaryItem { label: string; value: string; tone: StreamTone }
-
-function DashboardStrip({
-  streamLamp,
-  streamItems,
-  onStreamClick,
-  openOrderCount,
-  onOpenOrdersClick,
-  openOrdersLamp,
-  openOrdersLampTitle,
-}: {
-  streamLamp: 'green' | 'yellow' | 'red' | 'none'
-  streamItems: StreamSummaryItem[]
-  onStreamClick?: () => void
-  openOrderCount: number
-  onOpenOrdersClick?: () => void
-  openOrdersLamp?: 'green' | 'yellow' | 'red' | 'none'
-  openOrdersLampTitle?: string
-}) {
-  const tickerItems =
-    streamItems.length > 0
-      ? [...streamItems, ...streamItems]
-      : [
-          { label: 'Streams', value: 'No data', tone: 'neutral' as const },
-          { label: 'Streams', value: 'No data', tone: 'neutral' as const },
-        ]
-
-  return (
-    <section className="card dashboard-strip" aria-label="Dashboard">
-      <div className="dashboard-strip-grid">
-        <div className="dashboard-open-orders-cluster" aria-label="Open orders summary">
-          <button
-            type="button"
-            className="dashboard-open-orders-btn"
-            onClick={onOpenOrdersClick}
-            aria-label="Open orders"
-            title="View open orders on Live page"
-          >
-            {openOrdersLamp != null && (
-              <span
-                className={`lamp-icon ${openOrdersLamp}`}
-                aria-hidden
-                title={
-                  openOrdersLampTitle != null && openOrdersLampTitle !== ''
-                    ? openOrdersLampTitle
-                    : openOrdersLamp === 'green'
-                      ? 'Open orders: Account Sync Daemon healthy (DB sync).'
-                      : 'Open orders: Account Sync Daemon degraded or unknown.'
-                }
-              >
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-                </svg>
-              </span>
-            )}
-            <span className="dashboard-open-orders-label">Open orders</span>
-            <span className="dashboard-open-orders-value">{openOrderCount}</span>
-          </button>
-        </div>
-        <div className="dashboard-streams-cluster" aria-label="Market streams summary">
-          <button
-            type="button"
-            className="dashboard-streams-inline dashboard-streams-btn"
-            onClick={onStreamClick}
-            aria-label="Go to Live page"
-            title="Go to Live page"
-          >
-            <span className={`lamp-icon ${streamLamp}`} aria-hidden>
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M22 12h-4l-3 9L9 3 6 12H2" />
-              </svg>
-            </span>
-            <div className="dashboard-streams-marquee">
-              <div className="dashboard-streams-track">
-                {tickerItems.map((item, index) => (
-                  <span key={`${item.label}-${item.value}-${index}`} className="dashboard-streams-item">
-                    <span className="dashboard-streams-item-label">{item.label}</span>
-                    <span className={`dashboard-streams-item-value tone-${item.tone}`}>{item.value}</span>
-                  </span>
-                ))}
-              </div>
-            </div>
-          </button>
-        </div>
-      </div>
-    </section>
-  )
 }
 
 const HEADER_API_SHORTCUTS: {
@@ -200,35 +111,6 @@ const HEADER_API_SHORTCUTS: {
 
 function headerApiShortcutLampClass(lamp: 'green' | 'yellow' | 'red' | 'none' | 'gray'): string {
   return `title-inline-lamp lamp-icon ${lamp === 'none' ? 'none' : lamp}`
-}
-
-function settingsHashKey(hash: string): string {
-  return (hash.startsWith('#') ? hash.slice(1) : hash).trim()
-}
-
-function isDaemonSettingsHash(hash: string): boolean {
-  const h = settingsHashKey(hash)
-  return h === 'settings-daemon' || h === 'settings-system' || h === 'settings-system-daemon'
-}
-
-function isSocketSettingsHash(hash: string): boolean {
-  const h = settingsHashKey(hash)
-  return h === 'settings-ws-connector' || h === 'settings-market-ingest' || h === 'settings-ib-connector' || h === 'settings-ws-agent'
-}
-
-function isCelerySettingsHash(hash: string): boolean {
-  const h = settingsHashKey(hash)
-  return h === 'settings-celery' || h === 'settings-system-celery' || h === 'settings-dashboard-celery'
-}
-
-function isCoverageOverviewHash(hash: string): boolean {
-  const h = settingsHashKey(hash)
-  return h === COVERAGE_OVERVIEW_LEGACY_ID || COVERAGE_OVERVIEW_SUBSECTIONS.some(s => s.id === h)
-}
-
-function isCoverageOptionHash(hash: string): boolean {
-  const h = settingsHashKey(hash)
-  return h === 'coverage-option' || h === FEED_MASSIVE_DAILY_DATA_ID
 }
 
 /** Derive active tab from current pathname */
@@ -265,74 +147,18 @@ export function TradingLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => { if (!headerMenuOpen) setHeaderMenuUiBuildOpen(false) }, [headerMenuOpen])
 
-  const j = status
-  const daemonShortcutLamp = useMemo(() => aggregateDaemonProcessesHealthFromStatus(j), [j])
+  const daemonShortcutLamp = useMemo(() => aggregateDaemonProcessesHealthFromStatus(status), [status])
   const dl = daemonShortcutLamp.lamp
   const celeryLamp: LampId = celeryRuntimeLampOverride ?? celeryMetricsFromStatus(status).celeryLamp
-  const marketStreamsOk = useMemo(() => computeMarketStreamsOk(j, quotesMap), [j, quotesMap, liveLampClock])
-  const accountSyncLampForOpenOrders = useMemo(() => computeAccountSyncLamp(j), [j, liveLampClock])
-  const openOrdersSectionOk = useMemo(() => computeOpenOrdersSectionOk(j, Date.now() / 1000), [j, liveLampClock])
-  const dashboardStreamsLamp: LampId = marketStreamsOk ? 'green' : 'red'
-  const dashboardOpenOrdersLamp: LampId = openOrdersSectionOk ? 'green' : 'red'
 
-  const watchlistSymbols = useMemo(
-    () => [...new Set([...(status?.live_ui?.subscribed_tickers ?? []), ...Object.keys(quotesMap)])].sort(),
-    [status?.live_ui?.subscribed_tickers, quotesMap],
-  )
+  const {
+    marketStreamsOk,
+    accountSyncLampForOpenOrders,
+    dashboardStreamsLamp,
+    dashboardOpenOrdersLamp,
+  } = useDashboardLamps(status, quotesMap, liveLampClock)
 
-  const streamSummaryItems = useMemo<StreamSummaryItem[]>(() => {
-    const accountsList = status?.portfolio?.accounts ?? []
-    const rows = watchlistSymbols.map((symbol) => {
-      let qty = 0; let totalCost = 0; let hasCost = false
-      for (const acc of accountsList) {
-        for (const p of acc?.positions ?? []) {
-          const sym = (p.symbol || '').trim()
-          const secType = (p.secType || '').toString().toUpperCase()
-          const posQty = typeof p.position === 'number' ? p.position : 0
-          if (!sym || sym !== symbol || secType !== 'STK' || !Number.isFinite(posQty) || posQty === 0) continue
-          qty += posQty
-          if (p.avgCost != null && Number.isFinite(p.avgCost as number)) {
-            totalCost += (p.avgCost as number) * posQty; hasCost = true
-          }
-        }
-      }
-      const avgCost = hasCost && qty !== 0 ? totalCost / qty : null
-      const symKey = (symbol || '').trim().toUpperCase()
-      const quote = quotesMap[symKey] ?? quotesMap[symbol]
-      const bench = benchmarks[symKey]
-      const curr = quoteDisplayLast(quote)
-      const { changePct, pnlVsBench } = computeDailyChange(bench, curr, qty ?? 0)
-      const pnlCost = curr != null && avgCost != null && Number.isFinite(qty) && qty !== 0 ? (curr - avgCost) * qty : null
-      return { qty, avgCost, pnlCost, pnlVsBench, changePct }
-    })
-    const totalDailyDollar = rows.reduce((acc, row) => acc + (row.pnlVsBench != null && Number.isFinite(row.pnlVsBench) ? row.pnlVsBench : 0), 0)
-    const sumLastQty = watchlistSymbols.reduce((acc, symbol, index) => {
-      const qty = Number.isFinite(rows[index]?.qty) ? rows[index]!.qty : 0
-      const sk = (symbol || '').trim().toUpperCase()
-      const last = quoteDisplayLast(quotesMap[sk] ?? quotesMap[symbol]) ?? 0
-      return acc + last * qty
-    }, 0)
-    const totalDailyDenom = sumLastQty - totalDailyDollar
-    const totalDailyPct = totalDailyDenom > 0 && Number.isFinite(totalDailyDollar) ? (totalDailyDollar / totalDailyDenom) * 100 : null
-    const toneForNumber = (value: number | null | undefined): StreamTone => {
-      if (value == null || !Number.isFinite(value)) return 'neutral'
-      if (value > 0) return 'positive'
-      if (value < 0) return 'negative'
-      return 'neutral'
-    }
-    return [
-      { label: 'Market Streams', value: marketStreamsOk ? 'Online' : 'Offline', tone: marketStreamsOk ? 'positive' : 'negative' },
-      ...watchlistSymbols.map((symbol, i) => {
-        const row = rows[i]
-        const pct = row?.changePct ?? null
-        const dollar = row?.pnlVsBench ?? null
-        const valueStr = pct != null && dollar != null ? `${fmtPctCompact(pct)} / ${fmtUsdCompact(dollar)}` : pct != null ? fmtPctCompact(pct) : dollar != null ? fmtUsdCompact(dollar) : '—'
-        return { label: symbol, value: valueStr, tone: toneForNumber(pct ?? dollar) }
-      }),
-      { label: 'Daily %', value: fmtPctCompact(totalDailyPct), tone: toneForNumber(totalDailyPct) },
-      { label: 'Daily $', value: fmtUsdCompact(totalDailyDollar), tone: toneForNumber(totalDailyDollar) },
-    ]
-  }, [status?.portfolio?.accounts, status?.live_ui?.reference_indices, watchlistSymbols, quotesMap, benchmarks, marketStreamsOk])
+  const streamSummaryItems = useStreamSummaryItems(status, quotesMap, benchmarks, marketStreamsOk)
 
   const goSettings = useCallback((hash: string) => {
     const fullHash = hash.startsWith('#') ? hash : `#${hash}`
@@ -413,9 +239,7 @@ export function TradingLayout({ children }: { children: ReactNode }) {
                   <button type="button" className="app-header-lamp-switch"
                     onClick={() => runQuickStop(postMonitorStop, 'Stop Monitor API')}
                     title="Stop Monitor API process" aria-label="Stop Monitor API process">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                      <path d="M18 6L6 18M6 6l12 12" />
-                    </svg>
+                    <X size={14} aria-hidden />
                   </button>
                 </div>
                 <div className="app-header-lamp-stop-group app-header-api-shortcuts-group" aria-label="App runtime: Socket, Daemon, Celery">
@@ -460,9 +284,7 @@ export function TradingLayout({ children }: { children: ReactNode }) {
                     aria-label={activeMsgCount > 0 ? `Open menu (${activeMsgCount} active messages)` : 'Open menu'}
                   >
                     {activeMsgCount > 0 && <span className="msc-bell-badge" aria-hidden>{activeMsgCount > 99 ? '99+' : activeMsgCount}</span>}
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" />
-                    </svg>
+                    <MoreVertical size={20} aria-hidden />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="min-w-44 max-h-[72vh] overflow-y-auto overscroll-contain">
@@ -471,9 +293,7 @@ export function TradingLayout({ children }: { children: ReactNode }) {
                     onClick={() => { messageCenterRef.current?.openDrawer(); setHeaderMenuOpen(false) }}
                     title={activeMsgCount > 0 ? 'View system messages' : 'View system messages (none active)'}
                   >
-                    <svg viewBox="0 0 20 20" width="15" height="15" fill="currentColor" className="shrink-0" aria-hidden>
-                      <path d="M10 2a6 6 0 00-6 6v2.586l-1.707 1.707A1 1 0 003 14h14a1 1 0 00.707-1.707L16 10.586V8a6 6 0 00-6-6zM8.5 17a1.5 1.5 0 003 0H8.5z" />
-                    </svg>
+                    <Bell size={15} className="shrink-0" aria-hidden />
                     Messages
                     {activeMsgCount > 0 ? <span className="ml-auto text-xs font-bold bg-amber-400/20 text-amber-400 px-1.5 py-0.5 rounded-full">{activeMsgCount}</span> : null}
                   </DropdownMenuItem>
@@ -507,7 +327,7 @@ export function TradingLayout({ children }: { children: ReactNode }) {
                     className={cn('pl-6', activeTab === 'settings' && isDaemonSettingsHash(urlHash) && 'font-semibold text-accent bg-accent/10')}
                     onClick={() => goSettings('#settings-daemon')} title={`${daemonShortcutLamp.title} — Settings → Daemon`}>
                     <span className={`app-header-menu-system-lamp title-inline-lamp lamp-icon ${dl}`} aria-hidden>
-                      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden><path d="M8 5v14l11-7L8 5z" /></svg>
+                      <Play size={14} fill="currentColor" stroke="none" aria-hidden />
                     </span>
                     Daemon
                   </DropdownMenuItem>
@@ -515,9 +335,7 @@ export function TradingLayout({ children }: { children: ReactNode }) {
                     className={cn('pl-6', activeTab === 'settings' && isCelerySettingsHash(urlHash) && 'font-semibold text-accent bg-accent/10')}
                     onClick={() => goSettings('#settings-celery')} title="Settings → Celery">
                     <span className={`app-header-menu-system-lamp title-inline-lamp ${celeryLamp === 'none' ? 'none' : celeryLamp}`} aria-hidden>
-                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
-                      </svg>
+                      <Zap size={14} aria-hidden />
                     </span>
                     Celery
                   </DropdownMenuItem>
@@ -573,11 +391,7 @@ export function TradingLayout({ children }: { children: ReactNode }) {
                   <DropdownMenuItem
                     className={cn(activeTab === 'settings' && settingsViewSection === 'config' && 'font-semibold text-accent bg-accent/10')}
                     onClick={() => { goSettings('#settings-heartbeat') }}>
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0">
-                      <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" />
-                      <line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" />
-                      <line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" />
-                    </svg>
+                    <SlidersHorizontal size={18} className="shrink-0" aria-hidden />
                     Settings
                   </DropdownMenuItem>
 
@@ -590,12 +404,7 @@ export function TradingLayout({ children }: { children: ReactNode }) {
                           ? { background: 'var(--color-accent-soft)', color: 'var(--color-accent)' }
                           : { background: 'transparent', color: 'var(--color-text-muted)' }}
                         onClick={() => { setTheme('light'); setHeaderMenuOpen(false) }} title="Light">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                          <circle cx="12" cy="12" r="5" /><line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" />
-                          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-                          <line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" />
-                          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-                        </svg>
+                        <Sun size={16} aria-hidden />
                       </button>
                       <button type="button" role="radio" aria-checked={theme === 'dark'}
                         className="inline-flex items-center justify-center w-8 h-7 rounded-full border-0 cursor-pointer transition-colors"
@@ -603,9 +412,7 @@ export function TradingLayout({ children }: { children: ReactNode }) {
                           ? { background: 'var(--color-accent-soft)', color: 'var(--color-accent)' }
                           : { background: 'transparent', color: 'var(--color-text-muted)' }}
                         onClick={() => { setTheme('dark'); setHeaderMenuOpen(false) }} title="Dark">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                        </svg>
+                        <Moon size={16} aria-hidden />
                       </button>
                     </div>
                   </div>
@@ -615,10 +422,7 @@ export function TradingLayout({ children }: { children: ReactNode }) {
                     <DropdownMenuItem asChild className="flex-1">
                       <a href={mkdocsHandbookHref()} target="_blank" rel="noopener noreferrer"
                         onClick={() => setHeaderMenuOpen(false)}>
-                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0">
-                          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-                          <path d="M8 7h8" /><path d="M8 11h8" />
-                        </svg>
+                        <BookOpen size={18} className="shrink-0" aria-hidden />
                         Docs
                       </a>
                     </DropdownMenuItem>
@@ -665,5 +469,3 @@ export function TradingLayout({ children }: { children: ReactNode }) {
   )
 }
 
-/** @deprecated Use `TradingLayout` — kept for incremental refactors */
-export const AppLayout = TradingLayout

@@ -231,13 +231,15 @@ export function SettingsPage({
     if (h && h.startsWith('feed-')) return 'settings-feed'
     return h || SETTINGS_SECTIONS[0].id
   }
-  const [activeSectionId, setActiveSectionId] = useState<string>(() => {
-    if (typeof window === 'undefined') return SETTINGS_SECTIONS[0].id
+  const [activeSectionId, setActiveSectionId] = useState<string>(SETTINGS_SECTIONS[0].id)
+  useEffect(() => {
     if (settingsRouteSlug != null && settingsRouteSlug.length > 0) {
-      return hashToSectionId(slugToDefaultHash(settingsRouteSlug))
+      setActiveSectionId(hashToSectionId(slugToDefaultHash(settingsRouteSlug)))
+    } else {
+      setActiveSectionId(hashToSectionId(window.location.hash))
     }
-    return hashToSectionId(window.location.hash)
-  })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const settingsSlugKey = settingsRouteSlug?.join('/') ?? ''
 
@@ -262,7 +264,13 @@ export function SettingsPage({
   }, [settingsSlugKey, settingsRouteSlug])
   const deferredStart = useDeferredStart(280)
   void apiHealthProbes
-  const currentHash = typeof window !== 'undefined' ? window.location.hash.slice(1) : ''
+  const [currentHash, setCurrentHash] = useState('')
+  useEffect(() => {
+    const sync = () => setCurrentHash(window.location.hash.slice(1))
+    sync()
+    window.addEventListener('hashchange', sync)
+    return () => window.removeEventListener('hashchange', sync)
+  }, [])
   const activeSubId = activeSectionId === 'settings-ib-connection' && IB_CONNECTION_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
   const currentHashForMassive = currentHash ? `#${currentHash}` : ''
   /** Same roll-up as Daemon page title: all Ops-configured Daemon processes (Engine + Account Sync). */

@@ -1,3 +1,9 @@
+/**
+ * @deprecated 新代码请直接从域文件导入，例如：
+ *   import { fetchStatus } from '@/api/monitor/status'
+ *   import { fetchStrategyInstances } from '@/api/strategy/strategyInstances'
+ * 此文件仅为向后兼容保留，不再扩展新导出。
+ */
 export {
   fetchStatus,
   fetchHealth,

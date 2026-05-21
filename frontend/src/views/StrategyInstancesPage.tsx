@@ -490,9 +490,7 @@ export function StrategyInstancesPage({
   const [collapsedSymbolGroups, setCollapsedSymbolGroups] = useState<Record<string, boolean>>({})
   /** Accordion: only one symbol group expanded at a time. Multi: several may stay open (same as Portfolio Open → Detail view). */
   const [symbolGroupAccordionMode, setSymbolGroupAccordionMode] = useState<boolean>(true)
-  const [isNarrowViewport, setIsNarrowViewport] = useState<boolean>(
-    () => (typeof window !== 'undefined' ? window.innerWidth <= 960 : false),
-  )
+  const [isNarrowViewport, setIsNarrowViewport] = useState<boolean>(false)
 
   /** Detail view is shown when URL has an instance id or user picked one in-page (e.g. after create). */
   const effectiveDetailId = urlStrategyInstanceId ?? selectedInstanceId
@@ -603,6 +601,7 @@ export function StrategyInstancesPage({
 
   useEffect(() => {
     const onResize = () => setIsNarrowViewport(window.innerWidth <= 960)
+    onResize()
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])

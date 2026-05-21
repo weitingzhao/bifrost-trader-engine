@@ -52,46 +52,51 @@ import { brokerQueueKeyTitle, formatQueueLabel, setBrokerQueueLabelsFromApi } fr
 import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
 import { computeCeleryRuntimeLamp, supportedQueueNamesFromSummary } from '../utils/celeryRuntime'
 import { opsHostEnvFromConfigProfile } from '../utils/opsHostEnvPill'
+import {
+  type LampColor,
+  SCALE_SELECTION_ALL,
+  workerLamp,
+  workerStatusLabel,
+  fmtRelative,
+  workerHostFromWorkerId,
+  workerIdToInstanceId,
+  instanceIdFromWorkerUnit,
+  parseCeleryWorkerInstanceId,
+  dedupeWorkerProfilesByKey,
+  profileMaxInstances,
+  countInstancesForProfile,
+  countWorkerStackByProfileKey,
+  workerSituationRowDetailTitle,
+  workerProfileForInstanceUnit,
+  instanceConsumesCeleryQueue,
+  type ConfirmDialogState,
+  INITIAL_CONFIRM,
+  type QueueKindMatrixSortColumn,
+  queueKindMatrixSortArrow,
+  matrixRowHasEffectItems,
+  type MatrixModeColumnVisibility,
+  type MatrixEffectsSectionVisibility,
+  resolvedMatrixTaskName,
+  matrixRowMatchesTaskNameText,
+  matrixRowMatchesJobStyleToggles,
+  matrixJobStyleLabel,
+  compareQueueKindMatrixRows,
+  matrixRowMatchesKindText,
+  matrixRowMatchesModeSourceText,
+} from './celery/celeryControlUtils'
+import {
+  IcoWorkerScaleAddAll,
+  IcoWorkerInstanceAdd,
+  IcoWorkerScaleReset,
+  IcoWorkerInstanceRecreate,
+  IcoWorkerInstanceRemove,
+  IcoWorkerScaleRemoveAll,
+} from './celery/CeleryWorkerIconButtons'
 
 export interface CeleryControlPageProps {
   embeddedInSettings?: boolean
   /** Same lamp as Settings sidebar Celery link (App: ops poll + status fallback). */
   celeryLamp?: 'green' | 'yellow' | 'red' | 'none'
-}
-
-type LampColor = 'green' | 'yellow' | 'red' | 'none'
-
-/** Bubble value: all profiles — show bulk actions (Add all / Reset all / Remove all), hide single Add Instance. */
-const SCALE_SELECTION_ALL = '__celery_scale_all__'
-
-function workerLamp(status: string): LampColor {
-  if (status === 'running_healthy') return 'green'
-  if (status === 'running_degraded' || status === 'starting' || status === 'stopping') return 'yellow'
-  if (status === 'stopped' || status === 'failed') return 'red'
-  return 'none'
-}
-
-function workerStatusLabel(status: string): string {
-  const map: Record<string, string> = {
-    running_healthy: 'Healthy',
-    running_degraded: 'Degraded',
-    starting: 'Starting',
-    stopping: 'Stopping',
-    stopped: 'Stopped',
-    failed: 'Failed',
-    unknown: 'Unknown',
-  }
-  return map[status] ?? status
-}
-
-function fmtRelative(epochSec: number | null): string {
-  if (epochSec == null) return '—'
-  const delta = Date.now() / 1000 - epochSec
-  if (delta < 0) return 'just now'
-  if (delta < 60) return `${Math.floor(delta)}s ago`
-  if (delta < 3600) return `${Math.floor(delta / 60)}m ago`
-  if (delta < 86400) return `${Math.floor(delta / 3600)}h ago`
-  return `${Math.floor(delta / 86400)}d ago`
 }
 
 /** Local 1s tick only — avoids re-rendering the entire Celery dashboard every second. */
@@ -107,13 +112,6 @@ const WorkerHeartbeatLine = memo(function WorkerHeartbeatLine({
   }, [])
   return <span>Heartbeat: {fmtRelative(epochSec)}</span>
 })
-
-/** Celery nodename is ``worker{id}@{hostname}`` — return host part for cross-machine hints. */
-function workerHostFromWorkerId(workerId: string): string | null {
-  const i = workerId.indexOf('@')
-  if (i < 0 || i >= workerId.length - 1) return null
-  return workerId.slice(i + 1).trim() || null
-}
 
 /** Worker console: per-worker Redis stream via Ops `/ops/console/worker/{nodename}` (SSE). */
 function DashboardWorkerRedisConsole({ workerId }: { workerId: string }) {
@@ -147,268 +145,6 @@ function DashboardWorkerRedisConsole({ workerId }: { workerId: string }) {
   )
 }
 
-function workerIdToInstanceId(workerId: string): string | null {
-  const node = workerId.split('@')[0]?.trim() ?? ''
-  if (node.startsWith('worker') && node.length > 'worker'.length) {
-    return node.slice('worker'.length)
-  }
-  return null
-}
-
-/** Instance id from `bifrost-celery-worker@ID.service` (systemd may escape chars in ID). */
-function instanceIdFromWorkerUnit(unit: string): string | null {
-  const m = unit.trim().match(/^bifrost-celery-worker@(.+)\.service$/i)
-  return m ? m[1] : null
-}
-
-/** Ops allocates IDs as `{profile_key}-{seq}` (e.g. `stocks_ib-2`). */
-function parseCeleryWorkerInstanceId(instanceId: string): { profileKey: string; cycle: number } | null {
-  const m = instanceId.trim().match(/^([a-zA-Z0-9_]+)-(\d+)$/)
-  if (!m) return null
-  return { profileKey: m[1], cycle: parseInt(m[2], 10) }
-}
-
-/** One entry per profile key (first wins) so Add all / bubbles cannot repeat the same worker_type. */
-function dedupeWorkerProfilesByKey(profiles: WorkerProfileInfo[]): WorkerProfileInfo[] {
-  const seen = new Set<string>()
-  const out: WorkerProfileInfo[] = []
-  for (const p of profiles) {
-    if (seen.has(p.key)) continue
-    seen.add(p.key)
-    out.push(p)
-  }
-  return out
-}
-
-const PROFILE_MAX_WORKER_INSTANCES_CAP = 64
-
-function profileMaxInstances(p: WorkerProfileInfo): number {
-  const raw = p.max_worker_instances
-  if (typeof raw === 'number' && Number.isFinite(raw)) {
-    return Math.max(1, Math.min(PROFILE_MAX_WORKER_INSTANCES_CAP, Math.floor(raw)))
-  }
-  return 1
-}
-
-function countInstancesForProfile(insts: SystemdInstance[], profileKey: string): number {
-  const seenInstanceIds = new Set<string>()
-  let n = 0
-  for (const inst of insts) {
-    const iid = instanceIdFromWorkerUnit(inst.unit)
-    if (!iid || seenInstanceIds.has(iid)) continue
-    const parts = parseCeleryWorkerInstanceId(iid)
-    if (parts?.profileKey !== profileKey) continue
-    seenInstanceIds.add(iid)
-    n += 1
-  }
-  return n
-}
-
-/** Dev/prod/unknown from worker Redis presence (``worker_config_profile``), matched by profile key in nodename instance id. */
-function countWorkerStackByProfileKey(
-  workers: WorkerSummary[],
-  profileKey: string,
-): { dev: number; prod: number; unknown: number } {
-  const z = { dev: 0, prod: 0, unknown: 0 }
-  for (const w of workers) {
-    const iid = workerIdToInstanceId(w.worker_id)
-    if (!iid) continue
-    const parts = parseCeleryWorkerInstanceId(iid)
-    if (parts?.profileKey !== profileKey) continue
-    const cp = (w.worker_config_profile ?? '').toLowerCase().trim()
-    if (cp === 'dev') z.dev += 1
-    else if (cp === 'prod') z.prod += 1
-    else z.unknown += 1
-  }
-  return z
-}
-
-function workerSituationRowDetailTitle(
-  cur: number,
-  maxN: number,
-  atCap: boolean,
-  stack: { dev: number; prod: number; unknown: number },
-): string {
-  const sys = atCap
-    ? `Systemd units on this host for this profile: ${cur} (at or above max ${maxN}).`
-    : `Systemd units on this host for this profile: ${cur} / max ${maxN}.`
-  const unk =
-    stack.unknown > 0
-      ? ` Unknown (no dev/prod in Redis presence): ${stack.unknown}.`
-      : ''
-  return `${sys} Celery on broker — Dev ${stack.dev}, Prod ${stack.prod}.${unk}`
-}
-
-function workerProfileForInstanceUnit(
-  unit: string,
-  profiles: WorkerProfileInfo[],
-): WorkerProfileInfo | undefined {
-  const instanceId = instanceIdFromWorkerUnit(unit)
-  if (!instanceId) return undefined
-  const parts = parseCeleryWorkerInstanceId(instanceId)
-  if (parts) {
-    const p = profiles.find(x => x.key === parts.profileKey)
-    if (p) return p
-  }
-  return profiles.find(p => p.key === instanceId)
-}
-
-function instanceConsumesCeleryQueue(
-  unit: string,
-  celeryQueue: string,
-  profiles: WorkerProfileInfo[],
-): boolean {
-  const p = workerProfileForInstanceUnit(unit, profiles)
-  if (!p?.queues?.length) return false
-  return p.queues.some(q => q === celeryQueue)
-}
-
-function IcoWorkerScaleAddAll() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width={18}
-      height={18}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <polygon points="12 2 2 7 12 12 22 7 12 2" />
-      <polyline points="2 17 12 22 22 17" />
-      <polyline points="2 12 12 17 22 12" />
-    </svg>
-  )
-}
-
-/** Single instance add — one stack layer plus mark (distinct from Add all layers). */
-function IcoWorkerInstanceAdd() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width={18}
-      height={18}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <polyline points="2 17 12 22 22 17" />
-      <line x1="12" y1="4" x2="12" y2="12" />
-      <line x1="8" y1="8" x2="16" y2="8" />
-    </svg>
-  )
-}
-
-function IcoWorkerScaleReset() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width={18}
-      height={18}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-      <path d="M3 3v5h5" />
-      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
-      <path d="M16 16h5v5" />
-    </svg>
-  )
-}
-
-/** Per-row Recreate (same glyph as bulk Reset — force remove then add). */
-function IcoWorkerInstanceRecreate() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width={18}
-      height={18}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-      <path d="M3 3v5h5" />
-      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
-      <path d="M16 16h5v5" />
-    </svg>
-  )
-}
-
-function IcoWorkerInstanceRemove() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width={18}
-      height={18}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M3 6h18" />
-      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-      <line x1="10" x2="10" y1="11" y2="17" />
-      <line x1="14" x2="14" y1="11" y2="17" />
-    </svg>
-  )
-}
-
-function IcoWorkerScaleRemoveAll() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width={18}
-      height={18}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M3 6h18" />
-      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-      <line x1="10" x2="10" y1="11" y2="17" />
-      <line x1="14" x2="14" y1="11" y2="17" />
-    </svg>
-  )
-}
-
-type ConfirmDialogState = {
-  open: boolean
-  title: string
-  message: string
-  confirming: boolean
-  /** Primary action label (destructive remove uses Confirm delete). */
-  confirmLabel?: string
-  action: (() => Promise<void>) | null
-}
-
-const INITIAL_CONFIRM: ConfirmDialogState = {
-  open: false,
-  title: '',
-  message: '',
-  confirming: false,
-  confirmLabel: undefined,
-  action: null,
-}
 
 // \u2500\u2500 Log Console (SSE) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 
@@ -545,24 +281,6 @@ function LogConsole({ url, maxLines = 500 }: { url: string; maxLines?: number })
   )
 }
 
-type QueueKindMatrixSortColumn =
-  | 'kind'
-  | 'task_name'
-  | 'job_style'
-  | 'mode'
-  | 'broker_queue'
-
-function queueKindMatrixSortArrow(
-  column: QueueKindMatrixSortColumn,
-  sort: { column: QueueKindMatrixSortColumn; direction: 'asc' | 'desc' },
-): string {
-  return sort.column === column ? (sort.direction === 'asc' ? '↑' : '↓') : ''
-}
-
-function matrixRowHasEffectItems(items?: string[]): boolean {
-  return Array.isArray(items) && items.length > 0
-}
-
 function MatrixEffectsBullets({ items }: { items: string[] }) {
   return (
     <ul className="celery-matrix-effects-list">
@@ -571,14 +289,6 @@ function MatrixEffectsBullets({ items }: { items: string[] }) {
       ))}
     </ul>
   )
-}
-
-type MatrixModeColumnVisibility = { showMode: boolean; showModeSource: boolean }
-
-type MatrixEffectsSectionVisibility = {
-  showFeedApi: boolean
-  showDb: boolean
-  showRedis: boolean
 }
 
 function MatrixModeCell({
@@ -652,99 +362,6 @@ function MatrixEffectsStacked({
       )}
     </div>
   )
-}
-
-function compareQueueKindMatrixRows(
-  a: RunMassiveJobMatrixRow,
-  b: RunMassiveJobMatrixRow,
-  column: QueueKindMatrixSortColumn,
-  direction: 'asc' | 'desc',
-): number {
-  const mult = direction === 'asc' ? 1 : -1
-  const str = (row: RunMassiveJobMatrixRow): string => {
-    switch (column) {
-      case 'kind':
-        return row.kind ?? ''
-      case 'task_name':
-        return resolvedMatrixTaskName(row)
-      case 'job_style':
-        return resolvedMatrixJobStyle(row)
-      case 'mode':
-        return `${row.mode ?? ''}\0${row.mode_source ?? ''}`
-      case 'broker_queue':
-        return `${row.broker_queue_standard ?? ''}\0${row.broker_queue_high ?? ''}`
-      default:
-        return ''
-    }
-  }
-  return mult * str(a).localeCompare(str(b), undefined, { sensitivity: 'base', numeric: true })
-}
-
-function matrixRowMatchesKindText(row: RunMassiveJobMatrixRow, needle: string): boolean {
-  const q = needle.trim()
-  if (!q) return true
-  return row.kind.toLowerCase().includes(q.toLowerCase())
-}
-
-function matrixRowMatchesModeSourceText(row: RunMassiveJobMatrixRow, needle: string): boolean {
-  const q = needle.trim()
-  if (!q) return true
-  const lo = q.toLowerCase()
-  const modeStr = row.mode != null ? String(row.mode) : ''
-  const src = row.mode_source != null ? String(row.mode_source) : ''
-  return (
-    modeStr.toLowerCase().includes(lo) ||
-    src.toLowerCase().includes(lo) ||
-    `${modeStr} · ${src}`.toLowerCase().includes(lo)
-  )
-}
-
-/** Mirrors ``matrix_row_task_name_and_job_style`` in run_massive_job_manifest.py when API omits or sends empty strings. */
-const MATRIX_BEAT_SCHEDULED_KIND_TO_TASK: Record<string, string> = {
-  eod_pipeline: 'src.massive.tasks.beat_eod_pipeline',
-  feed_stocks_corporate_action: 'src.massive.tasks.beat_corporate_watchlist',
-  reconcile: 'src.massive.tasks.beat_reconcile',
-  trim_jobs: 'src.massive.tasks.beat_trim_massive_jobs',
-}
-const MATRIX_RUN_MASSIVE_JOB_TASK_NAME = 'src.massive.tasks.run_massive_job'
-
-function resolvedMatrixTaskName(row: RunMassiveJobMatrixRow): string {
-  const raw = (row.task_name ?? '').trim()
-  if (raw) return raw
-  const k = (row.kind ?? '').trim().toLowerCase()
-  return MATRIX_BEAT_SCHEDULED_KIND_TO_TASK[k] ?? MATRIX_RUN_MASSIVE_JOB_TASK_NAME
-}
-
-function resolvedMatrixJobStyle(row: RunMassiveJobMatrixRow): 'scheduled' | 'on_demand' {
-  const js = row.job_style
-  if (js === 'scheduled' || js === 'on_demand') return js
-  const k = (row.kind ?? '').trim().toLowerCase()
-  return MATRIX_BEAT_SCHEDULED_KIND_TO_TASK[k] != null ? 'scheduled' : 'on_demand'
-}
-
-function matrixRowMatchesTaskNameText(row: RunMassiveJobMatrixRow, needle: string): boolean {
-  const q = needle.trim()
-  if (!q) return true
-  return resolvedMatrixTaskName(row).toLowerCase().includes(q.toLowerCase())
-}
-
-function matrixRowJobStyleKey(row: RunMassiveJobMatrixRow): 'scheduled' | 'on_demand' {
-  return resolvedMatrixJobStyle(row)
-}
-
-function matrixRowMatchesJobStyleToggles(
-  row: RunMassiveJobMatrixRow,
-  includeScheduled: boolean,
-  includeOnDemand: boolean,
-): boolean {
-  if (!includeScheduled && !includeOnDemand) return true
-  const k = matrixRowJobStyleKey(row)
-  if (k === 'scheduled') return includeScheduled
-  return includeOnDemand
-}
-
-function matrixJobStyleLabel(row: RunMassiveJobMatrixRow): string {
-  return matrixRowJobStyleKey(row) === 'scheduled' ? 'Scheduled' : 'On-demand'
 }
 
 // ── Component ────────────────────────────────────────────────────────────────

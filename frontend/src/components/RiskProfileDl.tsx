@@ -36,9 +36,7 @@ function RiskFieldHelp({
     ox: 0,
     oy: 0,
   })
-  const [narrow, setNarrow] = useState(() =>
-    typeof window !== 'undefined' ? window.matchMedia('(max-width: 640px)').matches : false,
-  )
+  const [narrow, setNarrow] = useState(false)
 
   useEffect(() => {
     if (!open) {

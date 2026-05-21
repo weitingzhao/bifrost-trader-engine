@@ -99,9 +99,17 @@ const nextConfig = {
   },
   async rewrites() {
     if (process.env.NODE_ENV === 'production') {
-      return []
+      return { beforeFiles: [], afterFiles: [], fallback: [] }
     }
-    return devRewrites()
+    const rules = devRewrites()
+    return {
+      beforeFiles: rules.map((r) => ({
+        ...r,
+        missing: [{ type: 'header', key: 'sec-fetch-dest', value: 'document' }],
+      })),
+      afterFiles: [],
+      fallback: [],
+    }
   },
 }
 
