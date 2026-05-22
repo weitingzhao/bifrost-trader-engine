@@ -1,36 +1,22 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ReactElement } from 'react'
-import type { Execution, IbPositionRow, PositionInstanceAttribution, RealtimeQuote, StatusResponse } from '../types'
-import { deleteExecution, fetchQuotes, subscribeQuotes, updateExecution } from '../api'
-import { fetchPositionAttribution } from '../api/trading/executions'
-import { fetchOpportunities, fetchStructures } from '../api/strategy/strategies'
-import type { StrategyOpportunity, StrategyStructure } from '../api/strategy/strategies'
-import ExecSourceBadge from '../components/ExecSourceBadge'
-import { InfoTooltip } from '../components/InfoTooltip'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { Execution, IbPositionRow, StatusResponse } from '../types'
+import { deleteExecution, updateExecution } from '../api'
+import type { StrategyStructure } from '../api/strategy/strategies'
 import { SectionPageTitle } from '../components/SectionPageTitle'
-import { computeRiskProfile, formatRiskHedgedBreakdown, formatRiskLabel } from '../utils/riskProfile'
+import { computeRiskProfile } from '../utils/riskProfile'
 import type { RiskPosition } from '../utils/riskProfile'
-import { RiskProfileDl } from '../components/RiskProfileDl'
 import {
-  daysUntilExpiry,
-  fmtDate,
-  fmtDaysAgo,
-  fmtExpiry,
-  fmtUsd,
   getContractLabelParts,
   parseOptionContractKey,
 } from '../utils/format'
 import { executionMatchesInstanceGroup, sliceExecutionForInstanceOptView } from './portfolio/ledgerOptHelpers'
-import { mergeQuotesIntoSymbolMap } from './accounts/accountsUtils'
 import {
   optExecutionMatchKey, buildLiveOptExecutionMap, positionExecsForAttribution,
-  mergeExecsUniqueById, splitOffTrackTradesBySource, findMatchingFinalForTws,
-  findMatchingTwsForFinal, twsNeedsStrategySyncFromFinal,
-  finalNeedsStrategySyncFromTws, instanceIconFillFromMergedExecutions,
-  optionLastStrikePctClass, fmtSignedPct, optionExpiryMatchesFilter,
+  mergeExecsUniqueById, splitOffTrackTradesBySource,
+  optionExpiryMatchesFilter,
   accountTotalCashBuyingPower, parseIbSummaryNumber, sumStockMarketValueForAccountFilter,
-  fmtLivePositionMarketValueQtyTimesLast, fmtSurplusShares, fmtHeldSharesWhole,
-  sortStockCoverageItemsByColumn, coverageRowMarketValueTotal, groupCoverageByAccount,
-  underlyingCoverageStockMetrics, fmtMvAbbrev, buildMarketValueTooltip,
+  sortStockCoverageItemsByColumn,
+  fmtMvAbbrev, buildMarketValueTooltip,
   openPosAccountMatchesFilter, openPosShowOffTrack, liveStockRowCovKey,
   buildOptionContractLabel, pnlClassForTone,
   optionUnderlyingFootnote, DONUT_SYMBOL_COLORS, OPTION_STOCK_MIX_COLORS,
@@ -40,8 +26,16 @@ import type {
   CoveragePoolSortCol, DonutSegment, OptionDetailFootnote, UnderlyingCategoryFilter,
   OptionStockMixCategory,
 } from './positions/positionUtils'
-import { StrategyAttributionCells, LinkStrategyIconButton } from './positions/PositionStrategyAttribution'
 import { PositionDonutChart } from './positions/PositionDonutChart'
+import { StockBucketPanel } from './positions/StockBucketPanel'
+import { useStrategyMeta } from './positions/hooks/useStrategyMeta'
+import { useQuotesSubscription } from './positions/hooks/useQuotesSubscription'
+import { usePositionInspectors } from './positions/hooks/usePositionInspectors'
+import type { OptionExecRowActions } from './positions/OptionExecutionRow'
+import { PositionCoverageCharts } from './positions/PositionCoverageCharts'
+import { PositionOptionsTab } from './positions/PositionOptionsTab'
+import type { OpenOptSort } from './positions/PositionOptionsTab'
+import { PositionInstanceTab } from './positions/PositionInstanceTab'
 
 type OpenPositionsTab = 'instance' | 'options' | 'stocks' | 'fixed_income' | 'cash_like'
 
@@ -66,159 +60,6 @@ import type {
 } from './portfolio/types'
 import { findLiveStockRowForAccount } from './portfolio/positionsInspectorUtils'
 import { OFF_TRACK_ACCOUNT_ID, useExecutions } from './portfolio/useExecutions'
-
-/** Rows for open STK table: account sub-headers + position lines (used under category sections). */
-function buildOpenStockPositionRows(
-  positions: LivePositionRow[],
-  rowKeyPrefix: string,
-  onInspectStock?: (p: LivePositionRow) => void,
-): ReactElement[] {
-  const byAccount: Record<string, LivePositionRow[]> = {}
-  for (const position of positions) {
-    const accId = (position.account_id ?? '').trim() || '—'
-    if (!byAccount[accId]) byAccount[accId] = []
-    byAccount[accId].push(position)
-  }
-  const accountIds = Object.keys(byAccount).sort()
-  const rows: ReactElement[] = []
-  for (const accId of accountIds) {
-    rows.push(
-      <tr key={`${rowKeyPrefix}-acc-${accId}`} className="replay-portfolio-group-header">
-        <td colSpan={9}>
-          <strong>{accId}</strong>
-        </td>
-      </tr>,
-    )
-    for (const position of byAccount[accId]) {
-      const qty = Number(position.position)
-      const lastPrice = position.price != null && Number.isFinite(Number(position.price)) ? Number(position.price) : null
-      const avgCost = position.avgCost != null && Number.isFinite(Number(position.avgCost)) ? Number(position.avgCost) : null
-      const prevClose =
-        position.daily_prev_close != null && Number.isFinite(Number(position.daily_prev_close))
-          ? Number(position.daily_prev_close)
-          : null
-      const pnl =
-        position.unrealized_pnl != null && Number.isFinite(Number(position.unrealized_pnl))
-          ? Number(position.unrealized_pnl)
-          : null
-      const sincePct =
-        pnl != null && avgCost != null && avgCost !== 0 && Number.isFinite(qty) ? (pnl / (Math.abs(avgCost * qty))) * 100 : null
-      const dailyPnl =
-        lastPrice != null && prevClose != null && Number.isFinite(qty) ? (lastPrice - prevClose) * qty : null
-      const dailyPct =
-        dailyPnl != null && prevClose != null && prevClose !== 0 ? ((lastPrice! - prevClose) / prevClose) * 100 : null
-      const contractKey = position.contract_key ?? `${position.symbol ?? ''}|STK|||`
-      rows.push(
-        <tr key={`${rowKeyPrefix}-open-stk-${accId}-${position.symbol ?? ''}-${contractKey}`}>
-          <td>{accId}</td>
-          <td>
-            {onInspectStock ? (
-              <button
-                type="button"
-                className="riv-stock-symbol-btn"
-                onClick={() => onInspectStock(position)}
-                aria-label={`Open details for ${position.symbol ?? 'symbol'}`}
-              >
-                <strong>{position.symbol ?? '—'}</strong>
-              </button>
-            ) : (
-              <strong>{position.symbol ?? '—'}</strong>
-            )}
-          </td>
-          <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
-          <td>{Number.isFinite(qty) ? qty : '—'}</td>
-          <td>{fmtUsd(position.avgCost)}</td>
-          <td>{fmtUsd(position.price)}</td>
-          <td>{fmtLivePositionMarketValueQtyTimesLast(position)}</td>
-          <td className="coverage-pnl-stacked-cell">
-            <div className={(dailyPnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}>
-              {dailyPnl != null ? fmtUsd(dailyPnl) : '—'}
-            </div>
-            <div className={`coverage-pnl-stacked-pct ${(dailyPct ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-              {dailyPct != null ? fmtSignedPct(dailyPct) : '—'}
-            </div>
-          </td>
-          <td className="coverage-pnl-stacked-cell">
-            <div className={(pnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}>{pnl != null ? fmtUsd(pnl) : '—'}</div>
-            <div className={`coverage-pnl-stacked-pct ${(sincePct ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-              {sincePct != null ? fmtSignedPct(sincePct) : '—'}
-            </div>
-          </td>
-        </tr>,
-      )
-    }
-  }
-  return rows
-}
-
-function renderIndependentHoldingRow(
-  position: LivePositionRow,
-  keyPrefix: string,
-  onInspectStock?: (p: LivePositionRow) => void,
-): ReactElement {
-  const accId = (position.account_id ?? '').trim() || '—'
-  const qty = Number(position.position)
-  const lastPrice =
-    position.price != null && Number.isFinite(Number(position.price)) ? Number(position.price) : null
-  const dailyPrev =
-    position.daily_prev_close != null && Number.isFinite(Number(position.daily_prev_close))
-      ? Number(position.daily_prev_close)
-      : null
-  let dailyPnl: number | null = null
-  let dailyPct: number | null = null
-  if (lastPrice != null && dailyPrev != null && Number.isFinite(qty) && qty !== 0) {
-    dailyPnl = (lastPrice - dailyPrev) * qty
-    const dBase = Math.abs(dailyPrev * qty)
-    dailyPct = dBase > 0 ? (dailyPnl / dBase) * 100 : null
-  }
-  const totalPnl =
-    position.unrealized_pnl != null && Number.isFinite(Number(position.unrealized_pnl))
-      ? Number(position.unrealized_pnl)
-      : null
-  const avgCost =
-    position.avgCost != null && Number.isFinite(Number(position.avgCost)) ? Number(position.avgCost) : null
-  const costBasis =
-    avgCost != null && Number.isFinite(qty) && qty !== 0 ? Math.abs(qty) * avgCost : null
-  const totalPct =
-    costBasis != null && costBasis > 0 && totalPnl != null && Number.isFinite(totalPnl)
-      ? (totalPnl / costBasis) * 100
-      : null
-  const ck = (position.contract_key ?? '').trim()
-  return (
-    <tr key={`${keyPrefix}-${accId}-${position.symbol ?? ''}-${ck || 'stk'}`}>
-      <td>{accId}</td>
-      <td>
-        {onInspectStock ? (
-          <button
-            type="button"
-            className="riv-stock-symbol-btn"
-            onClick={() => onInspectStock(position)}
-            aria-label={`Open details for ${position.symbol ?? 'symbol'}`}
-          >
-            <strong>{position.symbol ?? '—'}</strong>
-          </button>
-        ) : (
-          <strong>{position.symbol ?? '—'}</strong>
-        )}
-      </td>
-      <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
-      <td>{Number.isFinite(qty) ? qty : '—'}</td>
-      <td>{fmtUsd(position.avgCost)}</td>
-      <td>{fmtUsd(lastPrice)}</td>
-      <td>{fmtLivePositionMarketValueQtyTimesLast(position)}</td>
-      <td>
-        <span className={((dailyPnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>{fmtUsd(dailyPnl)}</span>
-        {' / '}
-        <span className={((dailyPct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>{fmtSignedPct(dailyPct)}</span>
-      </td>
-      <td>
-        <span className={((totalPnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>{fmtUsd(totalPnl)}</span>
-        {' / '}
-        <span className={((totalPct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>{fmtSignedPct(totalPct)}</span>
-      </td>
-    </tr>
-  )
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -303,41 +144,7 @@ export function PositionsPage({
     }
   }, [loadReplayData])
 
-  const [opportunities, setOpportunities] = useState<StrategyOpportunity[]>([])
-  const [structures, setStructures] = useState<StrategyStructure[]>([])
-
-  const loadStrategyMeta = useCallback(async () => {
-    try {
-      const [oppRes, strRes] = await Promise.all([
-        fetchOpportunities(false),
-        fetchStructures(false),
-      ])
-      setOpportunities(oppRes.items ?? [])
-      setStructures(strRes.items ?? [])
-    } catch { /* non-critical */ }
-  }, [])
-
-  useEffect(() => { loadStrategyMeta() }, [loadStrategyMeta])
-
-  const [attributions, setAttributions] = useState<PositionInstanceAttribution[]>([])
-  const loadAttributions = useCallback(async () => {
-    try {
-      const res = await fetchPositionAttribution()
-      setAttributions(res.attributions ?? [])
-    } catch { /* non-critical: falls back to empty → unassigned */ }
-  }, [])
-
-  const oppMap = useMemo(() => {
-    const m = new Map<number, StrategyOpportunity>()
-    for (const o of opportunities) m.set(o.strategy_opportunity_id, o)
-    return m
-  }, [opportunities])
-
-  const structureMap = useMemo(() => {
-    const m = new Map<number, StrategyStructure>()
-    for (const s of structures) m.set(s.strategy_structure_id, s)
-    return m
-  }, [structures])
+  const { attributions, loadAttributions, oppMap, structureMap } = useStrategyMeta()
 
   const [openFilterSymbol, setOpenFilterSymbol] = useState('')
   const [openFilterExpiryStart, setOpenFilterExpiryStart] = useState('')
@@ -386,47 +193,12 @@ export function PositionsPage({
   })
   /** Same scope as Account / Asset mix chips: All vs one IB account for top-row portfolio donuts. */
   const [stockCoverageSectionAccount, setStockCoverageSectionAccount] = useState<string>('all')
-  const [stockInspector, setStockInspector] = useState<{
-    symbol: string
-    accountId: string
-    position: LivePositionRow
-  } | null>(null)
-  const [optionInspector, setOptionInspector] = useState<OpenOptionPosition | null>(null)
-  const [strategyInspectorInstanceId, setStrategyInspectorInstanceId] = useState<number | null>(null)
-
-  const openStockInspector = useCallback((p: LivePositionRow) => {
-    const sym = (p.symbol ?? '').trim().toUpperCase()
-    const acc = (p.account_id ?? '').trim() || '—'
-    if (!sym) return
-    setOptionInspector(null)
-    setStrategyInspectorInstanceId(null)
-    setStockInspector({ symbol: sym, accountId: acc, position: p })
-  }, [])
-
-  const openOptionInspector = useCallback((p: OpenOptionPosition) => {
-    setStockInspector(null)
-    setStrategyInspectorInstanceId(null)
-    setPageError(null)
-    setOptionInspector(p)
-  }, [])
-
-  const openStrategyInspector = useCallback((strategyInstanceId: number) => {
-    if (!Number.isFinite(strategyInstanceId)) return
-    setStockInspector(null)
-    setOptionInspector(null)
-    setPageError(null)
-    setStrategyInspectorInstanceId(strategyInstanceId)
-  }, [])
-
-  const handleNavigateOptionDiscovery = useCallback(() => {
-    setOptionInspector(null)
-    onOpenOptionDiscovery?.()
-  }, [onOpenOptionDiscovery])
+  const { stockInspector, optionInspector, strategyInspectorInstanceId, openStockInspector, openOptionInspector, openStrategyInspector, handleNavigateOptionDiscovery, closeStockInspector, closeOptionInspector, closeStrategyInspector } = usePositionInspectors({ openTab, onOpenOptionDiscovery, onClearError: () => setPageError(null) })
   const [instanceFilterStructureType, setInstanceFilterStructureType] = useState<string>('all')
   const [instanceFilterScopeType, setInstanceFilterScopeType] = useState<string>('all')
   const [instanceFilterOppName, setInstanceFilterOppName] = useState<string>('all')
   const [instanceFilterAttributionType, setInstanceFilterAttributionType] = useState<string>('all')
-  const getPositionKey = (p: OpenOptionPosition, instId: number | null) =>
+  const getPositionKey = (p: OpenOptionPosition, instId: number | null | undefined) =>
     `${instId ?? 'none'}-${p.contract_key}-${p.strike}-${p.expiry}-${p.pool_label}-${p.account_id}${p.filtered_exec_lists ? '-unc' : ''}`
   /** Options tab (physical rows only): stable expand key without instance slice. */
   const getOptionsTabPositionKey = (p: OpenOptionPosition) =>
@@ -439,53 +211,13 @@ export function PositionsPage({
       return isOpen ? prev.filter(k => k !== posKey) : [...prev, posKey]
     })
   }
-  type OpenOptSortCol =
-    | 'contract'
-    | 'expiry'
-    | 'strike'
-    | 'last'
-    | 'qty'
-    | 'avg_cost'
-    | 'value'
-    | 'time'
-    | 'un_pnl'
-  const [openOptSort, setOpenOptSort] = useState<{ column: OpenOptSortCol; dir: 'asc' | 'desc' }>({
+  const [openOptSort, setOpenOptSort] = useState<OpenOptSort>({
     column: 'expiry',
     dir: 'desc',
   })
 
   const [openAccordionMode, setOpenAccordionMode] = useState<boolean>(true)
-  const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
-
-  useEffect(() => {
-    let cancelled = false
-    fetchQuotes()
-      .then(res => {
-        if (!cancelled) {
-          setQuotesMap(() => {
-            const map = mergeQuotesIntoSymbolMap({}, res.quotes || [])
-            for (const q of res.quotes || []) {
-              if (q.contract_key && (q.sec_type ?? '').toUpperCase() === 'OPT')
-                map[q.contract_key] = q
-            }
-            return map
-          })
-        }
-      })
-      .catch(() => { if (!cancelled) setQuotesMap({}) })
-    const unsub = subscribeQuotes(q => {
-      setQuotesMap(prev => {
-        const next = mergeQuotesIntoSymbolMap(prev, [q])
-        if (q.contract_key && (q.sec_type ?? '').toUpperCase() === 'OPT')
-          next[q.contract_key] = q
-        return next
-      })
-    })
-    return () => {
-      cancelled = true
-      unsub()
-    }
-  }, [])
+  const quotesMap = useQuotesSubscription()
 
   /** OPT rows present in unified `account_executions` (canonical), keyed like optExecutionMatchKey — for TWS sync precheck. */
   const canonicalOptContractKeySet = useMemo(() => {
@@ -498,217 +230,39 @@ export function PositionsPage({
     return s
   }, [executionsCanonical])
 
-  const renderOpenOptionExecutionRow = useCallback(
-    (
-      pos: OpenOptionPosition,
-      posKey: string,
-      ex: Execution,
-      ei: number,
-      book: 'final' | 'tws',
-      finalRows: Execution[],
-      twsRows: Execution[],
-      includeAttrColumn: boolean,
-      includeAccountColumn: boolean = true,
-    ) => {
-      const crossBookMatch =
-        book === 'final' ? findMatchingTwsForFinal(ex, twsRows) : findMatchingFinalForTws(ex, finalRows)
-      const es = (ex.side ?? '').toUpperCase()
-      const eSideLabel =
-        es === 'BUY' || es === 'BOT' || es === 'B'
-          ? 'Buy'
-          : es === 'SELL' || es === 'SLD' || es === 'S'
-            ? 'Sell'
-            : (ex.side ?? '—')
-      const eQty = Math.abs(Number(ex.quantity) || 0)
-      const ePrice = Number(ex.price) || 0
-      const eComm = Number(ex.commission) || 0
-      const eTs = ex.time != null ? Number(ex.time) : null
-      const isOffTrack = pos.kind === 'offtrack'
-      const execInstanceId = ex.strategy_instance_id
-      const bookLabel = book === 'final' ? '[Final]' : '[TWS client]'
-      const rowKey = `${posKey}-exec-${book}-${ex.account_executions_id ?? ei}`
-      const twsContractKey = optExecutionMatchKey(ex.account_id ?? '', ex.contract_key ?? '')
-      const hasCanonicalContractRow = canonicalOptContractKeySet.has(twsContractKey)
-      const showSyncTws =
-        book === 'tws' &&
-        hasCanonicalContractRow &&
-        crossBookMatch != null &&
-        twsNeedsStrategySyncFromFinal(ex, crossBookMatch)
-      const showSyncFinal =
-        book === 'final' &&
-        hasCanonicalContractRow &&
-        crossBookMatch != null &&
-        finalNeedsStrategySyncFromTws(ex, crossBookMatch)
-      const syncBusyTws = syncingTwsAttributionKey === String(ex.account_executions_id ?? '')
-      const syncBusyFinal = syncingFinalAttributionKey === String(ex.account_executions_id ?? '')
-      return (
-        <tr key={rowKey} className="detail-execution-row">
-          <td className="replay-opt-expand-col" />
-          <td className="detail-exec-indent replay-muted detail-exec-indent--stack" colSpan={2}>
-            <div className="detail-exec-indent-stack">
-              <div className="detail-exec-line-primary">
-                ↳ {bookLabel} exec #{ex.account_executions_id ?? '?'}
-                {execInstanceId != null ? (
-                  <>
-                    {' '}
-                    <span className="replay-muted">·</span>{' '}
-                    <button
-                      type="button"
-                      className="ledger-instance-icon-link"
-                      title={`strategy_instance_id ${execInstanceId}`}
-                      aria-label={`View strategy #${execInstanceId}`}
-                      onClick={e => {
-                        e.stopPropagation()
-                        openStrategyInspector(execInstanceId)
-                      }}
-                    >
-                      strategy #{execInstanceId}
-                    </button>
-                  </>
-                ) : null}
-              </div>
-              {showSyncTws && crossBookMatch != null ? (
-                <div className="detail-exec-line-sync">
-                  <button
-                    type="button"
-                    className="btn btn-icon-small detail-exec-sync-btn"
-                    title="Apply opportunity and strategy from the final book row"
-                    aria-label="Sync strategy attribution from final book"
-                    disabled={syncBusyTws}
-                    onClick={e => {
-                      e.stopPropagation()
-                      handleSyncTwsStrategyFromFinal(ex, crossBookMatch)
-                    }}
-                  >
-                    <svg viewBox="0 0 24 24" width={14} height={14} fill="currentColor" aria-hidden>
-                      <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 9.02 4 10.48 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
-                    </svg>
-                  </button>
-                </div>
-              ) : null}
-              {showSyncFinal && crossBookMatch != null ? (
-                <div className="detail-exec-line-sync">
-                  <button
-                    type="button"
-                    className="btn btn-icon-small detail-exec-sync-btn"
-                    title="Apply opportunity and strategy from the TWS client row"
-                    aria-label="Sync strategy attribution from TWS client book"
-                    disabled={syncBusyFinal}
-                    onClick={e => {
-                      e.stopPropagation()
-                      handleSyncFinalStrategyFromTws(ex, crossBookMatch)
-                    }}
-                  >
-                    <svg viewBox="0 0 24 24" width={14} height={14} fill="currentColor" aria-hidden>
-                      <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 9.02 4 10.48 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
-                    </svg>
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </td>
-          <td>
-            <ExecSourceBadge source={ex.source} />
-          </td>
-          <td />
-          <td>
-            {eSideLabel} {eQty || '—'}
-          </td>
-          <td>{fmtUsd(ePrice)}</td>
-          <td />
-          <td>
-            {eTs != null && Number.isFinite(eTs) ? (
-              <>
-                {fmtDate(eTs)}
-                {fmtDaysAgo(eTs) ? <span className="replay-time-ago"> {fmtDaysAgo(eTs)}</span> : null}
-              </>
-            ) : (
-              '—'
-            )}
-          </td>
-          <td>{eComm ? fmtUsd(eComm) : '—'}</td>
-          <td className="replay-muted" />
-          {includeAttrColumn ? <td className="replay-muted" /> : null}
-          {includeAccountColumn ? <td className="replay-muted positions-opt-account-cell">{ex.account_id ?? '—'}</td> : null}
-          <StrategyAttributionCells ex={ex} onOpenStrategyInstance={openStrategyInspector} />
-          <td className="replay-opt-actions-cell">
-            <span className="replay-exec-row-actions">
-              <button
-                type="button"
-                className="btn btn-icon-small"
-                onClick={e => {
-                  e.stopPropagation()
-                  setPageError(null)
-                  setEditExecConfirmState({ open: true, exec: ex })
-                }}
-                title="Edit"
-                aria-label="Edit execution"
-              >
-                <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                </svg>
-              </button>
-              {ex.account_executions_id != null ? (
-                <LinkStrategyIconButton
-                  title="Assign opportunity and strategy"
-                  onClick={() => {
-                    setLinkContext({ account_executions_id: ex.account_executions_id!, execution: ex })
-                    setLinkModalOpen(true)
-                    setPageError(null)
-                  }}
-                />
-              ) : null}
-              {isOffTrack ? (
-                <button
-                  type="button"
-                  className="btn btn-small"
-                  onClick={e => {
-                    e.stopPropagation()
-                    setCloseAgainstExec(ex)
-                    setPageError(null)
-                  }}
-                >
-                  Close
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="btn btn-icon-small btn-icon-danger"
-                onClick={e => {
-                  e.stopPropagation()
-                  setPageError(null)
-                  setDeleteConfirmState({
-                    open: true,
-                    title: 'Delete execution',
-                    message: 'This will permanently remove this execution from the trade ledger. This cannot be undone.',
-                    confirming: false,
-                    exec: ex,
-                  })
-                }}
-                title="Delete"
-                aria-label="Delete execution"
-              >
-                <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <polyline points="3 6 5 6 21 6" />
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                  <line x1="10" y1="11" x2="10" y2="17" />
-                  <line x1="14" y1="11" x2="14" y2="17" />
-                </svg>
-              </button>
-            </span>
-          </td>
-        </tr>
-      )
-    },
-    [
-      canonicalOptContractKeySet,
-      handleSyncFinalStrategyFromTws,
-      handleSyncTwsStrategyFromFinal,
-      syncingFinalAttributionKey,
-      syncingTwsAttributionKey,
-    ],
-  )
+  const handleEditExec = useCallback((exec: Execution) => {
+    setPageError(null)
+    setEditExecConfirmState({ open: true, exec })
+  }, [])
+  const handleLinkExec = useCallback((exec: Execution) => {
+    if (exec.account_executions_id == null) return
+    setLinkContext({ account_executions_id: exec.account_executions_id, execution: exec })
+    setLinkModalOpen(true)
+    setPageError(null)
+  }, [])
+  const handleCloseAgainstExec = useCallback((exec: Execution) => {
+    setCloseAgainstExec(exec)
+    setPageError(null)
+  }, [])
+  const handleDeleteExec = useCallback((exec: Execution) => {
+    setPageError(null)
+    setDeleteConfirmState({
+      open: true,
+      title: 'Delete execution',
+      message: 'This will permanently remove this execution from the trade ledger. This cannot be undone.',
+      confirming: false,
+      exec,
+    })
+  }, [])
+  const execRowActions = useMemo((): OptionExecRowActions => ({
+    onSyncTwsStrategyFromFinal: handleSyncTwsStrategyFromFinal,
+    onSyncFinalStrategyFromTws: handleSyncFinalStrategyFromTws,
+    onOpenStrategyInspector: openStrategyInspector,
+    onEdit: handleEditExec,
+    onLink: handleLinkExec,
+    onCloseAgainst: handleCloseAgainstExec,
+    onDelete: handleDeleteExec,
+  }), [handleSyncTwsStrategyFromFinal, handleSyncFinalStrategyFromTws, openStrategyInspector, handleEditExec, handleLinkExec, handleCloseAgainstExec, handleDeleteExec])
 
   const openOffTrackBaseExecutions = useMemo(() => {
     let list = [...executionsFinal, ...executionsTws]
@@ -1450,11 +1004,6 @@ export function PositionsPage({
     return px
   }, [optionInspector, liveStockPositions])
 
-  useEffect(() => {
-    setStockInspector(null)
-    setOptionInspector(null)
-    setStrategyInspectorInstanceId(null)
-  }, [openTab])
 
   const instanceDefaultAccountForStockInspect = useCallback((allGroup: InstanceAllGroup): string => {
     const fromOpts = allGroup.options.map(o => (o.account_id ?? '').trim()).filter(Boolean)
@@ -2413,781 +1962,7 @@ export function PositionsPage({
     loadAttributions()
   }, [loadReplayData, loadAttributions])
 
-  const renderStockCoverageSummaryTable = (
-    rows: StockCoverageItem[],
-    keyPrefix: string,
-    tableOpts?: {
-      showAvailableHeldContracts?: boolean
-      hideBackedOpportunities?: boolean
-      /** Option underlying Pool: fewer columns, Host/Secondary account colors, held amt = contracts only. */
-      underlyingPoolSlim?: boolean
-      backingPoolSlim?: boolean
-      underlyingPoolSort?: {
-        column: CoveragePoolSortCol
-        dir: 'asc' | 'desc'
-        onColumnClick: (col: CoveragePoolSortCol) => void
-      }
-      /** When set, Symbol column opens stock inspector for that (symbol, account). */
-      onInspectCoverageSymbol?: (ci: StockCoverageItem) => void
-    },
-  ) => {
-    const slim = tableOpts?.underlyingPoolSlim === true
-    const backingSlim = tableOpts?.backingPoolSlim === true
-    const backingLayout = backingSlim && !slim
-    const poolSort = tableOpts?.underlyingPoolSort
-    const showAvail = slim || tableOpts?.showAvailableHeldContracts === true
-    const hideBacked = slim || tableOpts?.hideBackedOpportunities === true
-    const showHeldColumn = !backingLayout
-    const showHeldAmtColumn = slim || backingLayout || (showAvail && !backingLayout && !slim)
-    const accountCellClass = (accountId: string) => {
-      const a = (accountId ?? '').trim()
-      if (streamSecondaryAccountId && a === streamSecondaryAccountId) return 'coverage-account-id coverage-account-secondary'
-      if (streamHostAccountId && a === streamHostAccountId) return 'coverage-account-id coverage-account-host'
-      return 'coverage-account-id coverage-account-other'
-    }
-    const poolSortOn = !!(poolSort && (slim || backingLayout))
-    const poolGroupByAccount = slim || backingLayout
-    const accountGroupColSpan = poolGroupByAccount ? 7 : 0
-    const sortCol = poolSort?.column ?? 'market_price'
-    const sortDir = poolSort?.dir ?? 'desc'
-    const accountGroups = poolGroupByAccount
-      ? groupCoverageByAccount(
-          rows,
-          sortCol,
-          sortDir,
-          streamHostAccountId,
-          streamSecondaryAccountId,
-        )
-      : null
-    const sortTh = (label: ReactNode, col: CoveragePoolSortCol, title?: string) => {
-      if (!poolSortOn) return <th title={title}>{label}</th>
-      const active = poolSort.column === col
-      return (
-        <th
-          className="replay-th-sortable coverage-pool-sort-th"
-          title={title}
-          role="button"
-          tabIndex={0}
-          aria-sort={active ? (poolSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
-          onClick={() => poolSort.onColumnClick(col)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              poolSort.onColumnClick(col)
-            }
-          }}
-        >
-          {label}
-          {active ? (poolSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
-        </th>
-      )
-    }
-    const renderCoverageDataRow = (ci: StockCoverageItem, rowKey: string) => {
-      const statusLabel =
-        ci.held_shares >= ci.required_shares
-          ? 'Covered'
-          : ci.held_shares > 0
-            ? 'Partial'
-            : 'Naked'
-      const statusClass =
-        ci.held_shares >= ci.required_shares
-          ? 'coverage-status-covered'
-          : ci.held_shares > 0
-            ? 'coverage-status-partial'
-            : 'coverage-status-naked'
-      const optionSupportLabel =
-        ci.optionable_supported === true
-          ? 'Optionable'
-          : ci.optionable_supported === false
-            ? 'Not optionable'
-            : 'Mixed / Unknown'
-      const backedOpps = ci.backing_opportunities ?? []
-      const availContracts = showAvail ? Math.floor(Math.max(0, ci.held_shares) / 100) : 0
-      const acc = ci.account_id || '—'
-      return (
-        <tr key={rowKey}>
-          <td>
-            {tableOpts?.onInspectCoverageSymbol ? (
-              <button
-                type="button"
-                className="riv-stock-symbol-btn"
-                onClick={() => tableOpts.onInspectCoverageSymbol?.(ci)}
-                aria-label={`Stock details for ${ci.symbol} in account ${acc}`}
-              >
-                {ci.symbol}
-              </button>
-            ) : (
-              <strong>{ci.symbol}</strong>
-            )}
-          </td>
-          {!poolGroupByAccount && <td className="replay-muted">{acc}</td>}
-          {!hideBacked && (
-            <td title={backedOpps.join(', ') || undefined}>
-              {backedOpps.length > 0 ? backedOpps.join(', ') : '—'}
-            </td>
-          )}
-          {showHeldColumn && (
-            <td className={slim ? 'coverage-held-shares-cell' : undefined}>
-              {slim ? fmtHeldSharesWhole(ci.held_shares) : ci.held_shares}
-            </td>
-          )}
-          {showHeldAmtColumn &&
-            (slim || backingLayout ? (
-              <td
-                className={`coverage-available-held-amt-cell coverage-available-held-amt-slim${slim && !backingLayout ? ' coverage-held-amt-underlying-narrow' : ''}`}
-              >
-                <span
-                  className={`coverage-available-contracts-only${slim && !backingLayout ? ' coverage-held-amt-underlying-contracts' : ''}`}
-                  title={
-                    backingLayout
-                      ? `${Math.floor(Math.max(0, Math.min(ci.held_shares, ci.required_shares)) / 100)} contracts — min(${ci.held_shares} held, ${ci.required_shares} required) sh ÷ 100`
-                      : `${ci.held_shares} sh ÷ 100`
-                  }
-                >
-                  {backingLayout
-                    ? Math.floor(
-                        Math.max(0, Math.min(ci.held_shares || 0, ci.required_shares || 0)) / 100,
-                      )
-                    : Math.floor(Math.max(0, ci.held_shares) / 100)}
-                </span>
-                {backingLayout && ci.instances_needing > 1 && (
-                  <span className="coverage-shared-hint"> ({ci.instances_needing} strat.)</span>
-                )}
-              </td>
-            ) : (
-              <td className="coverage-available-held-amt-cell">
-                <div className="coverage-available-contracts" title={`${ci.held_shares} sh ÷ 100`}>
-                  {availContracts}
-                </div>
-                <div className="coverage-available-contracts-label">contracts</div>
-                <div className="coverage-available-shares-line" title="Share qty (100 sh per contract)">
-                  {ci.held_shares} sh
-                </div>
-              </td>
-            ))}
-          {!slim && !backingLayout && (
-            <td>
-              {ci.required_shares}
-              {ci.instances_needing > 1 && (
-                <span className="coverage-shared-hint"> ({ci.instances_needing} strat.)</span>
-              )}
-            </td>
-          )}
-          {!slim && !backingSlim && (
-            <td>
-              <span className={ci.surplus_or_gap >= 0 ? 'pnl-positive' : 'pnl-negative'}>
-                {fmtSurplusShares(ci.surplus_or_gap)}
-              </span>
-            </td>
-          )}
-          {!slim && !backingSlim && <td>{optionSupportLabel}</td>}
-          {slim || backingLayout ? (
-            <td className="coverage-cost-avg-cell" title="Cost basis (total) / avg cost per share">
-              <div className="coverage-cost-avg-basis">{fmtUsd(ci.cost_basis_total)}</div>
-              <div className="coverage-cost-avg-per-share">{fmtUsd(ci.avg_cost_per_share)}</div>
-            </td>
-          ) : (
-            <>
-              <td>{fmtUsd(ci.cost_basis_total)}</td>
-              <td>{fmtUsd(ci.avg_cost_per_share)}</td>
-            </>
-          )}
-          {slim || backingLayout ? (
-            <td
-              className="coverage-mkt-value-price-cell"
-              title="Position market value (held × last) / price per share"
-            >
-              <div className="coverage-mkt-value-total">{fmtUsd(coverageRowMarketValueTotal(ci))}</div>
-              <div className="coverage-mkt-value-per-share">{fmtUsd(ci.live_last_price)}</div>
-            </td>
-          ) : (
-            <td>{fmtUsd(ci.live_last_price)}</td>
-          )}
-          {slim || backingLayout ? (
-            <td className="coverage-pnl-stacked-cell">
-              <div className={((ci.daily_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                {fmtUsd(ci.daily_pnl)}
-              </div>
-              <div className={`coverage-pnl-stacked-pct ${((ci.daily_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}`}>
-                {fmtSignedPct(ci.daily_pct)}
-              </div>
-            </td>
-          ) : (
-            <td>
-              <span className={((ci.daily_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                {fmtUsd(ci.daily_pnl)}
-              </span>
-              {' / '}
-              <span className={((ci.daily_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                {fmtSignedPct(ci.daily_pct)}
-              </span>
-            </td>
-          )}
-          {slim || backingLayout ? (
-            <td className="coverage-pnl-stacked-cell">
-              <div className={((ci.total_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                {fmtUsd(ci.total_pnl)}
-              </div>
-              <div className={`coverage-pnl-stacked-pct ${((ci.total_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}`}>
-                {fmtSignedPct(ci.total_pct)}
-              </div>
-            </td>
-          ) : (
-            <td>
-              <span className={((ci.total_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                {fmtUsd(ci.total_pnl)}
-              </span>
-              {' / '}
-              <span className={((ci.total_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                {fmtSignedPct(ci.total_pct)}
-              </span>
-            </td>
-          )}
-          {!slim && !backingSlim && (
-            <td>
-              <span className={`coverage-status-badge ${statusClass}`}>{statusLabel}</span>
-            </td>
-          )}
-        </tr>
-      )
-    }
-    return (
-    <div className="replay-portfolio-table-wrap">
-      <table
-        className={`table-operations instance-sheet-sub-table coverage-summary-table${poolSortOn ? ' coverage-underlying-pool-sortable' : ''}`}
-      >
-        <thead>
-          <tr>
-            {slim || backingLayout ? sortTh('Symbol', 'symbol') : <th>Symbol</th>}
-            {!poolGroupByAccount && <th>Account</th>}
-            {!hideBacked && <th>Backed opportunities</th>}
-            {showHeldColumn &&
-              (slim ? sortTh('Held', 'held', 'Long share qty (whole shares).') : <th>Held</th>)}
-            {showHeldAmtColumn &&
-              (backingLayout ? (
-                sortTh(
-                  <span className="coverage-pool-th-backed-amt">
-                    Backed
-                    <br />
-                    Amt
-                  </span>,
-                  'backed_amt',
-                  'Contracts backing watchlist hedge: min(held, required) ÷ 100.',
-                )
-              ) : slim && poolSortOn ? (
-                sortTh(
-                  <span className="coverage-pool-th-held-amt">
-                    Held
-                    <br />
-                    Amt
-                  </span>,
-                  'held_amt',
-                  'Contracts ≈ max(0, long shares) ÷ 100.',
-                )
-              ) : slim ? (
-                <th title="Contracts ≈ max(0, long shares) ÷ 100.">
-                  <span className="coverage-pool-th-held-amt">Held<br />Amt</span>
-                </th>
-              ) : (
-                <th title="Option contracts ≈ max(0, long shares) ÷ 100.">Available Held Amt</th>
-              ))}
-            {!slim && !backingLayout && <th>Required</th>}
-            {!slim && !backingSlim && <th>Surplus / Gap</th>}
-            {!slim && !backingSlim && <th>Option support</th>}
-            {slim || backingLayout ? (
-              sortTh(
-                'Basis / Avg',
-                'cost_basis',
-                'Total cost basis (top) and average cost per share (bottom).',
-              )
-            ) : (
-              <>
-                <th>Cost basis</th>
-                <th>Avg cost</th>
-              </>
-            )}
-            {backingLayout ? (
-              sortTh(
-                'Mkt / Price',
-                'market_price',
-                'Market value (held × last) / share price. Sort by value.',
-              )
-            ) : slim ? (
-              sortTh(
-                'Mkt value / Price',
-                'market_price',
-                'Total market value (held × last) and price per share. Sort by total value.',
-              )
-            ) : (
-              <th>Live last</th>
-            )}
-            {slim || backingLayout ? <th className="coverage-pnl-stacked-th">Daily</th> : <th>Daily ($ / %)</th>}
-            {slim || backingLayout ? <th className="coverage-pnl-stacked-th">Total</th> : <th>Total ($ / %)</th>}
-            {!slim && !backingSlim && <th>Status</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {accountGroups
-            ? accountGroups.map(({ accountId, items }) => (
-                <Fragment key={`${keyPrefix}-acc-${accountId}`}>
-                  <tr className="coverage-pool-account-group-row">
-                    <td
-                      colSpan={accountGroupColSpan}
-                      className={accountCellClass(accountId)}
-                      title="Host vs Secondary use Settings → Stream host / secondary account IDs."
-                    >
-                      {accountId}
-                    </td>
-                  </tr>
-                  {items.map(ci =>
-                    renderCoverageDataRow(ci, `${keyPrefix}-${accountId}-${ci.symbol}`),
-                  )}
-                </Fragment>
-              ))
-            : rows.map(ci =>
-                renderCoverageDataRow(ci, `${keyPrefix}-${ci.symbol}-${ci.account_id || '—'}`),
-              )}
-        </tbody>
-      </table>
-    </div>
-    )
-  }
 
-  const renderLiveStockBucketPanel = (
-    panelId: string,
-    tabButtonId: string,
-    heading: string,
-    rows: LivePositionRow[],
-    rowKeyPrefix: string,
-    emptyHint: string,
-    onInspectStock?: (p: LivePositionRow) => void,
-  ) => (
-    <div
-      id={panelId}
-      role="tabpanel"
-      aria-labelledby={tabButtonId}
-      className="system-tab-panel"
-    >
-      <h5 className="replay-sub">{heading}</h5>
-      {rows.length === 0 ? (
-        <p className="section-hint">{emptyHint}</p>
-      ) : (
-        <div className="replay-portfolio-table-wrap">
-          <table className="table-operations">
-            <thead>
-              <tr>
-                <th>Account</th>
-                <th>Symbol</th>
-                <th>Side</th>
-                <th>Qty</th>
-                <th>Avg Cost</th>
-                <th>Last</th>
-                <th>Market Value</th>
-                <th className="coverage-pnl-stacked-th">Daily $/&nbsp;%</th>
-                <th className="coverage-pnl-stacked-th">Since $/&nbsp;%</th>
-              </tr>
-            </thead>
-            <tbody>{buildOpenStockPositionRows(rows, rowKeyPrefix, onInspectStock)}</tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  )
-
-  const renderAccountCoverageCharts = () => (
-    <div className="coverage-charts-section pos-comp-coverage-charts">
-      <div className="coverage-charts-toolbar coverage-charts-toolbar--account-mix">
-        <span className="coverage-charts-toolbar-label">Account</span>
-        <div
-          className="coverage-section-account-filter"
-          role="group"
-          aria-label="Account filter for asset mix chart"
-        >
-          {[
-            { id: 'all', label: 'All' },
-            ...(streamHostAccountId ? [{ id: streamHostAccountId, label: streamHostAccountId }] : []),
-            ...(streamSecondaryAccountId && streamSecondaryAccountId !== streamHostAccountId
-              ? [{ id: streamSecondaryAccountId, label: streamSecondaryAccountId }]
-              : []),
-          ].map(opt => (
-            <button
-              key={opt.id}
-              type="button"
-              className={`coverage-asset-pie-acct-btn${stockCoverageSectionAccount === opt.id ? ' active' : ''}`}
-              onClick={() => setStockCoverageSectionAccount(opt.id)}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="coverage-charts-grid">
-    {(() => {
-      const {
-        coreStockMV,
-        fixedIncomeMV,
-        cashLikeMV,
-        cash,
-        bp,
-        denom,
-        pStock,
-        pFixedIncome,
-        pCashLike,
-        pCash,
-        pBp,
-        netLiq,
-        includeBpInChart,
-        includeFiInChart,
-        includeCashLikeInChart,
-        simpleCenterPct,
-      } = coverageAssetPieData
-      /** Match `PositionDonutChart` ring (same as Underlying category donuts), not legacy thick stroke. */
-      const cx = 66
-      const cy = 66
-      const rMid = 46
-      const ringStroke = 14
-      const circ = 2 * Math.PI * rMid
-      let ringOff = 0
-      const ringSeg = (frac: number, className: string, key: string) => {
-        const len = Math.max(0, frac) * circ
-        if (len < 0.5) return null
-        const el = (
-          <circle
-            key={key}
-            cx={cx}
-            cy={cy}
-            r={rMid}
-            fill="none"
-            className={className}
-            strokeWidth={ringStroke}
-            strokeLinecap="butt"
-            strokeDasharray={`${len} ${circ}`}
-            strokeDashoffset={-ringOff}
-            transform={`rotate(-90 ${cx} ${cy})`}
-          />
-        )
-        ringOff += len
-        return el
-      }
-      let centerMain = '—'
-      let centerSub = ''
-      let centerValClass = 'coverage-asset-pie-center-val coverage-asset-pie-center-val--basis'
-      if (denom > 0) {
-        if (simpleCenterPct) {
-          if (coverageAssetMixLegendMode === 'usd') {
-            centerMain = fmtUsd(denom)
-            centerSub = netLiq != null ? `Net liq. ${fmtMvAbbrev(netLiq)}` : 'Stock + cash basis'
-            centerValClass = 'coverage-asset-pie-center-val coverage-asset-pie-center-val--basis'
-          } else {
-            centerMain = `${(pStock * 100).toFixed(1)} · ${(pCash * 100).toFixed(1)}`
-            centerSub = '% of sum'
-            centerValClass = 'coverage-asset-pie-center-val coverage-asset-pie-center-val--triplet'
-          }
-        } else if (coverageAssetMixLegendMode === 'usd') {
-          centerMain = fmtUsd(denom)
-          centerSub = netLiq != null ? `Net liq. ${fmtMvAbbrev(netLiq)}` : 'Chart basis'
-          centerValClass = 'coverage-asset-pie-center-val coverage-asset-pie-center-val--basis'
-        } else {
-          centerMain = '100.0%'
-          centerSub =
-            netLiq != null
-              ? `Basis ${fmtMvAbbrev(denom)} · Net liq. ${fmtMvAbbrev(netLiq)}`
-              : `Chart basis ${fmtMvAbbrev(denom)}`
-          centerValClass = 'coverage-asset-pie-center-val coverage-asset-pie-center-val--basis'
-        }
-      } else if (netLiq != null) {
-        centerMain = fmtUsd(netLiq)
-        centerSub = 'Net liq.'
-        centerValClass = 'coverage-asset-pie-center-val coverage-asset-pie-center-val--netliq'
-      }
-      const ringAriaParts = [
-        'Stock (core equities)',
-        includeFiInChart ? 'Fixed income' : null,
-        includeCashLikeInChart ? 'Cash-like' : null,
-        'Net cash',
-        includeBpInChart ? 'Buying power' : null,
-      ].filter(Boolean)
-      return (
-        <div className="coverage-charts-cell coverage-asset-pie-section">
-          <div
-            className="coverage-asset-pie-header"
-            style={{ flexWrap: 'wrap', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}
-          >
-            <span className="coverage-asset-pie-title">Asset mix</span>
-            <InfoTooltip text="Stock = market value of non-option positions classified as core equities (same as Stocks tab; excludes ledger Fixed income and Cash-like). Fixed income / Cash-like use position category labels. Net cash = IB TotalCashValue. Buying power = IB BuyingPower. Include/Exclude changes the ring and chart basis (center main in $ mode). The sub line shows IB net liquidation for reference when known. % / $ toggles legend columns like Option charts." />
-            <div
-              className="coverage-asset-pie-bubble-switch"
-              style={{ marginLeft: 'auto', flexShrink: 0 }}
-              role="group"
-              aria-label="Asset mix: percent of chart basis or dollars in legend; donut center follows mode when the ring uses full basis"
-            >
-              <button
-                type="button"
-                className={`coverage-asset-pie-bubble-btn${coverageAssetMixLegendMode === 'pct' ? ' active' : ''}`}
-                aria-pressed={coverageAssetMixLegendMode === 'pct'}
-                onClick={() => setCoverageAssetMixLegendMode('pct')}
-              >
-                %
-              </button>
-              <button
-                type="button"
-                className={`coverage-asset-pie-bubble-btn${coverageAssetMixLegendMode === 'usd' ? ' active' : ''}`}
-                aria-pressed={coverageAssetMixLegendMode === 'usd'}
-                onClick={() => setCoverageAssetMixLegendMode('usd')}
-              >
-                $
-              </button>
-            </div>
-          </div>
-          <div className="coverage-asset-pie-body">
-            <div className="coverage-asset-pie-chart-block">
-              <svg
-                width={132}
-                height={132}
-                viewBox="0 0 132 132"
-                className="coverage-asset-pie-svg"
-                role="img"
-                aria-label={`Ring chart: ${ringAriaParts.join(', ')} as shares of their sum`}
-              >
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r={rMid}
-                  fill="none"
-                  className="coverage-asset-pie-ring-track"
-                  strokeWidth={ringStroke}
-                />
-                {denom > 0 ? (
-                  <>
-                    {ringSeg(pStock, 'coverage-asset-pie-ring-seg-stock', 'seg-stock')}
-                    {includeFiInChart
-                      ? ringSeg(pFixedIncome, 'coverage-asset-pie-ring-seg-fi', 'seg-fi')
-                      : null}
-                    {includeCashLikeInChart
-                      ? ringSeg(pCashLike, 'coverage-asset-pie-ring-seg-cashlike', 'seg-cashlike')
-                      : null}
-                    {ringSeg(pCash, 'coverage-asset-pie-ring-seg-cash', 'seg-cash')}
-                    {includeBpInChart
-                      ? ringSeg(pBp, 'coverage-asset-pie-ring-seg-bp', 'seg-bp')
-                      : null}
-                  </>
-                ) : null}
-                <text
-                  x={cx}
-                  y={cy - 4}
-                  className={centerValClass}
-                  textAnchor="middle"
-                  dominantBaseline="auto"
-                  style={{ fontSize: '0.98rem', fill: 'var(--color-text-main, #e4e9ef)' }}
-                >
-                  {centerMain}
-                </text>
-                <text
-                  x={cx}
-                  y={cy + 11}
-                  className="coverage-asset-pie-center-sub"
-                  textAnchor="middle"
-                  dominantBaseline="auto"
-                  style={{ fontSize: '0.74rem', fill: 'var(--color-text-dim, #5c6572)' }}
-                >
-                  {centerSub}
-                </text>
-              </svg>
-              <div className="coverage-asset-pie-bp-side">
-                <div className="coverage-asset-pie-chart-toggle-row">
-                  <span className="coverage-asset-pie-bp-label">Fixed income in chart</span>
-                  <div
-                    className="coverage-asset-pie-bubble-switch"
-                    role="group"
-                    aria-label="Include fixed income in ring denominator"
-                  >
-                    <button
-                      type="button"
-                      className={`coverage-asset-pie-bubble-btn${!coverageAssetPieIncludeFi ? ' active' : ''}`}
-                      aria-pressed={!coverageAssetPieIncludeFi}
-                      onClick={() => setCoverageAssetPieIncludeFi(false)}
-                    >
-                      Exclude
-                    </button>
-                    <button
-                      type="button"
-                      className={`coverage-asset-pie-bubble-btn${coverageAssetPieIncludeFi ? ' active' : ''}`}
-                      aria-pressed={coverageAssetPieIncludeFi}
-                      onClick={() => setCoverageAssetPieIncludeFi(true)}
-                    >
-                      Include
-                    </button>
-                  </div>
-                </div>
-                <div className="coverage-asset-pie-chart-toggle-row">
-                  <span className="coverage-asset-pie-bp-label">Cash-like in chart</span>
-                  <div
-                    className="coverage-asset-pie-bubble-switch"
-                    role="group"
-                    aria-label="Include cash-like in ring denominator"
-                  >
-                    <button
-                      type="button"
-                      className={`coverage-asset-pie-bubble-btn${!coverageAssetPieIncludeCashLike ? ' active' : ''}`}
-                      aria-pressed={!coverageAssetPieIncludeCashLike}
-                      onClick={() => setCoverageAssetPieIncludeCashLike(false)}
-                    >
-                      Exclude
-                    </button>
-                    <button
-                      type="button"
-                      className={`coverage-asset-pie-bubble-btn${coverageAssetPieIncludeCashLike ? ' active' : ''}`}
-                      aria-pressed={coverageAssetPieIncludeCashLike}
-                      onClick={() => setCoverageAssetPieIncludeCashLike(true)}
-                    >
-                      Include
-                    </button>
-                  </div>
-                </div>
-                <div className="coverage-asset-pie-chart-toggle-row">
-                  <span className="coverage-asset-pie-bp-label">Buying power in chart</span>
-                  <div
-                    className="coverage-asset-pie-bubble-switch"
-                    role="group"
-                    aria-label="Include buying power in ring denominator"
-                  >
-                    <button
-                      type="button"
-                      className={`coverage-asset-pie-bubble-btn${!coverageAssetPieIncludeBp ? ' active' : ''}`}
-                      aria-pressed={!coverageAssetPieIncludeBp}
-                      onClick={() => setCoverageAssetPieIncludeBp(false)}
-                    >
-                      Exclude
-                    </button>
-                    <button
-                      type="button"
-                      className={`coverage-asset-pie-bubble-btn${coverageAssetPieIncludeBp ? ' active' : ''}`}
-                      aria-pressed={coverageAssetPieIncludeBp}
-                      onClick={() => setCoverageAssetPieIncludeBp(true)}
-                    >
-                      Include
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="coverage-asset-pie-legend coverage-asset-pie-legend--asset-mix-two-col">
-              <div className="coverage-asset-pie-legend-mix-col">
-                <div className="coverage-asset-pie-legend-item">
-                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--stock" />
-                  <span className="coverage-asset-pie-legend-label">Stock</span>
-                  <span className="coverage-asset-pie-legend-pct">
-                    {coverageAssetMixLegendMode === 'pct' ? (denom > 0 ? `${(pStock * 100).toFixed(1)}%` : '—') : '—'}
-                  </span>
-                  <span className="coverage-asset-pie-legend-value" title={fmtUsd(coreStockMV)}>
-                    {coverageAssetMixLegendMode === 'pct' ? fmtMvAbbrev(coreStockMV) : fmtUsd(coreStockMV)}
-                  </span>
-                </div>
-                <div
-                  className={`coverage-asset-pie-legend-item${!includeFiInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
-                  title={
-                    !includeFiInChart
-                      ? 'Fixed income MV is listed; not included in ring denominator.'
-                      : undefined
-                  }
-                >
-                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--fi" />
-                  <span className="coverage-asset-pie-legend-label">Fixed income</span>
-                  <span className="coverage-asset-pie-legend-pct">
-                    {coverageAssetMixLegendMode === 'pct'
-                      ? includeFiInChart && denom > 0
-                        ? `${(pFixedIncome * 100).toFixed(1)}%`
-                        : '—'
-                      : '—'}
-                  </span>
-                  <span className="coverage-asset-pie-legend-value" title={fmtUsd(fixedIncomeMV)}>
-                    {coverageAssetMixLegendMode === 'pct' ? fmtMvAbbrev(fixedIncomeMV) : fmtUsd(fixedIncomeMV)}
-                  </span>
-                </div>
-                <div
-                  className={`coverage-asset-pie-legend-item${!includeBpInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
-                  title={
-                    !includeBpInChart
-                      ? 'Buying power is listed for reference; not included in ring denominator.'
-                      : undefined
-                  }
-                >
-                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--bp" />
-                  <span className="coverage-asset-pie-legend-label">Buying power</span>
-                  <span className="coverage-asset-pie-legend-pct">
-                    {coverageAssetMixLegendMode === 'pct'
-                      ? includeBpInChart && denom > 0
-                        ? `${(pBp * 100).toFixed(1)}%`
-                        : '—'
-                      : '—'}
-                  </span>
-                  <span
-                    className="coverage-asset-pie-legend-value"
-                    title={bp != null && Number.isFinite(bp) ? fmtUsd(bp) : undefined}
-                  >
-                    {bp != null && Number.isFinite(bp) ? fmtUsd(bp) : '—'}
-                  </span>
-                </div>
-              </div>
-              <div className="coverage-asset-pie-legend-mix-col">
-                <div
-                  className={`coverage-asset-pie-legend-item${!includeCashLikeInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
-                  title={
-                    !includeCashLikeInChart
-                      ? 'Cash-like MV is listed; not included in ring denominator.'
-                      : undefined
-                  }
-                >
-                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--cashlike" />
-                  <span className="coverage-asset-pie-legend-label">Cash-like</span>
-                  <span className="coverage-asset-pie-legend-pct">
-                    {coverageAssetMixLegendMode === 'pct'
-                      ? includeCashLikeInChart && denom > 0
-                        ? `${(pCashLike * 100).toFixed(1)}%`
-                        : '—'
-                      : '—'}
-                  </span>
-                  <span className="coverage-asset-pie-legend-value" title={fmtUsd(cashLikeMV)}>
-                    {coverageAssetMixLegendMode === 'pct' ? fmtMvAbbrev(cashLikeMV) : fmtUsd(cashLikeMV)}
-                  </span>
-                </div>
-                <div className="coverage-asset-pie-legend-item">
-                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--cash" />
-                  <span className="coverage-asset-pie-legend-label">Net cash</span>
-                  <span className="coverage-asset-pie-legend-pct">
-                    {coverageAssetMixLegendMode === 'pct' ? (denom > 0 ? `${(pCash * 100).toFixed(1)}%` : '—') : '—'}
-                  </span>
-                  <span
-                    className="coverage-asset-pie-legend-value"
-                    title={cash != null && Number.isFinite(cash) ? fmtUsd(cash) : undefined}
-                  >
-                    {cash != null && Number.isFinite(cash)
-                      ? coverageAssetMixLegendMode === 'pct'
-                        ? fmtMvAbbrev(cash)
-                        : fmtUsd(cash)
-                      : '—'}
-                  </span>
-                </div>
-              </div>
-              {denom > 0 && (
-                <div className="coverage-asset-pie-legend-divider coverage-asset-pie-legend-divider--mix-full" aria-hidden />
-              )}
-              {denom > 0 && (
-                <div className="coverage-asset-pie-legend-item coverage-asset-pie-legend-sum coverage-asset-pie-legend-sum--mix-full">
-                  <span className="coverage-asset-pie-legend-label">Sum (chart basis)</span>
-                  <span className="coverage-asset-pie-legend-value" title={fmtUsd(denom)}>
-                    {coverageAssetMixLegendMode === 'pct' ? fmtMvAbbrev(denom) : fmtUsd(denom)}
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )
-    })()}
-      </div>
-    </div>
-  )
 
   return (
     <div className="card process-section replay-page">
@@ -3204,7 +1979,18 @@ export function PositionsPage({
       {(symbolDonutSegments.length > 0 || optionDetailSegments.length > 0 || optionStockMix.segments.length > 0) && (
         <div className="pos-comp-charts-row pos-comp-charts-row--12">
           <div className="pos-comp-chart-col pos-comp-chart-col--span-4">
-            {renderAccountCoverageCharts()}
+            <PositionCoverageCharts
+              streamHostAccountId={streamHostAccountId}
+              streamSecondaryAccountId={streamSecondaryAccountId}
+              account={stockCoverageSectionAccount}
+              onAccountChange={setStockCoverageSectionAccount}
+              legendMode={coverageAssetMixLegendMode}
+              onLegendModeChange={setCoverageAssetMixLegendMode}
+              pieData={coverageAssetPieData}
+              onIncludeBpChange={setCoverageAssetPieIncludeBp}
+              onIncludeFiChange={setCoverageAssetPieIncludeFi}
+              onIncludeCashLikeChange={setCoverageAssetPieIncludeCashLike}
+            />
           </div>
           <div className="coverage-asset-pie-section pos-comp-chart-col pos-comp-chart-col--span-4" style={{ minWidth: 0, maxWidth: 'none' }}>
             <div
@@ -3754,1169 +2540,107 @@ export function PositionsPage({
                 </div>
               ) : null}
               {openTab === 'instance' ? (
-                <div
-                  id="open-panel-strategy"
-                  role="tabpanel"
-                  aria-labelledby="open-tab-strategy"
-                  className="system-tab-panel"
-                >
-                  <div className="instance-sheet-filters">
-                    <select
-                      className="replay-filter-select"
-                      value={instanceFilterStructureType}
-                      onChange={e => setInstanceFilterStructureType(e.target.value)}
-                      aria-label="Filter by contract type"
-                    >
-                      <option value="all">All Contract Types</option>
-                      {instanceFilterOptions.structureTypes.map(st => (
-                        <option key={st} value={st}>{st.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
-                      ))}
-                    </select>
-                    <select
-                      className="replay-filter-select"
-                      value={instanceFilterOppName}
-                      onChange={e => setInstanceFilterOppName(e.target.value)}
-                      aria-label="Filter by opportunity"
-                    >
-                      <option value="all">All Opportunities</option>
-                      {instanceFilterOptions.oppNames.map(n => (
-                        <option key={n} value={n}>{n}</option>
-                      ))}
-                    </select>
-                    <div className="instance-sheet-filter-bubble-row">
-                      <span className="instance-sheet-filter-bubble-label" id="instance-filter-scope-label">
-                        Symbol scope
-                      </span>
-                      <div
-                        className="replay-bubble-switch instance-sheet-bubble-switch--wrap"
-                        role="radiogroup"
-                        aria-labelledby="instance-filter-scope-label"
-                      >
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={instanceFilterScopeType === 'all'}
-                          className={`replay-bubble-switch-btn ${instanceFilterScopeType === 'all' ? 'active' : ''}`}
-                          onClick={() => setInstanceFilterScopeType('all')}
-                        >
-                          All
-                        </button>
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={instanceFilterScopeType === '__none__'}
-                          className={`replay-bubble-switch-btn ${instanceFilterScopeType === '__none__' ? 'active' : ''}`}
-                          onClick={() => setInstanceFilterScopeType('__none__')}
-                        >
-                          None
-                        </button>
-                        {instanceFilterOptions.scopeTypes.filter(s => s !== '').map(s => (
-                          <button
-                            key={s}
-                            type="button"
-                            role="radio"
-                            aria-checked={instanceFilterScopeType === s}
-                            className={`replay-bubble-switch-btn ${instanceFilterScopeType === s ? 'active' : ''}`}
-                            onClick={() => setInstanceFilterScopeType(s)}
-                          >
-                            {s === 'watchlist_stk' ? 'Watchlist (stocks)' : s === 'explicit_symbols' ? 'Explicit symbols' : s}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="instance-sheet-filter-bubble-row">
-                      <span className="instance-sheet-filter-bubble-label" id="instance-filter-attr-label">
-                        Attribution
-                      </span>
-                      <div
-                        className="replay-bubble-switch"
-                        role="radiogroup"
-                        aria-labelledby="instance-filter-attr-label"
-                      >
-                        {(['all', 'single', 'mixed', 'unassigned'] as const).map(v => (
-                          <button
-                            key={v}
-                            type="button"
-                            role="radio"
-                            aria-checked={instanceFilterAttributionType === v}
-                            className={`replay-bubble-switch-btn ${instanceFilterAttributionType === v ? 'active' : ''}`}
-                            onClick={() => setInstanceFilterAttributionType(v)}
-                          >
-                            {v === 'all' ? 'All' : v === 'single' ? 'Single' : v === 'mixed' ? 'Mixed' : 'Unassigned'}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    {(instanceFilterStructureType !== 'all' || instanceFilterScopeType !== 'all' || instanceFilterOppName !== 'all' || instanceFilterAttributionType !== 'all') && (
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-small"
-                        onClick={() => { setInstanceFilterStructureType('all'); setInstanceFilterScopeType('all'); setInstanceFilterOppName('all'); setInstanceFilterAttributionType('all') }}
-                      >
-                        Clear Filters
-                      </button>
-                    )}
-                  </div>
-                  {sortedInstanceAllGroups.length === 0 ? (
-                    <p className="section-hint">No strategies match the current filters.</p>
-                  ) : (
-                    <div className="replay-portfolio-table-wrap">
-                      <table className="table-operations instance-sheet-table">
-                        <thead>
-                          <tr>
-                            <th className="replay-opt-expand-col" />
-                            <th title="Opportunity">Opp</th>
-                            <th>Contract Type</th>
-                            <th>Symbols</th>
-                            <th>Opened</th>
-                            <th title="Per option: execution quantities (comma-separated). Uses Final book only when at least one matching Final exists; otherwise TWS. Multiple option lines separated by |.">
-                              Exec Qty
-                            </th>
-                            <th>Underlying</th>
-                            <th>Opt PNL</th>
-                            <th>Max Gain</th>
-                            <th>Max Loss</th>
-                            <th>Risk</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {sortedInstanceAllGroups.map(allGroup => {
-                            const instKey = allGroup.strategy_instance_id != null ? String(allGroup.strategy_instance_id) : '__unassigned__'
-                            const instLabel = allGroup.strategy_instance_label ?? (allGroup.strategy_instance_id != null ? `Strategy #${allGroup.strategy_instance_id}` : 'Uncategorized')
-                            const oppName = allGroup.strategy_opportunity_name?.trim() || null
-                            const openedAt = allGroup.strategy_instance_opened_at_epoch
-                            const optN = allGroup.options.length
-                            const optExecQtySummary = formatInstanceOptExecQtyCell(allGroup)
-                            const covN = allGroup.stock_coverage.length
-                            const isExpanded = expandedInstanceKeys.includes(instKey)
-                            const structLabel = allGroup.structure_type
-                              ? allGroup.structure_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-                              : '—'
-                            const structBadgeClass = allGroup.structure_type
-                              ? `instance-sheet-badge instance-sheet-badge-${allGroup.structure_type.replace(/_/g, '-')}`
-                              : 'instance-sheet-badge'
-                            const opp = allGroup.strategy_opportunity_id != null ? oppMap.get(allGroup.strategy_opportunity_id) : undefined
-                            const scopeSymbols = opp?.symbols ?? []
-                            const scopeType = allGroup.scope_type
-                            const defaultAccForScope = instanceDefaultAccountForStockInspect(allGroup)
-                            const symbolsCell =
-                              scopeType === 'watchlist_stk' ? (
-                                <span className="instance-sheet-badge instance-sheet-badge-scope">Watchlist</span>
-                              ) : scopeSymbols.length > 0 ? (
-                                <span className="instance-sheet-symbols instance-sheet-symbols--buttons">
-                                  {scopeSymbols.map((symRaw, i) => {
-                                    const t = String(symRaw ?? '').trim()
-                                    if (!t) return null
-                                    return (
-                                      <Fragment key={`${instKey}-scope-sym-${i}-${t}`}>
-                                        {i > 0 ? <span className="instance-sheet-symbols-sep" aria-hidden>, </span> : null}
-                                        <button
-                                          type="button"
-                                          className="riv-stock-symbol-btn riv-stock-symbol-btn--compact"
-                                          onClick={e => {
-                                            e.stopPropagation()
-                                            tryOpenStockFromSymbolAccount(t, defaultAccForScope)
-                                          }}
-                                          aria-label={`Stock details for ${t} (account ${defaultAccForScope || '—'})`}
-                                        >
-                                          {t}
-                                        </button>
-                                      </Fragment>
-                                    )
-                                  })}
-                                </span>
-                              ) : (
-                                <span className="replay-muted">—</span>
-                              )
-                            return [
-                              <tr
-                                key={`inst-row-${instKey}`}
-                                className={`instance-sheet-row ${isExpanded ? 'instance-sheet-row-expanded' : ''}`}
-                                onClick={() => toggleInstanceExpand(instKey)}
-                                role="button"
-                                tabIndex={0}
-                                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleInstanceExpand(instKey) } }}
-                                aria-expanded={isExpanded}
-                              >
-                                <td className="replay-opt-expand-col">
-                                  <span className={`replay-opt-expand-icon ${isExpanded ? 'expanded' : ''}`} aria-hidden>
-                                    {isExpanded ? '▼' : '▶'}
-                                  </span>
-                                </td>
-                                <td className="instance-sheet-opp-cell">
-                                  {allGroup.strategy_instance_id != null ? (
-                                    <>
-                                      {oppName ? (
-                                        <span className="instance-sheet-opp-name">{oppName}</span>
-                                      ) : null}
-                                      <button
-                                        type="button"
-                                        className="instance-sheet-inst-link instance-sheet-inst-sublabel"
-                                        title={`View strategy: ${instLabel}`}
-                                        onClick={e => {
-                                          e.stopPropagation()
-                                          openStrategyInspector(allGroup.strategy_instance_id!)
-                                        }}
-                                      >
-                                        {instLabel}
-                                      </button>
-                                    </>
-                                  ) : (
-                                    <span>{oppName || instLabel}</span>
-                                  )}
-                                </td>
-                                <td><span className={structBadgeClass}>{structLabel}</span></td>
-                                <td>{symbolsCell}</td>
-                                <td>
-                                  {openedAt != null && Number.isFinite(openedAt) ? (
-                                    <>{fmtDate(openedAt)}{fmtDaysAgo(openedAt) ? <span className="replay-time-ago"> {fmtDaysAgo(openedAt)}</span> : null}</>
-                                  ) : '—'}
-                                </td>
-                                <td
-                                  className="instance-sheet-exec-qty-cell"
-                                  title="Per option: execution quantities (comma-separated). Final preferred over TWS when matching Finals exist. | separates option lines."
-                                >
-                                  {optN > 0 ? optExecQtySummary : '—'}
-                                </td>
-                                <td>
-                                  {covN > 0 ? (() => {
-                                    let allCovered = true
-                                    let anyNaked = false
-                                    for (const sc of allGroup.stock_coverage) {
-                                      const hp = liveStockPositions.find(
-                                        s =>
-                                          (s.symbol ?? '').toUpperCase() === (sc.symbol ?? '').toUpperCase() &&
-                                          (s.account_id ?? '').trim() === (sc.account_id ?? '').trim(),
-                                      )
-                                      const held = hp ? Math.abs(Number(hp.position) || 0) : 0
-                                      if (held >= sc.required_shares) continue
-                                      allCovered = false
-                                      if (held === 0) anyNaked = true
-                                    }
-                                    const statusClass = allCovered
-                                      ? 'coverage-status-covered'
-                                      : anyNaked
-                                        ? 'coverage-status-naked'
-                                        : 'coverage-status-partial'
-                                    const statusLabel = allCovered ? 'Covered' : anyNaked ? 'Naked' : 'Partial'
-                                    return <span className={`coverage-status-badge ${statusClass}`}>{statusLabel}</span>
-                                  })() : <span className="replay-muted">—</span>}
-                                </td>
-                                <td>{optN > 0 ? <span className="replay-pnl-unrealized">{fmtUsd(allGroup.options_unrealized_pnl)}</span> : <span className="replay-muted">—</span>}</td>
-                                {(() => {
-                                  if (!allGroup.risk_profile) return <><td className="replay-muted">—</td><td className="replay-muted">—</td><td className="replay-muted">—</td></>
-                                  const rl = formatRiskLabel(allGroup.risk_profile)
-                                  return <>
-                                    <td><span className="risk-value-gain">{rl.gainLabel}</span></td>
-                                    <td><span className={allGroup.risk_profile.max_loss == null ? 'risk-value-loss risk-value-unlimited' : 'risk-value-loss'}>{rl.lossLabel}</span></td>
-                                    <td><span className={`coverage-status-badge ${allGroup.risk_profile.risk_type === 'defined' ? 'risk-badge-defined' : 'risk-badge-unlimited'}`}>{rl.riskBadge}</span></td>
-                                  </>
-                                })()}
-                              </tr>,
-                              ...(isExpanded ? [
-                                <tr key={`inst-detail-${instKey}`} className="instance-sheet-detail-row">
-                                  <td colSpan={11} className="instance-sheet-detail-cell">
-                                    {optN > 0 && (
-                                      <div className="instance-sheet-sub-section">
-                                        <h6 className="replay-sub instance-sheet-sub-heading">Options ({optN})</h6>
-                                        <div className="replay-portfolio-table-wrap">
-                                          <table className="table-operations replay-opt-groups instance-sheet-sub-table positions-opt-instance-table">
-                                            <colgroup>
-                                              <col className="poi-col-expand" />
-                                              <col className="poi-col-contract" />
-                                              <col className="poi-col-expiry" />
-                                              <col className="poi-col-strike" />
-                                              <col className="poi-col-last" />
-                                              <col className="poi-col-qty" />
-                                              <col className="poi-col-at" />
-                                              <col className="poi-col-value" />
-                                              <col className="poi-col-quote" />
-                                              <col className="poi-col-time" />
-                                              <col className="poi-col-unpnl" />
-                                              <col className="poi-col-pool" />
-                                              <col className="poi-col-attr" />
-                                              <col className="poi-col-account" />
-                                              <col className="poi-col-opp" />
-                                              <col className="poi-col-actions" />
-                                            </colgroup>
-                                            <thead>
-                                              <tr>
-                                                <th className="replay-opt-expand-col" />
-                                                <th>Contract</th>
-                                                <th>Expiry</th>
-                                                <th>Strike</th>
-                                                <th>Last</th>
-                                                <th>Qty</th>
-                                                <th>@</th>
-                                                <th>Value</th>
-                                                <th title="Option live bid / mid / ask">Opt Quote</th>
-                                                <th>Time</th>
-                                                <th>UN PNL</th>
-                                                <th>Pool</th>
-                                                <th>Attr</th>
-                                                <th>Account</th>
-                                                <th title="Opportunity">Opp</th>
-                                                <th className="replay-opt-actions-cell">Actions</th>
-                                              </tr>
-                                            </thead>
-                                            <tbody>
-                                              {allGroup.options.map((pos) => {
-                                                const posKey = `ia-${instKey}-${getPositionKey(pos, allGroup.strategy_instance_id)}`
-                                                const absQty = Math.abs(pos.qty)
-                                                const sideLabel = pos.qty > 0 ? 'Long' : pos.qty < 0 ? 'Short' : '—'
-                                                const value = (pos.avg_cost ?? 0) * absQty * 100
-                                                const ts = getPositionTime(pos)
-                                                const execLists = getPositionExecLists(pos)
-                                                const execMatchesInstance = (ex: Execution) => {
-                                                  if (pos.filtered_exec_lists) return true
-                                                  return executionMatchesInstanceGroup(
-                                                    ex,
-                                                    allGroup.strategy_instance_id,
-                                                    allGroup.strategy_opportunity_id,
-                                                  )
-                                                }
-                                                const scopedFinalExecs = execLists.final.filter(execMatchesInstance)
-                                                const scopedTwsExecs = execLists.tws.filter(execMatchesInstance)
-                                                const execCount = scopedFinalExecs.length + scopedTwsExecs.length
-                                                const hasExecutions = execCount > 0
-                                                const isPosExpanded = expandedPositionKeys.includes(posKey)
-                                                return [
-                                                  <tr
-                                                    key={posKey}
-                                                    className="detail-position-row"
-                                                    onClick={hasExecutions ? (e) => { e.stopPropagation(); togglePositionExpand(posKey) } : undefined}
-                                                    role={hasExecutions ? 'button' : undefined}
-                                                    tabIndex={hasExecutions ? 0 : undefined}
-                                                    onKeyDown={hasExecutions ? e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); togglePositionExpand(posKey) } } : undefined}
-                                                    aria-expanded={hasExecutions ? isPosExpanded : undefined}
-                                                  >
-                                                    <td className="replay-opt-expand-col">
-                                                      {hasExecutions ? (
-                                                        <span className={`replay-opt-expand-icon ${isPosExpanded ? 'expanded' : ''}`} aria-hidden>
-                                                          {isPosExpanded ? '▼' : '▶'}
-                                                        </span>
-                                                      ) : null}
-                                                    </td>
-                                                    <td className="replay-opt-contract">
-                                                      {(() => {
-                                                        const p = getContractLabelParts(pos.contract_key)
-                                                        const strikeStr = pos.strike != null ? ` ${pos.strike}` : ''
-                                                        const aria = p.symbol
-                                                          ? `Option details for ${p.symbol} ${p.rightLabel}${strikeStr}`
-                                                          : `Option details for ${pos.contract_key}`
-                                                        return p.symbol ? (
-                                                          <button
-                                                            type="button"
-                                                            className="riv-opt-contract-btn"
-                                                            onClick={e => {
-                                                              e.stopPropagation()
-                                                              openOptionInspector(pos)
-                                                            }}
-                                                            aria-label={aria}
-                                                          >
-                                                            <strong>{p.symbol}</strong> {p.rightLabel}
-                                                            {strikeStr}
-                                                          </button>
-                                                        ) : (
-                                                          <button
-                                                            type="button"
-                                                            className="riv-opt-contract-btn"
-                                                            onClick={e => {
-                                                              e.stopPropagation()
-                                                              openOptionInspector(pos)
-                                                            }}
-                                                            aria-label={aria}
-                                                          >
-                                                            {pos.contract_key}
-                                                          </button>
-                                                        )
-                                                      })()}
-                                                    </td>
-                                                    <td className="positions-opt-expiry-cell">
-                                                      <div className="positions-opt-expiry-line1">{fmtExpiry(pos.expiry)}</div>
-                                                      {(() => {
-                                                        const days = daysUntilExpiry(pos.expiry)
-                                                        if (days == null) return null
-                                                        const label = days >= 0 ? (days === 0 ? 'today' : `${days}d`) : `${-days}d ago`
-                                                        return (
-                                                          <div className="positions-opt-expiry-line2">
-                                                            <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>{label}</span>
-                                                          </div>
-                                                        )
-                                                      })()}
-                                                    </td>
-                                                    <td><strong>{fmtUsd(pos.strike)}</strong></td>
-                                                    <td className="positions-opt-last-cell">
-                                                      {(() => {
-                                                        const underlying = getContractLabelParts(pos.contract_key).symbol
-                                                        const q = underlying ? quotesMap[underlying] : undefined
-                                                        const last = q?.last != null && Number.isFinite(q.last) ? q.last : null
-                                                        const strikeNum = pos.strike != null && Number.isFinite(pos.strike) ? pos.strike : null
-                                                        const pct = last != null && strikeNum != null && last !== 0 ? ((last - strikeNum) / last) * 100 : null
-                                                        const right = parseOptionContractKey(pos.contract_key).right
-                                                        const side: 'Buy' | 'Sell' = pos.qty > 0 ? 'Buy' : 'Sell'
-                                                        const pctClass = pct != null ? optionLastStrikePctClass(right, side, pct) : ''
-                                                        return (
-                                                          <>
-                                                            <div className="positions-opt-last-line1">{last != null ? fmtUsd(last) : '—'}</div>
-                                                            {pct != null ? (
-                                                              <div className="positions-opt-last-line2">
-                                                                <span className={`replay-last-strike-pct ${pctClass}`.trim()} title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}>
-                                                                  {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
-                                                                </span>
-                                                              </div>
-                                                            ) : null}
-                                                          </>
-                                                        )
-                                                      })()}
-                                                    </td>
-                                                    <td>{sideLabel} {absQty}</td>
-                                                    <td>{fmtUsd(pos.avg_cost)}</td>
-                                                    <td>{fmtUsd(value)}</td>
-                                                    <td className="positions-opt-live-quote">
-                                                      {(() => {
-                                                        const liveQ = quotesMap[pos.contract_key]
-                                                        if (!liveQ) return <span className="replay-muted">—</span>
-                                                        const mid = liveQ.mid ?? (liveQ.bid != null && liveQ.ask != null ? (liveQ.bid + liveQ.ask) / 2 : null)
-                                                        return (
-                                                          <>
-                                                            <div className="positions-opt-quote-line positions-opt-quote-line--bid">
-                                                              {liveQ.bid != null ? <span className="positions-opt-quote-bid">{liveQ.bid.toFixed(2)}</span> : <span className="replay-muted">—</span>}
-                                                            </div>
-                                                            <div className="positions-opt-quote-line positions-opt-quote-line--mid">
-                                                              <strong>{mid != null ? mid.toFixed(2) : '—'}</strong>
-                                                            </div>
-                                                            <div className="positions-opt-quote-line positions-opt-quote-line--ask">
-                                                              {liveQ.ask != null ? <span className="positions-opt-quote-ask">{liveQ.ask.toFixed(2)}</span> : <span className="replay-muted">—</span>}
-                                                            </div>
-                                                          </>
-                                                        )
-                                                      })()}
-                                                    </td>
-                                                    <td className="positions-opt-time-cell">
-                                                      {ts != null ? (
-                                                        <>
-                                                          <div className="positions-opt-time-line1">{fmtDate(ts)}</div>
-                                                          {fmtDaysAgo(ts) ? <div className="positions-opt-time-line2"><span className="replay-time-ago">{fmtDaysAgo(ts)}</span></div> : null}
-                                                        </>
-                                                      ) : '—'}
-                                                    </td>
-                                                    <td>
-                                                      {(() => {
-                                                        const liveQ = quotesMap[pos.contract_key]
-                                                        const liveMid = liveQ?.mid ?? (liveQ?.bid != null && liveQ?.ask != null ? (liveQ.bid + liveQ.ask) / 2 : null)
-                                                        const livePnl = liveMid != null && pos.avg_cost != null
-                                                          ? (liveMid - pos.avg_cost) * absQty * 100 : null
-                                                        return (
-                                                          <>
-                                                            {livePnl != null && (
-                                                              <div>
-                                                                <span className={`replay-pnl-unrealized ${livePnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(livePnl)}</span>
-                                                                <span className="replay-muted" style={{fontSize:'0.7em'}}> live</span>
-                                                              </div>
-                                                            )}
-                                                            <div className={livePnl != null ? 'replay-muted' : undefined} style={livePnl != null ? {fontSize:'0.75em'} : undefined}>
-                                                              <span className={`replay-pnl-unrealized ${pos.unrealized_pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(pos.unrealized_pnl)}</span>
-                                                              {livePnl != null && <span style={{fontSize:'0.7em'}}> snap</span>}
-                                                            </div>
-                                                          </>
-                                                        )
-                                                      })()}
-                                                    </td>
-                                                    <td className="replay-muted">{pos.pool_label}</td>
-                                                    <td>
-                                                      {pos.filtered_exec_lists ? (
-                                                        <span
-                                                          className="attr-badge attr-unassigned"
-                                                          title="Fills that do not match the instance row for this contract (Uncategorized)"
-                                                        >
-                                                          Uncategorized
-                                                        </span>
-                                                      ) : pos.attribution_type === 'mixed' ? (
-                                                        <span className="attr-badge attr-mixed" title={`Estimated attribution (net): ${((pos.attribution_ratio ?? 0) * 100).toFixed(0)}%`}>Mixed</span>
-                                                      ) : pos.attribution_type === 'single' ? (
-                                                        <span className="attr-badge attr-single" title="Single instance attribution">Single</span>
-                                                      ) : (
-                                                        <span className="attr-badge attr-unassigned" title="No strategy attribution">—</span>
-                                                      )}
-                                                    </td>
-                                                    <td className="positions-opt-account-cell">{pos.account_id || '—'}</td>
-                                                    <td className="replay-strategy-opp-cell positions-opt-opp-hint-cell">
-                                                      {execCount === 0 ? '—' : (
-                                                        <span className="replay-muted" title={`${execCount} execution${execCount > 1 ? 's' : ''} — expand row`}>
-                                                          {pos.filtered_exec_lists ? (
-                                                            <abbr title="Uncategorized fills">Unct.</abbr>
-                                                          ) : null}
-                                                          {pos.filtered_exec_lists ? ' · ' : null}
-                                                          {execCount} exec{execCount > 1 ? 's' : ''} ↓
-                                                        </span>
-                                                      )}
-                                                    </td>
-                                                    <td className="replay-opt-actions-cell">—</td>
-                                                  </tr>,
-                                                  ...(isPosExpanded ? [
-                                                    ...scopedFinalExecs.map((ex, ei) =>
-                                                      renderOpenOptionExecutionRow(
-                                                        pos,
-                                                        posKey,
-                                                        ex,
-                                                        ei,
-                                                        'final',
-                                                        scopedFinalExecs,
-                                                        scopedTwsExecs,
-                                                        true,
-                                                      ),
-                                                    ),
-                                                    ...scopedTwsExecs.map((ex, ei) =>
-                                                      renderOpenOptionExecutionRow(
-                                                        pos,
-                                                        posKey,
-                                                        ex,
-                                                        ei,
-                                                        'tws',
-                                                        scopedFinalExecs,
-                                                        scopedTwsExecs,
-                                                        true,
-                                                      ),
-                                                    ),
-                                                  ] : []),
-                                                ]
-                                              })}
-                                            </tbody>
-                                          </table>
-                                        </div>
-                                      </div>
-                                    )}
-                                    {covN > 0 && (
-                                      <div className="instance-sheet-sub-section">
-                                        <h6 className="replay-sub instance-sheet-sub-heading">Underlying Coverage</h6>
-                                        <div className="replay-portfolio-table-wrap">
-                                          <table className="table-operations instance-sheet-sub-table">
-                                            <thead>
-                                              <tr>
-                                                <th>Symbol</th>
-                                                <th>Account</th>
-                                                <th>Cost basis</th>
-                                                <th>Avg cost</th>
-                                                <th>Live last</th>
-                                                <th>Daily ($ / %)</th>
-                                                <th>Total ($ / %)</th>
-                                                <th>Direction</th>
-                                                <th>Required</th>
-                                                <th>Held</th>
-                                                <th>Status</th>
-                                                <th>Surplus / Gap</th>
-                                              </tr>
-                                            </thead>
-                                            <tbody>
-                                              {allGroup.stock_coverage.map(sc => {
-                                                const acct = (sc.account_id ?? '').trim()
-                                                const m = underlyingCoverageStockMetrics(liveStockPositions, sc.symbol, acct)
-                                                const held = m.held
-                                                const gap = held - sc.required_shares
-                                                const statusLabel =
-                                                  held >= sc.required_shares
-                                                    ? 'Fully Covered'
-                                                    : held > 0
-                                                      ? `Partial (${held}/${sc.required_shares})`
-                                                      : 'Naked'
-                                                const statusClass =
-                                                  held >= sc.required_shares
-                                                    ? 'coverage-status-covered'
-                                                    : held > 0
-                                                      ? 'coverage-status-partial'
-                                                      : 'coverage-status-naked'
-                                                const hasStock = m.held !== 0 || m.cost_basis_total != null
-                                                return (
-                                                  <tr key={`ia-cov-${instKey}-${sc.symbol}-${acct || 'x'}`}>
-                                                    <td>
-                                                      <button
-                                                        type="button"
-                                                        className="riv-stock-symbol-btn"
-                                                        onClick={() => tryOpenStockFromSymbolAccount(sc.symbol, acct || '')}
-                                                        aria-label={`Stock details for ${sc.symbol} in account ${acct || '—'}`}
-                                                      >
-                                                        {sc.symbol}
-                                                      </button>
-                                                    </td>
-                                                    <td>
-                                                      <span className="underlying-coverage-account" title="Stock hedge must be in this account (same as options above)">
-                                                        {acct || '—'}
-                                                      </span>
-                                                    </td>
-                                                    <td>{fmtUsd(m.cost_basis_total)}</td>
-                                                    <td>{fmtUsd(m.avg_cost_per_share)}</td>
-                                                    <td>{fmtUsd(m.live_last_price)}</td>
-                                                    <td>
-                                                      {hasStock ? (
-                                                        <>
-                                                          <span className={((m.daily_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                                                            {fmtUsd(m.daily_pnl)}
-                                                          </span>
-                                                          {' / '}
-                                                          <span className={((m.daily_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                                                            {fmtSignedPct(m.daily_pct)}
-                                                          </span>
-                                                        </>
-                                                      ) : (
-                                                        '—'
-                                                      )}
-                                                    </td>
-                                                    <td>
-                                                      {hasStock ? (
-                                                        <>
-                                                          <span className={((m.total_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                                                            {fmtUsd(m.total_pnl)}
-                                                          </span>
-                                                          {' / '}
-                                                          <span className={((m.total_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                                                            {fmtSignedPct(m.total_pct)}
-                                                          </span>
-                                                        </>
-                                                      ) : (
-                                                        '—'
-                                                      )}
-                                                    </td>
-                                                    <td>{sc.direction === 'long' ? 'Long' : 'Short'}</td>
-                                                    <td>{sc.required_shares}</td>
-                                                    <td>{held}</td>
-                                                    <td>
-                                                      <span className={`coverage-status-badge ${statusClass}`}>{statusLabel}</span>
-                                                    </td>
-                                                    <td><span className={gap >= 0 ? 'pnl-positive' : 'pnl-negative'}>{fmtSurplusShares(gap)}</span></td>
-                                                  </tr>
-                                                )
-                                              })}
-                                            </tbody>
-                                          </table>
-                                        </div>
-                                      </div>
-                                    )}
-                                    {allGroup.risk_profile && (
-                                      <div className="instance-sheet-sub-section risk-profile-section">
-                                        <h6 className="replay-sub instance-sheet-sub-heading">Risk Profile</h6>
-                                        <RiskProfileDl profile={allGroup.risk_profile} fmtUsd={fmtUsd} />
-                                        {allGroup.risk_profile.naked_short_call_contracts > 0 && (
-                                          <ul className="risk-hedged-breakdown" style={{ margin: '0.5rem 0 0', paddingLeft: '1.25rem' }}>
-                                            {formatRiskHedgedBreakdown(allGroup.risk_profile).map((line, i) => (
-                                              <li key={i} className="risk-unlimited-warning">{line}</li>
-                                            ))}
-                                          </ul>
-                                        )}
-                                      </div>
-                                    )}
-                                  </td>
-                                </tr>,
-                              ] : []),
-                            ]
-                          })}
-                        </tbody>
-                        <tfoot>
-                          <tr className="replay-opt-tfoot-total">
-                            <td colSpan={7} className="replay-opt-tfoot-label">
-                              Total ({sortedInstanceAllGroups.length}{' '}
-                              {sortedInstanceAllGroups.length !== 1 ? 'strategies' : 'strategy'})
-                            </td>
-                            <td>
-                              <strong>
-                                <span className="replay-pnl-unrealized">
-                                  {fmtUsd(sortedInstanceAllGroups.reduce((acc, g) => acc + g.options_unrealized_pnl, 0))}
-                                </span>
-                              </strong>
-                            </td>
-                            <td colSpan={3} className="replay-muted">
-                              —
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  )}
-                  {sortedInstanceAllGroups.length > 0 ? (
-                  <div className="coverage-summary-section">
-                      <div className="coverage-summary-intro">
-                        <h6 className="replay-sub instance-sheet-sub-heading coverage-summary-heading-row">
-                          Coverage summary
-                          <InfoTooltip text="The Account (asset mix) filter in the top composition row applies here too. Position pool tables below use the same filter. Optionable symbols only; Independent Holdings are not listed in pools. Underlying pool = stock left after opportunity hedges." />
-                        </h6>
-                      </div>
-                      <div className="coverage-pools-row">
-                          <div className="coverage-pool-panel">
-                            <p className="section-hint" style={{ margin: '0 0 0.35rem' }}>
-                              Option underlying Pool
-                            </p>
-                            <p className="section-hint" style={{ margin: '0 0 0.4rem', fontSize: '0.82em' }}>
-                              Long shares not needed for existing opportunity hedges (all scopes); can back additional options.
-                            </p>
-                            {optionUnderlyingPoolItems.length === 0 && (
-                              <p
-                                className="section-hint coverage-pool-empty-explanation"
-                                style={{ margin: '0 0 0.5rem', fontSize: '0.85em', lineHeight: 1.45 }}
-                              >
-                                No rows when every long share is already counted toward instance hedges, or when your instances do not require separate underlying stock backup. The table stays here so you can see the column layout when positions do create surplus.
-                              </p>
-                            )}
-                            <p className="option-underlying-pool-totals" style={{ margin: '0 0 0.45rem' }}>
-                              <span className="option-underlying-pool-total-item">
-                                <span className="option-underlying-pool-total-label">Market Total</span>{' '}
-                                <strong>{fmtUsd(optionUnderlyingPoolMarketTotal)}</strong>
-                              </span>
-                              <span className="option-underlying-pool-total-sep" aria-hidden>
-                                {' · '}
-                              </span>
-                              <span className="option-underlying-pool-total-item">
-                                {streamHostAccountId ? (
-                                  <>
-                                    <strong className="coverage-account-id coverage-account-host">
-                                      {streamHostAccountId}
-                                    </strong>{' '}
-                                    <span
-                                      className="option-underlying-pool-cash-bp"
-                                      title="Total cash / buying power (account table)"
-                                    >
-                                      {fmtUsd(hostSecondaryAccountCashBp.host.cash)}
-                                      {' / '}
-                                      {fmtUsd(hostSecondaryAccountCashBp.host.bp)}
-                                    </span>
-                                  </>
-                                ) : (
-                                  <strong className="replay-muted">—</strong>
-                                )}
-                              </span>
-                              <span className="option-underlying-pool-total-sep" aria-hidden>
-                                {' · '}
-                              </span>
-                              <span className="option-underlying-pool-total-item">
-                                {streamSecondaryAccountId ? (
-                                  <>
-                                    <strong className="coverage-account-id coverage-account-secondary">
-                                      {streamSecondaryAccountId}
-                                    </strong>{' '}
-                                    <span
-                                      className="option-underlying-pool-cash-bp"
-                                      title="Total cash / buying power (account table)"
-                                    >
-                                      {fmtUsd(hostSecondaryAccountCashBp.secondary.cash)}
-                                      {' / '}
-                                      {fmtUsd(hostSecondaryAccountCashBp.secondary.bp)}
-                                    </span>
-                                  </>
-                                ) : (
-                                  <strong className="replay-muted">—</strong>
-                                )}
-                              </span>
-                            </p>
-                            {renderStockCoverageSummaryTable(sortedOptionUnderlyingPoolItemsForSection, 'underlying-pool', {
-                              underlyingPoolSlim: true,
-                              underlyingPoolSort: {
-                                column: underlyingPoolSort.col,
-                                dir: underlyingPoolSort.dir,
-                                onColumnClick: onUnderlyingPoolSortClick,
-                              },
-                              onInspectCoverageSymbol: ci => tryOpenStockFromSymbolAccount(ci.symbol, ci.account_id),
-                            })}
-                          </div>
-                        {watchlistOptionableCoverageItems.length > 0 && (
-                          <div className="coverage-pool-panel">
-                            <p className="section-hint" style={{ margin: '0 0 0.35rem' }}>
-                              Option backing Pool
-                            </p>
-                            <p className="section-hint" style={{ margin: '0 0 0.45rem', fontSize: '0.82em' }}>
-                              Watchlist-scoped opportunities: Required = hedge from those strategies only.
-                            </p>
-                            {renderStockCoverageSummaryTable(sortedWatchlistOptionableCoverageItemsForSection, 'watchlist-optionable', {
-                              backingPoolSlim: true,
-                              underlyingPoolSort: {
-                                column: backingPoolSort.col,
-                                dir: backingPoolSort.dir,
-                                onColumnClick: onBackingPoolSortClick,
-                              },
-                              onInspectCoverageSymbol: ci => tryOpenStockFromSymbolAccount(ci.symbol, ci.account_id),
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="coverage-summary-section coverage-summary-section--placeholder">
-                      <h6 className="replay-sub instance-sheet-sub-heading coverage-summary-heading-row">
-                        Coverage summary
-                        <InfoTooltip text="Option underlying pool and backing pool tables appear when instances match filters. Underlying pool = stock left after opportunity hedges." />
-                      </h6>
-                      <p className="section-hint coverage-summary-placeholder-text">
-                        This section is computed from the instance table above. With no instances matching the current filters, there is nothing to show here—so the pools are hidden, not missing. Clear or widen filters to bring instances back and see Option underlying / backing pools.
-                      </p>
-                    </div>
-                  )}
-                  {independentStockSections.some(s => s.rows.length > 0) && (
-                    <div className="instance-sheet-stock-section">
-                      <h5 className="replay-sub instance-sheet-section-heading">Independent Holdings</h5>
-                      <p className="section-hint">Positions without tradeable options (Index, ETF, etc.); not part of any option strategy. Grouped by position category (Stocks, Fixed income, Cash-like).</p>
-                      <div className="replay-portfolio-table-wrap">
-                        <table className="table-operations instance-sheet-sub-table">
-                          <thead>
-                            <tr>
-                              <th>Account</th>
-                              <th>Symbol</th>
-                              <th>Side</th>
-                              <th>Qty</th>
-                              <th>Avg Cost</th>
-                              <th>Last</th>
-                              <th>Market Value</th>
-                              <th>Daily ($ / %)</th>
-                              <th>Total ($ / %)</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {independentStockSections
-                              .filter(s => s.rows.length > 0)
-                              .flatMap(section => [
-                                <tr key={`${section.key}-section`} className="replay-portfolio-group-header">
-                                  <td colSpan={9}>
-                                    <strong>{section.title}</strong>
-                                  </td>
-                                </tr>,
-                                ...section.rows.map(p => renderIndependentHoldingRow(p, section.key, openStockInspector)),
-                              ])}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <PositionInstanceTab
+                  sortedGroups={sortedInstanceAllGroups}
+                  filter={{
+                    structureType: instanceFilterStructureType,
+                    onStructureTypeChange: setInstanceFilterStructureType,
+                    scopeType: instanceFilterScopeType,
+                    onScopeTypeChange: setInstanceFilterScopeType,
+                    oppName: instanceFilterOppName,
+                    onOppNameChange: setInstanceFilterOppName,
+                    attributionType: instanceFilterAttributionType,
+                    onAttributionTypeChange: setInstanceFilterAttributionType,
+                    options: instanceFilterOptions,
+                  }}
+                  expand={{
+                    instanceKeys: expandedInstanceKeys,
+                    toggleInstance: toggleInstanceExpand,
+                    positionKeys: expandedPositionKeys,
+                    togglePosition: togglePositionExpand,
+                  }}
+                  sort={{
+                    underlyingPool: underlyingPoolSort,
+                    onUnderlyingPoolClick: onUnderlyingPoolSortClick,
+                    backingPool: backingPoolSort,
+                    onBackingPoolClick: onBackingPoolSortClick,
+                  }}
+                  actions={{
+                    openStockInspector,
+                    openOptionInspector,
+                    openStrategyInspector,
+                    tryOpenStock: tryOpenStockFromSymbolAccount,
+                    getDefaultAccount: instanceDefaultAccountForStockInspect,
+                  }}
+                  oppMap={oppMap}
+                  liveStockPositions={liveStockPositions}
+                  quotesMap={quotesMap}
+                  cashBp={hostSecondaryAccountCashBp}
+                  underlyingPoolItems={optionUnderlyingPoolItems}
+                  underlyingPoolMarketTotal={optionUnderlyingPoolMarketTotal}
+                  sortedUnderlyingPoolItems={sortedOptionUnderlyingPoolItemsForSection}
+                  watchlistItems={watchlistOptionableCoverageItems}
+                  sortedWatchlistItems={sortedWatchlistOptionableCoverageItemsForSection}
+                  independentSections={independentStockSections}
+                  streamHostAccountId={streamHostAccountId}
+                  streamSecondaryAccountId={streamSecondaryAccountId}
+                  formatOptExecQtyCell={formatInstanceOptExecQtyCell}
+                  getPositionKey={getPositionKey}
+                  getExecLists={getPositionExecLists}
+                  getTime={getPositionTime}
+                  canonicalOptContractKeySet={canonicalOptContractKeySet}
+                  syncingTwsAttributionKey={syncingTwsAttributionKey}
+                  syncingFinalAttributionKey={syncingFinalAttributionKey}
+                  execRowActions={execRowActions}
+                />
               ) : openTab === 'options' ? (
-                <div
-                  id="open-panel-options"
-                  role="tabpanel"
-                  aria-labelledby="open-tab-options"
-                  className="system-tab-panel"
-                >
-                  <h5 className="replay-sub">Option positions</h5>
-                  {optionsTabPositions.length === 0 ? (
-                    <p className="section-hint">No open option positions under the current filters.</p>
-                  ) : (
-                <div className="replay-portfolio-table-wrap replay-portfolio-table-wrap--no-scroll">
-                  <table className="table-operations replay-opt-groups positions-opt-main-table">
-                    <colgroup>
-                      <col className="pom-col-expand" />
-                      <col className="pom-col-contract" />
-                      <col className="pom-col-expiry" />
-                      <col className="pom-col-strike" />
-                      <col className="pom-col-last" />
-                      <col className="pom-col-qty" />
-                      <col className="pom-col-at" />
-                      <col className="pom-col-value" />
-                      <col className="pom-col-quote" />
-                      <col className="pom-col-time" />
-                      <col className="pom-col-unpnl" />
-                      <col className="pom-col-opp" />
-                      <col className="pom-col-actions" />
-                    </colgroup>
-                    <thead>
-                      <tr>
-                        <th className="replay-opt-expand-col" />
-                        {(() => {
-                          const cols: { col: OpenOptSortCol; label: string; title?: string }[] = [
-                            { col: 'contract', label: 'Contract' },
-                            { col: 'expiry', label: 'Expiry' },
-                            { col: 'strike', label: 'Strike' },
-                            { col: 'last', label: 'Last', title: 'Underlying last price; (Last − Strike) / Last %' },
-                            { col: 'qty', label: 'Qty' },
-                            { col: 'avg_cost', label: '@' },
-                            { col: 'value', label: 'Value' },
-                            { col: 'time', label: 'Time' },
-                            { col: 'un_pnl', label: 'UN PNL' },
-                          ]
-                          return cols.flatMap(c => {
-                            const th = (
-                              <th
-                                key={c.col}
-                                className="replay-th-sortable"
-                                title={c.title ?? `Sort by ${c.label}`}
-                                onClick={() => setOpenOptSort(prev => prev.column === c.col ? { column: c.col, dir: prev.dir === 'desc' ? 'asc' : 'desc' } : { column: c.col, dir: 'desc' })}
-                                role="button"
-                                tabIndex={0}
-                                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenOptSort(prev => prev.column === c.col ? { column: c.col, dir: prev.dir === 'desc' ? 'asc' : 'desc' } : { column: c.col, dir: 'desc' }) } }}
-                                aria-sort={openOptSort.column === c.col ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
-                              >
-                                {c.label}{openOptSort.column === c.col ? (openOptSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
-                              </th>
-                            )
-                            if (c.col === 'value') {
-                              return [th, <th key="opt-quote" title="Option live bid / mid / ask">Opt Quote</th>]
-                            }
-                            return [th]
-                          })
-                        })()}
-                        <th title="Opportunity">Opp</th>
-                        <th className="replay-opt-actions-cell">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedOptionsTabPositions.flatMap(pos => {
-                            const posKey = getOptionsTabPositionKey(pos)
-                            const absQty = Math.abs(pos.qty)
-                            const sideLabel = pos.qty > 0 ? 'Long' : pos.qty < 0 ? 'Short' : '—'
-                            const value = (pos.avg_cost ?? 0) * absQty * 100
-                            const ts = getPositionTime(pos)
-                            const execLists = getPositionExecLists(pos)
-                            const execCount = execLists.final.length + execLists.tws.length
-                            const hasExecutions = execCount > 0
-                            const isPosExpanded = expandedPositionKeys.includes(posKey)
-                            const posRow = (
-                              <tr
-                                key={posKey}
-                                className="detail-position-row"
-                                onClick={hasExecutions ? e => { e.stopPropagation(); togglePositionExpand(posKey) } : undefined}
-                                role={hasExecutions ? 'button' : undefined}
-                                tabIndex={hasExecutions ? 0 : undefined}
-                                onKeyDown={hasExecutions ? e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); togglePositionExpand(posKey) } } : undefined}
-                                aria-expanded={hasExecutions ? isPosExpanded : undefined}
-                              >
-                                <td className="replay-opt-expand-col">
-                                  {hasExecutions ? (
-                                    <span className={`replay-opt-expand-icon ${isPosExpanded ? 'expanded' : ''}`} aria-hidden>
-                                      {isPosExpanded ? '▼' : '▶'}
-                                    </span>
-                                  ) : null}
-                                </td>
-                                <td className="replay-opt-contract">
-                                  {(() => {
-                                    const p = getContractLabelParts(pos.contract_key)
-                                    const strikeStr = pos.strike != null ? ` ${pos.strike}` : ''
-                                    const fill = instanceIconFillFromMergedExecutions(execLists.merged)
-                                    const instanceIcon =
-                                      fill === 'empty'
-                                        ? null
-                                        : fill === 'none' ? (
-                                            <span
-                                              className="ledger-instance-icon-link ledger-instance-icon-link--different"
-                                              title="None of the matched executions have a strategy instance"
-                                              aria-label="No strategy instance on matched executions"
-                                              role="img"
-                                              onClick={e => e.stopPropagation()}
-                                            >
-                                              <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                <rect x="5" y="5" width="14" height="14" rx="1" />
-                                              </svg>
-                                            </span>
-                                          ) : fill === 'all' ? (
-                                            <span
-                                              className="ledger-instance-icon-link ledger-instance-icon-link--same"
-                                              title="All matched executions have a strategy instance"
-                                              aria-label="All matched executions have a strategy instance"
-                                              role="img"
-                                              onClick={e => e.stopPropagation()}
-                                            >
-                                              <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                <rect x="5" y="5" width="14" height="14" rx="1" />
-                                              </svg>
-                                            </span>
-                                          ) : (
-                                            <span
-                                              className="ledger-instance-icon-link ledger-instance-icon-link--mixed"
-                                              title="Some matched executions have a strategy instance, some do not"
-                                              aria-label="Mixed strategy instance on matched executions"
-                                              role="img"
-                                              onClick={e => e.stopPropagation()}
-                                            >
-                                              <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                <rect x="5" y="5" width="14" height="14" rx="1" />
-                                              </svg>
-                                            </span>
-                                          )
-                                    return p.symbol ? (
-                                      <>
-                                        {instanceIcon}
-                                        <button
-                                          type="button"
-                                          className="riv-opt-contract-btn"
-                                          onClick={e => {
-                                            e.stopPropagation()
-                                            openOptionInspector(pos)
-                                          }}
-                                          aria-label={`Option details for ${p.symbol} ${p.rightLabel}${strikeStr}`}
-                                        >
-                                          <strong>{p.symbol}</strong> {p.rightLabel}
-                                          {strikeStr}
-                                        </button>
-                                      </>
-                                    ) : (
-                                      <>
-                                        {instanceIcon}
-                                        <button
-                                          type="button"
-                                          className="riv-opt-contract-btn"
-                                          onClick={e => {
-                                            e.stopPropagation()
-                                            openOptionInspector(pos)
-                                          }}
-                                          aria-label={`Option details for ${pos.contract_key}`}
-                                        >
-                                          {pos.contract_key}
-                                        </button>
-                                      </>
-                                    )
-                                  })()}
-                                </td>
-                                <td className="positions-opt-expiry-cell">
-                                  <div className="positions-opt-expiry-line1">{fmtExpiry(pos.expiry)}</div>
-                                  {(() => {
-                                    const days = daysUntilExpiry(pos.expiry)
-                                    if (days == null) return null
-                                    const label = days >= 0 ? (days === 0 ? 'today' : `${days}d`) : `${-days}d ago`
-                                    return (
-                                      <div className="positions-opt-expiry-line2">
-                                        <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>{label}</span>
-                                      </div>
-                                    )
-                                  })()}
-                                </td>
-                                <td><strong>{fmtUsd(pos.strike)}</strong></td>
-                                <td className="positions-opt-last-cell">
-                                  {(() => {
-                                    const underlying = getContractLabelParts(pos.contract_key).symbol
-                                    const q = underlying ? quotesMap[underlying] : undefined
-                                    const last = q?.last != null && Number.isFinite(q.last) ? q.last : null
-                                    const strikeNum = pos.strike != null && Number.isFinite(pos.strike) ? pos.strike : null
-                                    const pct = last != null && strikeNum != null && last !== 0 ? ((last - strikeNum) / last) * 100 : null
-                                    const right = parseOptionContractKey(pos.contract_key).right
-                                    const side: 'Buy' | 'Sell' = pos.qty > 0 ? 'Buy' : 'Sell'
-                                    const pctClass = pct != null ? optionLastStrikePctClass(right, side, pct) : ''
-                                    return (
-                                      <>
-                                        <div className="positions-opt-last-line1">{last != null ? fmtUsd(last) : '—'}</div>
-                                        {pct != null ? (
-                                          <div className="positions-opt-last-line2">
-                                            <span className={`replay-last-strike-pct ${pctClass}`.trim()} title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}>
-                                              {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
-                                            </span>
-                                          </div>
-                                        ) : null}
-                                      </>
-                                    )
-                                  })()}
-                                </td>
-                                <td>{sideLabel} {absQty}</td>
-                                <td>{fmtUsd(pos.avg_cost)}</td>
-                                <td>{fmtUsd(value)}</td>
-                                <td className="positions-opt-live-quote">
-                                  {(() => {
-                                    const liveQ = quotesMap[pos.contract_key]
-                                    if (!liveQ) return <span className="replay-muted">—</span>
-                                    const mid = liveQ.mid ?? (liveQ.bid != null && liveQ.ask != null ? (liveQ.bid + liveQ.ask) / 2 : null)
-                                    return (
-                                      <>
-                                        <div className="positions-opt-quote-line positions-opt-quote-line--bid">
-                                          {liveQ.bid != null ? <span className="positions-opt-quote-bid">{liveQ.bid.toFixed(2)}</span> : <span className="replay-muted">—</span>}
-                                        </div>
-                                        <div className="positions-opt-quote-line positions-opt-quote-line--mid">
-                                          <strong>{mid != null ? mid.toFixed(2) : '—'}</strong>
-                                        </div>
-                                        <div className="positions-opt-quote-line positions-opt-quote-line--ask">
-                                          {liveQ.ask != null ? <span className="positions-opt-quote-ask">{liveQ.ask.toFixed(2)}</span> : <span className="replay-muted">—</span>}
-                                        </div>
-                                      </>
-                                    )
-                                  })()}
-                                </td>
-                                <td className="positions-opt-time-cell">
-                                  {ts != null ? (
-                                    <>
-                                      <div className="positions-opt-time-line1">{fmtDate(ts)}</div>
-                                      {fmtDaysAgo(ts) ? <div className="positions-opt-time-line2"><span className="replay-time-ago">{fmtDaysAgo(ts)}</span></div> : null}
-                                    </>
-                                  ) : '—'}
-                                </td>
-                                <td>
-                                  {(() => {
-                                    const liveQ = quotesMap[pos.contract_key]
-                                    const liveMid = liveQ?.mid ?? (liveQ?.bid != null && liveQ?.ask != null ? (liveQ.bid + liveQ.ask) / 2 : null)
-                                    const livePnl = liveMid != null && pos.avg_cost != null
-                                      ? (liveMid - pos.avg_cost) * absQty * 100 : null
-                                    return (
-                                      <>
-                                        {livePnl != null && (
-                                          <div>
-                                            <span className={`replay-pnl-unrealized ${livePnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(livePnl)}</span>
-                                            <span className="replay-muted" style={{fontSize:'0.7em'}}> live</span>
-                                          </div>
-                                        )}
-                                        <div className={livePnl != null ? 'replay-muted' : undefined} style={livePnl != null ? {fontSize:'0.75em'} : undefined}>
-                                          <span className={`replay-pnl-unrealized ${pos.unrealized_pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(pos.unrealized_pnl)}</span>
-                                          {livePnl != null && <span style={{fontSize:'0.7em'}}> snap</span>}
-                                        </div>
-                                      </>
-                                    )
-                                  })()}
-                                </td>
-                                <td className="replay-strategy-opp-cell positions-opt-opp-hint-cell">
-                                  {execCount === 0 ? '—' : (
-                                    <span className="replay-muted" title={`${execCount} execution${execCount > 1 ? 's' : ''} — expand row`}>
-                                      {execCount} exec{execCount > 1 ? 's' : ''} ↓
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="replay-opt-actions-cell">—</td>
-                              </tr>
-                            )
-                            const execRows = isPosExpanded
-                              ? [
-                                  ...execLists.final.map((ex, ei) =>
-                                    renderOpenOptionExecutionRow(pos, posKey, ex, ei, 'final', execLists.final, execLists.tws, false, false),
-                                  ),
-                                  ...execLists.tws.map((ex, ei) =>
-                                    renderOpenOptionExecutionRow(pos, posKey, ex, ei, 'tws', execLists.final, execLists.tws, false, false),
-                                  ),
-                                ]
-                              : []
-                            return [posRow, ...execRows]
-                      })}
-                    </tbody>
-                    <tfoot>
-                      <tr className="replay-opt-tfoot-total">
-                        <td colSpan={12} className="replay-opt-tfoot-label">Total</td>
-                        <td>
-                          <span className="replay-pnl-unrealized">
-                            {fmtUsd(optionsTabPositions.reduce((acc, p) => acc + p.unrealized_pnl, 0))}
-                          </span>
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              )}
-                </div>
+                <PositionOptionsTab
+                  positions={optionsTabPositions}
+                  sortedPositions={sortedOptionsTabPositions}
+                  sort={openOptSort}
+                  onSortToggle={col => setOpenOptSort(prev => prev.column === col ? { column: col, dir: prev.dir === 'desc' ? 'asc' : 'desc' } : { column: col, dir: 'desc' })}
+                  expandedKeys={expandedPositionKeys}
+                  onToggleExpand={togglePositionExpand}
+                  getPositionKey={getOptionsTabPositionKey}
+                  getExecLists={getPositionExecLists}
+                  getTime={getPositionTime}
+                  quotesMap={quotesMap}
+                  onOpenOptionInspector={openOptionInspector}
+                  canonicalOptContractKeySet={canonicalOptContractKeySet}
+                  syncingTwsAttributionKey={syncingTwsAttributionKey}
+                  syncingFinalAttributionKey={syncingFinalAttributionKey}
+                  execRowActions={execRowActions}
+                />
               ) : openTab === 'stocks' ? (
-                renderLiveStockBucketPanel(
-                  'open-panel-stocks',
-                  'open-tab-stocks',
-                  'Stock positions',
-                  coreStockPositionsFiltered,
-                  'stk',
-                  stocksTabEmptyHint,
-                  openStockInspector,
-                )
+                <StockBucketPanel
+                  panelId="open-panel-stocks"
+                  tabButtonId="open-tab-stocks"
+                  heading="Stock positions"
+                  rows={coreStockPositionsFiltered}
+                  rowKeyPrefix="stk"
+                  emptyHint={stocksTabEmptyHint}
+                  onInspectStock={openStockInspector}
+                />
               ) : openTab === 'fixed_income' ? (
-                renderLiveStockBucketPanel(
-                  'open-panel-fixed-income',
-                  'open-tab-fixed-income',
-                  'Fixed income positions',
-                  fixedIncomeStockPositions,
-                  'fi',
-                  'No open fixed income positions under the current filters.',
-                  openStockInspector,
-                )
+                <StockBucketPanel
+                  panelId="open-panel-fixed-income"
+                  tabButtonId="open-tab-fixed-income"
+                  heading="Fixed income positions"
+                  rows={fixedIncomeStockPositions}
+                  rowKeyPrefix="fi"
+                  emptyHint="No open fixed income positions under the current filters."
+                  onInspectStock={openStockInspector}
+                />
               ) : (
-                renderLiveStockBucketPanel(
-                  'open-panel-cash-like',
-                  'open-tab-cash-like',
-                  'Cash-like positions',
-                  cashLikeStockPositions,
-                  'cash',
-                  'No open cash-like positions under the current filters.',
-                  openStockInspector,
-                )
+                <StockBucketPanel
+                  panelId="open-panel-cash-like"
+                  tabButtonId="open-tab-cash-like"
+                  heading="Cash-like positions"
+                  rows={cashLikeStockPositions}
+                  rowKeyPrefix="cash"
+                  emptyHint="No open cash-like positions under the current filters."
+                  onInspectStock={openStockInspector}
+                />
               )}
             </div>
           )}
@@ -5072,7 +2796,7 @@ export function PositionsPage({
             symbol={stockInspector.symbol}
             accountId={stockInspector.accountId}
             position={stockInspector.position}
-            onClose={() => setStockInspector(null)}
+            onClose={closeStockInspector}
           />
         )}
       </RightInspectorDrawer>
@@ -5082,7 +2806,7 @@ export function PositionsPage({
             position={optionInspector}
             optionQuote={quotesMap[optionInspector.contract_key]}
             underlyingHint={optionInspectorUnderlyingHint}
-            onClose={() => setOptionInspector(null)}
+            onClose={closeOptionInspector}
             onOpenOptionDiscovery={onOpenOptionDiscovery != null ? handleNavigateOptionDiscovery : undefined}
           />
         )}
@@ -5098,7 +2822,7 @@ export function PositionsPage({
               <button
                 type="button"
                 className="od-detail-close"
-                onClick={() => setStrategyInspectorInstanceId(null)}
+                onClick={closeStrategyInspector}
                 aria-label="Close strategy instance inspector"
               >
                 ✕
