@@ -12,6 +12,7 @@
     "css:metrics:verbose": "node scripts/css-legacy-metrics.mjs --verbose",
     "test:visual": "playwright test",
     "test:visual:update": "playwright test --update-snapshots",
+    "postinstall": "playwright install chromium || true",
     "css:retirement:status": "node scripts/css-legacy-metrics.mjs && node -e \"const n=require('./scripts/legacy-class-allowlist.json').files.length;console.log('allowlist files:',n)\"",
     "test": "vitest",
     "test:run": "vitest run",

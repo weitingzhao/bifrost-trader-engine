@@ -20,8 +20,11 @@ for (const theme of THEMES) {
         document.documentElement.classList.toggle('dark', t !== 'light')
       }, theme)
 
-      await page.goto(route, { waitUntil: 'networkidle', timeout: 90_000 })
-      await page.waitForTimeout(800)
+      // load — not networkidle (Live/Celery/Positions keep SSE or polling open)
+      await page.goto(route, { waitUntil: 'load', timeout: 60_000 })
+      const shell = page.locator('[data-sidebar="sidebar"], [data-slot="sidebar-inset"]').first()
+      await shell.waitFor({ state: 'visible', timeout: 45_000 }).catch(() => undefined)
+      await page.waitForTimeout(1500)
 
       const slug = route.replace(/\//g, '_').replace(/^_/, '') || 'root'
       await expect(page).toHaveScreenshot(`${theme}-${slug}.png`, {
