@@ -30,7 +30,8 @@ import {
 } from '../api'
 import type { MassiveStatusResponse } from '../api'
 import { AppSelect } from '../components/AppSelect'
-import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
+import { PageSection } from '@/components/shared/page-section'
 import stockChecklistRows from './massiveStockFeedChecklistRows'
 import type { ChecklistRow } from './massiveStockFeedChecklistRows'
 import { CAPABILITY_GROUP_LABELS, CAPABILITY_GROUP_ORDER, type CapabilityGroup } from './massiveStockFeedChecklistRows'
@@ -55,6 +56,7 @@ import { MassiveRefJobSessionProvider } from './massive/MassiveRefJobSessionCont
 import { MassiveTickerReferenceDbSection } from './massive/MassiveTickerReferenceDbSection'
 
 import { baseUrlForStaticAssets } from '@/lib/publicEnv'
+import { Button } from '@/components/ui/button'
 
 /** `frontend/public/plans/` — respect base path when not deployed at domain root. */
 const MASSIVE_STOCKS_COVERAGE_PLAN_URL = `${baseUrlForStaticAssets()}plans/massive_stocks_api_coverage.html`
@@ -1238,9 +1240,9 @@ export function FeedMassiveStockPage({
                 </div>
 
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || tkAllBusy} onClick={runTkAllTickers}>
+                  <Button variant="secondary" type="button" disabled={!configured || tkAllBusy} onClick={runTkAllTickers}>
                     {tkAllBusy ? 'Loading\u2026' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {tkAllErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tkAllErr}</p> : null}
                 {tkAllResult ? (
@@ -1329,9 +1331,9 @@ export function FeedMassiveStockPage({
                 </div>
 
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || tkOvBusy} onClick={runTkOverview}>
+                  <Button variant="secondary" type="button" disabled={!configured || tkOvBusy} onClick={runTkOverview}>
                     {tkOvBusy ? 'Loading\u2026' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {tkOvErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tkOvErr}</p> : null}
                 {tkOvResult ? (
@@ -1414,9 +1416,9 @@ export function FeedMassiveStockPage({
                 </div>
 
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || tkTypesBusy} onClick={runTkTypes}>
+                  <Button variant="secondary" type="button" disabled={!configured || tkTypesBusy} onClick={runTkTypes}>
                     {tkTypesBusy ? 'Loading\u2026' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {tkTypesErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tkTypesErr}</p> : null}
                 {tkTypesResult ? (
@@ -1484,9 +1486,9 @@ export function FeedMassiveStockPage({
                 </div>
 
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || tkRelBusy} onClick={runTkRelated}>
+                  <Button variant="secondary" type="button" disabled={!configured || tkRelBusy} onClick={runTkRelated}>
                     {tkRelBusy ? 'Loading\u2026' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {tkRelErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tkRelErr}</p> : null}
                 {tkRelResult ? (
@@ -1686,9 +1688,9 @@ export function FeedMassiveStockPage({
                   <strong>Proxy:</strong> <code>GET /research/massive/stocks/bars/range</code>
                 </p>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || aggStBusy} onClick={runAggCustom}>
+                  <Button variant="secondary" type="button" disabled={!configured || aggStBusy} onClick={runAggCustom}>
                     {aggStBusy ? 'Loading\u2026' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {aggStErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{aggStErr}</p> : null}
                 {aggStResult ? (
@@ -1740,9 +1742,9 @@ export function FeedMassiveStockPage({
                   <strong>Proxy:</strong> <code>GET /research/massive/stocks/bars/grouped-daily/&#123;date&#125;</code>
                 </p>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || gdBusy} onClick={runAggGrouped}>
+                  <Button variant="secondary" type="button" disabled={!configured || gdBusy} onClick={runAggGrouped}>
                     {gdBusy ? 'Loading\u2026' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {gdErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{gdErr}</p> : null}
                 {gdResult ? (
@@ -1804,9 +1806,9 @@ export function FeedMassiveStockPage({
                   <strong>Proxy:</strong> <code>GET /research/massive/stocks/bars/open-close/&#123;ticker&#125;/&#123;date&#125;</code>
                 </p>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || ocBusy} onClick={runAggOpenClose}>
+                  <Button variant="secondary" type="button" disabled={!configured || ocBusy} onClick={runAggOpenClose}>
                     {ocBusy ? 'Loading\u2026' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {ocErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ocErr}</p> : null}
                 {ocResult ? (
@@ -1858,9 +1860,9 @@ export function FeedMassiveStockPage({
                   <strong>Proxy:</strong> <code>GET /research/massive/stocks/bars/prev/&#123;ticker&#125;</code>
                 </p>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || prevBusy} onClick={runAggPrev}>
+                  <Button variant="secondary" type="button" disabled={!configured || prevBusy} onClick={runAggPrev}>
                     {prevBusy ? 'Loading\u2026' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {prevErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{prevErr}</p> : null}
                 {prevResult ? (
@@ -2009,9 +2011,9 @@ export function FeedMassiveStockPage({
                   <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/fundamentals/income-statements</code></p>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || fundISBusy} onClick={runFundIS}>
+                  <Button variant="secondary" type="button" disabled={!configured || fundISBusy} onClick={runFundIS}>
                     {fundISBusy ? 'Loading…' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {fundISErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundISErr}</p>}
                 {fundISResult && (
@@ -2039,9 +2041,9 @@ export function FeedMassiveStockPage({
                   <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/fundamentals/balance-sheets</code></p>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || fundBSBusy} onClick={runFundBS}>
+                  <Button variant="secondary" type="button" disabled={!configured || fundBSBusy} onClick={runFundBS}>
                     {fundBSBusy ? 'Loading…' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {fundBSErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundBSErr}</p>}
                 {fundBSResult && (
@@ -2069,9 +2071,9 @@ export function FeedMassiveStockPage({
                   <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/fundamentals/cash-flow-statements</code></p>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || fundCFBusy} onClick={runFundCF}>
+                  <Button variant="secondary" type="button" disabled={!configured || fundCFBusy} onClick={runFundCF}>
                     {fundCFBusy ? 'Loading…' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {fundCFErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundCFErr}</p>}
                 {fundCFResult && (
@@ -2110,9 +2112,9 @@ export function FeedMassiveStockPage({
                   <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/fundamentals/ratios</code></p>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || fundRatiosBusy} onClick={runFundRatios}>
+                  <Button variant="secondary" type="button" disabled={!configured || fundRatiosBusy} onClick={runFundRatios}>
                     {fundRatiosBusy ? 'Loading…' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {fundRatiosErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundRatiosErr}</p>}
                 {fundRatiosResult && (
@@ -2156,9 +2158,9 @@ export function FeedMassiveStockPage({
                   <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/fundamentals/short-interest</code></p>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || fundSIBusy} onClick={runFundShortInterest}>
+                  <Button variant="secondary" type="button" disabled={!configured || fundSIBusy} onClick={runFundShortInterest}>
                     {fundSIBusy ? 'Loading…' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {fundSIErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundSIErr}</p>}
                 {fundSIResult && (
@@ -2202,9 +2204,9 @@ export function FeedMassiveStockPage({
                   <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/fundamentals/short-volume</code></p>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || fundSVBusy} onClick={runFundShortVolume}>
+                  <Button variant="secondary" type="button" disabled={!configured || fundSVBusy} onClick={runFundShortVolume}>
                     {fundSVBusy ? 'Loading…' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {fundSVErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundSVErr}</p>}
                 {fundSVResult && (
@@ -2243,9 +2245,9 @@ export function FeedMassiveStockPage({
                   <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/fundamentals/float</code></p>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || fundFloatBusy} onClick={runFundFloat}>
+                  <Button variant="secondary" type="button" disabled={!configured || fundFloatBusy} onClick={runFundFloat}>
                     {fundFloatBusy ? 'Loading…' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {fundFloatErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundFloatErr}</p>}
                 {fundFloatResult && (
@@ -2373,9 +2375,9 @@ export function FeedMassiveStockPage({
                   <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/filings/edgar-index</code></p>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || flEiBusy} onClick={runEdgarIndex}>
+                  <Button variant="secondary" type="button" disabled={!configured || flEiBusy} onClick={runEdgarIndex}>
                     {flEiBusy ? 'Loading…' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {flEiErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{flEiErr}</p>}
                 {resultBlock(flEiResult)}
@@ -2438,9 +2440,9 @@ export function FeedMassiveStockPage({
                   <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/filings/10k-sections</code></p>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || fl10kBusy} onClick={run10KSections}>
+                  <Button variant="secondary" type="button" disabled={!configured || fl10kBusy} onClick={run10KSections}>
                     {fl10kBusy ? 'Loading…' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {fl10kErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fl10kErr}</p>}
                 {resultBlock(fl10kResult)}
@@ -2493,9 +2495,9 @@ export function FeedMassiveStockPage({
                   <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/filings/8k-text</code></p>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || fl8kBusy} onClick={run8KText}>
+                  <Button variant="secondary" type="button" disabled={!configured || fl8kBusy} onClick={run8KText}>
                     {fl8kBusy ? 'Loading…' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {fl8kErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fl8kErr}</p>}
                 {resultBlock(fl8kResult)}
@@ -2538,9 +2540,9 @@ export function FeedMassiveStockPage({
                   <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/filings/13f</code></p>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || fl13fBusy} onClick={run13FFilings}>
+                  <Button variant="secondary" type="button" disabled={!configured || fl13fBusy} onClick={run13FFilings}>
                     {fl13fBusy ? 'Loading…' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {fl13fErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fl13fErr}</p>}
                 {resultBlock(fl13fResult)}
@@ -2588,9 +2590,9 @@ export function FeedMassiveStockPage({
                   <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/filings/risk-factors</code></p>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || flRfBusy} onClick={runRiskFactors}>
+                  <Button variant="secondary" type="button" disabled={!configured || flRfBusy} onClick={runRiskFactors}>
                     {flRfBusy ? 'Loading…' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {flRfErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{flRfErr}</p>}
                 {resultBlock(flRfResult)}
@@ -2633,9 +2635,9 @@ export function FeedMassiveStockPage({
                   <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/filings/risk-categories</code></p>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || flRcBusy} onClick={runRiskCategories}>
+                  <Button variant="secondary" type="button" disabled={!configured || flRcBusy} onClick={runRiskCategories}>
                     {flRcBusy ? 'Loading…' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {flRcErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{flRcErr}</p>}
                 {resultBlock(flRcResult)}
@@ -2688,9 +2690,9 @@ export function FeedMassiveStockPage({
                   <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/filings/form-3</code></p>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || flF3Busy} onClick={runForm3}>
+                  <Button variant="secondary" type="button" disabled={!configured || flF3Busy} onClick={runForm3}>
                     {flF3Busy ? 'Loading…' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {flF3Err && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{flF3Err}</p>}
                 {resultBlock(flF3Result)}
@@ -2761,9 +2763,9 @@ export function FeedMassiveStockPage({
                   <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/filings/form-4</code></p>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-secondary" disabled={!configured || flF4Busy} onClick={runForm4}>
+                  <Button variant="secondary" type="button" disabled={!configured || flF4Busy} onClick={runForm4}>
                     {flF4Busy ? 'Loading…' : 'Execute'}
-                  </button>
+                  </Button>
                 </div>
                 {flF4Err && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{flF4Err}</p>}
                 {resultBlock(flF4Result)}
@@ -2845,9 +2847,9 @@ export function FeedMassiveStockPage({
           <p style={{ marginTop: 'var(--space-1)' }}><strong>Proxy:</strong> <code>GET /research/massive/stocks/news</code></p>
         </div>
         <div style={{ marginTop: 'var(--space-3)' }}>
-          <button type="button" className="btn btn-secondary" disabled={!configured || newsBusy} onClick={runStockNews}>
+          <Button variant="secondary" type="button" disabled={!configured || newsBusy} onClick={runStockNews}>
             {newsBusy ? 'Loading…' : 'Execute'}
-          </button>
+          </Button>
         </div>
         {newsErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{newsErr}</p>}
         {newsResult ? (
@@ -2887,28 +2889,25 @@ export function FeedMassiveStockPage({
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="card process-section feed-massive-option-page">
+    <PageSection className="feed-massive-option-page min-w-0">
 
       {/* Title */}
       <div className="feed-massive-title-block">
         <div className="feed-massive-title-main">
-          <h2 className="page-title-with-tooltip" style={{ marginBottom: 0 }}>
-            {onGoToFeed ? (
-              <>
-                <button type="button" className="page-title-breadcrumb-link" onClick={onGoToFeed} aria-label="Go to Feed">
-                  Feed
-                </button>
-                {' / '}
-              </>
+          <SectionPageTitle
+            menu="Feed"
+            pageTitle={breadcrumbLabel}
+            onMenuClick={onGoToFeed}
+            menuNavigateAriaLabel="Go to Feed"
+            infoText="Massive (Polygon) Stocks API coverage sheet and capability status. Shared REST (Technical Indicators, Market Operations) lives under Feed → Massive Common; corporate actions sync UI remains under Feed → Massive Option. Stock-specific endpoints are planned."
+            style={{ marginBottom: 0 }}
+          >
+            {configured ? (
+              <span className="feed-massive-delay-pill" title={massiveStatus?.delay_notice}>
+                Delayed feed
+              </span>
             ) : null}
-            {breadcrumbLabel}{' '}
-            <InfoTooltip text="Massive (Polygon) Stocks API coverage sheet and capability status. Shared REST (Technical Indicators, Market Operations) lives under Feed → Massive Common; corporate actions sync UI remains under Feed → Massive Option. Stock-specific endpoints are planned." />
-          </h2>
-          {configured && (
-            <span className="feed-massive-delay-pill" title={massiveStatus?.delay_notice}>
-              Delayed feed
-            </span>
-          )}
+          </SectionPageTitle>
         </div>
       </div>
 
@@ -2950,19 +2949,15 @@ export function FeedMassiveStockPage({
             </p>
           </div>
           <div className="feed-massive-api-coverage-actions">
-            <a
+            <Button variant="secondary" asChild><a
               href={MASSIVE_STOCKS_COVERAGE_PLAN_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="btn-secondary"
+              
             >
               Open in new tab
-            </a>
-            <button
-              type="button"
-              className="btn-secondary"
-              disabled={apiCoverageSyncBusy}
-              onClick={async () => {
+            </a></Button>
+            <Button variant="secondary" type="button" disabled={apiCoverageSyncBusy} onClick={async () => {
                 setApiCoverageSyncBusy(true)
                 setApiCoverageSyncMsg(null)
                 try {
@@ -2976,15 +2971,12 @@ export function FeedMassiveStockPage({
               }}
             >
               {apiCoverageSyncBusy ? 'Syncing…' : 'Sync HTML'}
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => setApiCoverageOpen(v => !v)}
+            </Button>
+            <Button variant="secondary" type="button" onClick={() => setApiCoverageOpen(v => !v)}
               aria-expanded={apiCoverageOpen}
             >
               {apiCoverageOpen ? 'Hide embedded viewer' : 'Show embedded viewer'}
-            </button>
+            </Button>
           </div>
         </div>
         {apiCoverageSyncMsg ? <p className="feed-massive-api-coverage-sync-msg">{apiCoverageSyncMsg}</p> : null}
@@ -3073,13 +3065,10 @@ export function FeedMassiveStockPage({
           <p className="feed-massive-card-lead">
             Celery jobs that persist Massive REST data to PostgreSQL (reference sync and stock OHLC) live on Data Coverage → Stock → Massive Delay (DB).
           </p>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => { window.location.hash = '#coverage-massive-stock' }}
+          <Button variant="secondary" type="button" onClick={() => { window.location.hash = '#coverage-massive-stock' }}
           >
             Open Massive Delay (DB)
-          </button>
+          </Button>
         </section>
 
         <div className="feed-massive-delivery-tabs">
@@ -3229,6 +3218,6 @@ export function FeedMassiveStockPage({
         )}
 
       </div>
-    </div>
+    </PageSection>
   )
 }

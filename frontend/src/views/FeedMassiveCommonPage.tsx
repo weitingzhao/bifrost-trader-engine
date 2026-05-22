@@ -13,7 +13,8 @@ import type {
   MassiveMarketHolidaysResponse,
   TechnicalIndicatorResponse,
 } from '../api'
-import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
+import { PageSection } from '@/components/shared/page-section'
 import { AppSelect } from '../components/AppSelect'
 import checklistRows from './massiveFeedChecklistRows'
 import type { ChecklistRow } from './massiveFeedChecklistRows'
@@ -31,6 +32,7 @@ import {
 } from './massive/massiveChecklistStatus'
 import { FeedMassiveServiceBlock } from './massive/FeedMassiveServiceBlock'
 import type { EffectiveServiceStatus } from './massive/FeedMassiveServiceBlock'
+import { Button } from '@/components/ui/button'
 
 const TI_TAB_ORDER = ['sma', 'ema', 'macd', 'rsi'] as const
 type TiSubTabKey = (typeof TI_TAB_ORDER)[number]
@@ -343,26 +345,23 @@ export function FeedMassiveCommonPage({
   })()
 
   return (
-    <div className="card process-section feed-massive-option-page">
+    <PageSection className="feed-massive-option-page min-w-0">
       <div className="feed-massive-title-block">
         <div className="feed-massive-title-main">
-          <h2 className="page-title-with-tooltip" style={{ marginBottom: 0 }}>
-            {onGoToFeed ? (
-              <>
-                <button type="button" className="page-title-breadcrumb-link" onClick={onGoToFeed} aria-label="Go to Feed">
-                  Feed
-                </button>
-                {' / '}
-              </>
+          <SectionPageTitle
+            menu="Feed"
+            pageTitle={breadcrumbLabel}
+            onMenuClick={onGoToFeed}
+            menuNavigateAriaLabel="Go to Feed"
+            infoText="Shared Massive REST capabilities for both options and stocks: Technical Indicators and Market Operations."
+            style={{ marginBottom: 0 }}
+          >
+            {configured ? (
+              <span className="feed-massive-delay-pill" title={massiveStatus?.delay_notice}>
+                Delayed feed
+              </span>
             ) : null}
-            {breadcrumbLabel}{' '}
-            <InfoTooltip text="Shared Massive REST capabilities for both options and stocks: Technical Indicators and Market Operations." />
-          </h2>
-          {configured && (
-            <span className="feed-massive-delay-pill" title={massiveStatus?.delay_notice}>
-              Delayed feed
-            </span>
-          )}
+          </SectionPageTitle>
         </div>
       </div>
 
@@ -578,9 +577,9 @@ export function FeedMassiveCommonPage({
                     </label>
                   </div>
                   <div style={{ marginTop: 'var(--space-3)' }}>
-                    <button type="button" className="btn btn-secondary" disabled={tiBusy || !configured || !tiTicker.trim()} onClick={runTiIndicator}>
+                    <Button variant="secondary" type="button" disabled={tiBusy || !configured || !tiTicker.trim()} onClick={runTiIndicator}>
                       {tiBusy ? 'Loading\u2026' : `Fetch ${TI_DOC_PAGE_LABEL[tiSubTab]}`}
-                    </button>
+                    </Button>
                   </div>
                   {tiErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tiErr}</p> : null}
                   {tiResult?.ok && tiResult.results?.values ? (
@@ -699,9 +698,9 @@ export function FeedMassiveCommonPage({
                       </label>
                     </div>
                     <div style={{ marginTop: 'var(--space-3)' }}>
-                      <button type="button" className="btn btn-secondary" disabled={moExchBusy || !configured} onClick={runMoExchanges}>
+                      <Button variant="secondary" type="button" disabled={moExchBusy || !configured} onClick={runMoExchanges}>
                         {moExchBusy ? 'Loading\u2026' : 'Fetch Exchanges'}
-                      </button>
+                      </Button>
                     </div>
                     {moExchErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{moExchErr}</p> : null}
                     {moExchResults ? (
@@ -737,9 +736,9 @@ export function FeedMassiveCommonPage({
                       <p className="feed-massive-agg-sub-endpoint"><code>REST: GET /v1/marketstatus/upcoming</code></p>
                     </div>
                     <div style={{ marginTop: 'var(--space-3)' }}>
-                      <button type="button" className="btn btn-secondary" disabled={moHolBusy || !configured} onClick={runMoHolidays}>
+                      <Button variant="secondary" type="button" disabled={moHolBusy || !configured} onClick={runMoHolidays}>
                         {moHolBusy ? 'Loading\u2026' : 'Fetch & Compare Holidays'}
-                      </button>
+                      </Button>
                     </div>
                     {moHolErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{moHolErr}</p> : null}
                     {moHolData?.ok ? (
@@ -809,9 +808,9 @@ export function FeedMassiveCommonPage({
                       </p>
                     </div>
                     <div style={{ marginTop: 'var(--space-3)' }}>
-                      <button type="button" className="btn btn-secondary" disabled={moStatusBusy || !configured} onClick={runMoStatus}>
+                      <Button variant="secondary" type="button" disabled={moStatusBusy || !configured} onClick={runMoStatus}>
                         {moStatusBusy ? 'Loading\u2026' : 'Fetch Market Status'}
-                      </button>
+                      </Button>
                     </div>
                     {moStatusErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{moStatusErr}</p> : null}
                     {moStatusData ? (
@@ -872,9 +871,9 @@ export function FeedMassiveCommonPage({
                       </label>
                     </div>
                     <div style={{ marginTop: 'var(--space-3)' }}>
-                      <button type="button" className="btn btn-secondary" disabled={moCondBusy || !configured} onClick={runMoConditions}>
+                      <Button variant="secondary" type="button" disabled={moCondBusy || !configured} onClick={runMoConditions}>
                         {moCondBusy ? 'Loading\u2026' : 'Fetch Condition Codes'}
-                      </button>
+                      </Button>
                     </div>
                     {moCondErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{moCondErr}</p> : null}
                     {moCondResults ? (
@@ -907,6 +906,6 @@ export function FeedMassiveCommonPage({
           </FeedMassiveServiceBlock>
         </FeedMassiveCommonCapabilityPanel>
       </div>
-    </div>
+    </PageSection>
   )
 }

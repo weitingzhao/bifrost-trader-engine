@@ -15,7 +15,7 @@ export function InstanceStructureCard({
 }) {
   if (instance.strategy_structure_id == null) {
     return (
-      <section className="instance-detail-structure-card detail-block">
+      <section className="instance-detail-structure-panel detail-block rounded-lg border border-border bg-card p-4 shadow-sm">
         <h3 className="instance-detail-section-title">Strategy structure</h3>
         <p className="muted">No structure linked.</p>
       </section>
@@ -23,7 +23,7 @@ export function InstanceStructureCard({
   }
 
   return (
-    <section className="instance-detail-structure-card detail-block">
+    <section className="instance-detail-structure-panel detail-block rounded-lg border border-border bg-card p-4 shadow-sm">
       <h3 className="instance-detail-section-title">Strategy structure</h3>
       {structureLoading ? (
         <p className="muted">Loading structure…</p>

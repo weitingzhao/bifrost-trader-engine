@@ -9,7 +9,10 @@ import {
   fetchPerformance,
   fetchExecutions,
 } from '../api'
+import { PageSection } from '@/components/shared/page-section'
 import { SectionPageTitle } from '../components/SectionPageTitle'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { StrategyOpportunityCombobox } from '../components/StrategyOpportunityCombobox'
 import { DetailSidebar } from '../components/DetailSidebar'
 import { INSTANCE_DETAIL_SIDEBAR_WIDTH_PX } from '../constants/instanceDetailSidebar'
@@ -378,7 +381,7 @@ function SortableInstancesTh({
     >
       <button
         type="button"
-        className="strategy-instances-sort-btn"
+        className="strategy-instances-sort-action"
         onClick={() => onSort(column)}
         aria-pressed={active}
         title={
@@ -387,7 +390,7 @@ function SortableInstancesTh({
             : 'Sort within each symbol group by this column'
         }
       >
-        <span className="strategy-instances-sort-btn-label">{children}</span>
+        <span className="strategy-instances-sort-action-label">{children}</span>
         {active ? <span className="strategy-instances-sort-caret">{dir === 'asc' ? '↑' : '↓'}</span> : null}
       </button>
     </th>
@@ -1107,9 +1110,11 @@ export function StrategyInstancesPage({
                 <td className="tabular-nums">{row.executions_count != null ? row.executions_count : '—'}</td>
                 <td className="strategy-instance-actions-cell">
                   <div className="strategy-instance-actions-inner">
-                    <button
+                    <Button
                       type="button"
-                      className="btn btn-icon-small"
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8"
                       title="Open instance detail"
                       aria-label="Open instance detail"
                       onClick={() => openInstanceDetail(row.strategy_instance_id)}
@@ -1118,11 +1123,16 @@ export function StrategyInstancesPage({
                         <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
                         <circle cx="12" cy="12" r="3" />
                       </svg>
-                    </button>
+                    </Button>
                     {effectiveDetailId != null && effectiveDetailId !== row.strategy_instance_id && (
-                      <button
+                      <Button
                         type="button"
-                        className={`btn btn-icon-small${compareInstanceId === row.strategy_instance_id ? ' instance-compare-btn--active' : ''}`}
+                        variant="outline"
+                        size="icon"
+                        className={cn(
+                          'h-8 w-8',
+                          compareInstanceId === row.strategy_instance_id && 'instance-compare-action--active',
+                        )}
                         title={compareInstanceId === row.strategy_instance_id ? 'Remove from comparison' : 'Compare side-by-side with current instance'}
                         aria-label={compareInstanceId === row.strategy_instance_id ? 'Remove from comparison' : 'Compare side-by-side'}
                         onClick={() => toggleCompare(row.strategy_instance_id)}
@@ -1131,11 +1141,13 @@ export function StrategyInstancesPage({
                           <rect x="3" y="3" width="7" height="18" rx="1" />
                           <rect x="14" y="3" width="7" height="18" rx="1" />
                         </svg>
-                      </button>
+                      </Button>
                     )}
-                    <button
+                    <Button
                       type="button"
-                      className="btn btn-icon-small btn-icon-danger"
+                      variant="destructive"
+                      size="icon"
+                      className="h-8 w-8"
                       title="Delete instance"
                       aria-label="Delete instance"
                       onClick={() => openDeleteConfirm(row)}
@@ -1146,7 +1158,7 @@ export function StrategyInstancesPage({
                         <path d="M10 11v6M14 11v6" />
                         <path d="M9 6V4h6v2" />
                       </svg>
-                    </button>
+                    </Button>
                   </div>
                 </td>
               </tr>
@@ -1249,8 +1261,11 @@ export function StrategyInstancesPage({
       : undefined
 
   return (
-    <div
-      className={`card process-section strategy-instances-page${effectiveDetailId != null && !isNarrowViewport ? ' has-floating-detail-sidebar' : ''}`}
+    <PageSection
+      className={cn(
+        'strategy-instances-page',
+        effectiveDetailId != null && !isNarrowViewport && 'has-floating-detail-sidebar',
+      )}
       style={floatingSidebarStyle}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -1262,14 +1277,13 @@ export function StrategyInstancesPage({
           infoText="Running strategy instances per account; create from an opportunity, inspect PnL and executions, or open the instance sheet."
           style={{ margin: 0 }}
         />
-        <button
+        <Button
           type="button"
-          className="btn btn-primary"
           onClick={openCreateModal}
           aria-label="Create strategy instance"
         >
           Create instance
-        </button>
+        </Button>
       </div>
 
       <div className="filter-row" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', marginTop: '0.5rem' }}>
@@ -1760,22 +1774,22 @@ export function StrategyInstancesPage({
               <p className="section-hint replay-form-error" style={{ marginBottom: '0.75rem' }}>{confirmDelete.error}</p>
             )}
             <div className="replay-exec-form-actions" style={{ justifyContent: 'flex-end' }}>
-              <button
+              <Button
                 type="button"
-                className="btn btn-secondary"
+                variant="secondary"
                 onClick={() => setConfirmDelete((s) => ({ ...s, open: false }))}
                 disabled={confirmDelete.deleting}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="btn btn-danger"
+                variant="destructive"
                 onClick={handleDeleteConfirm}
                 disabled={confirmDelete.deleting}
               >
                 {confirmDelete.deleting ? 'Deleting…' : 'Confirm delete'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1873,22 +1887,22 @@ export function StrategyInstancesPage({
                 </div>
               </section>
               <div className="replay-exec-form-actions create-instance-actions">
-                <button
+                <Button
                   type="button"
-                  className="btn btn-secondary"
+                  variant="secondary"
                   onClick={() => { setCreateModalOpen(false); setCreateError(null) }}
                   disabled={createLoading}
                 >
                   Cancel
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={createLoading || eventAccounts.length === 0}>
+                </Button>
+                <Button type="submit" disabled={createLoading || eventAccounts.length === 0}>
                   {createLoading ? 'Creating…' : 'Create'}
-                </button>
+                </Button>
               </div>
             </form>
           </div>
         </div>
       )}
-    </div>
+    </PageSection>
   )
 }

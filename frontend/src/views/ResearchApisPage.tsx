@@ -25,6 +25,12 @@ import {
 } from './research/researchApiBases'
 import { scheduleMsgClear, setMsg } from './status/messageUtils'
 import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
+import { SettingsPageCard } from './settings/SettingsPageCard'
+import { SettingsPageGroups } from './settings/SettingsPageGroups'
+import { SettingsSection } from './settings/SettingsSection'
+import { SettingsTitleLamp } from './settings/SettingsTitleLamp'
+import { Button } from '@/components/ui/button'
+import type { LampTone } from '@/components/shared/lamp-indicator'
 
 export interface ResearchApisPageProps {
   embeddedInSettings?: boolean
@@ -435,23 +441,23 @@ export function ResearchApisPage({ embeddedInSettings }: ResearchApisPageProps) 
       titleId="research-shutdown-title"
       overlayClassName="celery-control-confirm-overlay"
       footer={
-        <div className="data-reset-modal-actions">
-          <button
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
             type="button"
-            className="btn btn-secondary"
+            variant="secondary"
             onClick={() => setShutdownResearch(INITIAL_SHUTDOWN)}
             disabled={shutdownResearch.busy}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn-shutdown-all"
+            variant="destructive"
             onClick={() => void runShutdown('research')}
             disabled={shutdownResearch.busy}
           >
             {shutdownResearch.busy ? 'Executing…' : 'Confirm'}
-          </button>
+          </Button>
         </div>
       }
     >
@@ -478,23 +484,23 @@ export function ResearchApisPage({ embeddedInSettings }: ResearchApisPageProps) 
       titleId="strategy-shutdown-title"
       overlayClassName="celery-control-confirm-overlay"
       footer={
-        <div className="data-reset-modal-actions">
-          <button
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
             type="button"
-            className="btn btn-secondary"
+            variant="secondary"
             onClick={() => setShutdownStrategy(INITIAL_SHUTDOWN)}
             disabled={shutdownStrategy.busy}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn-shutdown-all"
+            variant="destructive"
             onClick={() => void runShutdown('strategy')}
             disabled={shutdownStrategy.busy}
           >
             {shutdownStrategy.busy ? 'Executing…' : 'Confirm'}
-          </button>
+          </Button>
         </div>
       }
     >
@@ -521,23 +527,23 @@ export function ResearchApisPage({ embeddedInSettings }: ResearchApisPageProps) 
       titleId="market-shutdown-title"
       overlayClassName="celery-control-confirm-overlay"
       footer={
-        <div className="data-reset-modal-actions">
-          <button
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
             type="button"
-            className="btn btn-secondary"
+            variant="secondary"
             onClick={() => setShutdownMarket(INITIAL_SHUTDOWN)}
             disabled={shutdownMarket.busy}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn-shutdown-all"
+            variant="destructive"
             onClick={() => void runShutdown('market')}
             disabled={shutdownMarket.busy}
           >
             {shutdownMarket.busy ? 'Executing…' : 'Confirm'}
-          </button>
+          </Button>
         </div>
       }
     >
@@ -552,10 +558,6 @@ export function ResearchApisPage({ embeddedInSettings }: ResearchApisPageProps) 
       ) : null}
     </DraggableModal>
   )
-
-  const wrapClass = embeddedInSettings
-    ? 'settings-page-card massive-api-status-page massive-api-status-page--embedded architecture-apis-page'
-    : 'settings-page-card massive-api-status-page architecture-apis-page'
 
   const lampSvg = (
     <svg
@@ -574,21 +576,20 @@ export function ResearchApisPage({ embeddedInSettings }: ResearchApisPageProps) 
   )
 
   return (
-    <div className={wrapClass}>
+    <SettingsPageCard embedded={embeddedInSettings} className="massive-api-status-page architecture-apis-page">
       {researchDialog}
       {strategyDialog}
       {marketDialog}
-      <div className="server-groups settings-page-groups">
-        <section className="replay-section" aria-labelledby="research-page-head">
+      <SettingsPageGroups className="server-groups">
+        <SettingsSection aria-labelledby="research-page-head">
           <div className="architecture-page-intro">
-            <h2 id="research-page-head" className="daemon-card-title page-title-with-tooltip architecture-page-title">
-              <span
-                className={`title-inline-lamp lamp-icon ${researchTitleLamp}`}
+            <h2 id="research-page-head" className="daemon-card-title inline-flex flex-wrap items-center gap-2 architecture-page-title">
+              <SettingsTitleLamp
+                lamp={researchTitleLamp as LampTone}
                 title="Combined Research, Strategy, and Market API reachability"
-                aria-hidden
               >
                 <SettingsSidebarLampGlyph id="api-research" />
-              </span>
+              </SettingsTitleLamp>
               Research
               <InfoTooltip text="Research, Strategy, and Market FastAPI sidecars: option discovery / max pain, strategy instances and structures, and market quotes / watchlist. Base URLs follow API Health routing (VITE_RESEARCH_API_ORIGIN, VITE_STRATEGY_API_ORIGIN, VITE_MARKET_API_ORIGIN, or GET /health ports). Stop requires an operator-scoped Ops token (same as Account / Architecture)." />
             </h2>
@@ -602,9 +603,9 @@ export function ResearchApisPage({ embeddedInSettings }: ResearchApisPageProps) 
             <article className="architecture-api-card" aria-labelledby="research-card-research">
               <div className="architecture-api-card-head">
                 <h3 id="research-card-research" className="architecture-api-card-title">
-                  <span className={`title-inline-lamp lamp-icon ${researchLamp}`} title="Research API health" aria-hidden>
+                  <SettingsTitleLamp lamp={researchLamp as LampTone} title="Research API health">
                     {lampSvg}
-                  </span>
+                  </SettingsTitleLamp>
                   Research API
                 </h3>
                 <button
@@ -663,9 +664,9 @@ export function ResearchApisPage({ embeddedInSettings }: ResearchApisPageProps) 
             <article className="architecture-api-card" aria-labelledby="research-card-strategy">
               <div className="architecture-api-card-head">
                 <h3 id="research-card-strategy" className="architecture-api-card-title">
-                  <span className={`title-inline-lamp lamp-icon ${strategyLamp}`} title="Strategy API health" aria-hidden>
+                  <SettingsTitleLamp lamp={strategyLamp as LampTone} title="Strategy API health">
                     {lampSvg}
-                  </span>
+                  </SettingsTitleLamp>
                   Strategy API
                 </h3>
                 <button
@@ -724,9 +725,9 @@ export function ResearchApisPage({ embeddedInSettings }: ResearchApisPageProps) 
             <article className="architecture-api-card" aria-labelledby="research-card-market">
               <div className="architecture-api-card-head">
                 <h3 id="research-card-market" className="architecture-api-card-title">
-                  <span className={`title-inline-lamp lamp-icon ${marketLamp}`} title="Market API health" aria-hidden>
+                  <SettingsTitleLamp lamp={marketLamp as LampTone} title="Market API health">
                     {lampSvg}
-                  </span>
+                  </SettingsTitleLamp>
                   Market API
                 </h3>
                 <button
@@ -780,10 +781,10 @@ export function ResearchApisPage({ embeddedInSettings }: ResearchApisPageProps) 
               </dl>
             </article>
           </div>
-        </section>
+        </SettingsSection>
 
-        <section className="replay-section" aria-labelledby="research-docs-table-head">
-          <h3 id="research-docs-table-head" className="page-title-with-tooltip architecture-section-title">
+        <SettingsSection aria-labelledby="research-docs-table-head">
+          <h3 id="research-docs-table-head" className="inline-flex flex-wrap items-center gap-2 architecture-section-title">
             Documentation
             <InfoTooltip text="Swagger UI, ReDoc, and OpenAPI JSON for each sidecar. Research uses root /docs; Strategy and Market use prefixed paths." />
           </h3>
@@ -925,10 +926,10 @@ export function ResearchApisPage({ embeddedInSettings }: ResearchApisPageProps) 
               </tbody>
             </table>
           </div>
-        </section>
+        </SettingsSection>
 
-        <section className="replay-section" aria-labelledby="research-log-head">
-          <h3 id="research-log-head" className="page-title-with-tooltip architecture-section-title">
+        <SettingsSection aria-labelledby="research-log-head">
+          <h3 id="research-log-head" className="inline-flex flex-wrap items-center gap-2 architecture-section-title">
             Application log
             <InfoTooltip text="Monitor merges Redis console streams for Research, Strategy, and Market (both dev and prod keys) so logs show even when Monitor and sidecars use different config profiles. Use Source toggles to filter. Clear removes both dev and prod streams per API." />
           </h3>
@@ -942,10 +943,10 @@ export function ResearchApisPage({ embeddedInSettings }: ResearchApisPageProps) 
             resizeAriaLabel="Resize unified research console height"
             clearTitle="Clear Research, Strategy, and Market log streams (dev and prod Redis keys per API)"
           />
-        </section>
+        </SettingsSection>
 
-        <section className="replay-section architecture-api-details" aria-labelledby="research-api-details-head">
-          <h3 id="research-api-details-head" className="page-title-with-tooltip architecture-section-title">
+        <SettingsSection className="architecture-api-details" aria-labelledby="research-api-details-head">
+          <h3 id="research-api-details-head" className="inline-flex flex-wrap items-center gap-2 architecture-section-title">
             API details
             <InfoTooltip text="Summary of what each sidecar exposes. Open the Swagger links above for full paths and schemas." />
           </h3>
@@ -1072,8 +1073,8 @@ export function ResearchApisPage({ embeddedInSettings }: ResearchApisPageProps) 
               </>
             )}
           </div>
-        </section>
-      </div>
-    </div>
+        </SettingsSection>
+      </SettingsPageGroups>
+    </SettingsPageCard>
   )
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { PageSection } from '@/components/shared/page-section'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import { RightInspectorDrawer } from '../components/RightInspectorDrawer'
 import { StockInspectorPanel } from '../components/StockInspectorPanel'
@@ -14,7 +15,6 @@ import {
   type SepaCriteriaStats,
   type ReadinessSnapshotRow,
 } from '../api/research/dataReadiness'
-import '../styles/data-readiness.css'
 import '../styles/stock-screener.css'
 
 interface StockScreenerPageProps {
@@ -553,7 +553,7 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
 
 
   return (
-    <div className="card process-section stock-screener-page wl2 ssp-page">
+    <PageSection className="stock-screener-page wl2 ssp-page w-full max-w-none">
       <div className="research-page-head">
         <SectionPageTitle
           menu="Research"
@@ -1134,6 +1134,6 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
           <StockInspectorPanel symbol={inspector.symbol} fundamentalSeed={inspector.seed} onClose={closeInspector} />
         )}
       </RightInspectorDrawer>
-    </div>
+    </PageSection>
   )
 }

@@ -14,8 +14,10 @@ import {
   type EntryConditionItem,
   type GateSafetySet,
 } from '../api'
+import { PageSection } from '@/components/shared/page-section'
 import { DraggableModal } from '../components/DraggableModal'
 import { SectionPageTitle } from '../components/SectionPageTitle'
+import { Button } from '@/components/ui/button'
 import {
   SCOPE_TYPES,
   CONDITION_TYPES,
@@ -336,7 +338,7 @@ export function StrategyOpportunityPage({
     : `Edit opportunity #${oppFormOpen}`
 
   return (
-    <div className="card process-section">
+    <PageSection>
       <DraggableModal
         open={availabilityError != null}
         onBackdropClick={() => setAvailabilityError(null)}
@@ -345,9 +347,9 @@ export function StrategyOpportunityPage({
         maxWidth="min(520px, calc(100vw - 24px))"
         footer={
           <div className="data-reset-modal-actions">
-            <button type="button" className="btn btn-primary" onClick={() => setAvailabilityError(null)}>
+            <Button type="button" onClick={() => setAvailabilityError(null)}>
               Close
-            </button>
+            </Button>
           </div>
         }
       >
@@ -381,9 +383,9 @@ export function StrategyOpportunityPage({
                 </button>
               ))}
             </div>
-            <button type="button" className="btn-primary opp-create-btn" onClick={openOppCreate}>
+            <Button type="button" className="opp-create-btn" onClick={openOppCreate}>
               + Create opportunity
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -429,10 +431,10 @@ export function StrategyOpportunityPage({
                       </td>
                       <td>
                         <span className="opp-table-row-actions">
-                          <button type="button" className="opp-row-btn opp-row-btn--edit" onClick={() => openOppEdit(row.strategy_opportunity_id)}>
+                          <button type="button" className="opp-row-action opp-row-action--edit" onClick={() => openOppEdit(row.strategy_opportunity_id)}>
                             Edit
                           </button>
-                          <button type="button" className="opp-row-btn opp-row-btn--copy" onClick={() => openOppCopy(row.strategy_opportunity_id)}>
+                          <button type="button" className="opp-row-action opp-row-action--copy" onClick={() => openOppCopy(row.strategy_opportunity_id)}>
                             Copy
                           </button>
                         </span>
@@ -507,14 +509,14 @@ export function StrategyOpportunityPage({
             {/* ── Structure picker ── */}
             <div className="opp-field">
               <span className="opp-field-label">Structure</span>
-              <div className="opp-structure-cards" role="radiogroup" aria-label="Structure (required)" aria-required>
+              <div className="opp-structure-panels" role="radiogroup" aria-label="Structure (required)" aria-required>
                 {structures.length === 0 ? (
                   <p className="opp-field-hint">No structures. Create one in Structure first.</p>
                 ) : (
                   structures.map((s) => {
                     const selected = oppFormPayload.strategy_structure_id === s.strategy_structure_id
                     return (
-                      <label key={s.strategy_structure_id} className={`opp-structure-card ${selected ? 'opp-structure-card--selected' : ''}`}>
+                      <label key={s.strategy_structure_id} className={`opp-structure-panel ${selected ? 'opp-structure-panel--selected' : ''}`}>
                         <input
                           type="radio"
                           name="opp_structure"
@@ -523,11 +525,11 @@ export function StrategyOpportunityPage({
                           onChange={() => setOppFormPayload((p) => ({ ...p, strategy_structure_id: s.strategy_structure_id }))}
                           aria-label={`Structure: ${s.name}`}
                         />
-                        <span className="opp-structure-card-title">{s.name}</span>
+                        <span className="opp-structure-panel-title">{s.name}</span>
                         {(s.version != null && s.version !== '') ||
                         (s.template_display_name != null && s.template_display_name !== '') ||
                         (s.structure_type != null && s.structure_type !== '') ? (
-                          <span className="opp-structure-card-meta">
+                          <span className="opp-structure-panel-meta">
                             {s.version != null && s.version !== '' ? `v${s.version}` : ''}
                             {(s.version != null && s.version !== '') && (s.template_display_name || s.structure_type) ? ' · ' : ''}
                             {getStructureDisplayLabel(s)}
@@ -731,13 +733,13 @@ export function StrategyOpportunityPage({
 
           {/* ── Form footer ── */}
           <div className="opp-form-footer">
-            <button type="button" className="btn-secondary" onClick={closeOppForm}>Cancel</button>
-            <button type="button" className="btn-primary" onClick={submitOppForm} disabled={oppFormLoading}>
+            <Button type="button" variant="secondary" onClick={closeOppForm}>Cancel</Button>
+            <Button type="button" onClick={submitOppForm} disabled={oppFormLoading}>
               {isFormCreate ? 'Create' : 'Save changes'}
-            </button>
+            </Button>
           </div>
         </section>
       )}
-    </div>
+    </PageSection>
   )
 }

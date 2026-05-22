@@ -1,0 +1,176 @@
+/* ==========================================================================
+   Bifrost design tokens (canonical :root / light theme)
+   Extracted from legacy.css — component rules remain in legacy.css until retired.
+   Load before shadcn-tokens.css and legacy.css (see app/globals.css).
+   ========================================================================== */
+
+:root {
+  /* 空间尺度 */
+  --space-1: 0.25rem;
+  /* 4px */
+  --space-2: 0.5rem;
+  /* 8px */
+  --space-3: 0.75rem;
+  /* 12px */
+  --space-4: 1rem;
+  /* 16px */
+  --space-5: 1.5rem;
+  /* 24px */
+  --space-6: 2rem;
+  /* 32px */
+  --space-8: 3rem;
+  /* 48px */
+
+  /* 背景与表面 */
+  --color-bg: #0a0c0f;
+  --color-surface: #13171d;
+  --color-surface-elevated: #1a1f26;
+  --color-border: #2a313c;
+  --color-border-strong: #3d4754;
+
+  /* 文字 */
+  --color-text-main: #e4e9ef;
+  --color-text-muted: #7a8492;
+  --color-text-dim: #5c6572;
+  --color-text-primary: var(--color-text-main);
+  --color-text-secondary: var(--color-text-muted);
+
+  /* 语义色：红绿灯与操作 */
+  --color-lamp-green: #4ade80;
+  --color-lamp-yellow: #facc15;
+  --color-lamp-red: #f87171;
+  --color-lamp-gray: #94a3b8;
+  --color-lamp-none: var(--color-text-dim);
+
+  /* 强调色：关键指标与正向操作（青柠） */
+  --color-accent: #a3e635;
+  --color-accent-soft: rgba(163, 230, 53, 0.12);
+  --color-accent-glow: rgba(163, 230, 53, 0.35);
+
+  /* 链接与次要操作 */
+  --color-link: #7dd3fc;
+  --color-link-hover: #bae6fd;
+
+  /* 按钮与状态 */
+  --color-danger: #ef4444;
+  --color-danger-soft: rgba(239, 68, 68, 0.15);
+  --color-warning: #eab308;
+  --color-warning-soft: rgba(234, 179, 8, 0.15);
+  --color-success: #22c55e;
+  --color-success-soft: rgba(34, 197, 94, 0.15);
+
+  --wl2-pie-stk: #38bdf8;
+
+  --risk-payoff-plot-bg: #0d1118;
+  --risk-payoff-plot-border: rgba(74, 222, 128, 0.22);
+  --risk-payoff-profit-fill: rgba(74, 222, 128, 0.38);
+  --risk-payoff-loss-fill: rgba(248, 113, 113, 0.38);
+  --risk-payoff-line: #f8fafc;
+  --risk-payoff-axis: #cbd5e1;
+  --risk-payoff-tick: #94a3b8;
+  --risk-payoff-grid: rgba(148, 163, 184, 0.18);
+  --risk-payoff-zero: #e2e8f0;
+  --risk-payoff-breakeven: rgba(250, 204, 21, 0.9);
+  --risk-payoff-shadow: 0 0 0 1px rgba(74, 222, 128, 0.2), 0 4px 20px rgba(0, 0, 0, 0.5);
+
+  --color-dashboard-tile: rgba(255, 255, 255, 0.05);
+  --color-dashboard-shadow: rgba(0, 0, 0, 0.25);
+
+  --font-sans: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --text-headline: clamp(1.25rem, 2.5vw, 1.5rem);
+  --text-title: clamp(0.95rem, 1.5vw, 1.05rem);
+  --text-body: clamp(0.8125rem, 1.2vw, 0.875rem);
+  --text-caption: clamp(0.75rem, 1vw, 0.8125rem);
+  --text-tiny: 0.6875rem;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --transition-fast: 0.15s var(--ease-out);
+  --transition-normal: 0.2s var(--ease-out);
+
+  --settings-sidebar-width: 13.5rem;
+  --settings-main-padding-x: var(--space-6);
+  --settings-main-padding-y: var(--space-5);
+  --settings-section-gap: var(--space-5);
+  --settings-embedded-bp: 960px;
+
+  --scrollbar-track: var(--color-bg);
+  --scrollbar-thumb: rgba(100, 116, 139, 0.42);
+  --scrollbar-thumb-hover: rgba(148, 163, 184, 0.62);
+
+  --od-max-pain-axis-fill: #d8dee8;
+  --od-max-pain-axis-line: #64748b;
+  --od-max-pain-grid-stroke: rgba(148, 163, 184, 0.38);
+
+  --instance-detail-sidebar-width: 960px;
+
+  /* Research / watchlist v2 (wl2) — shared by data-readiness, stock-screener, watchlist */
+  --research-page-radius: 8px;
+  --research-card-radius: 10px;
+  --research-card-radius-lg: 12px;
+  --research-row-height: 2.25rem;
+  --wl2-radius: var(--research-page-radius);
+  --wl2-row-h: var(--research-row-height);
+}
+
+[data-theme='light'] {
+  --color-bg: #f0f2f5;
+  --color-surface: #ffffff;
+  --color-surface-elevated: #f8f9fa;
+  --color-border: #e5e7eb;
+  --color-border-strong: #d1d5db;
+
+  --color-text-main: #1a1d21;
+  --color-text-muted: #6b7280;
+  --color-text-dim: #9ca3af;
+  --color-text-primary: var(--color-text-main);
+  --color-text-secondary: var(--color-text-muted);
+
+  --color-lamp-green: #16a34a;
+  --color-lamp-yellow: #ca8a04;
+  --color-lamp-red: #dc2626;
+  --color-lamp-gray: #64748b;
+  --color-lamp-none: var(--color-text-dim);
+
+  --color-accent: #0ea5e9;
+  --color-accent-soft: rgba(14, 165, 233, 0.12);
+  --color-accent-glow: rgba(14, 165, 233, 0.25);
+
+  --color-link: #0284c7;
+  --color-link-hover: #0369a1;
+
+  --color-danger: #dc2626;
+  --color-danger-soft: rgba(220, 38, 38, 0.1);
+  --color-warning: #ca8a04;
+  --color-warning-soft: rgba(202, 138, 4, 0.12);
+
+  --color-dashboard-tile: rgba(0, 0, 0, 0.04);
+  --color-dashboard-shadow: rgba(0, 0, 0, 0.08);
+  --color-success: #16a34a;
+  --color-success-soft: rgba(22, 163, 74, 0.12);
+
+  --wl2-pie-stk: #a855f7;
+
+  --risk-payoff-plot-bg: #f9fafb;
+  --risk-payoff-plot-border: rgba(0, 0, 0, 0.08);
+  --risk-payoff-profit-fill: rgba(34, 197, 94, 0.28);
+  --risk-payoff-loss-fill: rgba(239, 68, 68, 0.28);
+  --risk-payoff-line: #111827;
+  --risk-payoff-axis: #374151;
+  --risk-payoff-tick: #4b5563;
+  --risk-payoff-grid: rgba(55, 65, 81, 0.2);
+  --risk-payoff-zero: #1f2937;
+  --risk-payoff-breakeven: rgba(202, 138, 4, 0.85);
+  --risk-payoff-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.06);
+
+  --scrollbar-track: var(--color-bg);
+  --scrollbar-thumb: rgba(148, 163, 184, 0.55);
+  --scrollbar-thumb-hover: rgba(100, 116, 139, 0.5);
+
+  --od-max-pain-axis-fill: #4b5563;
+  --od-max-pain-axis-line: #9ca3af;
+  --od-max-pain-grid-stroke: rgba(55, 65, 81, 0.22);
+}
+
+/* Bridge: legacy --color-* hex tokens and shadcn HSL tokens (shadcn-tokens.css) share the same palette. */

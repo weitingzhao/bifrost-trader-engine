@@ -117,11 +117,13 @@ Each domain is an independent FastAPI app on its own port. Pattern:
 
 ### Frontend (`frontend/src/`)
 
-- **Entry**: `main.tsx` → `initApiRouting()` → `App.tsx`
-- **Router**: tab + submenu navigation across ~57 page components in `pages/`
-- **API clients**: organized by domain under `api/` (monitor, ops, trading, account, research, portfolio, market, strategy, shared)
-- **Real-time**: SSE for quotes and system messages; no Redux/Zustand — uses React hooks + local state
-- **UI reference**: Skote Admin template at `~/Desktop/framework/Skote_Nodejs_v4.2.0` for visual inspiration only (cards, shadows, table styles) — do not copy its code or dependencies
+- **Stack**: Next.js 15 App Router (`frontend/src/app/`), React 19, Tailwind 4, shadcn/Radix
+- **Entry**: `app/layout.tsx` → `providers.tsx` (`initApiRouting`, React Query, `AppProvider`)
+- **Routes**: `app/(trading)/**` thin pages wrapping `views/*` components
+- **API clients**: domain modules under `api/` (avoid new imports from deprecated `api/index.ts` barrel)
+- **Real-time**: SSE for quotes and system messages; React Query for global monitor polls only
+- **Styling**: `design-tokens.css` + `shadcn-tokens.css` + retiring `legacy.css` — see `docs/plans/LEGACY_CSS_RETIREMENT.md`. New UI: Tailwind + `@/components/ui/*`; use `PageSection`, `SectionPageTitle`, `Button`. Run `npm run lint:legacy-classes` and `npm run css:metrics` from `frontend/`.
+- **UI reference**: Skote Admin template (visual only; do not copy code/deps)
 
 ### Key Docs (authoritative references)
 

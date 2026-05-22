@@ -13,8 +13,10 @@ import {
   type GateSafetyGates,
   type StrategyDimRow,
 } from '../api'
+import { PageSection } from '@/components/shared/page-section'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import { AppSelect } from '../components/AppSelect'
+import { Button } from '@/components/ui/button'
 
 export interface GatesConfigPageProps {
   status: StatusResponse | null
@@ -292,7 +294,7 @@ export function GatesConfigPage({
   const earningsDates = formPayload.earnings_dates ?? []
 
   return (
-    <div className="card process-section">
+    <PageSection>
       <SectionPageTitle
         id="gates-head"
         menu="Strategy"
@@ -327,9 +329,9 @@ export function GatesConfigPage({
       <section className="strategy-section" style={{ marginBottom: 'var(--space-4)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
           <h3 className="section-subtitle" style={{ margin: 0 }}>Gate safety sets</h3>
-          <button type="button" className="btn-primary" onClick={openCreate}>
+          <Button type="button" onClick={openCreate}>
             Create gate set
-          </button>
+          </Button>
         </div>
         {loading && <p className="section-hint">Loading…</p>}
         {error && <p className="msg-error">{error}</p>}
@@ -353,17 +355,17 @@ export function GatesConfigPage({
                     <td title={gateSetDimsSummary(row)}>{gateSetDimsSummary(row)}</td>
                     <td>{row.is_active ? 'Yes' : 'No'}</td>
                     <td>
-                      <button type="button" className="btn-manage" onClick={() => openEdit(row.gate_safety_strategy_id)}>
+                      <Button type="button" variant="outline" size="sm" onClick={() => openEdit(row.gate_safety_strategy_id)}>
                         Edit
-                      </button>
+                      </Button>
                       {' '}
-                      <button type="button" className="btn-set-active" onClick={() => handleSetActive(row.gate_safety_strategy_id)}>
+                      <Button type="button" variant="secondary" size="sm" onClick={() => handleSetActive(row.gate_safety_strategy_id)}>
                         Set active
-                      </button>
+                      </Button>
                       {' '}
-                      <button type="button" className="btn-secondary" onClick={() => openCopy(row.gate_safety_strategy_id)}>
+                      <Button type="button" variant="secondary" size="sm" onClick={() => openCopy(row.gate_safety_strategy_id)}>
                         Copy
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -571,23 +573,23 @@ export function GatesConfigPage({
                     value={d}
                     onChange={(e) => setEarningsDate(i, e.target.value)}
                   />
-                  <button type="button" className="btn-secondary" onClick={() => removeEarningsDate(i)}>Remove</button>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => removeEarningsDate(i)}>Remove</Button>
                 </div>
               ))}
               <div className="gates-form-row gates-form-row--full">
-                <button type="button" className="btn-secondary" onClick={addEarningsDate}>Add date</button>
+                <Button type="button" variant="secondary" onClick={addEarningsDate}>Add date</Button>
               </div>
             </div>
 
             <div className="gates-form-actions">
-              <button type="button" className="btn-primary" onClick={submitForm} disabled={formLoading}>
+              <Button type="button" onClick={submitForm} disabled={formLoading}>
                 {formOpen === 'create' ? 'Create' : 'Update'}
-              </button>
-              <button type="button" className="btn-secondary" onClick={closeForm}>Cancel</button>
+              </Button>
+              <Button type="button" variant="secondary" onClick={closeForm}>Cancel</Button>
             </div>
           </div>
         </section>
       )}
-    </div>
+    </PageSection>
   )
 }

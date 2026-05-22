@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
 import type { OptExecutionGroup } from '../../types'
 import { createExecution } from '../../api'
 import { fmtExpiry, fmtUsd, getContractLabelParts } from '../../utils/format'
@@ -137,12 +138,12 @@ export function ExpiredCloseModal({ group, onClose, onSuccess }: ExpiredCloseMod
             </label>
           </div>
           <div className="replay-expired-close-actions">
-            <button type="submit" className="btn btn-small btn-primary" disabled={submitting}>
+            <Button type="submit" size="sm" disabled={submitting}>
               {submitting ? 'Saving…' : 'Save'}
-            </button>
-            <button type="button" className="btn btn-small btn-secondary" onClick={handleClose}>
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={handleClose}>
               Cancel
-            </button>
+            </Button>
           </div>
         </form>
       </div>

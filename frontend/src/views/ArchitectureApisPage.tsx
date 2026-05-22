@@ -30,6 +30,12 @@ import {
 } from './architecture/architectureApiBases'
 import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
 import { scheduleMsgClear, setMsg } from './status/messageUtils'
+import { SettingsPageCard } from './settings/SettingsPageCard'
+import { SettingsPageGroups } from './settings/SettingsPageGroups'
+import { SettingsSection } from './settings/SettingsSection'
+import { SettingsTitleLamp } from './settings/SettingsTitleLamp'
+import { Button } from '@/components/ui/button'
+import type { LampTone } from '@/components/shared/lamp-indicator'
 
 export interface ArchitectureApisPageProps {
   embeddedInSettings?: boolean
@@ -330,10 +336,6 @@ export function ArchitectureApisPage({ embeddedInSettings }: ArchitectureApisPag
   const docsEnvClass = docsOpsEnvBadgeClass(docsHealth?.config_profile ?? undefined, docsOk, docsHealth?.config_path)
   const opsEnvClass = docsOpsEnvBadgeClass(opsHealth?.config_profile ?? undefined, opsOk, opsHealth?.config_path)
 
-  const wrapClass = embeddedInSettings
-    ? 'settings-page-card massive-api-status-page massive-api-status-page--embedded architecture-apis-page'
-    : 'settings-page-card massive-api-status-page architecture-apis-page'
-
   const docsDialog = (
     <DraggableModal
       open={shutdownDocs.open}
@@ -345,23 +347,23 @@ export function ArchitectureApisPage({ embeddedInSettings }: ArchitectureApisPag
       titleId="arch-docs-shutdown-title"
       overlayClassName="celery-control-confirm-overlay"
       footer={
-        <div className="data-reset-modal-actions">
-          <button
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
             type="button"
-            className="btn btn-secondary"
+            variant="secondary"
             onClick={() => setShutdownDocs(INITIAL_SHUTDOWN)}
             disabled={shutdownDocs.busy}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn-shutdown-all"
+            variant="destructive"
             onClick={() => void runShutdown('docs')}
             disabled={shutdownDocs.busy}
           >
             {shutdownDocs.busy ? 'Executing…' : 'Confirm'}
-          </button>
+          </Button>
         </div>
       }
     >
@@ -388,23 +390,23 @@ export function ArchitectureApisPage({ embeddedInSettings }: ArchitectureApisPag
       titleId="arch-monitor-shutdown-title"
       overlayClassName="celery-control-confirm-overlay"
       footer={
-        <div className="data-reset-modal-actions">
-          <button
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
             type="button"
-            className="btn btn-secondary"
+            variant="secondary"
             onClick={() => setShutdownMonitor(INITIAL_SHUTDOWN)}
             disabled={shutdownMonitor.busy}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn-shutdown-all"
+            variant="destructive"
             onClick={() => void runShutdown('monitor')}
             disabled={shutdownMonitor.busy}
           >
             {shutdownMonitor.busy ? 'Executing…' : 'Confirm'}
-          </button>
+          </Button>
         </div>
       }
     >
@@ -431,23 +433,23 @@ export function ArchitectureApisPage({ embeddedInSettings }: ArchitectureApisPag
       titleId="arch-ops-shutdown-title"
       overlayClassName="celery-control-confirm-overlay"
       footer={
-        <div className="data-reset-modal-actions">
-          <button
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
             type="button"
-            className="btn btn-secondary"
+            variant="secondary"
             onClick={() => setShutdownOps(INITIAL_SHUTDOWN)}
             disabled={shutdownOps.busy}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn-shutdown-all"
+            variant="destructive"
             onClick={() => void runShutdown('ops')}
             disabled={shutdownOps.busy}
           >
             {shutdownOps.busy ? 'Executing…' : 'Confirm'}
-          </button>
+          </Button>
         </div>
       }
     >
@@ -464,21 +466,20 @@ export function ArchitectureApisPage({ embeddedInSettings }: ArchitectureApisPag
   )
 
   return (
-    <div className={wrapClass}>
+    <SettingsPageCard embedded={embeddedInSettings} className="massive-api-status-page architecture-apis-page">
       {monitorDialog}
       {opsDialog}
       {docsDialog}
-      <div className="server-groups settings-page-groups">
-        <section className="replay-section" aria-labelledby="arch-page-head">
+      <SettingsPageGroups className="server-groups">
+        <SettingsSection aria-labelledby="arch-page-head">
           <div className="architecture-page-intro">
-            <h2 id="arch-page-head" className="daemon-card-title page-title-with-tooltip architecture-page-title">
-              <span
-                className={`title-inline-lamp lamp-icon ${architectureTitleLamp}`}
+            <h2 id="arch-page-head" className="daemon-card-title inline-flex flex-wrap items-center gap-2 architecture-page-title">
+              <SettingsTitleLamp
+                lamp={architectureTitleLamp as LampTone}
                 title="Combined Monitor, Ops, and Docs API reachability"
-                aria-hidden
               >
                 <SettingsSidebarLampGlyph id="api-architecture" />
-              </span>
+              </SettingsTitleLamp>
               Architecture
               <InfoTooltip text="Monitor, Ops, and Docs FastAPI processes: health, documentation links, and a unified process log (Redis streams). Stop actions require an operator-scoped Ops token (same as Celery Control)." />
             </h2>
@@ -492,11 +493,11 @@ export function ArchitectureApisPage({ embeddedInSettings }: ArchitectureApisPag
             <article className="architecture-api-card" aria-labelledby="arch-card-monitor">
               <div className="architecture-api-card-head">
                 <h3 id="arch-card-monitor" className="architecture-api-card-title">
-                  <span className={`title-inline-lamp lamp-icon ${monitorLamp}`} title="Monitor API health" aria-hidden>
+                  <SettingsTitleLamp lamp={monitorLamp as LampTone} title="Monitor API health">
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <path d="M22 12h-4l-3 9L9 3 6 12H2" />
                     </svg>
-                  </span>
+                  </SettingsTitleLamp>
                   Monitor API
                 </h3>
                 <button
@@ -553,11 +554,11 @@ export function ArchitectureApisPage({ embeddedInSettings }: ArchitectureApisPag
             <article className="architecture-api-card" aria-labelledby="arch-card-ops">
               <div className="architecture-api-card-head">
                 <h3 id="arch-card-ops" className="architecture-api-card-title">
-                  <span className={`title-inline-lamp lamp-icon ${opsLamp}`} title="Ops API health" aria-hidden>
+                  <SettingsTitleLamp lamp={opsLamp as LampTone} title="Ops API health">
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <path d="M22 12h-4l-3 9L9 3 6 12H2" />
                     </svg>
-                  </span>
+                  </SettingsTitleLamp>
                   Ops API
                 </h3>
                 <button
@@ -606,11 +607,11 @@ export function ArchitectureApisPage({ embeddedInSettings }: ArchitectureApisPag
             <article className="architecture-api-card" aria-labelledby="arch-card-docs">
               <div className="architecture-api-card-head">
                 <h3 id="arch-card-docs" className="architecture-api-card-title">
-                  <span className={`title-inline-lamp lamp-icon ${docsLamp}`} title="Docs API health" aria-hidden>
+                  <SettingsTitleLamp lamp={docsLamp as LampTone} title="Docs API health">
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <path d="M22 12h-4l-3 9L9 3 6 12H2" />
                     </svg>
-                  </span>
+                  </SettingsTitleLamp>
                   Docs API
                 </h3>
                 <button
@@ -662,10 +663,10 @@ export function ArchitectureApisPage({ embeddedInSettings }: ArchitectureApisPag
               </dl>
             </article>
           </div>
-        </section>
+        </SettingsSection>
 
-        <section className="replay-section" aria-labelledby="arch-docs-table-head">
-          <h3 id="arch-docs-table-head" className="page-title-with-tooltip architecture-section-title">
+        <SettingsSection aria-labelledby="arch-docs-table-head">
+          <h3 id="arch-docs-table-head" className="inline-flex flex-wrap items-center gap-2 architecture-section-title">
             Documentation
             <InfoTooltip text="Open Swagger UI, ReDoc, or OpenAPI JSON for each process. Override bases with VITE_API_BASE, VITE_DOCS_API_ORIGIN, and VITE_OPS_API_ORIGIN when the UI is served from a different origin." />
           </h3>
@@ -779,10 +780,10 @@ export function ArchitectureApisPage({ embeddedInSettings }: ArchitectureApisPag
               </tbody>
             </table>
           </div>
-        </section>
+        </SettingsSection>
 
-        <section className="replay-section" aria-labelledby="arch-console-head">
-          <h3 id="arch-console-head" className="page-title-with-tooltip architecture-section-title">
+        <SettingsSection aria-labelledby="arch-console-head">
+          <h3 id="arch-console-head" className="inline-flex flex-wrap items-center gap-2 architecture-section-title">
             Application log
             <InfoTooltip text="Merged Redis stream logs from Monitor (bifrost:console:{profile}:api_monitor), Ops (bifrost:console:{profile}:api_ops), and Docs (bifrost:console:{profile}:api_docs). Use Source toggles to include or exclude each API (multi-select, all on by default). Clear removes all three streams." />
           </h3>
@@ -795,10 +796,10 @@ export function ArchitectureApisPage({ embeddedInSettings }: ArchitectureApisPag
             resizeAriaLabel="Resize unified architecture console height"
             clearTitle="Clear all three log streams (Monitor, Ops, Docs)"
           />
-        </section>
+        </SettingsSection>
 
-        <section className="replay-section architecture-api-details" aria-labelledby="arch-api-details-head">
-          <h3 id="arch-api-details-head" className="page-title-with-tooltip architecture-section-title">
+        <SettingsSection className="architecture-api-details" aria-labelledby="arch-api-details-head">
+          <h3 id="arch-api-details-head" className="inline-flex flex-wrap items-center gap-2 architecture-section-title">
             API details
             <InfoTooltip text="Pick Monitor, Docs, or Ops to see configuration for that API: Monitor shows YAML sidecar ports from GET /health; Docs shows upstream OpenAPI URLs from Docs /health; Ops shows Main and Ops OpenAPI JSON endpoints." />
           </h3>
@@ -947,8 +948,8 @@ export function ArchitectureApisPage({ embeddedInSettings }: ArchitectureApisPag
               </>
             ) : null}
           </div>
-        </section>
-      </div>
-    </div>
+        </SettingsSection>
+      </SettingsPageGroups>
+    </SettingsPageCard>
   )
 }

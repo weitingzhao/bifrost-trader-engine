@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
 import '../styles/data-readiness.css'
+import { PageSection } from '@/components/shared/page-section'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import {
   fetchSepaReadinessSummary,
@@ -1555,7 +1556,7 @@ function StockDataReadinessPageInner({
   const supportRows = [...INSTRUMENT_TYPE_DATA_SUPPORT_ROWS, ...extraSnapshotRows]
 
   return (
-    <div className="card process-section sepa-data-ready-page wl2">
+    <PageSection className="w-full max-w-none pb-8">
       <div className="research-page-head">
         <SectionPageTitle
           menu="Research"
@@ -3708,7 +3709,7 @@ function StockDataReadinessPageInner({
         backfillSelectedMsg={selectedGapMsg}
         backfillSelectedOk={selectedGapOk}
       />
-    </div>
+    </PageSection>
   )
 }
 

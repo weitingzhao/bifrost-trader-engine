@@ -1,7 +1,7 @@
 /* ==========================================================================
    Stock Screener — Compact, dense layout
    Goals: save vertical space, group related controls, refined typography
-   Tokens: from :root in App.css
+   Tokens: design-tokens.css (--color-*, --space-*, --research-card-radius*)
    ========================================================================== */
 
 /* ── Root container ─────────────────────────────────────────────────────── */

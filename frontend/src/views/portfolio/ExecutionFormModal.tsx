@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react'
+import { Button } from '@/components/ui/button'
 import type { Execution } from '../../types'
 import type { StrategyOpportunity } from '../../api'
 import type { StrategyInstance } from '../../types'
@@ -407,9 +408,10 @@ export function ExecutionFormModal({
                   Split quantity across instances
                 </label>
                 {useInstanceSplits && (
-                  <button
+                  <Button
                     type="button"
-                    className="btn btn-secondary btn-sm"
+                    variant="secondary"
+                    size="sm"
                     onClick={() =>
                       setSplitRows(rows => [
                         ...rows,
@@ -418,7 +420,7 @@ export function ExecutionFormModal({
                     }
                   >
                     Add row
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
@@ -461,13 +463,15 @@ export function ExecutionFormModal({
                       placeholder="Signed qty"
                       aria-label="Allocated quantity"
                     />
-                    <button
+                    <Button
                       type="button"
-                      className="btn btn-secondary btn-sm replay-exec-split-remove"
+                      variant="secondary"
+                      size="sm"
+                      className="replay-exec-split-remove"
                       onClick={() => setSplitRows(rows => rows.filter(r => r.uid !== row.uid))}
                     >
                       Remove
-                    </button>
+                    </Button>
                   </div>
                 ))}
               </div>
@@ -636,12 +640,12 @@ export function ExecutionFormModal({
             </div>
           </div>
           <div className="replay-exec-form-actions">
-            <button type="button" className="btn btn-secondary" onClick={() => { onClose(); setExecFormError(null) }}>
+            <Button type="button" variant="secondary" onClick={() => { onClose(); setExecFormError(null) }}>
               Cancel
-            </button>
-            <button type="submit" className="btn btn-primary">
+            </Button>
+            <Button type="submit">
               {editExec ? 'Save' : createExecutionSource === 'journal_closed' ? 'Add journal' : 'Add'}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

@@ -51,3 +51,24 @@ Max-width container centered in viewport. Not yet used; reserved for
 future standalone configuration wizards or onboarding flows.
 
 **CSS**: not yet defined — create as needed.
+
+## 5. Tailwind + shadcn (target — use for all new pages)
+
+**Status**: Target template while Templates 1–3 are deprecated during
+[LEGACY_CSS_RETIREMENT](../../docs/plans/LEGACY_CSS_RETIREMENT.md).
+
+**Layout**:
+
+- Root: `className="flex min-w-0 flex-col gap-4 p-4 md:p-6"` (or page-specific padding).
+- Surfaces: `bg-card`, `border border-border`, `rounded-lg`, `shadow-sm`.
+- Typography: `text-foreground`, `text-muted-foreground`, `text-sm`.
+- Actions: `@/components/ui/button` (`Button`), not `.btn` / `.btn-primary`.
+- Tables: `@/components/shared/data-table` or shadcn `Table` inside `overflow-x-auto`.
+- Status lamps: `@/components/shared/lamp-indicator` (Tailwind), not `.lamp-icon`.
+- Tokens: `design-tokens.css` for charts/domain CSS variables; theme via `data-theme` + `.dark`.
+
+**Do not add** legacy class fragments (`card`, `process-section`, `btn-`,
+`settings-page`, `wl2`, etc.) in files outside
+`frontend/scripts/legacy-class-allowlist.json`. Run `npm run lint:legacy-classes`.
+
+Templates 1–3 remain valid for unmigrated pages until their wave in the retirement plan completes.

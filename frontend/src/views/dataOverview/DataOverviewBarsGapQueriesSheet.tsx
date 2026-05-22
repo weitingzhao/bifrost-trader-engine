@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
+import { Button } from '@/components/ui/button'
 
 /** Escape single quotes for SQL string literals in examples. */
 function sqlLit(s: string): string {
@@ -13,9 +14,9 @@ function CopyBlock({ label, text }: { label: string; text: string }) {
     <div className="data-overview-bars-gap-queries__block">
       <div className="data-overview-bars-gap-queries__block-head">
         <span className="data-overview-bars-gap-queries__block-label">{label}</span>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={copy}>
+        <Button variant="secondary" size="sm" type="button" onClick={copy}>
           Copy
-        </button>
+        </Button>
       </div>
       <pre className="data-overview-bars-gap-queries__pre">{text}</pre>
     </div>
@@ -186,9 +187,9 @@ curl -sS 'https://api.polygon.io/v2/aggs/ticker/O%3AREPLACE_WITH_O_TICKER/range/
           <h3 id="data-overview-bars-gap-queries-title" className="ref-jobs-sheet-title">
             Queries &amp; API
           </h3>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Close">
+          <Button variant="secondary" size="sm" type="button" onClick={onClose} aria-label="Close">
             Close
-          </button>
+          </Button>
         </div>
         <p className="ref-jobs-sheet-meta data-overview-bars-gap-queries__meta">
           <code>{sym}</code> · expiry <code>{exp}</code> · <code>{barsTable}</code>

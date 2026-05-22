@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '@/components/ui/button'
 import {
   fetchSnapshotQualityDetail,
   type SnapshotQualityDailyRow,
@@ -146,9 +147,9 @@ export function DataOverviewSnapshotQualitySheet({ open, onClose, symbol, source
           <h3 id="data-overview-snapshot-quality-title" className="ref-jobs-sheet-title">
             Snapshot Quality{symbol ? ` — ${symbol}` : ''}
           </h3>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Close">
+          <Button variant="secondary" size="sm" type="button" onClick={onClose} aria-label="Close">
             Close
-          </button>
+          </Button>
         </div>
 
         <div className="ref-jobs-sheet-body">

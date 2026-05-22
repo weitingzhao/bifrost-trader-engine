@@ -27,7 +27,17 @@ import {
 import type { LivePositionRow } from '../views/portfolio/types'
 import { fmtPctCompact, fmtUsd } from '../utils/format'
 import { StockBarStatsPanel } from './StockBarStatsPanel'
-import '../styles/stock-inspector.css'
+import { cn } from '@/lib/utils'
+
+/** Scoped compact layout inside the stock inspector sheet (replaces `.riv-stock-inspector`). */
+const STOCK_INSPECTOR_PANEL_CLASS = cn(
+  'stock-inspector-panel min-w-0',
+  '[&_.od-detail-section]:px-3 [&_.od-detail-section]:py-2',
+  '[&_.od-detail-section-title]:mb-1.5 [&_.od-detail-section-title]:text-[0.68rem]',
+  '[&_.sip-cond-row]:py-[3px] [&_.sip-cond-row]:text-xs',
+  '[&_.sip-fund-summary]:mt-1.5 [&_.sip-fund-summary]:px-2 [&_.sip-fund-summary]:py-1',
+  '[&_.sip-stmts-block]:mb-2',
+)
 
 /** Render a tiny inline bar that encodes relative magnitude for a table cell. */
 function MiniBar({ value, min, max }: { value: number | null | undefined; min: number; max: number }) {
@@ -887,8 +897,8 @@ export function StockInspectorPanel({
   }
 
   return (
-    <div className="riv-stock-inspector" aria-label="Stock position detail">
-      <div className="od-detail-header riv-stock-inspector-header">
+    <div className={STOCK_INSPECTOR_PANEL_CLASS} aria-label="Stock position detail">
+      <div className="od-detail-header">
         <h3 className="od-detail-title">
           {symU}
           {accountId && <span className="od-detail-expiry"> · {accountId}</span>}

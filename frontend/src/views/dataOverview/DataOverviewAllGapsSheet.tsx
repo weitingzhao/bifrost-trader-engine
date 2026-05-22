@@ -6,6 +6,7 @@ import type {
   WatchlistDbCoverageOptionContracts,
   WatchlistDbCoverageSymbolRow,
 } from '../../api'
+import { Button } from '@/components/ui/button'
 import type {
   DataOverviewOptionJobsBarHandle,
   NullableOptionContractsColumnCode,
@@ -39,15 +40,10 @@ function FillReferenceButton({
 
   return (
     <div className="data-overview-gap-sheet__fill-cta">
-      <button
-        type="button"
-        className="btn btn-secondary btn-sm"
-        disabled={busy || done}
-        title="Enqueue reference contracts upsert for this symbol (row-level; same as Fill row gap in the bar)."
-        onClick={() => void handleFill()}
+      <Button variant="secondary" size="sm" type="button" disabled={busy || done} title="Enqueue reference contracts upsert for this symbol (row-level; same as Fill row gap in the bar)." onClick={() => void handleFill()}
       >
         {busy ? 'Enqueueing…' : done ? 'Enqueued ✓' : 'Fill row gap'}
-      </button>
+      </Button>
       {err ? <span className="data-overview-gap-sheet__err" role="alert">{err}</span> : null}
       {done ? (
         <span className="data-overview-gap-sheet__muted" style={{ fontSize: 'var(--text-caption)' }}>
@@ -405,23 +401,14 @@ function NullableColumnNullStatsBlock({
                 </td>
                 <td>
                   {fillApiRef && symU ? (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm data-overview-gap-sheet__col-fill-btn"
-                      disabled={busyCol != null}
-                      title={
-                        r.code === 'massive_option_ticker'
-                          ? 'Row-level: reference list upsert to fill Polygon option tickers (same as Fill row gap).'
-                          : 'Column-level: detail-API backfill for this field (requires massive_option_ticker on each row).'
-                      }
-                      onClick={() => void handleFillColumn(r.code)}
+                    <Button variant="secondary" size="sm" className="data-overview-gap-sheet__col-fill-btn" type="button" disabled={busyCol != null} title={ r.code === 'massive_option_ticker' ? 'Row-level: reference list upsert to fill Polygon option tickers (same as Fill row gap).' : 'Column-level: detail-API backfill for this field (requires massive_option_ticker on each row).' } onClick={() => void handleFillColumn(r.code)}
                     >
                       {busyCol === r.code
                         ? 'Enqueueing…'
                         : r.code === 'massive_option_ticker'
                           ? 'Fill row'
                           : 'Fill column'}
-                    </button>
+                    </Button>
                   ) : (
                     <span className="data-overview-gap-sheet__metric--na">—</span>
                   )}
@@ -550,15 +537,10 @@ function ReferenceGapSymbolBlock({
             {opts.showFill ? (
               <td>
                 {e.gap > 0 ? (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    disabled={rowBusy != null || sectionBusy}
-                    title="Fill row gap for this expiry (reference upsert with expiration_date)."
-                    onClick={() => void runFill(e.expiry)}
+                  <Button variant="secondary" size="sm" type="button" disabled={rowBusy != null || sectionBusy} title="Fill row gap for this expiry (reference upsert with expiration_date)." onClick={() => void runFill(e.expiry)}
                   >
                     {rowBusy === e.expiry ? 'Enqueueing…' : 'Fill row gap'}
-                  </button>
+                  </Button>
                 ) : (
                   <span className="data-overview-gap-sheet__dash">—</span>
                 )}
@@ -614,15 +596,10 @@ function ReferenceGapSymbolBlock({
                 Behind reference (gap {'>'} 0)
               </h5>
               {behind.length > 0 ? (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  disabled={rowBusy != null || sectionBusy}
-                  title="Enqueue one reference upsert per expiry in this section (row-level gaps)."
-                  onClick={() => void runFillBehindSection(behind)}
+                <Button variant="secondary" size="sm" type="button" disabled={rowBusy != null || sectionBusy} title="Enqueue one reference upsert per expiry in this section (row-level gaps)." onClick={() => void runFillBehindSection(behind)}
                 >
                   {sectionBusy ? 'Enqueueing…' : 'Fill row gaps in section'}
-                </button>
+                </Button>
               ) : null}
             </div>
             {behind.length === 0 ? (
@@ -749,9 +726,9 @@ export function DataOverviewAllGapsSheet({
           <h3 id="data-overview-all-gaps-title" className="ref-jobs-sheet-title">
             All reference gaps
           </h3>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Close">
+          <Button variant="secondary" size="sm" type="button" onClick={onClose} aria-label="Close">
             Close
-          </button>
+          </Button>
         </div>
 
         <p className="ref-jobs-sheet-meta">

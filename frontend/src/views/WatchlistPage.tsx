@@ -20,6 +20,8 @@ import {
   deleteWatchlist,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { PageSection } from '@/components/shared/page-section'
+import { Button } from '@/components/ui/button'
 import { RightInspectorDrawer } from '../components/RightInspectorDrawer'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import { AppSelect } from '../components/AppSelect'
@@ -1252,7 +1254,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
   const addCategoryForHeader = watchingCategoryId != null ? watchingCategoryId : undefined
 
   return (
-    <div className="card process-section watchlist-page stock-screener-page wl2">
+    <PageSection className="watchlist-page wl2 w-full max-w-none">
       {/* ── Header bar ── */}
       <header className="wl2-header">
         <div className="research-page-head">
@@ -2352,14 +2354,14 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                     style={{ width: '65px' }}
                   />
                 </span>
-                <button
+                <Button
                   type="button"
-                  className="btn btn-secondary"
+                  variant="secondary"
                   onClick={() => void handleSizeCompute(selectedSizingSymbol)}
                   disabled={sizeComputeLoading}
                 >
                   {sizeComputeLoading ? 'Computing…' : 'Recompute'}
-                </button>
+                </Button>
               </div>
 
               {sizeComputeError && (
@@ -2791,6 +2793,6 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
           </div>
         </div>
       )}
-    </div>
+    </PageSection>
   )
 }

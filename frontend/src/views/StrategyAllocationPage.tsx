@@ -12,8 +12,10 @@ import {
   type StrategyAllocation,
   type GateSafetySet,
 } from '../api'
+import { PageSection } from '@/components/shared/page-section'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import { AppSelect } from '../components/AppSelect'
+import { Button } from '@/components/ui/button'
 
 export interface StrategyAllocationPageProps {
   status: StatusResponse | null
@@ -195,7 +197,7 @@ export function StrategyAllocationPage({
   }
 
   return (
-    <div className="card process-section">
+    <PageSection>
       <SectionPageTitle
         id="strategy-allocation-head"
         menu="Strategy"
@@ -226,9 +228,9 @@ export function StrategyAllocationPage({
       <section className="strategy-section" style={{ marginBottom: 'var(--space-4)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
           <h3 className="section-subtitle" style={{ margin: 0 }}>Allocations</h3>
-          <button type="button" className="btn-primary" onClick={openAllocationCreate}>
+          <Button type="button" onClick={openAllocationCreate}>
             Create allocation
-          </button>
+          </Button>
         </div>
         {allocationsLoading && <p className="section-hint">Loading…</p>}
         {allocationsError && <p className="msg-error">{allocationsError}</p>}
@@ -258,21 +260,23 @@ export function StrategyAllocationPage({
                     <td>{row.gate_safety_name ?? row.gate_safety_strategy_id ?? '—'}</td>
                     <td>{row.is_active ? 'Yes' : 'No'}</td>
                     <td>
-                      <button
+                      <Button
                         type="button"
-                        className="btn-manage"
+                        variant="outline"
+                        size="sm"
                         onClick={() => openAllocationEdit(row.strategy_allocation_id)}
                       >
                         Edit
-                      </button>
+                      </Button>
                       {' '}
-                      <button
+                      <Button
                         type="button"
-                        className="btn-set-active"
+                        variant="secondary"
+                        size="sm"
                         onClick={() => handleSetActiveAllocation(row.strategy_allocation_id)}
                       >
                         Set active
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -380,16 +384,16 @@ export function StrategyAllocationPage({
             </div>
 
             <div className="gates-form-actions">
-              <button type="button" className="btn-primary" onClick={submitAllocationForm} disabled={allocationFormLoading}>
+              <Button type="button" onClick={submitAllocationForm} disabled={allocationFormLoading}>
                 {allocationFormOpen === 'create' ? 'Create' : 'Save'}
-              </button>
-              <button type="button" className="btn-secondary" onClick={closeAllocationForm}>
+              </Button>
+              <Button type="button" variant="secondary" onClick={closeAllocationForm}>
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         </section>
       )}
-    </div>
+    </PageSection>
   )
 }

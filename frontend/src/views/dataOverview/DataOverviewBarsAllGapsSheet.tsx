@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import type { OptionBarsContractsGapResult } from '../../api'
 import type { DataOverviewOptionJobsBarHandle } from './DataOverviewOptionJobsBar'
 import { DataOverviewBarsGapQueriesSheet } from './DataOverviewBarsGapQueriesSheet'
+import { Button } from '@/components/ui/button'
 
 export function DataOverviewBarsAllGapsSheet({
   open,
@@ -157,9 +158,9 @@ export function DataOverviewBarsAllGapsSheet({
           <h3 id="data-overview-bars-all-gaps-title" className="ref-jobs-sheet-title">
             {title}
           </h3>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Close">
+          <Button variant="secondary" size="sm" type="button" onClick={onClose} aria-label="Close">
             Close
-          </button>
+          </Button>
         </div>
 
         <p className="ref-jobs-sheet-meta">
@@ -195,22 +196,14 @@ export function DataOverviewBarsAllGapsSheet({
                 <article key={symU} className="data-overview-all-gaps-sheet__sym">
                   <h4 className="data-overview-all-gaps-sheet__sym-h">
                     <code>{symU}</code>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      style={{ marginLeft: 'var(--space-2)' }}
-                      onClick={() => void runRowFullSymbol(symU)}
+                    <Button variant="secondary" size="sm" type="button" style={{ marginLeft: 'var(--space-2)' }} onClick={() => void runRowFullSymbol(symU)}
                     >
                       Fill row gap (symbol)
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      style={{ marginLeft: 'var(--space-2)' }}
-                      onClick={() => void runColumnFullSymbol(symU)}
+                    </Button>
+                    <Button variant="secondary" size="sm" type="button" style={{ marginLeft: 'var(--space-2)' }} onClick={() => void runColumnFullSymbol(symU)}
                     >
                       Fill column data (symbol)
-                    </button>
+                    </Button>
                   </h4>
                   {ex.length === 0 ? (
                     <p className="data-overview-gap-sheet__muted">No per-expiry rows.</p>
@@ -245,13 +238,10 @@ export function DataOverviewBarsAllGapsSheet({
                                 {row.illiquid != null ? row.illiquid.toLocaleString() : '—'}
                               </td>
                               <td>
-                                <button
-                                  type="button"
-                                  className="btn btn-secondary btn-sm"
-                                  onClick={() => void runRowOneExpiry(symU, row.expiry)}
+                                <Button variant="secondary" size="sm" type="button" onClick={() => void runRowOneExpiry(symU, row.expiry)}
                                 >
                                   Fill row gap (expiry)
-                                </button>
+                                </Button>
                               </td>
                               <td>
                                 <button

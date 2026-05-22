@@ -24,6 +24,15 @@ import {
   socketServicesHostColumnDisplay,
 } from '../utils/ingestOpsShared'
 import { IngestServicesTable, type IngestCategory } from './MarketIngestOpsPage'
+import { SettingsSection } from './settings/SettingsSection'
+import {
+  SettingsPageHeader,
+  SettingsPageTitle,
+} from './settings/SettingsPageHeader'
+import { SettingsTitleLamp } from './settings/SettingsTitleLamp'
+import { SettingsStatusMessage } from './settings/SettingsStatusMessage'
+import { Button } from '@/components/ui/button'
+import type { LampTone } from '@/components/shared/lamp-indicator'
 
 function fmtAge(s: number | null | undefined): string {
   if (s == null || Number.isNaN(s)) return '—'
@@ -307,46 +316,10 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
   }
 
   return (
-    <section className="replay-section" aria-labelledby="daemon-process-page-title">
-      <div className="settings-page-header settings-page-header--celery">
-        <div className="settings-page-title-group">
-          <h2
-            id="daemon-process-page-title"
-            className="settings-page-title page-title-with-tooltip"
-            style={{ flexWrap: 'wrap', rowGap: 'var(--space-2)' }}
-          >
-            <span style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-              <span
-                className={`title-inline-lamp lamp-icon ${daemonPageRollup.lamp}`}
-                title={daemonPageRollup.title}
-                role="img"
-                aria-label={daemonPageRollup.title}
-              >
-                <SettingsSidebarLampGlyph id="daemon" />
-              </span>
-              <span>Daemon</span>
-              <InfoTooltip text="Ops API: POST /ops/market-ingest/control for systemd start/stop (trading_engine, account_sync_daemon, …). Authenticate here or on Settings → Socket; the token is shared." />
-            </span>
-          </h2>
-          <p
-            className="massive-api-doc-hint"
-            style={{
-              marginTop: 'var(--space-2)',
-              marginBottom: 0,
-              display: 'flex',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: 'var(--space-2)',
-            }}
-          >
-            <span title={hostColumn.title}>
-              This Ops instance (config / executor)
-              <span style={{ marginLeft: 6, display: 'inline-flex', verticalAlign: 'middle' }}>
-                <OpsHostEnvPillBadge pill={hostColumn.pill} />
-              </span>
-            </span>
-          </p>
-        </div>
+    <SettingsSection aria-labelledby="daemon-process-page-title">
+      <SettingsPageHeader
+        celeryLayout
+        actions={
         <div className="dashboard-auth-bar dashboard-auth-bar--celery-header">
           <div className="dashboard-auth-info">
             <span className={`dashboard-auth-role dashboard-auth-role--${currentRole}`}>
@@ -388,18 +361,40 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
                 }}
                 autoFocus
               />
-              <button
-                type="button"
-                className="btn-resume dashboard-btn dashboard-btn--start"
-                onClick={handleLogin}
-                disabled={!tokenInput.trim()}
-              >
+              <Button type="button" size="sm" onClick={handleLogin} disabled={!tokenInput.trim()}>
                 Connect
-              </button>
+              </Button>
             </div>
           )}
         </div>
-      </div>
+        }
+      >
+        <SettingsPageTitle id="daemon-process-page-title" className="flex-wrap" style={{ rowGap: 'var(--space-2)' }}>
+          <SettingsTitleLamp lamp={daemonPageRollup.lamp as LampTone} title={daemonPageRollup.title}>
+            <SettingsSidebarLampGlyph id="daemon" />
+          </SettingsTitleLamp>
+          Daemon
+          <InfoTooltip text="Ops API: POST /ops/market-ingest/control for systemd start/stop (trading_engine, account_sync_daemon, …). Authenticate here or on Settings → Socket; the token is shared." />
+        </SettingsPageTitle>
+        <p
+          className="massive-api-doc-hint"
+          style={{
+            marginTop: 'var(--space-2)',
+            marginBottom: 0,
+            display: 'flex',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 'var(--space-2)',
+          }}
+        >
+          <span title={hostColumn.title}>
+            This Ops instance (config / executor)
+            <span style={{ marginLeft: 6, display: 'inline-flex', verticalAlign: 'middle' }}>
+              <OpsHostEnvPillBadge pill={hostColumn.pill} />
+            </span>
+          </span>
+        </p>
+      </SettingsPageHeader>
 
       <DraggableModal
         open={confirmState.open}
@@ -410,42 +405,38 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
         title={confirmState.title}
         titleId="daemon-engine-confirm-title"
         footer={
-          <div className="data-reset-modal-actions">
-            <button
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
               type="button"
-              className="btn btn-secondary"
+              variant="secondary"
               onClick={() => setConfirmState(INITIAL_CONFIRM)}
               disabled={confirmState.confirming}
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="btn-shutdown-all"
+              variant="destructive"
               onClick={() => confirmState.action?.()}
               disabled={confirmState.confirming}
             >
               {confirmState.confirming ? 'Executing…' : 'Confirm'}
-            </button>
+            </Button>
           </div>
         }
       >
         <p>{confirmState.message}</p>
         {confirmState.error ? (
-          <p
-            className="settings-page-msg settings-page-msg--error"
-            style={{ marginTop: 'var(--space-2)' }}
-            role="alert"
-          >
+          <SettingsStatusMessage error className="mt-2 block">
             {confirmState.error}
-          </p>
+          </SettingsStatusMessage>
         ) : null}
       </DraggableModal>
 
       {opsErr ? (
-        <p className="settings-page-msg settings-page-msg--error" role="alert" style={{ marginTop: 'var(--space-2)' }}>
+        <SettingsStatusMessage error className="mt-2 block">
           {opsErr}
-        </p>
+        </SettingsStatusMessage>
       ) : null}
       {engineConfigMissing && !opsErr ? (
         <p className="massive-api-doc-hint" style={{ marginTop: 'var(--space-2)' }}>
@@ -462,14 +453,9 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
       {localAgentPanel ? (
         <div style={{ marginTop: 'var(--space-3)' }}>
           <h4 className="daemon-group-title" style={{ marginBottom: 'var(--space-2)' }}>
-            <span
-              className={`title-inline-lamp lamp-icon ${localAgentPanel.lamp}`}
-              title={localAgentPanel.detail}
-              role="img"
-              aria-label={localAgentPanel.detail}
-            >
+            <SettingsTitleLamp lamp={localAgentPanel.lamp as LampTone} title={localAgentPanel.detail}>
               <SettingsSidebarLampGlyph id="api-ops" />
-            </span>
+            </SettingsTitleLamp>
             Local Control Agent
             <InfoTooltip text="If red, systemd Engine control via Ops will fail. Socket Services page shows the same agent status." />
           </h4>
@@ -501,6 +487,6 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
           onReset={openResetConfirm}
         />
       </div>
-    </section>
+    </SettingsSection>
   )
 }

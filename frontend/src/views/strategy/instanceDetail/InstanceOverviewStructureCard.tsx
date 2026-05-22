@@ -72,7 +72,7 @@ export function InstanceOverviewStructureCard({
     )
 
   return (
-    <section className="instance-detail-summary-card detail-block" aria-label="Instance summary">
+    <section className="instance-detail-summary-panel detail-block rounded-lg border border-border bg-card p-4 shadow-sm" aria-label="Instance summary">
       <h3 className="instance-detail-section-title instance-detail-overview-head">
         <span>Overview</span>
         {statusChip}

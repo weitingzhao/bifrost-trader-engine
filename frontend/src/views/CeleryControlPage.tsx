@@ -50,6 +50,15 @@ import { fetchMassiveCeleryBeatSchedule } from '../api/research/research'
 import type { MassiveCeleryBeatEntry } from '../api/research/research'
 import { brokerQueueKeyTitle, formatQueueLabel, setBrokerQueueLabelsFromApi } from '../utils/celeryQueueLabels'
 import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
+import { SettingsPageCard } from './settings/SettingsPageCard'
+import {
+  SettingsPageHeader,
+  SettingsPageTitle,
+  SettingsPageSubtitle,
+} from './settings/SettingsPageHeader'
+import { SettingsTitleLamp } from './settings/SettingsTitleLamp'
+import { Button } from '@/components/ui/button'
+import type { LampTone } from '@/components/shared/lamp-indicator'
 import { computeCeleryRuntimeLamp, supportedQueueNamesFromSummary } from '../utils/celeryRuntime'
 import { opsHostEnvFromConfigProfile } from '../utils/opsHostEnvPill'
 import {
@@ -1537,30 +1546,16 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   )
 
   return (
-    <div
+    <SettingsPageCard
       id="settings-celery-control"
-      className={`settings-page-card ${embeddedInSettings ? 'dashboard-page dashboard-page--embedded' : 'dashboard-page'}`}
+      embedded={embeddedInSettings}
+      className="dashboard-page"
     >
       {confirmDialog}
 
-      <div className="settings-page-header settings-page-header--celery">
-        <div className="settings-page-title-group">
-          <h2 className="settings-page-title">
-            <span
-              className={`title-inline-lamp lamp-icon ${celeryLamp === 'none' ? 'none' : celeryLamp}`}
-              title="Celery workers (broker + inspect)"
-              aria-hidden
-            >
-              <SettingsSidebarLampGlyph id="celery" />
-            </span>
-            Celery
-            <InfoTooltip text="Queue summary (above tabs): broker + PostgreSQL job counts for every queue; same on all tabs. Queues & Instances: PostgreSQL job queues plus systemd worker instances and Redis/broker. Console & Runtime: live consoles and Celery inspect snapshot." />
-          </h2>
-          <p className="settings-page-subtitle">
-            Queue summary at the top applies to all tabs. Main sections: Queues & Instances (job tables + workers and
-            broker), or Console & Runtime (streams and inspect snapshot).
-          </p>
-        </div>
+      <SettingsPageHeader
+        celeryLayout
+        actions={
         <div className="dashboard-auth-bar dashboard-auth-bar--celery-header">
           <div className="dashboard-auth-info">
             <span className={`dashboard-auth-role dashboard-auth-role--${currentRole}`}>
@@ -1602,18 +1597,26 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                 onKeyDown={e => { if (e.key === 'Enter' && tokenInput.trim()) handleLogin() }}
                 autoFocus
               />
-              <button
-                type="button"
-                className="btn-resume dashboard-btn dashboard-btn--start"
-                onClick={handleLogin}
-                disabled={!tokenInput.trim()}
-              >
+              <Button type="button" size="sm" onClick={handleLogin} disabled={!tokenInput.trim()}>
                 Connect
-              </button>
+              </Button>
             </div>
           )}
         </div>
-      </div>
+        }
+      >
+        <SettingsPageTitle>
+          <SettingsTitleLamp lamp={celeryLamp as LampTone} title="Celery workers (broker + inspect)">
+            <SettingsSidebarLampGlyph id="celery" />
+          </SettingsTitleLamp>
+          Celery
+          <InfoTooltip text="Queue summary (above tabs): broker + PostgreSQL job counts for every queue; same on all tabs. Queues & Instances: PostgreSQL job queues plus systemd worker instances and Redis/broker. Console & Runtime: live consoles and Celery inspect snapshot." />
+        </SettingsPageTitle>
+        <SettingsPageSubtitle>
+          Queue summary at the top applies to all tabs. Main sections: Queues & Instances (job tables + workers and
+          broker), or Console & Runtime (streams and inspect snapshot).
+        </SettingsPageSubtitle>
+      </SettingsPageHeader>
 
       {error ? (
         <div className="dashboard-inline-alert msg err" role="status">
@@ -3010,6 +3013,6 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
 
           </div>
         </div>
-    </div>
+    </SettingsPageCard>
   )
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { Bell, BookOpen, Moon, MoreVertical, Play, SlidersHorizontal, Sun, X, Zap } from 'lucide-react'
+import { Bell, BookOpen, Moon, MoreVertical, Play, SlidersHorizontal, Sun, Zap } from 'lucide-react'
 import { usePathname, useRouter } from 'next/navigation'
 import { postMonitorStop } from '../api/monitor/monitor'
 import { celeryMetricsFromStatus } from '../views/status/celeryMetrics'
@@ -38,6 +38,14 @@ import {
 } from '@/components/ui/sidebar'
 import { TradingSidebar } from '@/components/layout/trading-sidebar'
 import { TradingPathBreadcrumb } from '@/components/layout/trading-path-breadcrumb'
+import {
+  AppHeaderQueueBadge,
+  AppHeaderShortcutButton,
+  AppHeaderShortcutPill,
+  AppHeaderStopButton,
+} from '@/components/layout/app-header-shortcuts'
+import { HeaderLampGlyph } from '@/components/layout/header-lamp-glyph'
+import { LampGlyphSlot } from '@/components/shared/lamp-indicator'
 import { TradingLayoutOutletProvider } from '../contexts/TradingLayoutOutletContext'
 import { isDevBuild, publicEnv } from '@/lib/publicEnv'
 import {
@@ -108,10 +116,6 @@ const HEADER_API_SHORTCUTS: {
   { hash: '#settings-api-research', glyph: 'api-research', title: 'Settings → API → Research', menuLabel: 'Research', lampPicker: 'research' },
   { hash: '#settings-api-massive', glyph: 'api-massive', title: 'Settings → API → Massive', menuLabel: 'Massive', lampPicker: 'massive' },
 ]
-
-function headerApiShortcutLampClass(lamp: 'green' | 'yellow' | 'red' | 'none' | 'gray'): string {
-  return `title-inline-lamp lamp-icon ${lamp === 'none' ? 'none' : lamp}`
-}
 
 /** Derive active tab from current pathname */
 function pathnameToTabId(pathname: string): 'live' | 'research' | 'replay' | 'strategy' | 'settings' {
@@ -197,7 +201,7 @@ export function TradingLayout({ children }: { children: ReactNode }) {
 
   return (
     <SidebarProvider>
-      <div className="app app-shell-next flex min-h-svh w-full max-w-none">
+      <div className="relative z-[1] flex min-h-svh w-full max-w-none">
         <TradingSidebar />
         <SidebarInset className="flex min-h-svh min-w-0 flex-1 flex-col">
           <header className="flex shrink-0 items-center justify-between gap-2 px-4 py-2 mb-3 border-b border-border">
@@ -220,58 +224,71 @@ export function TradingLayout({ children }: { children: ReactNode }) {
                 onDismiss={dismissMessage}
                 onDismissAll={dismissAllMessages}
               />
-              <div className="flex items-center gap-1 shrink-0">
-                <div className="app-header-lamp-stop-group app-header-api-shortcuts-group" aria-label="API settings shortcuts and stop monitor">
-                  <div className="app-header-api-shortcuts" role="toolbar" aria-label="Open Settings API pages">
+              <div className="flex shrink-0 items-center gap-1">
+                <AppHeaderShortcutPill aria-label="API settings shortcuts and stop monitor">
+                  <div className="inline-flex items-center gap-px" role="toolbar" aria-label="Open Settings API pages">
                     {HEADER_API_SHORTCUTS.map(({ hash, glyph, title, lampPicker }) => {
                       const active = activeTab === 'settings' && urlHash === hash
                       const lamp = lampPicker === 'architecture' ? apiHealthProbes.architectureApiLamp : lampPicker === 'account' ? apiHealthProbes.accountApiLamp : lampPicker === 'research' ? apiHealthProbes.researchApiLamp : apiHealthProbes.massiveApiLamp
                       return (
-                        <button key={hash} type="button" className={`app-header-api-shortcut-btn${active ? ' active' : ''}`}
-                          title={title} aria-label={title} onClick={() => goSettings(hash)}>
-                          <span className={headerApiShortcutLampClass(lamp)} aria-hidden>
+                        <AppHeaderShortcutButton
+                          key={hash}
+                          active={active}
+                          title={title}
+                          aria-label={title}
+                          onClick={() => goSettings(hash)}
+                        >
+                          <HeaderLampGlyph lamp={lamp}>
                             <SettingsSidebarLampGlyph id={glyph} />
-                          </span>
-                        </button>
+                          </HeaderLampGlyph>
+                        </AppHeaderShortcutButton>
                       )
                     })}
                   </div>
-                  <button type="button" className="app-header-lamp-switch"
+                  <AppHeaderStopButton
                     onClick={() => runQuickStop(postMonitorStop, 'Stop Monitor API')}
-                    title="Stop Monitor API process" aria-label="Stop Monitor API process">
-                    <X size={14} aria-hidden />
-                  </button>
-                </div>
-                <div className="app-header-lamp-stop-group app-header-api-shortcuts-group" aria-label="App runtime: Socket, Daemon, Celery">
-                  <div className="app-header-api-shortcuts" role="toolbar" aria-label="Socket, Daemon, Celery shortcuts">
-                    <button type="button" className={`app-header-api-shortcut-btn${activeTab === 'settings' && isSocketSettingsHash(urlHash) ? ' active' : ''}`}
-                      title={socketIngestProbe.title} aria-label="Settings → Socket"
-                      onClick={() => goSettings('#settings-ws-connector')}>
-                      <span className={`title-inline-lamp lamp-icon ${socketIngestProbe.lamp === 'none' ? 'none' : socketIngestProbe.lamp}`} aria-hidden>
+                    title="Stop Monitor API process"
+                    aria-label="Stop Monitor API process"
+                  />
+                </AppHeaderShortcutPill>
+                <AppHeaderShortcutPill aria-label="App runtime: Socket, Daemon, Celery">
+                  <div className="inline-flex items-center gap-px" role="toolbar" aria-label="Socket, Daemon, Celery shortcuts">
+                    <AppHeaderShortcutButton
+                      active={activeTab === 'settings' && isSocketSettingsHash(urlHash)}
+                      title={socketIngestProbe.title}
+                      aria-label="Settings → Socket"
+                      onClick={() => goSettings('#settings-ws-connector')}
+                    >
+                      <HeaderLampGlyph lamp={socketIngestProbe.lamp}>
                         <SettingsSidebarLampGlyph id="websocket" />
-                      </span>
-                    </button>
-                    <button type="button" className={`app-header-api-shortcut-btn${activeTab === 'settings' && isDaemonSettingsHash(urlHash) ? ' active' : ''}`}
-                      title={`${daemonShortcutLamp.title} — Settings → Daemon`} aria-label="Settings → Daemon"
-                      onClick={() => goSettings('#settings-daemon')}>
-                      <span className={headerApiShortcutLampClass(dl)} aria-hidden>
+                      </HeaderLampGlyph>
+                    </AppHeaderShortcutButton>
+                    <AppHeaderShortcutButton
+                      active={activeTab === 'settings' && isDaemonSettingsHash(urlHash)}
+                      title={`${daemonShortcutLamp.title} — Settings → Daemon`}
+                      aria-label="Settings → Daemon"
+                      onClick={() => goSettings('#settings-daemon')}
+                    >
+                      <HeaderLampGlyph lamp={dl}>
                         <SettingsSidebarLampGlyph id="daemon" />
-                      </span>
-                    </button>
-                    <button type="button"
-                      className={`app-header-api-shortcut-btn app-header-api-shortcut-btn--celery${activeTab === 'settings' && isCelerySettingsHash(urlHash) ? ' active' : ''}`}
-                      title="Celery workers and queue pending — Settings → Celery" aria-label="Settings → Celery"
-                      onClick={() => goSettings('#settings-celery')}>
-                      <span className={headerApiShortcutLampClass(celeryLamp)} aria-hidden>
+                      </HeaderLampGlyph>
+                    </AppHeaderShortcutButton>
+                    <AppHeaderShortcutButton
+                      active={activeTab === 'settings' && isCelerySettingsHash(urlHash)}
+                      title="Celery workers and queue pending — Settings → Celery"
+                      aria-label="Settings → Celery"
+                      onClick={() => goSettings('#settings-celery')}
+                      className="inline-flex items-center gap-0.5 pr-1"
+                    >
+                      <HeaderLampGlyph lamp={celeryLamp}>
                         <SettingsSidebarLampGlyph id="celery" />
-                      </span>
-                      <span className="app-header-queue-value app-header-queue-value--inline"
-                        title="Queue summary Pending total">
-                        {celeryQueuePendingTotal != null ? (celeryQueuePendingTotal > 99 ? '99+' : String(celeryQueuePendingTotal)) : '—'}
-                      </span>
-                    </button>
+                      </HeaderLampGlyph>
+                      <AppHeaderQueueBadge
+                        value={celeryQueuePendingTotal != null ? (celeryQueuePendingTotal > 99 ? '99+' : String(celeryQueuePendingTotal)) : '—'}
+                      />
+                    </AppHeaderShortcutButton>
                   </div>
-                </div>
+                </AppHeaderShortcutPill>
               </div>
 
               <DropdownMenu open={headerMenuOpen} onOpenChange={setHeaderMenuOpen}>
@@ -283,7 +300,14 @@ export function TradingLayout({ children }: { children: ReactNode }) {
                     title={activeMsgCount > 0 ? `Menu — ${activeMsgCount} active messages` : 'Menu'}
                     aria-label={activeMsgCount > 0 ? `Open menu (${activeMsgCount} active messages)` : 'Open menu'}
                   >
-                    {activeMsgCount > 0 && <span className="msc-bell-badge" aria-hidden>{activeMsgCount > 99 ? '99+' : activeMsgCount}</span>}
+                    {activeMsgCount > 0 ? (
+                      <span
+                        className="absolute -right-0.5 -top-0.5 flex min-w-[1.1rem] items-center justify-center rounded-full bg-amber-400 px-1 text-[0.65rem] font-bold leading-none text-amber-950"
+                        aria-hidden
+                      >
+                        {activeMsgCount > 99 ? '99+' : activeMsgCount}
+                      </span>
+                    ) : null}
                     <MoreVertical size={20} aria-hidden />
                   </Button>
                 </DropdownMenuTrigger>
@@ -306,9 +330,9 @@ export function TradingLayout({ children }: { children: ReactNode }) {
                       <DropdownMenuItem key={hash}
                         className={cn('pl-6', activeTab === 'settings' && urlHash === hash && 'font-semibold text-accent bg-accent/10')}
                         onClick={() => goSettings(hash)} title={title}>
-                        <span className={headerApiShortcutLampClass(lamp)} aria-hidden>
+                        <LampGlyphSlot lamp={lamp}>
                           <SettingsSidebarLampGlyph id={glyph} />
-                        </span>
+                        </LampGlyphSlot>
                         {menuLabel}
                       </DropdownMenuItem>
                     )
@@ -318,25 +342,25 @@ export function TradingLayout({ children }: { children: ReactNode }) {
                   <DropdownMenuItem
                     className={cn('pl-6', activeTab === 'settings' && isSocketSettingsHash(urlHash) && 'font-semibold text-accent bg-accent/10')}
                     onClick={() => goSettings('#settings-ws-connector')} title="Settings → Socket">
-                    <span className={`title-inline-lamp lamp-icon ${socketIngestProbe.lamp === 'none' ? 'none' : socketIngestProbe.lamp}`} aria-hidden>
+                    <LampGlyphSlot lamp={socketIngestProbe.lamp}>
                       <SettingsSidebarLampGlyph id="websocket" />
-                    </span>
+                    </LampGlyphSlot>
                     Socket
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className={cn('pl-6', activeTab === 'settings' && isDaemonSettingsHash(urlHash) && 'font-semibold text-accent bg-accent/10')}
                     onClick={() => goSettings('#settings-daemon')} title={`${daemonShortcutLamp.title} — Settings → Daemon`}>
-                    <span className={`app-header-menu-system-lamp title-inline-lamp lamp-icon ${dl}`} aria-hidden>
+                    <LampGlyphSlot lamp={dl}>
                       <Play size={14} fill="currentColor" stroke="none" aria-hidden />
-                    </span>
+                    </LampGlyphSlot>
                     Daemon
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className={cn('pl-6', activeTab === 'settings' && isCelerySettingsHash(urlHash) && 'font-semibold text-accent bg-accent/10')}
                     onClick={() => goSettings('#settings-celery')} title="Settings → Celery">
-                    <span className={`app-header-menu-system-lamp title-inline-lamp ${celeryLamp === 'none' ? 'none' : celeryLamp}`} aria-hidden>
+                    <LampGlyphSlot lamp={celeryLamp}>
                       <Zap size={14} aria-hidden />
-                    </span>
+                    </LampGlyphSlot>
                     Celery
                   </DropdownMenuItem>
 

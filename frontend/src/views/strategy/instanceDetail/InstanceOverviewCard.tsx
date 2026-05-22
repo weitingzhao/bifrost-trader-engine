@@ -57,7 +57,7 @@ export function InstanceOverviewCard({
 
   return (
     <section
-      className="instance-detail-overview-card detail-block"
+      className="instance-detail-overview-panel detail-block rounded-lg border border-border bg-card p-4 shadow-sm"
       aria-label="Instance overview"
     >
       <h3 className="instance-detail-section-title instance-detail-overview-head">

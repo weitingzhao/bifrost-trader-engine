@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
 import type { Execution } from '../../types'
 import { createExecution } from '../../api'
 import { datetimeLocalToUnix, unixToDatetimeLocal } from '../../utils/format'
@@ -118,12 +119,10 @@ export function QuickCloseModal({ exec, onClose, onSuccess }: QuickCloseModalPro
             <input type="number" step="any" value={closeForm.commission} onChange={e => setCloseForm(f => ({ ...f, commission: e.target.value }))} placeholder="Leave empty" />
           </div>
           <div className="replay-exec-form-actions">
-            <button type="button" className="btn btn-secondary" onClick={() => { onClose(); setCloseError(null) }}>
+            <Button type="button" variant="secondary" onClick={() => { onClose(); setCloseError(null) }}>
               Cancel
-            </button>
-            <button type="submit" className="btn btn-primary">
-              Add Close Trade
-            </button>
+            </Button>
+            <Button type="submit">Add Close Trade</Button>
           </div>
         </form>
       </div>

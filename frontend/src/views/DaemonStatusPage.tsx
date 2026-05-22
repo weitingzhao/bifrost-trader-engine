@@ -27,6 +27,11 @@ import {
 } from './status/daemonIbBrokerLamp'
 import { ingestRedisHealthLamp } from '../utils/socketIngestLamp'
 import { DaemonEngineOpsSection } from './DaemonEngineOpsSection'
+import { SettingsPageCard } from './settings/SettingsPageCard'
+import { SettingsPageGroups } from './settings/SettingsPageGroups'
+import { SettingsSection } from './settings/SettingsSection'
+import { SettingsTitleLamp } from './settings/SettingsTitleLamp'
+import type { LampTone } from '@/components/shared/lamp-indicator'
 
 /** Same stroke lamp as Strategy Trading Daemon Heartbeat / IB broker groups (StatusDaemonPanel). */
 const ACCOUNT_SYNC_GROUP_LAMP_SVG = (
@@ -204,11 +209,11 @@ export function DaemonStatusPage({
   })
 
   return (
-    <div className={`settings-page-card ${embeddedInSettings ? 'daemon-status-page daemon-status-page--embedded' : 'daemon-status-page'}`}>
-      <div className="daemon-groups settings-page-groups">
+    <SettingsPageCard embedded={embeddedInSettings} className="daemon-status-page">
+      <SettingsPageGroups className="daemon-groups">
         <DaemonEngineOpsSection status={j} loadStatus={loadStatus} />
 
-        <section className="replay-section" aria-labelledby="daemon-panel-head">
+        <SettingsSection aria-labelledby="daemon-panel-head">
           <StatusDaemonPanel
             status={j}
             hb={hb}
@@ -246,7 +251,7 @@ export function DaemonStatusPage({
             onNavigateToSocket={onNavigateToSocket}
             ctrlMsg={ctrlMsg}
           />
-        </section>
+        </SettingsSection>
 
         {(() => {
           const asdHb = asdHeart
@@ -255,14 +260,14 @@ export function DaemonStatusPage({
           const syncPathLamp = computeAccountSyncLamp(status)
           const { lamp: ibAccountGroupLamp, title: ibAccountGroupTitle } = computeAccountSyncIbGroupLamp(status)
           return (
-            <section className="replay-section" aria-labelledby="daemon-account-sync-head">
+            <SettingsSection aria-labelledby="daemon-account-sync-head">
               <div className="daemon-header" style={{ marginBottom: 'var(--space-3)' }}>
                 <div className="daemon-header-main daemon-header-with-lamp">
                   <div>
-                    <h3 id="daemon-account-sync-head" className="page-title-with-tooltip">
-                      <span className={`title-inline-lamp lamp-icon ${asdL.lamp}`} title={asdL.title} aria-hidden>
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
-                      </span>
+                    <h3 id="daemon-account-sync-head" className="inline-flex flex-wrap items-center gap-2">
+                      <SettingsTitleLamp lamp={asdL.lamp as LampTone} title={asdL.title}>
+                        {ACCOUNT_SYNC_GROUP_LAMP_SVG}
+                      </SettingsTitleLamp>
                       Account Sync Daemon
                       <InfoTooltip text="Independent process (not the Strategy Trading Daemon). Syncs IB Account Agent stream to PostgreSQL. Liveness: PostgreSQL account_sync_heartbeat.last_ts refreshed each loop (~35s stale threshold), same idea as Strategy Trading Daemon heartbeat." />
                     </h3>
@@ -293,9 +298,9 @@ export function DaemonStatusPage({
               <div className="daemon-groups daemon-groups-layout daemon-groups-account-sync-layout">
                 <div className="daemon-group daemon-group-heartbeat">
                   <div className="daemon-group-header">
-                    <span className={`title-inline-lamp lamp-icon ${asdL.lamp}`} title={asdL.title} aria-hidden>
+                    <SettingsTitleLamp lamp={asdL.lamp as LampTone} title={asdL.title}>
                       {ACCOUNT_SYNC_GROUP_LAMP_SVG}
-                    </span>
+                    </SettingsTitleLamp>
                     <span className="daemon-group-title">Heartbeat</span>
                   </div>
                   <div className="daemon-group-body">
@@ -332,9 +337,9 @@ export function DaemonStatusPage({
                 </div>
                 <div className="daemon-group daemon-group-ib">
                   <div className="daemon-group-header">
-                    <span className={`title-inline-lamp lamp-icon ${ibAccountGroupLamp}`} title={ibAccountGroupTitle} aria-hidden>
+                    <SettingsTitleLamp lamp={ibAccountGroupLamp as LampTone} title={ibAccountGroupTitle}>
                       {ACCOUNT_SYNC_GROUP_LAMP_SVG}
-                    </span>
+                    </SettingsTitleLamp>
                     <span className="daemon-group-title">IB account</span>
                   </div>
                   <div className="daemon-group-body">
@@ -409,12 +414,12 @@ export function DaemonStatusPage({
                 <code style={{ fontSize: '0.85em' }}>python scripts/systemd/run_account_sync_daemon.py --config config/config.prod.yaml</code>
                 {' '}(prod). Or use <strong>Ops</strong> on this page (market ingest → Account Sync Daemon) if your host runs systemd.
               </p>
-            </section>
+            </SettingsSection>
           )
         })()}
 
-        <section className="replay-section" aria-labelledby="daemon-console-head">
-          <h3 id="daemon-console-head" className="page-title-with-tooltip">
+        <SettingsSection aria-labelledby="daemon-console-head">
+          <h3 id="daemon-console-head" className="inline-flex flex-wrap items-center gap-2">
             Daemon logs
             <InfoTooltip text="Strategy Trading Daemon: Redis streams bifrost:console:{dev|prod}:daemon_trading (legacy merged). Account Sync: bifrost:console:account_sync_daemon. Same Sources filter pattern as Socket → Logs on Market ingest Ops." />
           </h3>
@@ -431,14 +436,14 @@ export function DaemonStatusPage({
             clearTitle="Clear displayed log and both Redis streams"
             sourceDefinitions={[...DAEMON_PAGE_LOG_SOURCE_DEFINITIONS]}
           />
-        </section>
+        </SettingsSection>
 
-        <section className="replay-section" aria-labelledby="daemon-ops-head">
-          <h3 id="daemon-ops-head" className="page-title-with-tooltip">
+        <SettingsSection aria-labelledby="daemon-ops-head">
+          <h3 id="daemon-ops-head" className="inline-flex flex-wrap items-center gap-2">
             Recent operations
             <InfoTooltip text="Recent automated trading operations executed by the daemon." />
           </h3>
-          <div className="table-scroll-x">
+          <div className="overflow-x-auto">
             <table className="table-operations">
               <thead>
                 <tr>
@@ -463,8 +468,8 @@ export function DaemonStatusPage({
               </tbody>
             </table>
           </div>
-        </section>
-      </div>
-    </div>
+        </SettingsSection>
+      </SettingsPageGroups>
+    </SettingsPageCard>
   )
 }

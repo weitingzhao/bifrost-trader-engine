@@ -19,6 +19,7 @@ import type {
 } from '../../types'
 import type { StrategyOpportunity } from '../../api'
 import { deleteExecution, fetchOpportunities, postOptionStockLinksQuery, updateExecution } from '../../api'
+import { Button } from '@/components/ui/button'
 import ExecSourceBadge from '../../components/ExecSourceBadge'
 import { DraggableExplainPanel } from '../../components/DraggableExplainPanel'
 import { LedgerSymbolCombobox } from '../../components/LedgerSymbolCombobox'
@@ -3281,9 +3282,11 @@ export function LedgerView({
                                     <td>
                                       {ex.account_executions_id != null ? (
                                         <span className="replay-exec-row-actions">
-                                          <button
+                                          <Button
                                             type="button"
-                                            className="btn btn-icon-small"
+                                            variant="outline"
+                                            size="icon"
+                                            className="h-8 w-8 min-w-8 shrink-0"
                                             onClick={() => {
                                               setEditExec(ex)
                                               setPageError(null)
@@ -3295,10 +3298,12 @@ export function LedgerView({
                                               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                                             </svg>
-                                          </button>
-                                          <button
+                                          </Button>
+                                          <Button
                                             type="button"
-                                            className="btn btn-icon-small btn-icon-danger"
+                                            variant="outline"
+                                            size="icon"
+                                            className="h-8 w-8 min-w-8 shrink-0 text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
                                             onClick={() => {
                                               setPageError(null)
                                               setDeleteConfirmState({
@@ -3319,7 +3324,7 @@ export function LedgerView({
                                               <line x1="10" y1="11" x2="10" y2="17" />
                                               <line x1="14" y1="11" x2="14" y2="17" />
                                             </svg>
-                                          </button>
+                                          </Button>
                                         </span>
                                       ) : (
                                         '—'
@@ -3479,9 +3484,11 @@ export function LedgerView({
                                         unrealized={groupUnrealized}
                                       />
                                       {ledgerTab === 'stocks' && ledgerStockGroupByPosition && (
-                                        <button
+                                        <Button
                                           type="button"
-                                          className="btn btn-icon-small ledger-stock-quick-journal-btn"
+                                          variant="outline"
+                                          size="icon"
+                                          className="ledger-stock-quick-journal-btn h-8 w-8 min-w-8 shrink-0"
                                           onClick={() => openQuickStockJournal(accId, sym)}
                                           title="Add journal"
                                           aria-label="Add journal"
@@ -3503,7 +3510,7 @@ export function LedgerView({
                                             <line x1="16" y1="17" x2="8" y2="17" />
                                             <line x1="10" y1="9" x2="8" y2="9" />
                                           </svg>
-                                        </button>
+                                        </Button>
                                       )}
                                     </div>
                                   </td>
@@ -3549,9 +3556,11 @@ export function LedgerView({
                                     <td>
                                       {ex.account_executions_id != null ? (
                                         <span className="replay-exec-row-actions">
-                                          <button
+                                          <Button
                                             type="button"
-                                            className="btn btn-icon-small"
+                                            variant="outline"
+                                            size="icon"
+                                            className="h-8 w-8 min-w-8 shrink-0"
                                             onClick={() => {
                                               setEditExec(ex)
                                               setPageError(null)
@@ -3563,10 +3572,12 @@ export function LedgerView({
                                               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                                             </svg>
-                                          </button>
-                                          <button
+                                          </Button>
+                                          <Button
                                             type="button"
-                                            className="btn btn-icon-small btn-icon-danger"
+                                            variant="outline"
+                                            size="icon"
+                                            className="h-8 w-8 min-w-8 shrink-0 text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
                                             onClick={() => {
                                               setPageError(null)
                                               setDeleteConfirmState({
@@ -3587,7 +3598,7 @@ export function LedgerView({
                                               <line x1="10" y1="11" x2="10" y2="17" />
                                               <line x1="14" y1="11" x2="14" y2="17" />
                                             </svg>
-                                          </button>
+                                          </Button>
                                         </span>
                                       ) : (
                                         '—'
@@ -3744,17 +3755,17 @@ export function LedgerView({
               {deleteConfirmState.message}
             </p>
             <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
-              <button
+              <Button
                 type="button"
-                className="btn btn-secondary"
+                variant="secondary"
                 onClick={() => setDeleteConfirmState(prev => ({ ...prev, open: false, exec: null }))}
                 disabled={deleteConfirmState.confirming}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="btn-danger"
+                variant="destructive"
                 onClick={async () => {
                   const exec = deleteConfirmState.exec
                   if (!exec?.account_executions_id) {
@@ -3774,7 +3785,7 @@ export function LedgerView({
                 disabled={deleteConfirmState.confirming}
               >
                 {deleteConfirmState.confirming ? 'Deleting…' : 'Confirm delete'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

@@ -22,7 +22,9 @@ import {
 import { AppSelect } from '../components/AppSelect'
 import { DraggableModal } from '../components/DraggableModal'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { PageSection } from '@/components/shared/page-section'
 import { SectionPageTitle } from '../components/SectionPageTitle'
+import { Button } from '@/components/ui/button'
 import {
   DEFAULT_STRUCTURE_PAYLOAD,
   getStructureDisplayLabel,
@@ -706,7 +708,7 @@ export function StrategyStructurePage({
   }
 
   return (
-    <div className="card process-section">
+    <PageSection>
       {/* Availability toggle error modal: backend rejected the change (e.g. validation), list stays visible */}
       <DraggableModal
         open={availabilityError != null}
@@ -716,9 +718,9 @@ export function StrategyStructurePage({
         maxWidth="min(520px, calc(100vw - 24px))"
         footer={
           <div className="data-reset-modal-actions">
-            <button type="button" className="btn btn-primary" onClick={() => setAvailabilityError(null)}>
+            <Button type="button" onClick={() => setAvailabilityError(null)}>
               Close
-            </button>
+            </Button>
           </div>
         }
       >
@@ -736,9 +738,8 @@ export function StrategyStructurePage({
         maxWidth="min(520px, calc(100vw - 24px))"
         footer={
           <div className="data-reset-modal-actions" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-            <button
+            <Button
               type="button"
-              className="btn btn-primary"
               onClick={() =>
                 nameConfirmDialog &&
                 trySubmitWithVersionCheck(
@@ -748,18 +749,18 @@ export function StrategyStructurePage({
               disabled={formLoading || nameConfirmDialog == null}
             >
               Use new name and save
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="btn btn-secondary"
+              variant="secondary"
               onClick={() => originalEditName && trySubmitWithVersionCheck(originalEditName)}
               disabled={formLoading}
             >
               Keep current name and save
-            </button>
-            <button type="button" className="btn btn-secondary" onClick={() => setNameConfirmDialog(null)}>
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setNameConfirmDialog(null)}>
               Cancel
-            </button>
+            </Button>
           </div>
         }
       >
@@ -800,9 +801,8 @@ export function StrategyStructurePage({
         maxWidth="min(520px, calc(100vw - 24px))"
         footer={
           <div className="data-reset-modal-actions" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-            <button
+            <Button
               type="button"
-              className="btn btn-primary"
               onClick={() =>
                 pendingSubmitName != null &&
                 originalEditVersion != null &&
@@ -815,17 +815,17 @@ export function StrategyStructurePage({
               disabled={formLoading || versionConfirmDialog == null}
             >
               Save
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="btn btn-secondary"
+              variant="secondary"
               onClick={() => {
                 setVersionConfirmDialog(null)
                 setPendingSubmitName(null)
               }}
             >
               Cancel
-            </button>
+            </Button>
           </div>
         }
       >
@@ -915,9 +915,9 @@ export function StrategyStructurePage({
                 </button>
               ))}
             </div>
-            <button type="button" className="btn-primary" onClick={openCreate}>
+            <Button type="button" onClick={openCreate}>
               Create structure
-            </button>
+            </Button>
           </div>
         </div>
         {!structuresLoading && !structuresError && dimStructureTabs.length > 0 && (
@@ -1020,21 +1020,23 @@ export function StrategyStructurePage({
                         </label>
                       </td>
                       <td>
-                        <button
+                        <Button
                           type="button"
-                          className="btn-manage"
+                          variant="outline"
+                          size="sm"
                           onClick={() => openEdit(row.strategy_structure_id)}
                         >
                           Edit
-                        </button>
+                        </Button>
                         {' '}
-                        <button
+                        <Button
                           type="button"
-                          className="btn-secondary"
+                          variant="secondary"
+                          size="sm"
                           onClick={() => openCopy(row.strategy_structure_id)}
                         >
                           Copy
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                   )
@@ -1170,9 +1172,10 @@ export function StrategyStructurePage({
                         onChange={(e) => setTplFilterSearch(e.target.value)}
                         aria-label="Filter templates by name or code"
                       />
-                      <button
+                      <Button
                         type="button"
-                        className="btn-secondary structure-template-filters-toggle"
+                        variant="secondary"
+                        className="structure-template-filters-toggle"
                         onClick={() => setTplFiltersExpanded((v) => !v)}
                         aria-expanded={tplFiltersExpanded}
                       >
@@ -1180,18 +1183,19 @@ export function StrategyStructurePage({
                         {Object.values(tplDimFilters).filter(Boolean).length > 0
                           ? ` (${Object.values(tplDimFilters).filter(Boolean).length})`
                           : ''}
-                      </button>
+                      </Button>
                       {activeTplFilterCount > 0 && (
-                        <button
+                        <Button
                           type="button"
-                          className="btn-secondary structure-template-filters-clear"
+                          variant="secondary"
+                          className="structure-template-filters-clear"
                           onClick={() => {
                             setTplFilterSearch('')
                             setTplDimFilters({})
                           }}
                         >
                           Clear filters
-                        </button>
+                        </Button>
                       )}
                     </div>
                     {tplFiltersExpanded && (
@@ -1230,7 +1234,7 @@ export function StrategyStructurePage({
                       wizardTemplatesToShow.map((tpl) => (
                         <label
                           key={tpl.strategy_template_id}
-                          className={`structure-template-card ${selectedTemplateId === tpl.strategy_template_id ? 'structure-template-card--selected' : ''}`}
+                          className={`structure-template-panel ${selectedTemplateId === tpl.strategy_template_id ? 'structure-template-panel--selected' : ''}`}
                         >
                           <input
                             type="radio"
@@ -1239,16 +1243,16 @@ export function StrategyStructurePage({
                             checked={selectedTemplateId === tpl.strategy_template_id}
                             onChange={() => handleTemplateSelect(tpl.strategy_template_id)}
                           />
-                          <span className="structure-template-card__name">{tpl.display_name}</span>
-                          <span className="structure-template-card__code">{tpl.template_code}</span>
+                          <span className="structure-template-panel__name">{tpl.display_name}</span>
+                          <span className="structure-template-panel__code">{tpl.template_code}</span>
                           {(tpl.typical_use || tpl.explanation) && (
-                            <span className="structure-template-card__desc">{tpl.typical_use || tpl.explanation}</span>
+                            <span className="structure-template-panel__desc">{tpl.typical_use || tpl.explanation}</span>
                           )}
-                          <div className="structure-template-card__tags">
+                          <div className="structure-template-panel__tags">
                             {TEMPLATE_DIM_TYPES.map((dt) => {
                               const v = templateDimAt(tpl, dt)
                               return v ? (
-                                <span key={dt} className="structure-template-card__tag" title={TEMPLATE_DIM_LABELS[dt]}>
+                                <span key={dt} className="structure-template-panel__tag" title={TEMPLATE_DIM_LABELS[dt]}>
                                   {v}
                                 </span>
                               ) : null
@@ -1271,7 +1275,7 @@ export function StrategyStructurePage({
                   {(wizardTemplateDetail.meta_params ?? []).filter((p: MetaParamItem) => p.param_kind !== 'fixed').length === 0 ? (
                     <p className="form-hint">No editable parameters. Click Next.</p>
                   ) : (
-                    <div className="structure-param-card">
+                    <div className="structure-param-panel">
                       {(wizardTemplateDetail.meta_params ?? [])
                         .filter((p: MetaParamItem) => p.param_kind !== 'fixed')
                         .map((p: MetaParamItem) => (
@@ -1302,8 +1306,8 @@ export function StrategyStructurePage({
                 const showStep3Meta = metaNF.length > 0 && !wizardVisitedMetaStep
                 return (
                   <div className="structure-wizard-step structure-details-step">
-                    <div className={`structure-details-card${!showStep3Meta ? ' structure-details-card--span-2' : ''}`}>
-                      <h4 className="structure-details-card-title">Metadata</h4>
+                    <div className={`structure-details-panel${!showStep3Meta ? ' structure-details-panel--span-2' : ''}`}>
+                      <h4 className="structure-details-panel-title">Metadata</h4>
                       <div className="structure-details-meta-grid">
                         <div className="structure-details-field structure-details-field--name">
                           <label className="structure-details-label">
@@ -1349,8 +1353,8 @@ export function StrategyStructurePage({
                       </div>
                     </div>
                     {showStep3Meta && wizardTemplateDetail && (
-                      <div className="structure-details-card">
-                        <h4 className="structure-details-card-title">Parameters</h4>
+                      <div className="structure-details-panel">
+                        <h4 className="structure-details-panel-title">Parameters</h4>
                         <div className="structure-details-params">
                           {metaNF.map((p: MetaParamItem) => (
                             <div key={p.meta_key} className="structure-details-param-row">
@@ -1380,9 +1384,9 @@ export function StrategyStructurePage({
                     )}
 
                     {/* Row 2: Legs | Constraints */}
-                    <div className="structure-details-card">
-                      <h4 className="structure-details-card-title">Legs</h4>
-                      <p className="structure-details-hint structure-details-card-desc">
+                    <div className="structure-details-panel">
+                      <h4 className="structure-details-panel-title">Legs</h4>
+                      <p className="structure-details-hint structure-details-panel-desc">
                         From template. Not editable here.
                       </p>
                       {defaultLegsLoading ? (
@@ -1412,8 +1416,8 @@ export function StrategyStructurePage({
                         </div>
                       )}
                     </div>
-                    <div className="structure-details-card">
-                      <h4 className="structure-details-card-title">Constraints</h4>
+                    <div className="structure-details-panel">
+                      <h4 className="structure-details-panel-title">Constraints</h4>
                       <div className="structure-details-constraints">
                         {formConstraints.map((c, i) => (
                           <div key={i} className="structure-details-constraint-row">
@@ -1441,19 +1445,21 @@ export function StrategyStructurePage({
                               className="structure-details-input structure-details-constraint-int"
                               aria-label="Value int"
                             />
-                            <button
+                            <Button
                               type="button"
-                              className="btn-secondary structure-details-constraint-remove"
+                              variant="secondary"
+                              size="sm"
+                              className="structure-details-constraint-remove"
                               onClick={() => removeConstraint(i)}
                               aria-label="Remove constraint"
                             >
                               Remove
-                            </button>
+                            </Button>
                           </div>
                         ))}
-                        <button type="button" className="btn-secondary structure-details-add-constraint" onClick={addConstraint}>
+                        <Button type="button" variant="secondary" className="structure-details-add-constraint" onClick={addConstraint}>
                           Add constraint
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -1463,8 +1469,8 @@ export function StrategyStructurePage({
             </>
           ) : (
             <div className="structure-copy-grid">
-              <div className="structure-details-card structure-details-card--span-2">
-                <h4 className="structure-details-card-title">Metadata</h4>
+              <div className="structure-details-panel structure-details-panel--span-2">
+                <h4 className="structure-details-panel-title">Metadata</h4>
                 <div className="structure-details-meta-grid">
                   <div className="structure-details-field structure-details-field--name">
                     <label className="structure-details-label">Name</label>
@@ -1513,9 +1519,10 @@ export function StrategyStructurePage({
                         onChange={(e) => setTplFilterSearch(e.target.value)}
                         aria-label="Filter templates by name or code"
                       />
-                      <button
+                      <Button
                         type="button"
-                        className="btn-secondary structure-template-filters-toggle"
+                        variant="secondary"
+                        className="structure-template-filters-toggle"
                         onClick={() => setTplFiltersExpanded((v) => !v)}
                         aria-expanded={tplFiltersExpanded}
                       >
@@ -1523,18 +1530,19 @@ export function StrategyStructurePage({
                         {Object.values(tplDimFilters).filter(Boolean).length > 0
                           ? ` (${Object.values(tplDimFilters).filter(Boolean).length})`
                           : ''}
-                      </button>
+                      </Button>
                       {activeTplFilterCount > 0 && (
-                        <button
+                        <Button
                           type="button"
-                          className="btn-secondary structure-template-filters-clear"
+                          variant="secondary"
+                          className="structure-template-filters-clear"
                           onClick={() => {
                             setTplFilterSearch('')
                             setTplDimFilters({})
                           }}
                         >
                           Clear
-                        </button>
+                        </Button>
                       )}
                     </div>
                     {tplFiltersExpanded && (
@@ -1583,9 +1591,9 @@ export function StrategyStructurePage({
                 </div>
               </div>
 
-              <div className="structure-details-card">
-                <h4 className="structure-details-card-title">Legs</h4>
-                <p className="structure-details-hint structure-details-card-desc">
+              <div className="structure-details-panel">
+                <h4 className="structure-details-panel-title">Legs</h4>
+                <p className="structure-details-hint structure-details-panel-desc">
                   From template. Not editable here.
                 </p>
                 {defaultLegsLoading ? (
@@ -1616,8 +1624,8 @@ export function StrategyStructurePage({
                 )}
               </div>
 
-              <div className="structure-details-card">
-                <h4 className="structure-details-card-title">Constraints</h4>
+              <div className="structure-details-panel">
+                <h4 className="structure-details-panel-title">Constraints</h4>
                 <div className="structure-details-constraints">
                   {formConstraints.map((c, i) => (
                     <div key={i} className="structure-details-constraint-row">
@@ -1645,24 +1653,26 @@ export function StrategyStructurePage({
                         className="structure-details-input structure-details-constraint-int"
                         aria-label="Value int"
                       />
-                      <button
+                      <Button
                         type="button"
-                        className="btn-secondary structure-details-constraint-remove"
+                        variant="secondary"
+                        size="sm"
+                        className="structure-details-constraint-remove"
                         onClick={() => removeConstraint(i)}
                         aria-label="Remove constraint"
                       >
                         Remove
-                      </button>
+                      </Button>
                     </div>
                   ))}
-                  <button type="button" className="btn-secondary structure-details-add-constraint" onClick={addConstraint}>
+                  <Button type="button" variant="secondary" className="structure-details-add-constraint" onClick={addConstraint}>
                     Add constraint
-                  </button>
+                  </Button>
                 </div>
               </div>
 
-              <div className="structure-details-card">
-                <h4 className="structure-details-card-title">Notes</h4>
+              <div className="structure-details-panel">
+                <h4 className="structure-details-panel-title">Notes</h4>
                 <textarea
                   value={formNotes}
                   onChange={(e) => setFormNotes(e.target.value)}
@@ -1673,8 +1683,8 @@ export function StrategyStructurePage({
                 />
               </div>
 
-              <div className="structure-details-card">
-                <h4 className="structure-details-card-title">Meta</h4>
+              <div className="structure-details-panel">
+                <h4 className="structure-details-panel-title">Meta</h4>
                 <div className="structure-details-constraints">
                   {formMeta.map((m, i) => (
                     <div key={i} className="structure-details-constraint-row">
@@ -1694,45 +1704,46 @@ export function StrategyStructurePage({
                         className="structure-details-input structure-details-constraint-value"
                         aria-label="Meta value"
                       />
-                      <button
+                      <Button
                         type="button"
-                        className="btn-secondary structure-details-constraint-remove"
+                        variant="secondary"
+                        size="sm"
+                        className="structure-details-constraint-remove"
                         onClick={() => removeMeta(i)}
                         aria-label="Remove meta"
                       >
                         Remove
-                      </button>
+                      </Button>
                     </div>
                   ))}
-                  <button type="button" className="btn-secondary structure-details-add-constraint" onClick={addMeta}>
+                  <Button type="button" variant="secondary" className="structure-details-add-constraint" onClick={addMeta}>
                     Add meta
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
           )}
           </div>
           <div className="structure-form-footer">
-            <button type="button" className="btn-secondary" onClick={closeForm}>Cancel</button>
+            <Button type="button" variant="secondary" onClick={closeForm}>Cancel</Button>
             {isWizard ? (
               wizardStep < 3 ? (
-                <button
+                <Button
                   type="button"
-                  className="btn-primary"
                   onClick={goWizardNext}
                   disabled={wizardStep === 1 && !selectedTemplateId}
                 >
                   Next
-                </button>
+                </Button>
               ) : (
-                <button type="button" className="btn-primary" onClick={submitWizardForm} disabled={formLoading}>
+                <Button type="button" onClick={submitWizardForm} disabled={formLoading}>
                   {formOpen === 'create' ? 'Create' : 'Save'}
-                </button>
+                </Button>
               )
             ) : (
-              <button type="button" className="btn-primary" onClick={submitForm} disabled={formLoading}>
+              <Button type="button" onClick={submitForm} disabled={formLoading}>
                 {formOpen === 'create' ? 'Create' : 'Save'}
-              </button>
+              </Button>
             )}
           </div>
         </section>
@@ -1785,6 +1796,6 @@ export function StrategyStructurePage({
           <p className="section-hint">No strategy history.</p>
         )}
       </section>
-    </div>
+    </PageSection>
   )
 }

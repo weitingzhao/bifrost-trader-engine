@@ -22,6 +22,8 @@ import type {
 } from '../api'
 import type { OptionSnapshotRow } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { PageSection } from '@/components/shared/page-section'
+import { Button } from '@/components/ui/button'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import { fmtUsd } from '../utils/format'
 import { OptionDiscoveryMaxPainPanel } from './optionDiscovery/OptionDiscoveryMaxPainPanel'
@@ -1146,7 +1148,7 @@ export function OptionDiscoveryPage({
 
 
   return (
-    <div className="card process-section">
+    <PageSection>
       <div className="research-page-head">
         <SectionPageTitle
           menu="Research"
@@ -1254,13 +1256,14 @@ export function OptionDiscoveryPage({
                         }}
                         aria-label="Underlying symbol"
                       />
-                      <button
+                      <Button
                         type="button"
-                        className="btn btn-primary btn-sm od-underlying-apply-btn"
+                        size="sm"
+                        className="od-underlying-apply-btn"
                         onClick={() => applyUnderlyingFromInput()}
                       >
                         Apply
-                      </button>
+                      </Button>
                     </div>
                     {stkSymbols.length > 0 ? (
                       <div className="od-underlying-bubbles od-underlying-bubbles--below-manual">
@@ -1843,15 +1846,16 @@ export function OptionDiscoveryPage({
             <span>{snapshotFeedback.body}</span>
             {snapshotFeedback.level !== 'error' && (
               <div className="od-feedback-actions">
-                <button
+                <Button
                   type="button"
-                  className="button button-secondary button-sm"
+                  variant="secondary"
+                  size="sm"
                   onClick={() => void loadQuotes()}
                   disabled={!canLoadQuotes}
                   aria-label="Enqueue Massive snapshot job and reload quotes from PostgreSQL"
                 >
                   Pull now
-                </button>
+                </Button>
                 {onOpenMassiveFeed && (
                   <button type="button" className="button-feedback-nav" onClick={onOpenMassiveFeed}>
                     Open Massive Option
@@ -2077,6 +2081,6 @@ export function OptionDiscoveryPage({
         </div>{/* end option-discovery-main-inner */}
         </div>{/* end option-discovery-main */}
       </div>{/* end option-discovery-layout */}
-    </div>
+    </PageSection>
   )
 }

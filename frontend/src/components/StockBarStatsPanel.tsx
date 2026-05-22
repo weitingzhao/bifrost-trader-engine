@@ -8,7 +8,6 @@ import {
   nyCalendarDateIso,
   presetNyRegularSessionForDate,
 } from '../views/massive/customBarsTimePresets'
-
 export function StockBarStatsPanel({
   symbol,
   embedded = false,
@@ -183,30 +182,37 @@ export function StockBarStatsPanel({
     // ── Compact embedded layout ──────────────────────────────────────────────
     return (
       <section
-        className="wl2-analysis riv-stock-bar-stats riv-stock-bar-stats--embedded"
+        className="wl2-analysis min-w-0 border-t border-border p-3"
         aria-labelledby="riv-stock-bar-stats-head"
-        style={{ minWidth: 0 }}
       >
         {/* Row 1: title · kpi pills · fetch button */}
-        <div className="riv-bsp-top-row">
-          <span className="riv-bsp-label" id="riv-stock-bar-stats-head">Bar Data</span>
+        <div className="flex min-h-6 flex-wrap items-center gap-1.5">
+          <span
+            className="shrink-0 border-l-2 border-primary pl-1.5 text-[0.68rem] font-bold tracking-wider text-muted-foreground uppercase whitespace-nowrap"
+            id="riv-stock-bar-stats-head"
+          >
+            Bar Data
+          </span>
           {stats != null && (
-            <div className="riv-bsp-kpi-pills">
-              <span className="riv-bsp-kpi-pill">
-                <span className="riv-bsp-kpi-k">Daily</span>
-                <span className="riv-bsp-kpi-v">{stats.stock_day.toLocaleString()}</span>
+            <div className="flex flex-1 flex-wrap items-center gap-1">
+              <span className="inline-flex items-center gap-0.5 rounded-full border border-border bg-muted/30 px-1.5 py-px text-[0.62rem] whitespace-nowrap">
+                <span className="font-mono text-muted-foreground">Daily</span>
+                <span className="font-mono font-semibold text-foreground">{stats.stock_day.toLocaleString()}</span>
               </span>
               {stats.stock_min && Object.entries(stats.stock_min).map(([period, count]) => (
-                <span key={period} className="riv-bsp-kpi-pill">
-                  <span className="riv-bsp-kpi-k">{period}</span>
-                  <span className="riv-bsp-kpi-v">{(count as number).toLocaleString()}</span>
+                <span
+                  key={period}
+                  className="inline-flex items-center gap-0.5 rounded-full border border-border bg-muted/30 px-1.5 py-px text-[0.62rem] whitespace-nowrap"
+                >
+                  <span className="font-mono text-muted-foreground">{period}</span>
+                  <span className="font-mono font-semibold text-foreground">{(count as number).toLocaleString()}</span>
                 </span>
               ))}
             </div>
           )}
           <button
             type="button"
-            className="wl2-btn wl2-btn--primary riv-bsp-fetch-btn"
+            className="wl2-btn wl2-btn--primary !h-[22px] shrink-0 !px-2 !py-0.5 !text-[0.65rem] whitespace-nowrap"
             disabled={!!fetchMarketDataStep}
             onClick={() => void handleFetchMarketData()}
             title={fetchMarketDataStep ?? 'Fetch daily + intraday OHLC from Massive'}
@@ -220,7 +226,7 @@ export function StockBarStatsPanel({
         )}
 
         {/* Row 2: period tabs · layer toggles · reload */}
-        <div className="riv-bsp-controls-row">
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
           <div className="wl2-analysis__chart-tabs" role="tablist" aria-label="Period">
             <button type="button" role="tab" aria-selected={chartPeriod === '1 D'}
               className={`wl2-analysis__chart-tab${chartPeriod === '1 D' ? ' wl2-analysis__chart-tab--active' : ''}`}
@@ -229,7 +235,10 @@ export function StockBarStatsPanel({
               className={`wl2-analysis__chart-tab${chartPeriod === '1 min' ? ' wl2-analysis__chart-tab--active' : ''}`}
               onClick={() => setChartPeriod('1 min')}>1 min</button>
           </div>
-          <div className="riv-bsp-toggles" aria-label="Chart layers">
+          <div
+            className="flex flex-1 flex-wrap items-center gap-1.5 [&_.wl2-analysis__toggle]:gap-0.5 [&_.wl2-analysis__toggle]:text-[0.62rem]"
+            aria-label="Chart layers"
+          >
             {[
               { label: 'Vol', state: chartShowVolume, set: setChartShowVolume },
               { label: 'VWAP', state: chartShowVwap, set: setChartShowVwap },
@@ -244,7 +253,9 @@ export function StockBarStatsPanel({
               </label>
             ))}
           </div>
-          <button type="button" className="wl2-btn wl2-btn--ghost riv-bsp-reload-btn"
+          <button
+            type="button"
+            className="wl2-btn wl2-btn--ghost !h-[22px] shrink-0 !px-1.5 !py-px !text-[0.78rem] leading-none"
             disabled={chartLoading || !!fetchMarketDataStep}
             onClick={() => void loadChartFromDb(symU, chartPeriod)}>
             {chartLoading ? '…' : '↻'}
@@ -292,27 +303,35 @@ export function StockBarStatsPanel({
 
   // ── Full standalone layout ──────────────────────────────────────────────────
   return (
-    <section className="wl2-analysis riv-stock-bar-stats" aria-labelledby="riv-stock-bar-stats-head">
-      <div className="riv-bsp-top-row">
-        <span className="riv-bsp-label" id="riv-stock-bar-stats-head">Bar Data · {symU}</span>
+    <section className="wl2-analysis" aria-labelledby="riv-stock-bar-stats-head">
+      <div className="flex min-h-6 flex-wrap items-center gap-1.5">
+        <span
+          className="shrink-0 border-l-2 border-primary pl-1.5 text-[0.68rem] font-bold tracking-wider text-muted-foreground uppercase whitespace-nowrap"
+          id="riv-stock-bar-stats-head"
+        >
+          Bar Data · {symU}
+        </span>
         {stats != null && (
-          <div className="riv-bsp-kpi-pills">
-            <span className="riv-bsp-kpi-pill">
-              <span className="riv-bsp-kpi-k">Daily</span>
-              <span className="riv-bsp-kpi-v">{stats.stock_day.toLocaleString()}</span>
+          <div className="flex flex-1 flex-wrap items-center gap-1">
+            <span className="inline-flex items-center gap-0.5 rounded-full border border-border bg-muted/30 px-1.5 py-px text-[0.62rem] whitespace-nowrap">
+              <span className="font-mono text-muted-foreground">Daily</span>
+              <span className="font-mono font-semibold text-foreground">{stats.stock_day.toLocaleString()}</span>
             </span>
             {stats.stock_min && Object.entries(stats.stock_min).map(([period, count]) => (
-              <span key={period} className="riv-bsp-kpi-pill">
-                <span className="riv-bsp-kpi-k">{period}</span>
-                <span className="riv-bsp-kpi-v">{(count as number).toLocaleString()}</span>
+              <span
+                key={period}
+                className="inline-flex items-center gap-0.5 rounded-full border border-border bg-muted/30 px-1.5 py-px text-[0.62rem] whitespace-nowrap"
+              >
+                <span className="font-mono text-muted-foreground">{period}</span>
+                <span className="font-mono font-semibold text-foreground">{(count as number).toLocaleString()}</span>
               </span>
             ))}
           </div>
         )}
-        <div style={{ flex: 1 }} />
+        <div className="flex-1" />
         <button
           type="button"
-          className="wl2-btn wl2-btn--primary riv-bsp-fetch-btn"
+          className="wl2-btn wl2-btn--primary !h-[22px] shrink-0 !px-2 !py-0.5 !text-[0.65rem] whitespace-nowrap"
           disabled={!!fetchMarketDataStep}
           onClick={() => void handleFetchMarketData()}
           title={fetchMarketDataStep ?? 'Fetch daily + intraday OHLC from Massive'}
@@ -328,7 +347,7 @@ export function StockBarStatsPanel({
         <p className="msg-error" role="alert" style={{ marginTop: 'var(--space-2)' }}>{fetchMarketDataError}</p>
       )}
 
-      <div className="riv-bsp-controls-row">
+      <div className="mt-1 flex flex-wrap items-center gap-1.5">
         <div className="wl2-analysis__chart-tabs" role="tablist" aria-label="Period">
           <button type="button" role="tab" aria-selected={chartPeriod === '1 D'}
             className={`wl2-analysis__chart-tab${chartPeriod === '1 D' ? ' wl2-analysis__chart-tab--active' : ''}`}
@@ -337,7 +356,10 @@ export function StockBarStatsPanel({
             className={`wl2-analysis__chart-tab${chartPeriod === '1 min' ? ' wl2-analysis__chart-tab--active' : ''}`}
             onClick={() => setChartPeriod('1 min')}>1 min</button>
         </div>
-        <div className="riv-bsp-toggles" aria-label="Chart layers">
+        <div
+          className="flex flex-1 flex-wrap items-center gap-1.5 [&_.wl2-analysis__toggle]:gap-0.5 [&_.wl2-analysis__toggle]:text-[0.62rem]"
+          aria-label="Chart layers"
+        >
           {[
             { label: 'Vol', state: chartShowVolume, set: setChartShowVolume },
             { label: 'VWAP', state: chartShowVwap, set: setChartShowVwap },
@@ -352,7 +374,9 @@ export function StockBarStatsPanel({
             </label>
           ))}
         </div>
-        <button type="button" className="wl2-btn wl2-btn--ghost riv-bsp-reload-btn"
+        <button
+          type="button"
+          className="wl2-btn wl2-btn--ghost !h-[22px] shrink-0 !px-1.5 !py-px !text-[0.78rem] leading-none"
           disabled={chartLoading || !!fetchMarketDataStep}
           onClick={() => void loadChartFromDb(symU, chartPeriod)}>
           {chartLoading ? '…' : '↻'}

@@ -26,8 +26,10 @@ import {
   type StructureTypeConfigOption,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { PageSection } from '@/components/shared/page-section'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import { AppSelect } from '../components/AppSelect'
+import { Button } from '@/components/ui/button'
 
 const DIM_TYPES = [
   'direction',
@@ -358,7 +360,7 @@ export function StructureTypeConfigPage({
 
   if (loading && !templates.length) {
     return (
-      <div className="card process-section otc-page">
+      <PageSection className="otc-page">
         <header className="otc-page-header">
           <SectionPageTitle
             menu="Strategy"
@@ -369,13 +371,13 @@ export function StructureTypeConfigPage({
           />
         </header>
         <div className="otc-loading">Loading…</div>
-      </div>
+      </PageSection>
     )
   }
 
   if (err && !templates.length) {
     return (
-      <div className="card process-section otc-page">
+      <PageSection className="otc-page">
         <header className="otc-page-header">
           <SectionPageTitle
             menu="Strategy"
@@ -386,12 +388,12 @@ export function StructureTypeConfigPage({
           />
         </header>
         <div className="otc-error">{err}</div>
-      </div>
+      </PageSection>
     )
   }
 
   return (
-    <div className="card process-section otc-page">
+    <PageSection className="otc-page">
       <header className="otc-page-header">
         <SectionPageTitle
           menu="Strategy"
@@ -401,14 +403,14 @@ export function StructureTypeConfigPage({
           infoText={titleInfo}
         />
         <div className="otc-page-actions">
-          <button type="button" className="otc-btn otc-btn-ghost" onClick={() => setDimsOpen(true)}>
+          <Button type="button" variant="ghost" onClick={() => setDimsOpen(true)}>
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             Dimensions
-          </button>
-          <button type="button" className="otc-btn otc-btn-accent" onClick={() => setCreateOpen(true)}>
+          </Button>
+          <Button type="button" onClick={() => setCreateOpen(true)}>
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
             New template
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -578,24 +580,24 @@ export function StructureTypeConfigPage({
           ) : (
             <div className="otc-detail-scroll">
               {/* ── Template Info Card ── */}
-              <div className="otc-card">
-                <div className="otc-card-header">
-                  <div className="otc-card-header-left">
-                    <h2 className="otc-card-title">{detail.display_name}</h2>
-                    <span className="otc-card-badge">{detail.template_code}</span>
+              <div className="otc-panel">
+                <div className="otc-panel-header">
+                  <div className="otc-panel-header-left">
+                    <h2 className="otc-panel-title">{detail.display_name}</h2>
+                    <span className="otc-panel-badge">{detail.template_code}</span>
                   </div>
-                  <div className="otc-card-header-actions">
+                  <div className="otc-panel-header-actions">
                     {saveFeedback?.section === 'info' && (
                       <span className={`otc-save-feedback ${saveFeedback.ok ? 'ok' : 'err'}`}>
                         {saveFeedback.ok ? 'Saved' : 'Error'}
                       </span>
                     )}
-                    <button type="button" className="otc-btn otc-btn-accent otc-btn-sm" onClick={() => void saveTemplateInfo()}>
+                    <Button type="button" size="sm" onClick={() => void saveTemplateInfo()}>
                       Save
-                    </button>
-                    <button type="button" className="otc-btn otc-btn-danger-ghost otc-btn-sm" onClick={openDeleteTemplate}>
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={openDeleteTemplate}>
                       Delete
-                    </button>
+                    </Button>
                   </div>
                 </div>
                 <div className="otc-form-row">
@@ -649,8 +651,8 @@ export function StructureTypeConfigPage({
               </div>
 
               {/* ── Six Dimensions Card ── */}
-              <div className="otc-card">
-                <div className="otc-card-header">
+              <div className="otc-panel">
+                <div className="otc-panel-header">
                   <h3 className="otc-section-title">Six Dimensions</h3>
                 </div>
                 <div className="otc-dim-grid">
@@ -676,18 +678,19 @@ export function StructureTypeConfigPage({
               </div>
 
               {/* ── Default Legs Card ── */}
-              <div className="otc-card">
-                <div className="otc-card-header">
+              <div className="otc-panel">
+                <div className="otc-panel-header">
                   <h3 className="otc-section-title">Default Legs</h3>
-                  <div className="otc-card-header-actions">
+                  <div className="otc-panel-header-actions">
                     {saveFeedback?.section === 'legs' && (
                       <span className={`otc-save-feedback ${saveFeedback.ok ? 'ok' : 'err'}`}>
                         {saveFeedback.ok ? 'Saved' : 'Error'}
                       </span>
                     )}
-                    <button
+                    <Button
                       type="button"
-                      className="otc-btn otc-btn-ghost otc-btn-sm"
+                      variant="ghost"
+                      size="sm"
                       onClick={() =>
                         setDetail({
                           ...detail,
@@ -696,10 +699,10 @@ export function StructureTypeConfigPage({
                       }
                     >
                       + Add leg
-                    </button>
-                    <button type="button" className="otc-btn otc-btn-accent otc-btn-sm" onClick={() => void saveLegs()}>
+                    </Button>
+                    <Button type="button" size="sm" onClick={() => void saveLegs()}>
                       Save
-                    </button>
+                    </Button>
                   </div>
                 </div>
                 {(detail.legs || []).length === 0 ? (
@@ -792,10 +795,10 @@ export function StructureTypeConfigPage({
               </div>
 
               {/* ── Meta Parameters Card ── */}
-              <div className="otc-card">
-                <div className="otc-card-header">
+              <div className="otc-panel">
+                <div className="otc-panel-header">
                   <h3 className="otc-section-title">Meta Parameters</h3>
-                  <div className="otc-card-header-actions">
+                  <div className="otc-panel-header-actions">
                     {saveFeedback?.section === 'params' && (
                       <span className={`otc-save-feedback ${saveFeedback.ok ? 'ok' : 'err'}`}>
                         {saveFeedback.ok ? 'Saved' : 'Error'}
@@ -812,18 +815,18 @@ export function StructureTypeConfigPage({
               </div>
 
               {/* ── Characteristics Card ── */}
-              <div className="otc-card">
-                <div className="otc-card-header">
+              <div className="otc-panel">
+                <div className="otc-panel-header">
                   <h3 className="otc-section-title">Characteristics</h3>
-                  <div className="otc-card-header-actions">
+                  <div className="otc-panel-header-actions">
                     {saveFeedback?.section === 'chars' && (
                       <span className={`otc-save-feedback ${saveFeedback.ok ? 'ok' : 'err'}`}>
                         {saveFeedback.ok ? 'Saved' : 'Error'}
                       </span>
                     )}
-                    <button type="button" className="otc-btn otc-btn-accent otc-btn-sm" onClick={() => void saveCharacteristics()}>
+                    <Button type="button" size="sm" onClick={() => void saveCharacteristics()}>
                       Save
-                    </button>
+                    </Button>
                   </div>
                 </div>
                 <textarea
@@ -853,18 +856,18 @@ export function StructureTypeConfigPage({
             </div>
             <p className="otc-dialog-msg">{confirmMsg}</p>
             <div className="otc-dialog-actions">
-              <button type="button" className="otc-btn otc-btn-ghost" onClick={() => setConfirmOpen(false)}>
+              <Button type="button" variant="ghost" onClick={() => setConfirmOpen(false)}>
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="otc-btn otc-btn-danger"
+                variant="destructive"
                 onClick={() => {
                   void confirmAction().then(() => setConfirmOpen(false))
                 }}
               >
                 Confirm delete
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -884,12 +887,12 @@ export function StructureTypeConfigPage({
               <input className="otc-input" value={newTplName} onChange={(e) => setNewTplName(e.target.value)} />
             </label>
             <div className="otc-dialog-actions">
-              <button type="button" className="otc-btn otc-btn-ghost" onClick={() => setCreateOpen(false)}>
+              <Button type="button" variant="ghost" onClick={() => setCreateOpen(false)}>
                 Cancel
-              </button>
-              <button type="button" className="otc-btn otc-btn-accent" onClick={() => void openCreateTemplate()}>
+              </Button>
+              <Button type="button" onClick={() => void openCreateTemplate()}>
                 Create
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -951,14 +954,14 @@ export function StructureTypeConfigPage({
               />
               <input className="otc-input" placeholder="code" value={newDimCode} onChange={(e) => setNewDimCode(e.target.value)} />
               <input className="otc-input" placeholder="label" value={newDimLabel} onChange={(e) => setNewDimLabel(e.target.value)} />
-              <button type="button" className="otc-btn otc-btn-accent otc-btn-sm" onClick={() => void addDimRow()}>
+              <Button type="button" size="sm" onClick={() => void addDimRow()}>
                 Add
-              </button>
+              </Button>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </PageSection>
   )
 }
 
@@ -1087,9 +1090,10 @@ function TemplateMetaEditor({
         </div>
       )}
       <div className="otc-meta-actions">
-        <button
+        <Button
           type="button"
-          className="otc-btn otc-btn-ghost otc-btn-sm"
+          variant="ghost"
+          size="sm"
           onClick={() =>
             setDetail({
               ...detail,
@@ -1101,10 +1105,10 @@ function TemplateMetaEditor({
           }
         >
           + Add parameter
-        </button>
-        <button type="button" className="otc-btn otc-btn-accent otc-btn-sm" onClick={onSave}>
+        </Button>
+        <Button type="button" size="sm" onClick={onSave}>
           Save
-        </button>
+        </Button>
       </div>
     </>
   )

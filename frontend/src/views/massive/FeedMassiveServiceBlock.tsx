@@ -1,4 +1,6 @@
 import { useRef, type ReactNode, type MouseEvent } from 'react'
+import { LampGlyphSlot } from '@/components/shared/lamp-indicator'
+import { Button } from '@/components/ui/button'
 import type { ChecklistRow } from '../massiveFeedChecklistRows'
 import { SettingsSidebarLampGlyph } from '../settings/settingsSidebarLampGlyphs'
 import {
@@ -22,8 +24,8 @@ function lampClass(s: EffectiveServiceStatus): string {
   return 'feed-massive-svc-lamp feed-massive-svc-lamp--fail'
 }
 
-function titleInlineLampClass(lamp: MassiveSidebarLamp): string {
-  if (lamp === 'tier') return 'tier'
+function sidebarLampToGlyph(lamp: MassiveSidebarLamp): 'green' | 'yellow' | 'red' | 'gray' {
+  if (lamp === 'tier') return 'gray'
   return lamp
 }
 
@@ -109,13 +111,12 @@ export function FeedMassiveServiceBlock({
       <div className="feed-massive-svc-toolbar">
         {checklistRow ? (
           <>
-            <span
-              className={`title-inline-lamp lamp-icon ${titleInlineLampClass(sidebarLamp)}`}
+            <LampGlyphSlot
+              lamp={sidebarLampToGlyph(sidebarLamp)}
               title={`${statusWords} — ${shortServiceLabel(checklistRow)}`}
-              aria-hidden
             >
               <SettingsSidebarLampGlyph id={checklistRow.id} />
-            </span>
+            </LampGlyphSlot>
             <span className="feed-massive-svc-cap-name">{shortServiceLabel(checklistRow)}</span>
             <span className="feed-massive-svc-impl-status" aria-label={`Implementation status: ${statusWords}`}>
               {statusWords}
@@ -132,9 +133,9 @@ export function FeedMassiveServiceBlock({
           </>
         )}
         {showHelp ? (
-          <button type="button" className="btn btn-secondary feed-massive-svc-help-btn" onClick={handleHelp}>
+          <Button variant="secondary" className="feed-massive-svc-help-btn" type="button" onClick={handleHelp}>
             Help
-          </button>
+          </Button>
         ) : null}
       </div>
       <div

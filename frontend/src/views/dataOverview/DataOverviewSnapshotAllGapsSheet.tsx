@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { OptionSnapshotsContractsGapResult } from '../../api'
 import type { DataOverviewOptionJobsBarHandle } from './DataOverviewOptionJobsBar'
+import { Button } from '@/components/ui/button'
 
 export function DataOverviewSnapshotAllGapsSheet({
   open,
@@ -100,9 +101,9 @@ export function DataOverviewSnapshotAllGapsSheet({
           <h3 id="data-overview-snapshot-all-gaps-title" className="ref-jobs-sheet-title">
             All snapshot gaps
           </h3>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Close">
+          <Button variant="secondary" size="sm" type="button" onClick={onClose} aria-label="Close">
             Close
-          </button>
+          </Button>
         </div>
 
         <p className="ref-jobs-sheet-meta">
@@ -135,15 +136,10 @@ export function DataOverviewSnapshotAllGapsSheet({
                 <article key={symU} className="data-overview-all-gaps-sheet__sym">
                   <h4 className="data-overview-all-gaps-sheet__sym-h">
                     <code>{symU}</code>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      style={{ marginLeft: 'var(--space-2)' }}
-                      title="Per-contract column refresh for incomplete IV / Greeks / OI (capped per job)."
-                      onClick={() => void runSnapshotColumn(symU)}
+                    <Button variant="secondary" size="sm" type="button" style={{ marginLeft: 'var(--space-2)' }} title="Per-contract column refresh for incomplete IV / Greeks / OI (capped per job)." onClick={() => void runSnapshotColumn(symU)}
                     >
                       Fill column data
-                    </button>
+                    </Button>
                   </h4>
                   {ex.length === 0 ? (
                     <p className="data-overview-gap-sheet__muted">No per-expiry rows.</p>
@@ -170,13 +166,10 @@ export function DataOverviewSnapshotAllGapsSheet({
                               <td>{row.gap?.toLocaleString() ?? '—'}</td>
                               <td>
                                 {row.gap != null && row.gap > 0 ? (
-                                  <button
-                                    type="button"
-                                    className="btn btn-secondary btn-sm"
-                                    onClick={() => void runChainExpiry(symU, row.expiry)}
+                                  <Button variant="secondary" size="sm" type="button" onClick={() => void runChainExpiry(symU, row.expiry)}
                                   >
                                     Fill row gap
-                                  </button>
+                                  </Button>
                                 ) : (
                                   <span className="data-overview-gap-sheet__muted">—</span>
                                 )}

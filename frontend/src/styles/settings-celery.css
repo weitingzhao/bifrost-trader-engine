@@ -416,8 +416,9 @@
 }
 
 /* Embedded Daemon/Celery under Settings: don't let grid/flex min-content widen the whole page */
-.settings-main > .settings-page-card.celery-page--embedded,
-.settings-main > .settings-page-card.daemon-status-page--embedded {
+.settings-main > #settings-celery-control,
+.settings-main > .daemon-status-page--embedded,
+.settings-main > .massive-api-status-page--embedded {
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
@@ -710,52 +711,8 @@
 }
 
 /* ==========================================================================
-   2. Settings Page Header, Actions & Buttons
+   2. Settings Page Buttons (header/card shell → SettingsPageCard / SettingsPageHeader)
    ========================================================================== */
-
-.settings-page-card {
-  padding: 0;
-  background: transparent;
-  border: none;
-  box-shadow: none;
-}
-
-.settings-page-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-5);
-  padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--color-border);
-}
-
-/* Celery control: title block + Ops auth on one row; auth right-aligned */
-.settings-page-header--celery {
-  align-items: flex-start;
-}
-
-.settings-page-header--celery .settings-page-title-group {
-  flex: 1;
-  min-width: 0;
-}
-
-.settings-page-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-}
-
-.settings-page .settings-page-actions .btn-resume {
-  padding: 0.4rem 1.2rem;
-  font-size: var(--text-body);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  border-radius: 8px;
-  transition: all var(--transition-fast);
-}
 
 /* Settings page: buttons match System Status compact style */
 .settings-page .btn-resume,
@@ -896,13 +853,6 @@
 /* ==========================================================================
    4. Settings Page Titles & Messages
    ========================================================================== */
-
-/* Settings page: ? icon tooltip (hover to show) */
-.settings-page-title-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
 
 .settings-page-subtitle {
   margin: 0;
@@ -2150,12 +2100,6 @@ button.dashboard-queue-summary-status-console-nav:focus-visible {
 /* ==========================================================================
    8. Massive API Status Page (embedded in Settings)
    ========================================================================== */
-
-.settings-main > .settings-page-card.massive-api-status-page--embedded {
-  min-width: 0;
-  max-width: 100%;
-  box-sizing: border-box;
-}
 
 /* ==========================================================================
    8b. Architecture APIs page (Monitor + Docs + Ops)
@@ -4372,10 +4316,6 @@ button.dashboard-queue-summary-totals-queue-clear:focus-visible {
   }
   .dashboard-console-selector {
     flex-direction: column;
-  }
-  .settings-page-header--celery {
-    flex-direction: column;
-    align-items: stretch;
   }
   .dashboard-auth-bar--celery-header {
     max-width: none;

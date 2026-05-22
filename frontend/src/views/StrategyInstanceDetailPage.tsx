@@ -19,6 +19,7 @@ import { InstancePnLStrip } from './strategy/instanceDetail/InstancePnLStrip'
 import { InstanceExecutionsPanel } from './strategy/instanceDetail/InstanceExecutionsPanel'
 import { computeInstanceExecDerivedNetPnl } from './strategy/instanceDetail/instanceDetailPnlMetrics'
 import { InstanceKlineSection, type InstanceKlineNavRequest } from './strategy/instanceDetail/InstanceKlineSection'
+import { PageSection } from '@/components/shared/page-section'
 
 export interface StrategyInstanceDetailPageProps {
   strategyInstanceId: number
@@ -277,8 +278,8 @@ export function StrategyInstanceDetailPage({
     return merged
   }, [executionsFinalForInstance, structure, status?.portfolio?.accounts])
 
-  return (
-    <div className={`${embedded ? '' : 'card process-section '}instance-detail-page${embedded ? ' instance-detail-page-embedded' : ''}`}>
+  const pageBody = (
+    <>
       {instanceLoading ? (
         <p>Loading instance…</p>
       ) : instance == null ? (
@@ -352,6 +353,12 @@ export function StrategyInstanceDetailPage({
           />
         </>
       )}
-    </div>
+    </>
   )
+
+  if (embedded) {
+    return <div className="instance-detail-page instance-detail-page-embedded">{pageBody}</div>
+  }
+
+  return <PageSection className="instance-detail-page">{pageBody}</PageSection>
 }

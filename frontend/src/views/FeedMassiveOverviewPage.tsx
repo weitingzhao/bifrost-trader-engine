@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import type { StatusResponse } from '../types'
 import { fetchMassiveStatus } from '../api'
 import type { MassiveStatusResponse } from '../api'
-import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
+import { PageSection } from '@/components/shared/page-section'
+import { Button } from '@/components/ui/button'
 import { CAPABILITY_GROUP_LABELS, type CapabilityGroup, type ChecklistRow } from './massiveFeedChecklistRows'
 import {
   checklistEffectiveStatusLabel,
@@ -94,9 +96,9 @@ export function FeedMassiveOverviewPage({ status: _status, onGoToFeed }: FeedMas
           ))}
         </ul>
         <div className="feed-massive-overview-actions">
-          <a className="btn btn-secondary" href={`#${feedId}`}>
-            {openLabel}
-          </a>
+          <Button variant="secondary" asChild>
+            <a href={`#${feedId}`}>{openLabel}</a>
+          </Button>
         </div>
       </section>
     )
@@ -104,26 +106,23 @@ export function FeedMassiveOverviewPage({ status: _status, onGoToFeed }: FeedMas
 
   const stockGrouped = groupedStockChecklistRows()
   return (
-    <div className="card process-section feed-massive-option-page">
+    <PageSection className="feed-massive-option-page min-w-0">
       <div className="feed-massive-title-block">
         <div className="feed-massive-title-main">
-          <h2 className="page-title-with-tooltip" style={{ marginBottom: 0 }}>
-            {onGoToFeed ? (
-              <>
-                <button type="button" className="page-title-breadcrumb-link" onClick={onGoToFeed} aria-label="Go to Feed">
-                  Feed
-                </button>
-                {' / '}
-              </>
+          <SectionPageTitle
+            menu="Feed"
+            pageTitle="Massive Overview"
+            onMenuClick={onGoToFeed}
+            menuNavigateAriaLabel="Go to Feed"
+            infoText="Summary of Polygon / Massive capabilities for Stocks, Options, and shared Common REST (Technical Indicators, Market Operations). Use the links below to open each feed page."
+            style={{ marginBottom: 0 }}
+          >
+            {configured ? (
+              <span className="feed-massive-delay-pill" title={massiveStatus?.delay_notice}>
+                Delayed feed
+              </span>
             ) : null}
-            Massive Overview{' '}
-            <InfoTooltip text="Summary of Polygon / Massive capabilities for Stocks, Options, and shared Common REST (Technical Indicators, Market Operations). Use the links below to open each feed page." />
-          </h2>
-          {configured && (
-            <span className="feed-massive-delay-pill" title={massiveStatus?.delay_notice}>
-              Delayed feed
-            </span>
-          )}
+          </SectionPageTitle>
         </div>
       </div>
 
@@ -176,9 +175,9 @@ export function FeedMassiveOverviewPage({ status: _status, onGoToFeed }: FeedMas
             ))}
           </ul>
           <div className="feed-massive-overview-actions">
-            <a className="btn btn-secondary" href={`#${FEED_MASSIVE_STOCK_ID}`}>
-              Open Massive Stock
-            </a>
+            <Button variant="secondary" asChild>
+              <a href={`#${FEED_MASSIVE_STOCK_ID}`}>Open Massive Stock</a>
+            </Button>
           </div>
         </section>
 
@@ -189,6 +188,6 @@ export function FeedMassiveOverviewPage({ status: _status, onGoToFeed }: FeedMas
       <p className="feed-massive-overview-footnote">
         Bookmark this overview: <code>#{FEED_MASSIVE_OVERVIEW_ID}</code>
       </p>
-    </div>
+    </PageSection>
   )
 }

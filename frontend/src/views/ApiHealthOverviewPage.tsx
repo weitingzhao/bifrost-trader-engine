@@ -14,6 +14,9 @@ import { InfoTooltip } from '../components/InfoTooltip'
 import { normalizeUtilizedServices, type UtilizedServiceRow } from '../utils/utilizedServices'
 import { ApiConfiguredRoutesSection } from './apiOverview/ApiConfiguredRoutesSection'
 import { publicEnv } from '@/lib/publicEnv'
+import { SettingsPageCard } from './settings/SettingsPageCard'
+import { SettingsPageGroups } from './settings/SettingsPageGroups'
+import { SettingsSection } from './settings/SettingsSection'
 
 export interface ApiHealthOverviewPageProps {
   embeddedInSettings?: boolean
@@ -606,10 +609,6 @@ export function ApiHealthOverviewPage({ embeddedInSettings }: ApiHealthOverviewP
     return () => window.clearInterval(t)
   }, [resolved, refresh])
 
-  const wrapClass = embeddedInSettings
-    ? 'settings-page-card massive-api-status-page massive-api-status-page--embedded api-health-overview'
-    : 'settings-page-card massive-api-status-page api-health-overview'
-
   const displayDev =
     devCol ??
     (resolved?.dev
@@ -622,14 +621,14 @@ export function ApiHealthOverviewPage({ embeddedInSettings }: ApiHealthOverviewP
       : null)
 
   return (
-    <div className={wrapClass}>
-      <div className="server-groups settings-page-groups">
-        <section className="replay-section" aria-labelledby="services-overview-head">
+    <SettingsPageCard embedded={embeddedInSettings} className="massive-api-status-page api-health-overview">
+      <SettingsPageGroups className="server-groups">
+        <SettingsSection aria-labelledby="services-overview-head">
           <div className="system-tab-panel">
             <div className="daemon-header">
               <div className="daemon-header-main daemon-header-with-lamp">
                 <div>
-                  <h2 id="services-overview-head" className="daemon-card-title page-title-with-tooltip">
+                  <h2 id="services-overview-head" className="daemon-card-title inline-flex flex-wrap items-center gap-2">
                     Services Overview
                     <InfoTooltip text="Configured routes from YAML utilized.services (GET /health), and live probes for Dev vs Prod. The app uses the same routing rules so a dead dev stack does not break the UI when services are declared prod. Requests time out per probe. Override bases with VITE_DEV_API_ORIGIN and VITE_PROD_API_ORIGIN." />
                   </h2>
@@ -707,9 +706,9 @@ export function ApiHealthOverviewPage({ embeddedInSettings }: ApiHealthOverviewP
               </>
             )}
           </div>
-        </section>
-      </div>
-    </div>
+        </SettingsSection>
+      </SettingsPageGroups>
+    </SettingsPageCard>
   )
 }
 

@@ -28,6 +28,7 @@ import {
   type OptionsFocusTableId,
   showFocusTable,
 } from './optionFocusDataset'
+import { Button } from '@/components/ui/button'
 import {
   DEFAULT_OPTION_MIN_PERIOD,
   type OptionMinIntradayPeriodValue,
@@ -791,7 +792,7 @@ export function DataOverviewWatchlistOptions({
       {showWatchlistSummary ? (
         <details open className="replay-section data-overview-watchlist-summary" style={{ marginBottom: 'var(--space-3)' }}>
           <summary
-            className="page-title-with-tooltip data-overview-watchlist-summary__summary"
+            className="m-0 inline-flex flex-wrap items-center gap-2 text-[length:var(--text-body)] font-semibold tracking-tight text-foreground data-overview-watchlist-summary__summary"
             style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)', cursor: 'pointer' }}
           >
             Watchlist summary
@@ -1192,23 +1193,17 @@ export function DataOverviewWatchlistOptions({
                             {r.symbol}
                           </button>
                           {focusDataset === 'option_snapshots' ? (
-                            <button
-                              type="button"
-                              className="data-overview-wl-matrix__sym-detail-btn"
-                              onClick={() => setSnapshotQualitySymbol(r.symbol)}
+                            <Button variant="secondary" className="data-overview-wl-matrix__sym-detail-btn" type="button" onClick={() => setSnapshotQualitySymbol(r.symbol)}
                               title="Open snapshot quality detail"
                               aria-label={`Snapshot quality detail for ${r.symbol}`}
                             >
                               ↗
-                            </button>
+                            </Button>
                           ) : null}
                           {(focusDataset === 'option_day' ||
                             focusDataset === 'option_min' ||
                             focusDataset === 'option_contracts') ? (
-                            <button
-                              type="button"
-                              className="data-overview-wl-matrix__sym-detail-btn"
-                              onClick={() => {
+                            <Button variant="secondary" className="data-overview-wl-matrix__sym-detail-btn" type="button" onClick={() => {
                                 if (focusDataset === 'option_contracts') {
                                   setBarQualityTable('option_day')
                                 } else {
@@ -1228,7 +1223,7 @@ export function DataOverviewWatchlistOptions({
                               }
                             >
                               ↗
-                            </button>
+                            </Button>
                           ) : null}
                         </>
                       ) : (

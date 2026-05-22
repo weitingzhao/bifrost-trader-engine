@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '@/components/ui/button'
 import {
   fetchBarQualityDetail,
   type BarQualityDailyRow,
@@ -200,9 +201,9 @@ export function DataOverviewBarQualitySheet({ open, onClose, symbol, table }: Pr
           <h3 id="data-overview-bar-quality-title" className="ref-jobs-sheet-title">
             Bar Quality — <code>{table}</code>{symbol ? ` · ${symbol}` : ''}
           </h3>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Close">
+          <Button variant="secondary" size="sm" type="button" onClick={onClose} aria-label="Close">
             Close
-          </button>
+          </Button>
         </div>
 
         <div className="ref-jobs-sheet-body">

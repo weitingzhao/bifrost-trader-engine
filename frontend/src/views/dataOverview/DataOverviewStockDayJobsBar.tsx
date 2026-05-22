@@ -10,6 +10,7 @@ import {
   type WatchlistDbCoverageSymbolRow,
 } from '../../api'
 import { formatRefJobIdShort, summarizeRefJobResult } from '../massive/stockReferenceJobHelpers'
+import { Button } from '@/components/ui/button'
 
 const MAX_TRACKED = 128
 const MAX_CONCURRENT_JOB_SSE = 8
@@ -176,7 +177,7 @@ function AllGapsSheet({ open, onClose, gapBySymbol, poolSymbols, onOpenQualitySh
           <h3 id="stock-day-all-gaps-title" className="ref-jobs-sheet-title">
             stock_day — All gaps by symbol
           </h3>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Close">Close</button>
+          <Button variant="secondary" size="sm" type="button" onClick={onClose} aria-label="Close">Close</Button>
         </div>
         <div className="ref-jobs-sheet-body">
           {checkedSymbols.length > 0 ? (
@@ -228,13 +229,10 @@ function AllGapsSheet({ open, onClose, gapBySymbol, poolSymbols, onOpenQualitySh
                         <td style={{ fontSize: 'var(--text-caption)', fontVariantNumeric: 'tabular-nums' }}>{g.compared_at?.slice(0, 16) ?? '—'}</td>
                         <td>
                           {onOpenQualitySheet && (
-                            <button
-                              type="button"
-                              className="data-overview-wl-matrix__sym-detail-btn"
-                              onClick={() => onOpenQualitySheet(sym)}
+                            <Button variant="secondary" className="data-overview-wl-matrix__sym-detail-btn" type="button" onClick={() => onOpenQualitySheet(sym)}
                               title={`Open daily bar quality for ${sym}`}
                               aria-label={`Bar quality detail for ${sym}`}
-                            >↗</button>
+                            >↗</Button>
                           )}
                         </td>
                       </tr>
@@ -339,7 +337,7 @@ function StockDayJobsSheet({ open, onClose, items, onClearCompleted, onClearAll,
       >
         <div className="ref-jobs-sheet-header">
           <h3 id="stock-day-jobs-title" className="ref-jobs-sheet-title">stock_day coverage jobs</h3>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Close">Close</button>
+          <Button variant="secondary" size="sm" type="button" onClick={onClose} aria-label="Close">Close</Button>
         </div>
         <p className="ref-jobs-sheet-meta">
           Session-only tracking for stock_day jobs enqueued from Data Overview. Jobs update via stream; use Refresh coverage to reload the watchlist matrix after jobs finish. Only the last {maxTracked} tracked rows are shown.
@@ -351,12 +349,12 @@ function StockDayJobsSheet({ open, onClose, items, onClearCompleted, onClearAll,
         )}
         <div className="ref-jobs-sheet-toolbar">
           {onRefreshCoverage && (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => void handleRefresh()} disabled={refreshBusy}>
+            <Button variant="secondary" size="sm" type="button" onClick={() => void handleRefresh()} disabled={refreshBusy}>
               {refreshBusy ? 'Refreshing…' : 'Refresh coverage'}
-            </button>
+            </Button>
           )}
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClearCompleted} disabled={!hasCompleted}>Clear completed</button>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClearAll} disabled={items.length === 0}>Clear all</button>
+          <Button variant="secondary" size="sm" type="button" onClick={onClearCompleted} disabled={!hasCompleted}>Clear completed</Button>
+          <Button variant="secondary" size="sm" type="button" onClick={onClearAll} disabled={items.length === 0}>Clear all</Button>
         </div>
         <div className="ref-jobs-sheet-table-wrap">
           {sorted.length === 0 ? (
@@ -390,10 +388,9 @@ function StockDayJobsSheet({ open, onClose, items, onClearCompleted, onClearAll,
                       <td className="ref-jobs-table-dedup">{item.deduplicated ? 'Yes' : '—'}</td>
                       <td className="ref-jobs-table-id-cell">
                         <code className="ref-jobs-table-job-id" title={jid || undefined}>{jid ? formatRefJobIdShort(jid) : '—'}</code>
-                        <button type="button" className="btn btn-secondary btn-sm ref-jobs-table-copy" disabled={!jid}
-                          onClick={() => { if (!jid) return; void navigator.clipboard?.writeText(jid).catch(() => {}) }}>
+                        <Button variant="secondary" size="sm" className="ref-jobs-table-copy" type="button" disabled={!jid} onClick={() => { if (!jid) return; void navigator.clipboard?.writeText(jid).catch(() => {}) }}>
                           Copy
-                        </button>
+                        </Button>
                       </td>
                       <td className="ref-jobs-table-summary">{item.activitySummary ?? summarizeRefJobResult(item.job)}</td>
                       <td className="ref-jobs-table-details-cell">

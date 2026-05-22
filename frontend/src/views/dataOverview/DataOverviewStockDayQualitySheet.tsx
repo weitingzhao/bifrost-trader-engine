@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { StockDayQualityDetailResponse, StockDayQualityDailyRow } from '../../api'
+import { Button } from '@/components/ui/button'
 
 interface Props {
   open: boolean
@@ -87,9 +88,9 @@ export function DataOverviewStockDayQualitySheet({ open, onClose, symbol, data, 
           <h3 id="data-overview-stock-day-quality-title" className="ref-jobs-sheet-title">
             Bar Quality — <code>stock_day</code>{symbol ? ` · ${symbol}` : ''}
           </h3>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Close">
+          <Button variant="secondary" size="sm" type="button" onClick={onClose} aria-label="Close">
             Close
-          </button>
+          </Button>
         </div>
 
         <div className="ref-jobs-sheet-body">

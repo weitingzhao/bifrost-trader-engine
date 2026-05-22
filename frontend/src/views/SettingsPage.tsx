@@ -58,6 +58,16 @@ import { CeleryControlPage } from './CeleryControlPage'
 import { MarketIngestOpsPage } from './MarketIngestOpsPage'
 import { ApiHealthOverviewPage, computeApiHealthAggregateLamp } from './ApiHealthOverviewPage'
 import { SettingsShell } from './settings/SettingsShell'
+import { SettingsPageCard } from './settings/SettingsPageCard'
+import {
+  SettingsPageActions,
+  SettingsPageHeader,
+  SettingsPageTitle,
+  SettingsPageSubtitle,
+} from './settings/SettingsPageHeader'
+import { SettingsPageGroups } from './settings/SettingsPageGroups'
+import { SettingsStatusMessage } from './settings/SettingsStatusMessage'
+import { Button } from '@/components/ui/button'
 import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
 import { DataOverviewSummaryPage } from './DataOverviewSummaryPage'
 import { DataOverviewDetailPage } from './DataOverviewDetailPage'
@@ -571,27 +581,24 @@ export function SettingsPage({
           )}
         </>
       ) : (
-        <div className="settings-page-card">
-          <div className="settings-page-header">
-            <div className="settings-page-title-group">
-              <h2 className="settings-page-title">
-                Settings
-                <InfoTooltip text="Configure daemon-related parameters; written to DB and read by daemon on start or next heartbeat." />
-              </h2>
-              <p className="settings-page-subtitle">Configure daemon, IB connection and market calendar</p>
-            </div>
-            <div className="settings-page-actions">
-              {msg.text && (
-                <span className={`settings-page-msg ${msg.isErr ? 'msg-error' : 'msg-ok'}`}>
-                  {msg.text}
-                </span>
-              )}
-              <button type="button" className="btn-resume settings-save-btn" onClick={onSave}>
-                Save settings
-              </button>
-            </div>
-          </div>
-          <div className="daemon-groups settings-page-groups">
+        <SettingsPageCard>
+          <SettingsPageHeader
+            actions={
+              <SettingsPageActions>
+                {msg.text ? <SettingsStatusMessage error={msg.isErr}>{msg.text}</SettingsStatusMessage> : null}
+                <Button type="button" onClick={onSave}>
+                  Save settings
+                </Button>
+              </SettingsPageActions>
+            }
+          >
+            <SettingsPageTitle>
+              Settings
+              <InfoTooltip text="Configure daemon-related parameters; written to DB and read by daemon on start or next heartbeat." />
+            </SettingsPageTitle>
+            <SettingsPageSubtitle>Configure daemon, IB connection and market calendar</SettingsPageSubtitle>
+          </SettingsPageHeader>
+          <SettingsPageGroups className="daemon-groups">
             <HeartbeatSection
               heartbeatIntervalSec={heartbeatIntervalSec}
               setHeartbeatIntervalSec={setHeartbeatIntervalSec}
@@ -630,8 +637,8 @@ export function SettingsPage({
               setFlexAccounts={setFlexAccounts}
               activeSubId={activeSubId}
             />
-          </div>
-        </div>
+          </SettingsPageGroups>
+        </SettingsPageCard>
       )}
     </SettingsShell>
   )

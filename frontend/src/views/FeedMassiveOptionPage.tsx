@@ -21,7 +21,8 @@ import type {
   MassiveOptionExpirationsDebug,
   ContractsCoverageResponse,
 } from '../api'
-import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle } from '../components/SectionPageTitle'
+import { PageSection } from '@/components/shared/page-section'
 import type { ChecklistRow } from './massiveFeedChecklistRows'
 import { CAPABILITY_GROUP_LABELS, CAPABILITY_GROUP_ORDER, type CapabilityGroup } from './massiveFeedChecklistRows'
 import { feedMassiveSvcAnchorId } from './massive/feedMassiveAnchors'
@@ -40,6 +41,7 @@ import type { EffectiveServiceStatus } from './massive/FeedMassiveServiceBlock'
 import { parseFeedMassiveSvcFromHash, parseFeedMassiveTabFromHash } from './massive/feedMassiveTabUtils'
 import { AppSelect } from '../components/AppSelect'
 import { baseUrlForStaticAssets } from '@/lib/publicEnv'
+import { Button } from '@/components/ui/button'
 
 const WS_VERIFY_CMD = 'python scripts/verify_massive_options_ws.py --config config/config.dev.yaml'
 
@@ -1188,43 +1190,23 @@ export function FeedMassiveOptionPage({
   }).length
 
   return (
-    <div className="card process-section feed-massive-option-page">
+    <PageSection className="feed-massive-option-page min-w-0">
       <div className="feed-massive-title-block">
         <div className="feed-massive-title-main">
-          <h2 className="page-title-with-tooltip" style={{ marginBottom: 0 }}>
-            {onGoToFeed ? (
-              <>
-                <button
-                  type="button"
-                  className="page-title-breadcrumb-link"
-                  onClick={onGoToFeed}
-                  aria-label="Go to Feed"
-                >
-                  Feed
-                </button>
-                {' / '}
-              </>
-            ) : onGoToScreener ? (
-              <>
-                <button
-                  type="button"
-                  className="page-title-breadcrumb-link"
-                  onClick={onGoToScreener}
-                  aria-label="Go to Screener"
-                >
-                  Research
-                </button>
-                {' / '}
-              </>
+          <SectionPageTitle
+            menu={onGoToScreener ? 'Research' : 'Feed'}
+            pageTitle={breadcrumbLabel}
+            onMenuClick={onGoToScreener ?? onGoToFeed}
+            menuNavigateAriaLabel={onGoToScreener ? 'Go to Screener' : 'Go to Feed'}
+            infoText="Enqueue Massive REST sync on the Celery `massive` queue; quotes are delayed (tier-dependent). Verify reads latest rows from PostgreSQL option_snapshots (source=massive). Worker implements feed_option_snapshots, feed_options_aggregate, and oi placeholder; other kinds may fail until implemented."
+            style={{ marginBottom: 0 }}
+          >
+            {configured ? (
+              <span className="feed-massive-delay-pill" title={massiveStatus?.delay_notice}>
+                Delayed feed
+              </span>
             ) : null}
-            {breadcrumbLabel}{' '}
-            <InfoTooltip text="Enqueue Massive REST sync on the Celery `massive` queue; quotes are delayed (tier-dependent). Verify reads latest rows from PostgreSQL option_snapshots (source=massive). Worker implements feed_option_snapshots, feed_options_aggregate, and oi placeholder; other kinds may fail until implemented." />
-          </h2>
-          {configured && (
-            <span className="feed-massive-delay-pill" title={massiveStatus?.delay_notice}>
-              Delayed feed
-            </span>
-          )}
+          </SectionPageTitle>
         </div>
       </div>
 
@@ -1266,19 +1248,15 @@ export function FeedMassiveOptionPage({
             </p>
           </div>
           <div className="feed-massive-api-coverage-actions">
-            <a
+            <Button variant="secondary" asChild><a
               href={MASSIVE_OPTION_COVERAGE_PLAN_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="btn-secondary"
+              
             >
               Open in new tab
-            </a>
-            <button
-              type="button"
-              className="btn-secondary"
-              disabled={apiCoverageSyncBusy}
-              onClick={async () => {
+            </a></Button>
+            <Button variant="secondary" type="button" disabled={apiCoverageSyncBusy} onClick={async () => {
                 setApiCoverageSyncBusy(true)
                 setApiCoverageSyncMsg(null)
                 try {
@@ -1296,15 +1274,12 @@ export function FeedMassiveOptionPage({
               }}
             >
               {apiCoverageSyncBusy ? 'Syncing…' : 'Sync HTML'}
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => setApiCoverageOpen(v => !v)}
+            </Button>
+            <Button variant="secondary" type="button" onClick={() => setApiCoverageOpen(v => !v)}
               aria-expanded={apiCoverageOpen}
             >
               {apiCoverageOpen ? 'Hide embedded viewer' : 'Show embedded viewer'}
-            </button>
+            </Button>
           </div>
         </div>
         {apiCoverageSyncMsg ? (
@@ -1583,12 +1558,12 @@ export function FeedMassiveOptionPage({
                     </label>
                   </div>
                   <div style={{ marginTop: 'var(--space-3)', display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
-                    <button type="button" className="btn btn-secondary" disabled={ctListBusy || !configured} onClick={() => runCtContractsList()}>
+                    <Button variant="secondary" type="button" disabled={ctListBusy || !configured} onClick={() => runCtContractsList()}>
                       {ctListBusy ? 'Running\u2026' : 'Fetch contracts'}
-                    </button>
-                    <button type="button" className="btn btn-primary" disabled={ctCoverageBusy} onClick={() => loadCtCoverage()}>
+                    </Button>
+                    <Button variant="default" type="button" disabled={ctCoverageBusy} onClick={() => loadCtCoverage()}>
                       {ctCoverageBusy ? 'Loading\u2026' : 'Check Coverage'}
-                    </button>
+                    </Button>
                   </div>
                   {ctListErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ctListErr}</p> : null}
                   {ctCoverage && ctCoverage.ok && ctCoverage.total != null && ctCoverage.total > 0 ? (
@@ -1625,9 +1600,9 @@ export function FeedMassiveOptionPage({
                       placeholder="O:AAPL211119C00085000" autoComplete="off"
                     />
                   </label>
-                  <button type="button" className="btn btn-secondary" disabled={ctDetailBusy || !configured} onClick={() => runCtContractDetail()}>
+                  <Button variant="secondary" type="button" disabled={ctDetailBusy || !configured} onClick={() => runCtContractDetail()}>
                     {ctDetailBusy ? 'Running\u2026' : 'Fetch overview'}
-                  </button>
+                  </Button>
                   {ctDetailErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ctDetailErr}</p> : null}
                   {ctDetailResult ? (
                     <div style={{ marginTop: 'var(--space-3)' }}>
@@ -1659,9 +1634,9 @@ export function FeedMassiveOptionPage({
                     </label>
                   </div>
                   <div style={{ marginTop: 'var(--space-3)' }}>
-                    <button type="button" className="btn btn-primary" disabled={ctCoverageBusy} onClick={() => loadCtCoverage()}>
+                    <Button variant="default" type="button" disabled={ctCoverageBusy} onClick={() => loadCtCoverage()}>
                       {ctCoverageBusy ? 'Loading\u2026' : 'Check Coverage'}
-                    </button>
+                    </Button>
                   </div>
                   {ctCoverage && ctCoverage.ok && ctCoverage.total != null && ctCoverage.total > 0 ? (
                     <div style={{ marginTop: 'var(--space-3)' }}>
@@ -1711,9 +1686,9 @@ export function FeedMassiveOptionPage({
                     </label>
                   </div>
                   <div style={{ marginTop: 'var(--space-3)' }}>
-                    <button type="button" className="btn btn-secondary" disabled={ctSnapBusy || !configured} onClick={() => runCtSnapshotLink()}>
+                    <Button variant="secondary" type="button" disabled={ctSnapBusy || !configured} onClick={() => runCtSnapshotLink()}>
                       {ctSnapBusy ? 'Running\u2026' : 'Fetch Contract Snapshot'}
-                    </button>
+                    </Button>
                   </div>
                   {ctSnapErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ctSnapErr}</p> : null}
                   {ctSnapResult ? (
@@ -1878,9 +1853,9 @@ export function FeedMassiveOptionPage({
                     </label>
                   </div>
                   <div style={{ marginTop: 'var(--space-3)' }}>
-                    <button type="button" className="btn btn-secondary" disabled={aggBusy || !configured} onClick={() => runAggregates()}>
+                    <Button variant="secondary" type="button" disabled={aggBusy || !configured} onClick={() => runAggregates()}>
                       {aggBusy ? 'Running\u2026' : 'Enqueue Custom Bars (OHLC)'}
-                    </button>
+                    </Button>
                   </div>
                   {aggErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{aggErr}</p> : null}
                 </div>
@@ -1909,9 +1884,9 @@ export function FeedMassiveOptionPage({
                     </label>
                   </div>
                   <div style={{ marginTop: 'var(--space-3)' }}>
-                    <button type="button" className="btn btn-secondary" disabled={ocBusy || !configured} onClick={() => runOpenClose()}>
+                    <Button variant="secondary" type="button" disabled={ocBusy || !configured} onClick={() => runOpenClose()}>
                       {ocBusy ? 'Running\u2026' : 'Enqueue Daily Ticker Summary (OHLC)'}
-                    </button>
+                    </Button>
                   </div>
                   {ocErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ocErr}</p> : null}
                 </div>
@@ -1936,9 +1911,9 @@ export function FeedMassiveOptionPage({
                     </label>
                   </div>
                   <div style={{ marginTop: 'var(--space-3)' }}>
-                    <button type="button" className="btn btn-secondary" disabled={prevBusy || !configured} onClick={() => runPrevDay()}>
+                    <Button variant="secondary" type="button" disabled={prevBusy || !configured} onClick={() => runPrevDay()}>
                       {prevBusy ? 'Running\u2026' : 'Enqueue Previous Day Bar (OHLC)'}
-                    </button>
+                    </Button>
                   </div>
                   {prevErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{prevErr}</p> : null}
                 </div>
@@ -1967,11 +1942,7 @@ export function FeedMassiveOptionPage({
             checklistRow={rSnap}
             evidence={jobEvidenceLine(latestJobForKind(jobs, 'feed_option_snapshots'))}
             testArea={
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={snapBusy || !configured}
-                onClick={() => runSnapshot()}
+              <Button variant="default" type="button" disabled={snapBusy || !configured} onClick={() => runSnapshot()}
               >
                 {snapBusy
                   ? 'Running…'
@@ -1982,7 +1953,7 @@ export function FeedMassiveOptionPage({
                           ? 'Option Contract Snapshot'
                           : 'Unified Snapshot'
                     }`}
-              </button>
+              </Button>
             }
           >
             <div className="feed-massive-card-head">
@@ -2443,9 +2414,9 @@ export function FeedMassiveOptionPage({
                     </label>
                   </div>
                   <div style={{ marginTop: 'var(--space-3)' }}>
-                    <button type="button" className="btn btn-secondary" disabled={tqHistTradesBusy || !configured || !massiveStatus?.trades_enabled} onClick={() => runTqHistTrades()}>
+                    <Button variant="secondary" type="button" disabled={tqHistTradesBusy || !configured || !massiveStatus?.trades_enabled} onClick={() => runTqHistTrades()}>
                       {tqHistTradesBusy ? 'Fetching\u2026' : 'Fetch Trades'}
-                    </button>
+                    </Button>
                   </div>
                   {tqHistTradesErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tqHistTradesErr}</p> : null}
                   {tqHistTradesResult ? (
@@ -2488,9 +2459,9 @@ export function FeedMassiveOptionPage({
                     </label>
                   </div>
                   <div style={{ marginTop: 'var(--space-3)' }}>
-                    <button type="button" className="btn btn-secondary" disabled={tqLastTradeBusy || !configured} onClick={() => runTqLastTrade()}>
+                    <Button variant="secondary" type="button" disabled={tqLastTradeBusy || !configured} onClick={() => runTqLastTrade()}>
                       {tqLastTradeBusy ? 'Fetching\u2026' : 'Fetch Last Trade'}
-                    </button>
+                    </Button>
                   </div>
                   {tqLastTradeErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tqLastTradeErr}</p> : null}
                   {tqLastTradeResult ? (
@@ -2556,9 +2527,9 @@ export function FeedMassiveOptionPage({
                     </label>
                   </div>
                   <div style={{ marginTop: 'var(--space-3)' }}>
-                    <button type="button" className="btn btn-secondary" disabled={tqHistQuotesBusy || !configured} onClick={() => runTqHistQuotes()}>
+                    <Button variant="secondary" type="button" disabled={tqHistQuotesBusy || !configured} onClick={() => runTqHistQuotes()}>
                       {tqHistQuotesBusy ? 'Fetching\u2026' : 'Fetch Quotes'}
-                    </button>
+                    </Button>
                   </div>
                   {tqHistQuotesErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tqHistQuotesErr}</p> : null}
                   {tqHistQuotesResult ? (
@@ -2674,9 +2645,9 @@ export function FeedMassiveOptionPage({
             <p className="feed-massive-agg-sub-endpoint"><code>WS channel: A.O:&#123;optionsTicker&#125;</code></p>
             <div className="feed-massive-ws-cmd-row">
               <code className="feed-massive-ws-cmd">python scripts/verify_massive_options_ws.py --config config/config.dev.yaml --channel &quot;A.O:SPY251219C00600000&quot;</code>
-              <button type="button" className="btn btn-xs btn-secondary" onClick={() => copyWsCommand('A.O:SPY251219C00600000')}>
+              <Button variant="secondary" size="sm" type="button" onClick={() => copyWsCommand('A.O:SPY251219C00600000')}>
                 {wsCopied === 'A.O:SPY251219C00600000' ? 'Copied' : 'Copy'}
-              </button>
+              </Button>
             </div>
           </FeedMassiveServiceBlock>
         </FeedMassiveCapabilityPanel>
@@ -2707,9 +2678,9 @@ export function FeedMassiveOptionPage({
             <p className="feed-massive-agg-sub-endpoint"><code>WS channel: AM.O:&#123;optionsTicker&#125;</code></p>
             <div className="feed-massive-ws-cmd-row">
               <code className="feed-massive-ws-cmd">python scripts/verify_massive_options_ws.py --config config/config.dev.yaml --channel &quot;AM.O:SPY251219C00600000&quot;</code>
-              <button type="button" className="btn btn-xs btn-secondary" onClick={() => copyWsCommand('AM.O:SPY251219C00600000')}>
+              <Button variant="secondary" size="sm" type="button" onClick={() => copyWsCommand('AM.O:SPY251219C00600000')}>
                 {wsCopied === 'AM.O:SPY251219C00600000' ? 'Copied' : 'Copy'}
-              </button>
+              </Button>
             </div>
           </FeedMassiveServiceBlock>
         </FeedMassiveCapabilityPanel>
@@ -2740,9 +2711,9 @@ export function FeedMassiveOptionPage({
             <p className="feed-massive-agg-sub-endpoint"><code>WS channel: Q.O:&#123;optionsTicker&#125;</code></p>
             <div className="feed-massive-ws-cmd-row">
               <code className="feed-massive-ws-cmd">python scripts/verify_massive_options_ws.py --config config/config.dev.yaml --channel &quot;Q.O:SPY251219C00600000&quot;</code>
-              <button type="button" className="btn btn-xs btn-secondary" onClick={() => copyWsCommand('Q.O:SPY251219C00600000')}>
+              <Button variant="secondary" size="sm" type="button" onClick={() => copyWsCommand('Q.O:SPY251219C00600000')}>
                 {wsCopied === 'Q.O:SPY251219C00600000' ? 'Copied' : 'Copy'}
-              </button>
+              </Button>
             </div>
           </FeedMassiveServiceBlock>
         </FeedMassiveCapabilityPanel>
@@ -2776,9 +2747,9 @@ export function FeedMassiveOptionPage({
             ) : null}
             <div className="feed-massive-ws-cmd-row">
               <code className="feed-massive-ws-cmd">python scripts/verify_massive_options_ws.py --config config/config.dev.yaml --channel &quot;T.O:SPY251219C00600000&quot;</code>
-              <button type="button" className="btn btn-xs btn-secondary" onClick={() => copyWsCommand('T.O:SPY251219C00600000')}>
+              <Button variant="secondary" size="sm" type="button" onClick={() => copyWsCommand('T.O:SPY251219C00600000')}>
                 {wsCopied === 'T.O:SPY251219C00600000' ? 'Copied' : 'Copy'}
-              </button>
+              </Button>
             </div>
           </FeedMassiveServiceBlock>
         </FeedMassiveCapabilityPanel>
@@ -2857,14 +2828,10 @@ export function FeedMassiveOptionPage({
                     <div style={{ marginTop: 'var(--space-2)' }}>
                       <div className="feed-massive-ws-sub-block">
                         <pre className="feed-massive-ws-cmd">{`python scripts/verify_massive_options_ws.py --config config/config.dev.yaml --channel "FMV.${fmvTicker.trim() || 'O:SPY251219C00600000'}"`}</pre>
-                        <button
-                          type="button"
-                          className="btn btn-xs btn-secondary"
-                          aria-label="Copy WebSocket verify command for FMV"
-                          onClick={() => copyWsCommand(`FMV.${fmvTicker.trim() || 'O:SPY251219C00600000'}`)}
+                        <Button variant="secondary" size="sm" type="button" aria-label="Copy WebSocket verify command for FMV" onClick={() => copyWsCommand(`FMV.${fmvTicker.trim() || 'O:SPY251219C00600000'}`)}
                         >
                           {wsCopied === `FMV.${fmvTicker.trim() || 'O:SPY251219C00600000'}` ? 'Copied' : 'Copy'}
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -2906,9 +2873,9 @@ export function FeedMassiveOptionPage({
             testArea={
               <div>
                 <pre className="feed-massive-ws-cmd">{WS_VERIFY_CMD}</pre>
-                <button type="button" className="btn btn-secondary" onClick={() => copyWsCommand()}>
+                <Button variant="secondary" type="button" onClick={() => copyWsCommand()}>
                   Copy command
-                </button>
+                </Button>
               </div>
             }
           >
@@ -3014,18 +2981,14 @@ export function FeedMassiveOptionPage({
                     autoComplete="off"
                   />
                 </label>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={refTestBusy || !configured}
-                  onClick={() => runRefExpirationsTest()}
+                <Button variant="default" type="button" disabled={refTestBusy || !configured} onClick={() => runRefExpirationsTest()}
                 >
                   {refTestBusy ? 'Running…' : 'Run expirations test'}
-                </button>
+                </Button>
                 {onGoToScreener ? (
-                  <button type="button" className="btn btn-secondary" onClick={onGoToScreener}>
+                  <Button variant="secondary" type="button" onClick={onGoToScreener}>
                     Open Option Discovery
-                  </button>
+                  </Button>
                 ) : null}
               </div>
             }
@@ -3115,9 +3078,9 @@ export function FeedMassiveOptionPage({
                     autoComplete="off"
                   />
                 </label>
-                <button type="button" className="btn btn-secondary" disabled={oiFetchBusy} onClick={() => runOiApiFetch()}>
+                <Button variant="secondary" type="button" disabled={oiFetchBusy} onClick={() => runOiApiFetch()}>
                   {oiFetchBusy ? 'Loading…' : 'GET option-oi'}
-                </button>
+                </Button>
               </div>
             }
           >
@@ -3134,14 +3097,10 @@ export function FeedMassiveOptionPage({
             </p>
           </FeedMassiveServiceBlock>
           <div className="feed-massive-actions-row">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              disabled={oiBusy || !configured}
-              onClick={() => runOi()}
+            <Button variant="secondary" type="button" disabled={oiBusy || !configured} onClick={() => runOi()}
             >
               {oiBusy ? 'Running…' : 'Enqueue OI job'}
-            </button>
+            </Button>
           </div>
           {oiErr ? (
             <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>
@@ -3180,12 +3139,12 @@ export function FeedMassiveOptionPage({
                     autoComplete="off"
                   />
                 </label>
-                <button type="button" className="btn btn-secondary" disabled={corpBusy || !configured} onClick={() => runCorpAction()}>
+                <Button variant="secondary" type="button" disabled={corpBusy || !configured} onClick={() => runCorpAction()}>
                   {corpBusy ? 'Running…' : 'Enqueue sync'}
-                </button>
-                <button type="button" className="btn btn-primary" disabled={corpDbLoading} onClick={() => loadCorpFromDb()}>
+                </Button>
+                <Button variant="default" type="button" disabled={corpDbLoading} onClick={() => loadCorpFromDb()}>
                   {corpDbLoading ? 'Loading…' : 'Load from DB'}
-                </button>
+                </Button>
               </div>
             }
           >
@@ -3239,6 +3198,6 @@ export function FeedMassiveOptionPage({
         </FeedMassiveCapabilityPanel>
 
       </div>
-    </div>
+    </PageSection>
   )
 }

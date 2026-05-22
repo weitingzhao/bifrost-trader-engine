@@ -19,6 +19,7 @@ import {
 } from './stockFocusDataset'
 import { DataOverviewStockDayJobsBar } from './DataOverviewStockDayJobsBar'
 import { DataOverviewStockDayQualitySheet } from './DataOverviewStockDayQualitySheet'
+import { Button } from '@/components/ui/button'
 
 const EMPTY_SD: WatchlistDbCoverageStockDay = {
   has_data: false,
@@ -280,7 +281,7 @@ export function DataOverviewWatchlistStocksSummaryTable({
   const utilRows = useMemo(() => buildStocksUtilitiesSummaryRows(wlRows), [wlRows])
   return (
     <div className="data-overview-stocks-summary-split">
-      <h4 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)' }}>
+      <h4 className="m-0 inline-flex flex-wrap items-center gap-2 text-[length:var(--text-body)] font-semibold tracking-tight text-foreground" style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)' }}>
         Watchlist bars
         <InfoTooltip text="Per-watchlist-symbol OHLC coverage (stock_day, stock_min)." />
       </h4>
@@ -289,7 +290,7 @@ export function DataOverviewWatchlistStocksSummaryTable({
         freshnessTooltip="Worst-case age across watchlist symbols for the latest bar or row activity."
       />
       <h4
-        className="page-title-with-tooltip"
+        className="m-0 inline-flex flex-wrap items-center gap-2 text-[length:var(--text-body)] font-semibold tracking-tight text-foreground"
         style={{ marginTop: 'var(--space-4)', marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)' }}
       >
         Utilities
@@ -315,7 +316,7 @@ export function DataOverviewStocksUtilitiesSection({
   const utilRows = useMemo(() => buildStocksUtilitiesSummaryRows(wlRows), [wlRows])
   return (
     <section className="replay-section" aria-labelledby="data-overview-stocks-util-head" style={{ marginBottom: 'var(--space-4)' }}>
-      <h3 id="data-overview-stocks-util-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
+      <h3 id="data-overview-stocks-util-head" className="m-0 inline-flex flex-wrap items-center gap-2 text-[length:var(--text-body)] font-semibold tracking-tight text-foreground" style={{ marginBottom: 'var(--space-2)' }}>
         Utilities
         <InfoTooltip text="PostgreSQL reference tables covering the full Massive stocks universe (not scoped to the watchlist). Coverage uses the watchlist as a convenience slice for per-symbol tables; ticker_types is one global dictionary." />
       </h3>
@@ -406,7 +407,7 @@ export function DataOverviewWatchlistStocks({
       {showWatchlistSummary ? (
         <details open className="replay-section data-overview-watchlist-summary" style={{ marginBottom: 'var(--space-3)' }}>
           <summary
-            className="page-title-with-tooltip data-overview-watchlist-summary__summary"
+            className="m-0 inline-flex flex-wrap items-center gap-2 text-[length:var(--text-body)] font-semibold tracking-tight text-foreground data-overview-watchlist-summary__summary"
             style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)', cursor: 'pointer' }}
           >
             Watchlist summary
@@ -517,13 +518,10 @@ export function DataOverviewWatchlistStocks({
                           >
                             {r.symbol}
                           </button>
-                          <button
-                            type="button"
-                            className="data-overview-wl-matrix__sym-detail-btn"
-                            onClick={() => void handleOpenQualitySheet(symU)}
+                          <Button variant="secondary" className="data-overview-wl-matrix__sym-detail-btn" type="button" onClick={() => void handleOpenQualitySheet(symU)}
                             title={`Open daily bar quality for ${r.symbol}`}
                             aria-label={`Bar quality detail for ${r.symbol}`}
-                          >↗</button>
+                          >↗</Button>
                         </th>
                         {show('stock_day') ? (
                           <>

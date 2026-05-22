@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { WinRateStructureRow, WinRateResponse } from '../api/strategy/strategyInstances'
 import { fetchStrategyWinRate } from '../api'
+import { PageSection } from '@/components/shared/page-section'
 import { SectionPageTitle } from '../components/SectionPageTitle'
+import { Button } from '@/components/ui/button'
 import { fmtUsd, fmtUsdRound0 } from '../utils/format'
 
 export type StrategyWinRateGoToInstancesOptions = {
@@ -116,7 +118,7 @@ function WinRateStructureCard({
   return (
     <button
       type="button"
-      className={`strategy-win-rate-card${canDrill ? ' strategy-win-rate-card--clickable' : ''}`}
+      className={`strategy-win-rate-panel${canDrill ? ' strategy-win-rate-panel--clickable' : ''}`}
       disabled={!canDrill}
       onClick={() => {
         if (canDrill) onOpenInstancesForStructure(row.structure_name.trim())
@@ -124,10 +126,10 @@ function WinRateStructureCard({
       title={canDrill ? `Open Instances filtered by structure: ${row.structure_name}` : undefined}
       aria-label={canDrill ? `Open Instances for structure ${row.structure_name}` : undefined}
     >
-      <h3 className="strategy-win-rate-card__title">{row.structure_name}</h3>
+      <h3 className="strategy-win-rate-panel__title">{row.structure_name}</h3>
 
-      <div className="strategy-win-rate-card__section">
-        <div className="strategy-win-rate-card__section-label">Trades</div>
+      <div className="strategy-win-rate-panel__section">
+        <div className="strategy-win-rate-panel__section-label">Trades</div>
         <div className="strategy-win-rate-kpis">
           <div className="strategy-win-rate-kpi">
             <span className="strategy-win-rate-kpi__label">Profit</span>
@@ -148,8 +150,8 @@ function WinRateStructureCard({
         </div>
       </div>
 
-      <div className="strategy-win-rate-card__section">
-        <div className="strategy-win-rate-card__section-label">P&amp;L</div>
+      <div className="strategy-win-rate-panel__section">
+        <div className="strategy-win-rate-panel__section-label">P&amp;L</div>
         <div className="strategy-win-rate-metrics strategy-win-rate-metrics--3 strategy-win-rate-metrics--pnl">
           <div className="strategy-win-rate-metric">
             <span
@@ -201,9 +203,9 @@ function WinRateStructureCard({
         </div>
       </div>
 
-      <div className="strategy-win-rate-card__section">
+      <div className="strategy-win-rate-panel__section">
         <div
-          className="strategy-win-rate-card__section-label"
+          className="strategy-win-rate-panel__section-label"
           title="Same as Instance detail: sum of sell OPT strike × |qty| × 100 per instance. Buckets follow net PnL > 0 vs ≤ 0 (same idea as Trades Profit/Loss counts). Amounts shown rounded to whole dollars."
         >
           Underlying cost
@@ -230,8 +232,8 @@ function WinRateStructureCard({
         </div>
       </div>
 
-      <div className="strategy-win-rate-card__section">
-        <div className="strategy-win-rate-card__section-label">Averages</div>
+      <div className="strategy-win-rate-panel__section">
+        <div className="strategy-win-rate-panel__section-label">Averages</div>
         <div className="strategy-win-rate-metrics strategy-win-rate-metrics--wrap">
           <div className="strategy-win-rate-metric">
             <span className="strategy-win-rate-metric__label">Profit avg %</span>
@@ -349,13 +351,13 @@ function WinRateTotalsCard({ totals }: { totals: WinRateStructureRow }) {
   const totalLossUsd = winRateTotalLossDisplayUsd(totals)
 
   return (
-    <article className="strategy-win-rate-card strategy-win-rate-card--total">
-      <h3 className="strategy-win-rate-card__title">All structures</h3>
+    <article className="strategy-win-rate-panel strategy-win-rate-panel--total">
+      <h3 className="strategy-win-rate-panel__title">All structures</h3>
 
-      <div className="strategy-win-rate-card--total-panel">
-        <div className="strategy-win-rate-card--total-row">
-          <div className="strategy-win-rate-card__section strategy-win-rate-card__section--total-band">
-            <div className="strategy-win-rate-card__section-label">Trades</div>
+      <div className="strategy-win-rate-panel--total-panel">
+        <div className="strategy-win-rate-panel--total-row">
+          <div className="strategy-win-rate-panel__section strategy-win-rate-panel__section--total-band">
+            <div className="strategy-win-rate-panel__section-label">Trades</div>
             <div className="strategy-win-rate-kpis">
               <div className="strategy-win-rate-kpi">
                 <span className="strategy-win-rate-kpi__label">Profit</span>
@@ -376,8 +378,8 @@ function WinRateTotalsCard({ totals }: { totals: WinRateStructureRow }) {
             </div>
           </div>
 
-          <div className="strategy-win-rate-card__section strategy-win-rate-card__section--total-band">
-            <div className="strategy-win-rate-card__section-label">P&amp;L</div>
+          <div className="strategy-win-rate-panel__section strategy-win-rate-panel__section--total-band">
+            <div className="strategy-win-rate-panel__section-label">P&amp;L</div>
             <div className="strategy-win-rate-metrics strategy-win-rate-metrics--3 strategy-win-rate-metrics--pnl">
               <div className="strategy-win-rate-metric">
                 <span
@@ -435,9 +437,9 @@ function WinRateTotalsCard({ totals }: { totals: WinRateStructureRow }) {
             </div>
           </div>
 
-          <div className="strategy-win-rate-card__section strategy-win-rate-card__section--total-band">
+          <div className="strategy-win-rate-panel__section strategy-win-rate-panel__section--total-band">
             <div
-              className="strategy-win-rate-card__section-label"
+              className="strategy-win-rate-panel__section-label"
               title="Same as Instance detail Underlying cost; summed across structures. Whole dollars (rounded)."
             >
               Underlying cost
@@ -464,9 +466,9 @@ function WinRateTotalsCard({ totals }: { totals: WinRateStructureRow }) {
             </div>
           </div>
 
-          <div className="strategy-win-rate-card__section strategy-win-rate-card__section--total-band">
-            <div className="strategy-win-rate-card__section-label">Averages</div>
-            <div className="strategy-win-rate-card--total-averages-kpis">
+          <div className="strategy-win-rate-panel__section strategy-win-rate-panel__section--total-band">
+            <div className="strategy-win-rate-panel__section-label">Averages</div>
+            <div className="strategy-win-rate-panel--total-averages-kpis">
               <div className="strategy-win-rate-kpi">
                 <span className="strategy-win-rate-kpi__label">Profit avg %</span>
                 <span className="strategy-win-rate-kpi__value pnl-positive">{fmtPct(totals.profit_avg_pct)}</span>
@@ -525,7 +527,7 @@ export function StrategyWinRatePage({ onGoToInstances }: StrategyWinRatePageProp
     totalsAll ?? (structures.length > 1 ? fallbackTotalsAllFromStructures(structures) : null)
 
   return (
-    <div className="card process-section strategy-win-rate-page">
+    <PageSection className="strategy-win-rate-page">
       <div className="strategy-win-rate-page__head">
         <div className="strategy-win-rate-page__head-main">
           <SectionPageTitle
@@ -540,9 +542,9 @@ export function StrategyWinRatePage({ onGoToInstances }: StrategyWinRatePageProp
           </p>
         </div>
         <div className="strategy-win-rate-page__head-actions">
-          <button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loading}>
+          <Button type="button" variant="secondary" onClick={() => void load()} disabled={loading}>
             {loading ? 'Loading…' : 'Refresh'}
-          </button>
+          </Button>
           {loading ? <span className="section-hint strategy-win-rate-page__loading">Loading…</span> : null}
         </div>
       </div>
@@ -575,6 +577,6 @@ export function StrategyWinRatePage({ onGoToInstances }: StrategyWinRatePageProp
           </div>
         </div>
       )}
-    </div>
+    </PageSection>
   )
 }

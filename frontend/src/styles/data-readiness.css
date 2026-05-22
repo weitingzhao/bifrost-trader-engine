@@ -2,17 +2,10 @@
    SEPA Data Ready — Pipeline Ops Console
    Aesthetic: Industrial / data-pipeline control panel
    Fonts: DM Sans (UI) + JetBrains Mono (object names, data points, numbers)
-   Tokens: from :root in App.css (--color-*, --space-*, --font-*, --text-*)
+   Tokens: design-tokens.css (--color-*, --space-*, --research-card-radius*)
    ========================================================================== */
 
-/* ── Root shell ─────────────────────────────────────────────────────────── */
-
-.card.process-section.sepa-data-ready-page.wl2 {
-  max-width: none;
-  width: 100%;
-  padding-bottom: var(--space-8);
-  box-sizing: border-box;
-}
+/* Root shell: StockDataReadinessPage uses PageSection + w-full max-w-none pb-8 */
 
 /* ── Actions card ────────────────────────────────────────────────────────── */
 

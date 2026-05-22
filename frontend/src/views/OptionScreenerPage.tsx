@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { StatusResponse } from '../types'
+import { PageSection } from '@/components/shared/page-section'
+import { Button } from '@/components/ui/button'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import type { ScreenerFilters, ScreenerContractRow, ScreenerSymbolGroup, ScreenerResponse } from '../api/research/screener'
 import { runScreener } from '../api/research/screener'
@@ -138,9 +140,9 @@ function ScreenerPipelineSummary({ onOpenOptionCoverage }: { onOpenOptionCoverag
         {' '}for coverage metrics and detail links.
       </p>
       {onOpenOptionCoverage ? (
-        <button type="button" className="btn btn-secondary btn-sm" onClick={onOpenOptionCoverage}>
+        <Button type="button" variant="secondary" size="sm" onClick={onOpenOptionCoverage}>
           View data pipeline & tables
-        </button>
+        </Button>
       ) : null}
     </div>
   )
@@ -725,7 +727,7 @@ export function OptionScreenerPage({
   const minPremiumDisplay = filters.min_premium ?? 0
 
   return (
-    <div className="card process-section watchlist-page stock-screener-page option-screener-page wl2">
+    <PageSection className="watchlist-page option-screener-page wl2 w-full max-w-none">
       <div className="research-page-head">
         <SectionPageTitle
           menu="Research"
@@ -1035,6 +1037,6 @@ export function OptionScreenerPage({
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
-    </div>
+    </PageSection>
   )
 }

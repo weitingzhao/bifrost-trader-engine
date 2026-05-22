@@ -17,6 +17,7 @@ import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
 import { useDeferredStart } from '../hooks/useDeferredStart'
 import { useControlAction } from './status/useControlAction'
 import { publicEnv } from '@/lib/publicEnv'
+import { SettingsPageCard } from './settings/SettingsPageCard'
 
 export interface MassiveApiStatusPageProps {
   embeddedInSettings?: boolean
@@ -116,7 +117,10 @@ export function MassiveApiStatusPage({ embeddedInSettings }: MassiveApiStatusPag
   const healthLamp: 'green' | 'red' | 'none' = healthOk === true ? 'green' : healthOk === false ? 'red' : 'none'
 
   return (
-    <div className={`settings-page-card ${embeddedInSettings ? 'massive-api-status-page massive-api-status-page--embedded' : 'massive-api-status-page'}`}>
+    <SettingsPageCard
+      embedded={embeddedInSettings}
+      className={embeddedInSettings ? 'massive-api-status-page massive-api-status-page--embedded' : 'massive-api-status-page'}
+    >
       <div className="server-groups settings-page-groups">
 
         <section className="replay-section" aria-labelledby="massive-api-health-head">
@@ -288,6 +292,6 @@ export function MassiveApiStatusPage({ embeddedInSettings }: MassiveApiStatusPag
         </section>
 
       </div>
-    </div>
+    </SettingsPageCard>
   )
 }

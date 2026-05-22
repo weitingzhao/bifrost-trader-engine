@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { PageSection } from '@/components/shared/page-section'
+import { Button } from '@/components/ui/button'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import { fetchGreeks, fetchGreeksAvailableDates } from '../api/research/research'
 import type { GreeksRow, GreeksResponse } from '../api/research/research'
@@ -322,8 +324,8 @@ export default function OptionGreeksPage({ onBreadcrumbResearch, breadcrumbLabel
   const today = tradeDate ? new Date(tradeDate) : new Date()
 
   return (
-    <div className="card process-section option-greeks-page">
-      <div className="research-page-head">
+    <PageSection className="option-greeks-page flex flex-col gap-4">
+      <div className="research-page-head mb-2">
         <SectionPageTitle
           menu="Research"
           pageTitle={breadcrumbLabel}
@@ -407,14 +409,14 @@ export default function OptionGreeksPage({ onBreadcrumbResearch, breadcrumbLabel
           </div>
 
           {/* Load */}
-          <button
+          <Button
             type="button"
-            className="option-greeks-page__load-btn btn btn-primary"
+            className="option-greeks-page__load-btn"
             onClick={handleLoad}
             disabled={loading || !symbol || !tradeDate}
           >
             {loading ? 'Loading…' : 'Load'}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -513,6 +515,6 @@ export default function OptionGreeksPage({ onBreadcrumbResearch, breadcrumbLabel
           riskFreeRate={riskFreeRate}
         />
       )}
-    </div>
+    </PageSection>
   )
 }

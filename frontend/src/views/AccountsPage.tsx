@@ -4,6 +4,8 @@ import { fetchBarsBenchmark, fetchQuotes, fetchExecutionsFreshness, postExecutio
 import { fetchPositionCategories, postPositionCategory, patchPositionCategory, deletePositionCategory, putPositionCategoryTag } from '../api'
 import type { PositionCategory } from '../types'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { PageSection } from '@/components/shared/page-section'
+import { Button } from '@/components/ui/button'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import { fmtExpiry, fmtUsd, fmtUsdRound0 } from '../utils/format'
 import {
@@ -463,7 +465,7 @@ export function AccountsPage({
 
   if (!hasAccounts) {
     return (
-      <div className="card process-section">
+      <PageSection>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
           <SectionPageTitle
             menu="Portfolio"
@@ -601,7 +603,7 @@ export function AccountsPage({
               }
             }}
           >
-            <div className="modal-content card" style={{ maxWidth: '28rem' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-content rounded-lg border border-border bg-background p-4 shadow-sm" style={{ maxWidth: '28rem' }} onClick={(e) => e.stopPropagation()}>
               <h3 id="category-modal-title" style={{ marginTop: 0 }}>Position categories</h3>
               {categoryError && (
                 <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem', color: 'var(--color-danger, #c00)' }}>
@@ -624,9 +626,9 @@ export function AccountsPage({
                           style={{ flex: 1, minWidth: '8rem' }}
                           aria-label="Edit category name"
                         />
-                        <button
+                        <Button
                           type="button"
-                          className="btn btn-small"
+                          size="sm"
                           onClick={async () => {
                             const name = editingCategoryName.trim()
                             if (!name) return
@@ -642,14 +644,15 @@ export function AccountsPage({
                           }}
                         >
                           Save
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
-                          className="btn btn-small"
+                          variant="secondary"
+                          size="sm"
                           onClick={() => { setEditingCategoryId(null); setCategoryError(null) }}
                         >
                           Cancel
-                        </button>
+                        </Button>
                       </>
                     ) : (
                       <>
@@ -657,16 +660,18 @@ export function AccountsPage({
                         {c.description && (
                           <span className="section-hint" style={{ fontSize: '0.85rem' }}>{c.description}</span>
                         )}
-                        <button
+                        <Button
                           type="button"
-                          className="btn btn-small"
+                          variant="secondary"
+                          size="sm"
                           onClick={() => { setEditingCategoryId(c.id); setEditingCategoryName(c.name); setCategoryError(null) }}
                         >
                           Edit
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
-                          className="btn btn-small"
+                          variant="destructive"
+                          size="sm"
                           onClick={async () => {
                             if (!confirm(`Delete category "${c.name}"? Positions tagged with it will be untagged.`)) return
                             await deletePositionCategory(c.id)
@@ -675,7 +680,7 @@ export function AccountsPage({
                           }}
                         >
                           Delete
-                        </button>
+                        </Button>
                       </>
                     )}
                   </li>
@@ -706,17 +711,17 @@ export function AccountsPage({
                   required
                   style={{ minWidth: '10rem' }}
                 />
-                <button type="submit" className="btn btn-small">Add</button>
+                <Button type="submit" size="sm">Add</Button>
               </form>
               <div style={{ marginTop: '1rem' }}>
-                <button type="button" className="btn btn-small" onClick={() => setCategoryModalOpen(false)}>
+                <Button type="button" variant="secondary" size="sm" onClick={() => setCategoryModalOpen(false)}>
                   Close
-                </button>
+                </Button>
               </div>
             </div>
           </div>
         )}
-      </div>
+      </PageSection>
     )
   }
 
@@ -778,7 +783,7 @@ export function AccountsPage({
     autoStRow?.ts != null && Number.isFinite(Number(autoStRow.ts)) ? Number(autoStRow.ts) : null
 
   return (
-    <div className="card process-section">
+    <PageSection>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
         <SectionPageTitle
           menu="Portfolio"
@@ -1447,7 +1452,7 @@ export function AccountsPage({
             <p className="section-hint" style={{ marginTop: '0.5rem' }}>No accounts</p>
           ) : (
           <>
-          <div className="ib-summary-card">
+          <div className="ib-summary-panel">
             <div className="ib-summary-row">
             <div className="ib-summary-item">
               <span className="label">Account</span>
@@ -1498,7 +1503,7 @@ export function AccountsPage({
           ) : (
             <>
               <div style={{ marginBottom: '0.35rem' }} />
-              <div className="ib-accounts-stock-table-scroll">
+              <div className="ib-accounts-stock-table-wrap">
               <table className="ib-positions-table ib-accounts-stock-positions">
                 <colgroup>
                   <col className="ib-acs-col-symbol" />
@@ -1900,7 +1905,7 @@ export function AccountsPage({
             <p className="ib-positions-empty">None</p>
           ) : (
             <>
-              <div className="ib-accounts-stock-table-scroll">
+              <div className="ib-accounts-stock-table-wrap">
               <table className="ib-positions-table ib-accounts-option-positions">
                 <thead>
                   <tr>
@@ -2117,7 +2122,7 @@ export function AccountsPage({
             }
           }}
         >
-          <div className="modal-content card" style={{ maxWidth: '30rem' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content rounded-lg border border-border bg-background p-4 shadow-sm" style={{ maxWidth: '30rem' }} onClick={(e) => e.stopPropagation()}>
             <h3 id="category-modal-title" style={{ marginTop: 0 }}>Position categories</h3>
             {categoryError && (
               <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem', color: 'var(--color-danger, #c00)' }}>
@@ -2140,9 +2145,9 @@ export function AccountsPage({
                         style={{ flex: 1, minWidth: '8rem' }}
                         aria-label="Edit category name"
                       />
-                      <button
+                      <Button
                         type="button"
-                        className="btn btn-small"
+                        size="sm"
                         onClick={async () => {
                           const name = editingCategoryName.trim()
                           if (!name) return
@@ -2158,14 +2163,15 @@ export function AccountsPage({
                         }}
                       >
                         Save
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
-                        className="btn btn-small"
+                        variant="secondary"
+                        size="sm"
                         onClick={() => { setEditingCategoryId(null); setCategoryError(null) }}
                       >
                         Cancel
-                      </button>
+                      </Button>
                     </>
                   ) : (
                     <>
@@ -2173,16 +2179,18 @@ export function AccountsPage({
                       {c.description && (
                         <span className="section-hint" style={{ fontSize: '0.85rem' }}>{c.description}</span>
                       )}
-                      <button
+                      <Button
                         type="button"
-                        className="btn btn-small"
+                        variant="secondary"
+                        size="sm"
                         onClick={() => { setEditingCategoryId(c.id); setEditingCategoryName(c.name); setCategoryError(null) }}
                       >
                         Edit
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
-                        className="btn btn-small"
+                        variant="destructive"
+                        size="sm"
                         onClick={async () => {
                           if (!confirm(`Delete category "${c.name}"? Positions tagged with it will be untagged.`)) return
                           await deletePositionCategory(c.id)
@@ -2191,7 +2199,7 @@ export function AccountsPage({
                         }}
                       >
                         Delete
-                      </button>
+                      </Button>
                     </>
                   )}
                 </li>
@@ -2222,7 +2230,7 @@ export function AccountsPage({
                 required
                 style={{ minWidth: '10rem' }}
               />
-              <button type="submit" className="btn btn-small">Add</button>
+              <Button type="submit" size="sm">Add</Button>
             </form>
             <div style={{ marginTop: '1rem', marginBottom: '1rem' }}>
               <strong style={{ display: 'block', marginBottom: '0.5rem' }}>Assign category to positions</strong>
@@ -2330,13 +2338,13 @@ export function AccountsPage({
               })()}
             </div>
             <div style={{ marginTop: '1rem' }}>
-              <button type="button" className="btn btn-small" onClick={() => setCategoryModalOpen(false)}>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setCategoryModalOpen(false)}>
                 Close
-              </button>
+              </Button>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </PageSection>
   )
 }

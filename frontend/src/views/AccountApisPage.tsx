@@ -18,6 +18,12 @@ import { useDeferredStart } from '../hooks/useDeferredStart'
 import { portfolioServiceBase, tradingServiceBase } from './account/accountSidecarBases'
 import { scheduleMsgClear, setMsg } from './status/messageUtils'
 import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
+import { SettingsPageCard } from './settings/SettingsPageCard'
+import { SettingsPageGroups } from './settings/SettingsPageGroups'
+import { SettingsSection } from './settings/SettingsSection'
+import { SettingsTitleLamp } from './settings/SettingsTitleLamp'
+import { Button } from '@/components/ui/button'
+import type { LampTone } from '@/components/shared/lamp-indicator'
 
 export interface AccountApisPageProps {
   embeddedInSettings?: boolean
@@ -388,23 +394,23 @@ export function AccountApisPage({ embeddedInSettings }: AccountApisPageProps) {
       titleId="account-trading-shutdown-title"
       overlayClassName="celery-control-confirm-overlay"
       footer={
-        <div className="data-reset-modal-actions">
-          <button
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
             type="button"
-            className="btn btn-secondary"
+            variant="secondary"
             onClick={() => setShutdownTrading(INITIAL_SHUTDOWN)}
             disabled={shutdownTrading.busy}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn-shutdown-all"
+            variant="destructive"
             onClick={() => void runShutdown('trading')}
             disabled={shutdownTrading.busy}
           >
             {shutdownTrading.busy ? 'Executing…' : 'Confirm'}
-          </button>
+          </Button>
         </div>
       }
     >
@@ -431,23 +437,23 @@ export function AccountApisPage({ embeddedInSettings }: AccountApisPageProps) {
       titleId="account-portfolio-shutdown-title"
       overlayClassName="celery-control-confirm-overlay"
       footer={
-        <div className="data-reset-modal-actions">
-          <button
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
             type="button"
-            className="btn btn-secondary"
+            variant="secondary"
             onClick={() => setShutdownPortfolio(INITIAL_SHUTDOWN)}
             disabled={shutdownPortfolio.busy}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn-shutdown-all"
+            variant="destructive"
             onClick={() => void runShutdown('portfolio')}
             disabled={shutdownPortfolio.busy}
           >
             {shutdownPortfolio.busy ? 'Executing…' : 'Confirm'}
-          </button>
+          </Button>
         </div>
       }
     >
@@ -463,25 +469,20 @@ export function AccountApisPage({ embeddedInSettings }: AccountApisPageProps) {
     </DraggableModal>
   )
 
-  const wrapClass = embeddedInSettings
-    ? 'settings-page-card massive-api-status-page massive-api-status-page--embedded architecture-apis-page'
-    : 'settings-page-card massive-api-status-page architecture-apis-page'
-
   return (
-    <div className={wrapClass}>
+    <SettingsPageCard embedded={embeddedInSettings} className="massive-api-status-page architecture-apis-page">
       {tradingDialog}
       {portfolioDialog}
-      <div className="server-groups settings-page-groups">
-        <section className="replay-section" aria-labelledby="account-page-head">
+      <SettingsPageGroups className="server-groups">
+        <SettingsSection aria-labelledby="account-page-head">
           <div className="architecture-page-intro">
-            <h2 id="account-page-head" className="daemon-card-title page-title-with-tooltip architecture-page-title">
-              <span
-                className={`title-inline-lamp lamp-icon ${accountTitleLamp}`}
+            <h2 id="account-page-head" className="daemon-card-title inline-flex flex-wrap items-center gap-2 architecture-page-title">
+              <SettingsTitleLamp
+                lamp={accountTitleLamp as LampTone}
                 title="Combined Trading and Portfolio API reachability"
-                aria-hidden
               >
                 <SettingsSidebarLampGlyph id="api-account" />
-              </span>
+              </SettingsTitleLamp>
               Account
               <InfoTooltip text="Trading and Portfolio FastAPI sidecars: order execution / performance data vs portfolio model analysis and position configuration. Base URLs follow the same routing rules as API Health (VITE_TRADING_API_ORIGIN, VITE_PORTFOLIO_API_ORIGIN, or GET /health ports). Stop requires an operator-scoped Ops token (same as Architecture / Celery Control)." />
             </h2>
@@ -495,11 +496,11 @@ export function AccountApisPage({ embeddedInSettings }: AccountApisPageProps) {
             <article className="architecture-api-card" aria-labelledby="account-card-trading">
               <div className="architecture-api-card-head">
                 <h3 id="account-card-trading" className="architecture-api-card-title">
-                  <span className={`title-inline-lamp lamp-icon ${tradingLamp}`} title="Trading API health" aria-hidden>
+                  <SettingsTitleLamp lamp={tradingLamp as LampTone} title="Trading API health">
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <path d="M22 12h-4l-3 9L9 3 6 12H2" />
                     </svg>
-                  </span>
+                  </SettingsTitleLamp>
                   Trading API
                 </h3>
                 <button
@@ -558,11 +559,11 @@ export function AccountApisPage({ embeddedInSettings }: AccountApisPageProps) {
             <article className="architecture-api-card" aria-labelledby="account-card-portfolio">
               <div className="architecture-api-card-head">
                 <h3 id="account-card-portfolio" className="architecture-api-card-title">
-                  <span className={`title-inline-lamp lamp-icon ${portfolioLamp}`} title="Portfolio API health" aria-hidden>
+                  <SettingsTitleLamp lamp={portfolioLamp as LampTone} title="Portfolio API health">
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <path d="M22 12h-4l-3 9L9 3 6 12H2" />
                     </svg>
-                  </span>
+                  </SettingsTitleLamp>
                   Portfolio API
                 </h3>
                 <button
@@ -618,10 +619,10 @@ export function AccountApisPage({ embeddedInSettings }: AccountApisPageProps) {
               </dl>
             </article>
           </div>
-        </section>
+        </SettingsSection>
 
-        <section className="replay-section" aria-labelledby="account-docs-table-head">
-          <h3 id="account-docs-table-head" className="page-title-with-tooltip architecture-section-title">
+        <SettingsSection aria-labelledby="account-docs-table-head">
+          <h3 id="account-docs-table-head" className="inline-flex flex-wrap items-center gap-2 architecture-section-title">
             Documentation
             <InfoTooltip text="Swagger UI, ReDoc, and OpenAPI JSON for each sidecar. Paths are fixed per app: /trading/docs and /portfolio/docs." />
           </h3>
@@ -732,10 +733,10 @@ export function AccountApisPage({ embeddedInSettings }: AccountApisPageProps) {
               </tbody>
             </table>
           </div>
-        </section>
+        </SettingsSection>
 
-        <section className="replay-section" aria-labelledby="account-log-head">
-          <h3 id="account-log-head" className="page-title-with-tooltip architecture-section-title">
+        <SettingsSection aria-labelledby="account-log-head">
+          <h3 id="account-log-head" className="inline-flex flex-wrap items-center gap-2 architecture-section-title">
             Application log
             <InfoTooltip text="Monitor merges Redis console streams for Trading and Portfolio (both dev and prod keys) so logs show even when Monitor and sidecars use different config profiles. Same pattern as Ops/Docs. Use Source toggles to filter. Clear removes both dev and prod streams per API." />
           </h3>
@@ -749,10 +750,10 @@ export function AccountApisPage({ embeddedInSettings }: AccountApisPageProps) {
             resizeAriaLabel="Resize unified account console height"
             clearTitle="Clear Trading and Portfolio log streams (dev and prod Redis keys per API)"
           />
-        </section>
+        </SettingsSection>
 
-        <section className="replay-section architecture-api-details" aria-labelledby="account-api-details-head">
-          <h3 id="account-api-details-head" className="page-title-with-tooltip architecture-section-title">
+        <SettingsSection className="architecture-api-details" aria-labelledby="account-api-details-head">
+          <h3 id="account-api-details-head" className="inline-flex flex-wrap items-center gap-2 architecture-section-title">
             API details
             <InfoTooltip text="Summary of what each sidecar exposes. Open the Swagger links above for full paths and schemas." />
           </h3>
@@ -839,8 +840,8 @@ export function AccountApisPage({ embeddedInSettings }: AccountApisPageProps) {
               </>
             )}
           </div>
-        </section>
-      </div>
-    </div>
+        </SettingsSection>
+      </SettingsPageGroups>
+    </SettingsPageCard>
   )
 }

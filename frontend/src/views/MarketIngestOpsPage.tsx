@@ -6,6 +6,17 @@ import { AggregatedLogConsolePanel } from '../components/AggregatedLogConsolePan
 import { useSocketServicesUnifiedLogConsole } from '../components/useSocketServicesUnifiedLogConsole'
 import type { UnifiedLogSourceDefinition } from '../components/unifiedLogConsoleTypes'
 import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
+import { SettingsPageCard } from './settings/SettingsPageCard'
+import {
+  SettingsPageHeader,
+  SettingsPageTitle,
+} from './settings/SettingsPageHeader'
+import { SettingsSection } from './settings/SettingsSection'
+import { SettingsTitleLamp } from './settings/SettingsTitleLamp'
+import { SettingsStatusMessage } from './settings/SettingsStatusMessage'
+import { IngestActionIconButton } from './settings/IngestActionIconButton'
+import { LampIndicator, type LampTone } from '@/components/shared/lamp-indicator'
+import { Button } from '@/components/ui/button'
 import {
   fetchOpsCapabilities,
   fetchOpsHealth,
@@ -636,9 +647,7 @@ function ServiceRow(props: {
   return (
     <tr>
       <td>
-        <span className={`title-inline-lamp lamp-icon ${lamp}`} title={statusTitle} aria-label={statusTitle}>
-          <span aria-hidden>●</span>
-        </span>
+        <LampIndicator lamp={lamp as LampTone} title={statusTitle} />
       </td>
       <td title={blockedBySiblingLease ? `${runtimeHostTitle} — Sibling services in this group hold a lease for the other Ops stack, so this service is also locked. Stop those services first, or start everything from the other stack's Ops host.` : runtimeHostTitle}>
         <OpsHostEnvPillBadge pill={runtimeHostPill} />
@@ -861,9 +870,8 @@ function ServiceRow(props: {
         {!actionsDisabled ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center' }}>
             {showStart ? (
-              <button
-                type="button"
-                className="btn btn-icon-small btn-icon-success"
+              <IngestActionIconButton
+                variant="success"
                 onClick={onStart}
                 title={`Start "${svc.label}" — bring the ingest process online.`}
                 aria-label={`Start ${svc.label}: bring the ingest process online.`}
@@ -871,12 +879,11 @@ function ServiceRow(props: {
                 <svg {...INGEST_ACTION_SVG_PROPS}>
                   <path d="M8 5v14l11-7L8 5z" />
                 </svg>
-              </button>
+              </IngestActionIconButton>
             ) : null}
             {showStop ? (
-              <button
-                type="button"
-                className="btn btn-icon-small btn-icon-danger"
+              <IngestActionIconButton
+                variant="danger"
                 onClick={onStop}
                 title={`Stop "${svc.label}" — stop the ingest process.`}
                 aria-label={`Stop ${svc.label}: stop the ingest process.`}
@@ -884,11 +891,9 @@ function ServiceRow(props: {
                 <svg {...INGEST_ACTION_SVG_PROPS}>
                   <rect x="6" y="6" width="12" height="12" rx="1" />
                 </svg>
-              </button>
+              </IngestActionIconButton>
             ) : null}
-            <button
-              type="button"
-              className="btn btn-icon-small"
+            <IngestActionIconButton
               onClick={onRestart}
               title={`Restart "${svc.label}" — restart with a brief disconnect.`}
               aria-label={`Restart ${svc.label}: restart with a brief disconnect.`}
@@ -899,10 +904,8 @@ function ServiceRow(props: {
                 <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
                 <path d="M3 21v-5h5" />
               </svg>
-            </button>
-            <button
-              type="button"
-              className="btn btn-icon-small"
+            </IngestActionIconButton>
+            <IngestActionIconButton
               onClick={onReset}
               title={`Reset "${svc.label}" — restart and release resources (IB services disconnect TWS clients first).`}
               aria-label={`Reset ${svc.label}: restart and release resources; IB services disconnect TWS clients first.`}
@@ -911,7 +914,7 @@ function ServiceRow(props: {
                 <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
                 <path d="M3 3v5h5" />
               </svg>
-            </button>
+            </IngestActionIconButton>
           </div>
         ) : (
           <span
@@ -1440,12 +1443,12 @@ export function MarketIngestOpsPage({
     openConfirm('Reset service', message, () => runControl(svc.id, 'reset'))
   }
 
-  const cardClass = embeddedInSettings
-    ? 'settings-page-card dashboard-page dashboard-page--embedded'
-    : 'settings-page-card dashboard-page'
-
   return (
-    <div id="settings-ws-connector" className={cardClass}>
+    <SettingsPageCard
+      id="settings-ws-connector"
+      embedded={embeddedInSettings}
+      className="dashboard-page"
+    >
       <DraggableModal
         open={confirmState.open}
         onBackdropClick={cancelConfirm}
@@ -1453,79 +1456,37 @@ export function MarketIngestOpsPage({
         title={confirmState.title}
         titleId="ws-connector-confirm-title"
         footer={
-          <div className="data-reset-modal-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={cancelConfirm}
-            >
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={cancelConfirm}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="btn-shutdown-all"
+              variant="destructive"
               onClick={() => confirmState.action?.()}
               disabled={confirmState.confirming}
             >
               {confirmState.confirming ? 'Sending…' : 'Confirm'}
-            </button>
+            </Button>
           </div>
         }
       >
         <p>{confirmState.message}</p>
         {confirmState.confirming && !confirmState.error ? (
-          <p
-            className="settings-page-msg"
-            style={{ marginTop: 'var(--space-2)', opacity: 0.75, fontSize: '0.85em' }}
-          >
+          <p className="mt-2 text-[0.85em] opacity-75">
             Command sent — Ops API is processing (IB services may take ~45s to connect). You can cancel and check status manually.
           </p>
         ) : null}
         {confirmState.error ? (
-          <p
-            className="settings-page-msg settings-page-msg--error"
-            style={{ marginTop: 'var(--space-2)' }}
-            role="alert"
-          >
+          <SettingsStatusMessage error className="mt-2 block">
             {confirmState.error}
-          </p>
+          </SettingsStatusMessage>
         ) : null}
       </DraggableModal>
 
-      <div className="settings-page-header settings-page-header--celery">
-        <div className="settings-page-title-group">
-          <h2 className="settings-page-title page-title-with-tooltip" style={{ flexWrap: 'wrap', rowGap: 'var(--space-2)' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-              <span
-                className={`title-inline-lamp lamp-icon ${socketPageAggregate.lamp}`}
-                title={socketPageAggregate.title}
-                role="img"
-                aria-label={socketPageAggregate.title}
-              >
-                <SettingsSidebarLampGlyph id="websocket" />
-              </span>
-              <span>Socket Services</span>
-            </span>
-          </h2>
-          <p
-            className="massive-api-doc-hint"
-            style={{
-              marginTop: 'var(--space-2)',
-              marginBottom: 0,
-              display: 'flex',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: 'var(--space-2)',
-            }}
-          >
-            <span title={hostColumn.title}>
-              This Ops instance (config / executor)
-              <span style={{ marginLeft: 6, display: 'inline-flex', verticalAlign: 'middle' }}>
-                <OpsHostEnvPillBadge pill={hostColumn.pill} />
-              </span>
-            </span>
-          </p>
-        </div>
+      <SettingsPageHeader
+        celeryLayout
+        actions={
         <div className="dashboard-auth-bar dashboard-auth-bar--celery-header">
           <div className="dashboard-auth-info">
             <span className={`dashboard-auth-role dashboard-auth-role--${currentRole}`}>
@@ -1575,44 +1536,55 @@ export function MarketIngestOpsPage({
                 }}
                 autoFocus
               />
-              <button
-                type="button"
-                className="btn-resume dashboard-btn dashboard-btn--start"
-                onClick={handleLogin}
-                disabled={!tokenInput.trim()}
-              >
+              <Button type="button" size="sm" onClick={handleLogin} disabled={!tokenInput.trim()}>
                 Connect
-              </button>
+              </Button>
             </div>
           )}
         </div>
-      </div>
+        }
+      >
+        <SettingsPageTitle className="flex-wrap" style={{ rowGap: 'var(--space-2)' }}>
+          <SettingsTitleLamp lamp={socketPageAggregate.lamp as LampTone} title={socketPageAggregate.title}>
+            <SettingsSidebarLampGlyph id="websocket" />
+          </SettingsTitleLamp>
+          Socket Services
+        </SettingsPageTitle>
+        <p
+          className="massive-api-doc-hint"
+          style={{
+            marginTop: 'var(--space-2)',
+            marginBottom: 0,
+            display: 'flex',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 'var(--space-2)',
+          }}
+        >
+          <span title={hostColumn.title}>
+            This Ops instance (config / executor)
+            <span style={{ marginLeft: 6, display: 'inline-flex', verticalAlign: 'middle' }}>
+              <OpsHostEnvPillBadge pill={hostColumn.pill} />
+            </span>
+          </span>
+        </p>
+      </SettingsPageHeader>
 
       {opsErr ? (
-        <p className="settings-page-msg settings-page-msg--error" role="alert">
+        <SettingsStatusMessage error className="mb-3 block">
           {opsErr}
-        </p>
+        </SettingsStatusMessage>
       ) : null}
 
       {localAgentPanel ? (
-        <section
-          className="replay-section"
-          id="settings-ws-agent"
-          aria-labelledby="local-control-agent-heading"
-        >
+        <SettingsSection id="settings-ws-agent" aria-labelledby="local-control-agent-heading">
           <h3
             id="local-control-agent-heading"
-            className="daemon-group-title"
-            style={{ marginBottom: 'var(--space-2)' }}
+            className="daemon-group-title mb-2"
           >
-            <span
-              className={`title-inline-lamp lamp-icon ${localAgentPanel.lamp}`}
-              title={localAgentPanel.detail}
-              role="img"
-              aria-label={localAgentPanel.detail}
-            >
+            <SettingsTitleLamp lamp={localAgentPanel.lamp as LampTone} title={localAgentPanel.detail}>
               <SettingsSidebarLampGlyph id="api-ops" />
-            </span>
+            </SettingsTitleLamp>
             Local Control Agent
             <InfoTooltip text="Separate systemd proxy (bifrost-agent) over a Unix socket. If red, ingest control via Ops will fail even when units exist. Does not replace ingest process status in the table below." />
           </h3>
@@ -1625,7 +1597,7 @@ export function MarketIngestOpsPage({
               <code style={{ fontSize: '0.9em' }}>{localAgentPanel.socketPath}</code>
             </p>
           ) : null}
-        </section>
+        </SettingsSection>
       ) : null}
 
       {(() => {
@@ -1662,7 +1634,7 @@ export function MarketIngestOpsPage({
         )
       })()}
 
-      <section className="replay-section" aria-label="Socket service units">
+      <SettingsSection aria-label="Socket service units">
         <IngestServicesTable
           rows={unifiedServiceRows}
           status={status}
@@ -1679,9 +1651,9 @@ export function MarketIngestOpsPage({
           startingServiceIds={startingServiceIds}
           stoppingServiceIds={stoppingServiceIds}
         />
-      </section>
+      </SettingsSection>
 
-      <section className="replay-section" aria-labelledby="socket-logs-heading">
+      <SettingsSection aria-labelledby="socket-logs-heading">
         <h3 id="socket-logs-heading" className="daemon-group-title" style={{ marginBottom: 'var(--space-2)' }}>
           Logs
         </h3>
@@ -1699,7 +1671,7 @@ export function MarketIngestOpsPage({
           resizeAriaLabel="Resize Socket Services log console height"
           clearTitle="Clear displayed log and all four Redis streams"
         />
-      </section>
-    </div>
+      </SettingsSection>
+    </SettingsPageCard>
   )
 }

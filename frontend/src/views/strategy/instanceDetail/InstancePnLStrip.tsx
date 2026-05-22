@@ -1,6 +1,7 @@
 import { useId, useMemo, useState, type ReactNode } from 'react'
 import type { Execution, PerformanceResponse } from '../../../types'
 import { DraggableModal } from '../../../components/DraggableModal'
+import { Button } from '@/components/ui/button'
 import { fmtUsd } from '../../../utils/format'
 import type { RiskProfile } from '../../../utils/riskProfile'
 import type { InstanceLinkedStockPnlRow } from '../../portfolio/ledgerOptHelpers'
@@ -384,9 +385,9 @@ export function InstancePnLStrip({
             maxWidth="min(560px, calc(100vw - 24px))"
             footer={
               <div className="data-reset-modal-actions">
-                <button type="button" className="btn btn-primary" onClick={() => setMetricsExplainOpen(false)}>
+                <Button type="button" onClick={() => setMetricsExplainOpen(false)}>
                   Close
-                </button>
+                </Button>
               </div>
             }
           >
@@ -666,9 +667,9 @@ export function InstancePnLStrip({
             panelClassName="instance-detail-risk-cost-explain-modal"
             footer={
               <div className="data-reset-modal-actions">
-                <button type="button" className="btn btn-primary" onClick={() => setReturnExplainOpen(false)}>
+                <Button type="button" onClick={() => setReturnExplainOpen(false)}>
                   Close
-                </button>
+                </Button>
               </div>
             }
           >
@@ -699,9 +700,9 @@ export function InstancePnLStrip({
             panelClassName="instance-detail-risk-cost-explain-modal"
             footer={
               <div className="data-reset-modal-actions">
-                <button type="button" className="btn btn-primary" onClick={() => setRiskCostExplainOpen(false)}>
+                <Button type="button" onClick={() => setRiskCostExplainOpen(false)}>
                   Close
-                </button>
+                </Button>
               </div>
             }
           >

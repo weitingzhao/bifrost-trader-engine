@@ -26,6 +26,7 @@ import {
 } from '../massive/stockReferenceJobHelpers'
 import type { OptionsFocusDataset } from './optionFocusDataset'
 import { DEFAULT_OPTION_MIN_PERIOD, OPTION_MIN_INTRADAY_PERIODS } from '../../utils/optionBarPeriods'
+import { Button } from '@/components/ui/button'
 
 /** Watchlist optionable symbols max 80; batch chain jobs + Check rows need headroom (trim is display-only). */
 const MAX_TRACKED = 128
@@ -403,9 +404,9 @@ function DataOverviewOptionJobsSheet({
           <h3 id="data-overview-opt-jobs-title" className="ref-jobs-sheet-title">
             Option coverage jobs
           </h3>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Close">
+          <Button variant="secondary" size="sm" type="button" onClick={onClose} aria-label="Close">
             Close
-          </button>
+          </Button>
         </div>
 
         <p className="ref-jobs-sheet-meta">
@@ -451,22 +452,19 @@ function DataOverviewOptionJobsSheet({
 
         <div className="ref-jobs-sheet-toolbar">
           {onRefreshCoverage ? (
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => void handleRefreshCoverage()}
+            <Button variant="secondary" size="sm" type="button" onClick={() => void handleRefreshCoverage()}
               disabled={refreshBusy}
               title="Reload Data Overview coverage and job summaries from the server"
             >
               {refreshBusy ? 'Refreshing…' : 'Refresh coverage'}
-            </button>
+            </Button>
           ) : null}
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClearCompleted} disabled={!hasCompleted}>
+          <Button variant="secondary" size="sm" type="button" onClick={onClearCompleted} disabled={!hasCompleted}>
             Clear completed
-          </button>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClearAll} disabled={items.length === 0}>
+          </Button>
+          <Button variant="secondary" size="sm" type="button" onClick={onClearAll} disabled={items.length === 0}>
             Clear all
-          </button>
+          </Button>
         </div>
 
         <div className="ref-jobs-sheet-table-wrap">
@@ -509,17 +507,13 @@ function DataOverviewOptionJobsSheet({
                         <code className="ref-jobs-table-job-id" title={jid || undefined}>
                           {jid ? formatRefJobIdShort(jid) : '—'}
                         </code>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm ref-jobs-table-copy"
-                          disabled={!jid}
-                          onClick={() => {
+                        <Button variant="secondary" size="sm" className="ref-jobs-table-copy" type="button" disabled={!jid} onClick={() => {
                             if (!jid) return
                             void navigator.clipboard?.writeText(jid).catch(() => {})
                           }}
                         >
                           Copy
-                        </button>
+                        </Button>
                       </td>
                       <td className="ref-jobs-table-summary">
                         {item.activitySummary ?? summarizeRefJobResult(item.job)}
@@ -2714,14 +2708,10 @@ export const DataOverviewOptionJobsBar = forwardRef<
                   {activeCount} active
                 </span>
               ) : null}
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                disabled={!canEnqueueRow}
-                onClick={() => void handleEnqueue()}
+              <Button variant="default" size="sm" type="button" disabled={!canEnqueueRow} onClick={() => void handleEnqueue()}
               >
                 {enqueueBusy ? 'Enqueueing…' : 'Enqueue'}
-              </button>
+              </Button>
             </div>
             <label className="data-overview-option-jobs-bar__sym">
               <span className="data-overview-option-jobs-bar__sym-label">Underlying</span>

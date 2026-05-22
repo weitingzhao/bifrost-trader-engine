@@ -15,6 +15,8 @@ import type {
   WatchlistDbCoverageSymbolRow,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { PageSection } from '@/components/shared/page-section'
+import { Button } from '@/components/ui/button'
 import { DataOverviewWatchlistOptionsSummaryTable } from './dataOverview/DataOverviewWatchlistOptions'
 import { DataOverviewWatchlistStocksSummaryTable } from './dataOverview/DataOverviewWatchlistStocks'
 import {
@@ -23,6 +25,15 @@ import {
   COVERAGE_STOCK_SUBSECTIONS,
   FEED_MASSIVE_STOCK_ID,
 } from './settings/settingsConstants'
+
+const BREADCRUMB_LINK =
+  'border-0 bg-transparent p-0 font-inherit text-[var(--color-link)] hover:text-[var(--color-link-hover)] hover:underline focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]'
+
+const PAGE_TITLE =
+  'm-0 inline-flex flex-wrap items-center gap-2 text-[length:var(--text-headline)] font-bold tracking-tight text-foreground'
+
+const SECTION_TITLE =
+  'm-0 inline-flex flex-wrap items-center gap-2 text-[length:var(--text-body)] font-semibold tracking-tight text-foreground'
 
 interface DataOverviewSummaryPageProps {
   status: StatusResponse | null
@@ -256,34 +267,36 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
   }
 
   return (
-    <div className="card process-section market-data-page market-data-page--settings-embed">
-      <h2 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
+    <PageSection className="market-data-page market-data-page--settings-embed min-w-0">
+      <h2 className={PAGE_TITLE} style={{ marginBottom: 'var(--space-2)' }}>
         <button
           type="button"
-          className="page-title-breadcrumb-link"
+          className={BREADCRUMB_LINK}
           onClick={() => { window.location.hash = '#settings-heartbeat' }}
           aria-label="Go to Settings"
         >
           Settings
         </button>
-        {' / '}
-        <button
-          type="button"
-          className="page-title-breadcrumb-link"
-          onClick={() => { window.location.hash = `#${COVERAGE_OVERVIEW_DETAIL_ID}` }}
-          aria-label="Go to Data Overview Detail"
-        >
-          Data Overview
-        </button>
-        {' / '}
-        Summary
+        <span className="text-foreground">
+          {' / '}
+          <button
+            type="button"
+            className={BREADCRUMB_LINK}
+            onClick={() => { window.location.hash = `#${COVERAGE_OVERVIEW_DETAIL_ID}` }}
+            aria-label="Go to Data Overview Detail"
+          >
+            Data Overview
+          </button>
+          {' / '}
+          <span className="font-bold">Summary</span>
+        </span>
         <InfoTooltip text="Aggregates only: watchlist summary tables, job queues, Celery Beat, global PostgreSQL coverage. Per-symbol matrix and jobs toolbar are on Data Overview → Detail." />
       </h2>
 
       <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)' }}>
         <button
           type="button"
-          className="page-title-breadcrumb-link"
+          className={BREADCRUMB_LINK}
           style={{ fontSize: 'inherit', padding: 0 }}
           onClick={() => { window.location.hash = `#${COVERAGE_OVERVIEW_DETAIL_ID}` }}
         >
@@ -297,13 +310,13 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
         <span style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)' }}>
           Massive-only coverage and pipeline status.
         </span>
-        <button type="button" className="btn btn-secondary btn-sm" disabled={loading} onClick={() => void loadAll()}>
+        <Button variant="secondary" size="sm" type="button" disabled={loading} onClick={() => void loadAll()}>
           {loading ? 'Loading…' : 'Refresh'}
-        </button>
+        </Button>
       </div>
 
       <section className="replay-section" aria-labelledby="data-overview-wl-summary-head" style={{ marginBottom: 'var(--space-4)' }}>
-        <h3 id="data-overview-wl-summary-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
+        <h3 id="data-overview-wl-summary-head" className={SECTION_TITLE} style={{ marginBottom: 'var(--space-2)' }}>
           Watchlist coverage (summary)
           <InfoTooltip text="Watchlist-scoped aggregates by dataset. For per-symbol columns, use Data Overview → Detail." />
         </h3>
@@ -320,14 +333,14 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
         {wlRows.length > 0 ? (
           <>
             <div style={{ marginBottom: 'var(--space-4)' }}>
-              <h4 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)' }}>
+              <h4 className={SECTION_TITLE} style={{ marginBottom: 'var(--space-2)' }}>
                 Options (watchlist summary)
                 <InfoTooltip text="Watchlist-scoped aggregates across symbols (max 80). Same metrics as Data Overview → Detail option datasets summary block." />
               </h4>
               <DataOverviewWatchlistOptionsSummaryTable wlRows={wlRows} />
             </div>
             <div>
-              <h4 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)' }}>
+              <h4 className={SECTION_TITLE} style={{ marginBottom: 'var(--space-2)' }}>
                 Stocks (watchlist summary)
                 <InfoTooltip text="Fundamental stock datasets for the same watchlist universe. Per-symbol matrix is on Data Overview → Detail." />
               </h4>
@@ -341,7 +354,7 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
       </section>
 
       <section className="replay-section" aria-labelledby="data-overview-pipeline-head" style={{ marginBottom: 'var(--space-4)' }}>
-        <h3 id="data-overview-pipeline-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
+        <h3 id="data-overview-pipeline-head" className={SECTION_TITLE} style={{ marginBottom: 'var(--space-2)' }}>
           Massive job queues and schedule
           <InfoTooltip text="Queue counts come from job_massive_backfill (Ops API). Scheduled tasks list Celery Beat entries in UTC; actual execution requires Celery Beat and workers. Full job tables: Option Coverage and Massive Stock pages." />
         </h3>
@@ -362,13 +375,10 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
           >
             <h4 className="mp-chart-subtitle" style={{ marginTop: 0 }}>Options Massive queue</h4>
             <p style={{ fontSize: 'var(--text-caption)', marginBottom: 'var(--space-2)' }}>{queueSummaryLine(jobsOpt)}</p>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => openDetail(COVERAGE_OPTION_SUBSECTION.id)}
+            <Button variant="secondary" size="sm" type="button" onClick={() => openDetail(COVERAGE_OPTION_SUBSECTION.id)}
             >
               Open job details — Options
-            </button>
+            </Button>
           </div>
           <div
             className="replay-section"
@@ -376,13 +386,10 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
           >
             <h4 className="mp-chart-subtitle" style={{ marginTop: 0 }}>Stocks Massive queue</h4>
             <p style={{ fontSize: 'var(--text-caption)', marginBottom: 'var(--space-2)' }}>{queueSummaryLine(jobsStock)}</p>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => openDetail(FEED_MASSIVE_STOCK_ID)}
+            <Button variant="secondary" size="sm" type="button" onClick={() => openDetail(FEED_MASSIVE_STOCK_ID)}
             >
               Open job details — Stock
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -445,7 +452,7 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
       </section>
 
       <section className="replay-section" aria-labelledby="data-overview-summary-head">
-        <h3 id="data-overview-summary-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
+        <h3 id="data-overview-summary-head" className={SECTION_TITLE} style={{ marginBottom: 'var(--space-2)' }}>
           Global PostgreSQL coverage (Massive)
           <InfoTooltip text="Whole-database aggregates for Massive source rows. Option contracts count symbols with massive_option_ticker set. Distinct symbols use normalized tickers; option_snapshots counts the underlying segment of contract_key." />
         </h3>
@@ -482,13 +489,10 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
                   <td style={{ fontSize: 'var(--text-caption)' }}>{row.newest_trade_date ?? '—'}</td>
                   <td style={{ fontSize: 'var(--text-caption)' }}>{globalRowFreshness(row)}</td>
                   <td>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => openDetail(row.drill_down_hash)}
+                    <Button variant="secondary" size="sm" type="button" onClick={() => openDetail(row.drill_down_hash)}
                     >
                       {detailLabel(row.drill_down_hash)}
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               ))}
@@ -502,15 +506,15 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
 
       <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginTop: 'var(--space-4)' }}>
         Massive option sync and chain tools:{' '}
-        <button type="button" className="page-title-breadcrumb-link" style={{ fontSize: 'inherit', padding: 0 }} onClick={() => { window.location.hash = `#${COVERAGE_OPTION_SUBSECTION.id}` }}>
+        <button type="button" className={BREADCRUMB_LINK} style={{ fontSize: 'inherit', padding: 0 }} onClick={() => { window.location.hash = `#${COVERAGE_OPTION_SUBSECTION.id}` }}>
           Data Coverage → Option
         </button>
         {' · '}
         Stock daily bars (DB):{' '}
-        <button type="button" className="page-title-breadcrumb-link" style={{ fontSize: 'inherit', padding: 0 }} onClick={() => { window.location.hash = `#${FEED_MASSIVE_STOCK_ID}` }}>
+        <button type="button" className={BREADCRUMB_LINK} style={{ fontSize: 'inherit', padding: 0 }} onClick={() => { window.location.hash = `#${FEED_MASSIVE_STOCK_ID}` }}>
           Feed → Massive → Stock
         </button>
       </p>
-    </div>
+    </PageSection>
   )
 }

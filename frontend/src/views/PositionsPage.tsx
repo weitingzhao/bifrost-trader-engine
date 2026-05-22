@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Execution, IbPositionRow, StatusResponse } from '../types'
 import { deleteExecution, updateExecution } from '../api'
 import type { StrategyStructure } from '../api/strategy/strategies'
+import { PageSection } from '@/components/shared/page-section'
+import { Button } from '@/components/ui/button'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import { computeRiskProfile } from '../utils/riskProfile'
 import type { RiskPosition } from '../utils/riskProfile'
@@ -1965,7 +1967,7 @@ export function PositionsPage({
 
 
   return (
-    <div className="card process-section replay-page">
+    <PageSection className="replay-page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
         <SectionPageTitle
           menu="Portfolio"
@@ -2672,16 +2674,15 @@ export function PositionsPage({
               this line.
             </p>
             <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
-              <button
+              <Button
                 type="button"
-                className="btn btn-secondary"
+                variant="secondary"
                 onClick={() => setEditExecConfirmState({ open: false, exec: null })}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="btn btn-primary"
                 onClick={() => {
                   const ex = editExecConfirmState.exec
                   setEditExecConfirmState({ open: false, exec: null })
@@ -2692,7 +2693,7 @@ export function PositionsPage({
                 }}
               >
                 Continue
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -2749,17 +2750,17 @@ export function PositionsPage({
               {deleteConfirmState.message}
             </p>
             <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
-              <button
+              <Button
                 type="button"
-                className="btn btn-secondary"
+                variant="secondary"
                 onClick={() => setDeleteConfirmState(prev => ({ ...prev, open: false, exec: null }))}
                 disabled={deleteConfirmState.confirming}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="btn-danger"
+                variant="destructive"
                 onClick={async () => {
                   const exec = deleteConfirmState.exec
                   if (!exec?.account_executions_id) {
@@ -2780,7 +2781,7 @@ export function PositionsPage({
                 disabled={deleteConfirmState.confirming}
               >
                 {deleteConfirmState.confirming ? 'Deleting…' : 'Confirm delete'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -2813,26 +2814,28 @@ export function PositionsPage({
       </RightInspectorDrawer>
       <RightInspectorDrawer open={strategyInspectorInstanceId != null} ariaLabel="Strategy instance detail" variant="instance-detail">
         {strategyInspectorInstanceId != null && (
-          <div className="riv-stock-inspector" aria-label="Strategy instance detail">
-            <div className="od-detail-header riv-stock-inspector-header">
-              <h3 className="od-detail-title">
+          <div className="flex min-w-0 flex-col" aria-label="Strategy instance detail">
+            <div className="mb-3 flex items-start justify-between gap-2 border-b border-border pb-3">
+              <h3 className="text-base font-semibold leading-tight">
                 Strategy Instance
-                <span className="od-detail-expiry"> · #{strategyInspectorInstanceId}</span>
+                <span className="font-normal text-muted-foreground"> · #{strategyInspectorInstanceId}</span>
               </h3>
-              <button
+              <Button
                 type="button"
-                className="od-detail-close"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0"
                 onClick={closeStrategyInspector}
                 aria-label="Close strategy instance inspector"
               >
                 ✕
-              </button>
+              </Button>
             </div>
             <StrategyInstanceDetailPage strategyInstanceId={strategyInspectorInstanceId} status={status} embedded />
           </div>
         )}
       </RightInspectorDrawer>
-    </div>
+    </PageSection>
   )
 }
 

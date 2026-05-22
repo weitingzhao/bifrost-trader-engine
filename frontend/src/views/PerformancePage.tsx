@@ -12,6 +12,8 @@ import type { StrategyInstance } from '../types'
 import { fetchExecutions, fetchPerformance, fetchOpportunities, fetchStrategyInstances, postOptionStockLinksQuery } from '../api'
 import ExecSourceBadge from '../components/ExecSourceBadge'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { PageSection } from '@/components/shared/page-section'
+import { Button } from '@/components/ui/button'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import { ViewOptionStockLinksModal } from './portfolio/ViewOptionStockLinksModal'
 import {
@@ -909,7 +911,7 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
 
   return (
     <div className="app-page-stack performance-page">
-      <section className="card performance-summary-section" aria-label="Performance">
+      <PageSection className="performance-summary-section" aria-label="Performance">
         <SectionPageTitle
           menu="Portfolio"
           pageTitle="Performance"
@@ -1090,10 +1092,10 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
           </div>
         </div>
         {portfolioGrowthChart && (
-          <section className="performance-growth-card" aria-label="Portfolio equity growth">
-            <div className="performance-growth-card-header">
+          <section className="performance-growth-panel" aria-label="Portfolio equity growth">
+            <div className="performance-growth-panel-header">
               <div>
-                <div className="performance-growth-card-title-row">
+                <div className="performance-growth-panel-title-row">
                   <h3>Portfolio Equity Growth</h3>
                   <InfoTooltip
                     text={
@@ -1590,7 +1592,7 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
         </section>
 
       <section className="performance-calendar-section performance-pane" aria-label="Calendar">
-        <h3 className="card-subtitle page-title-with-tooltip">
+        <h3 className="inline-flex items-center gap-1 text-sm font-semibold">
           Calendar
           <InfoTooltip text="Options: daily Realized and Unrealized (R/U)—FIFO option PnL plus prorated option–stock link slippage. Stocks / Fixed income: daily Realized is Σ realized_pnl; daily Notional is signed net trade size (qty×price) for coloring. Cash-like: Realized same; Notional is Σ |qty|×price. Unrealized is not shown for STK tabs. Category labels use GET /status (approximate on history)." />
         </h3>
@@ -1685,9 +1687,9 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                       <p className="section-hint performance-calendar-loading">Loading daily metrics…</p>
                     )}
                     <div className="performance-calendar-nav">
-                      <button type="button" className="btn btn-secondary" onClick={goPrev} aria-label="Previous month">&larr; Prev</button>
+                      <Button type="button" variant="secondary" onClick={goPrev} aria-label="Previous month">&larr; Prev</Button>
                       <span className="performance-calendar-title">{monthLabel}</span>
-                      <button type="button" className="btn btn-secondary" onClick={goNext} aria-label="Next month">Next &rarr;</button>
+                      <Button type="button" variant="secondary" onClick={goNext} aria-label="Next month">Next &rarr;</Button>
                     </div>
                     <div className="performance-calendar-legend" aria-label="PnL legend">
                       <span className="performance-calendar-legend-item performance-calendar-legend-item-realized">R = Realized</span>
@@ -1821,7 +1823,7 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                       ))}
                     </div>
                       </div>
-                    <div className="performance-calendar-summary performance-calendar-summary-card">
+                    <div className="performance-calendar-summary performance-calendar-summary-panel">
                     <div className="performance-summary-rows performance-summary-inside-calendar">
                       <div className="performance-summary-row performance-summary-row-summary">
                         <span className="performance-summary-type">Summary</span>
@@ -2087,7 +2089,7 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                       <div className="performance-calendar-day-detail" aria-live="polite">
                         <h4 className="performance-calendar-day-detail-title">
                           Records for {selectedDay}
-                          <button type="button" className="btn btn-secondary btn-sm performance-calendar-day-detail-close" onClick={() => setSelectedDay(null)} aria-label="Close">×</button>
+                          <Button type="button" variant="secondary" size="sm" className="performance-calendar-day-detail-close" onClick={() => setSelectedDay(null)} aria-label="Close">×</Button>
                         </h4>
                         {selectedDayExecutionsLoading ? (
                           <p className="section-hint">Loading executions…</p>
@@ -2711,15 +2713,16 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
 
       <section className="performance-on-the-fly-section performance-pane" aria-label="On the fly executions">
         <div className="performance-on-the-fly-header">
-          <h3 className="card-title performance-on-the-fly-title">On the fly</h3>
-          <button
+          <h3 className="text-base font-semibold performance-on-the-fly-title">On the fly</h3>
+          <Button
             type="button"
-            className="btn btn-secondary performance-on-the-fly-toggle"
+            variant="secondary"
+            className="performance-on-the-fly-toggle"
             aria-expanded={onTheFlyOpen}
             onClick={() => setOnTheFlyOpen((o) => !o)}
           >
             {onTheFlyOpen ? 'Hide' : 'Show'}
-          </button>
+          </Button>
         </div>
         <p className="section-hint performance-on-the-fly-hint">
           TWS-side executions that are not already covered by the official book (same account and contract as a row in
@@ -2927,10 +2930,10 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
           </>
         )}
       </section>
-      </section>
+      </PageSection>
 
       {error && (
-        <div className="card card-error" role="alert">
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive" role="alert">
           <p>{error}</p>
         </div>
       )}

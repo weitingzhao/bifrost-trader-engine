@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { Button } from '@/components/ui/button'
 
 /** Shared copy — also reflected in matrix tooltips where relevant. */
 export const GAP_SCOPE_CORE_TEXT =
@@ -55,9 +56,9 @@ export function DataOverviewGapExplainSheet({
           <h3 id="data-overview-gap-explain-title" className="ref-jobs-sheet-title">
             Gap scope
           </h3>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Close">
+          <Button variant="secondary" size="sm" type="button" onClick={onClose} aria-label="Close">
             Close
-          </button>
+          </Button>
         </div>
 
         <div className="data-overview-gap-explain-sheet__body">
