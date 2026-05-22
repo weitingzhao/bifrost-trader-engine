@@ -1,3 +1,5 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
 import { Button } from '@/components/ui/button'
 import { ExecRowIconButton } from '@/components/shared/exec-row-buttons'
 import type { Execution } from '../../types'
@@ -84,16 +86,16 @@ export function OptionExecutionRow({
   const syncBusyFinal = syncingFinalAttributionKey === String(ex.account_executions_id ?? '')
 
   return (
-    <tr key={rowKey} className="detail-execution-row">
-      <td className="replay-opt-expand-col" />
-      <td className="detail-exec-indent replay-muted detail-exec-indent--stack" colSpan={2}>
-        <div className="detail-exec-indent-stack">
-          <div className="detail-exec-line-primary">
+    <tr key={rowKey} className={w9.detailExecutionRow}>
+      <td className={rl.optExpandCol} />
+      <td className={rl.muted} colSpan={2}>
+        <div className={w9.detailExecIndentStack}>
+          <div className={w9.detailExecLinePrimary}>
             ↳ {bookLabel} exec #{ex.account_executions_id ?? '?'}
             {execInstanceId != null ? (
               <>
                 {' '}
-                <span className="replay-muted">·</span>{' '}
+                <span className={rl.muted}>·</span>{' '}
                 <button
                   type="button"
                   className="ledger-instance-icon-link"
@@ -110,9 +112,9 @@ export function OptionExecutionRow({
             ) : null}
           </div>
           {showSyncTws && crossBookMatch != null ? (
-            <div className="detail-exec-line-sync">
+            <div className={w9.detailExecLineSync}>
               <ExecRowIconButton
-                className="detail-exec-sync-btn"
+                className={w9.detailExecSyncBtn}
                 title="Apply opportunity and strategy from the final book row"
                 aria-label="Sync strategy attribution from final book"
                 disabled={syncBusyTws}
@@ -128,9 +130,9 @@ export function OptionExecutionRow({
             </div>
           ) : null}
           {showSyncFinal && crossBookMatch != null ? (
-            <div className="detail-exec-line-sync">
+            <div className={w9.detailExecLineSync}>
               <ExecRowIconButton
-                className="detail-exec-sync-btn"
+                className={w9.detailExecSyncBtn}
                 title="Apply opportunity and strategy from the TWS client row"
                 aria-label="Sync strategy attribution from TWS client book"
                 disabled={syncBusyFinal}
@@ -160,19 +162,19 @@ export function OptionExecutionRow({
         {eTs != null && Number.isFinite(eTs) ? (
           <>
             {fmtDate(eTs)}
-            {fmtDaysAgo(eTs) ? <span className="replay-time-ago"> {fmtDaysAgo(eTs)}</span> : null}
+            {fmtDaysAgo(eTs) ? <span className={rl.timeAgo}> {fmtDaysAgo(eTs)}</span> : null}
           </>
         ) : (
           '—'
         )}
       </td>
       <td>{eComm ? fmtUsd(eComm) : '—'}</td>
-      <td className="replay-muted" />
-      {includeAttrColumn ? <td className="replay-muted" /> : null}
-      {includeAccountColumn ? <td className="replay-muted positions-opt-account-cell">{ex.account_id ?? '—'}</td> : null}
+      <td className={rl.muted} />
+      {includeAttrColumn ? <td className={rl.muted} /> : null}
+      {includeAccountColumn ? <td className={rl.muted}>{ex.account_id ?? '—'}</td> : null}
       <StrategyAttributionCells ex={ex} onOpenStrategyInstance={actions.onOpenStrategyInspector} />
-      <td className="replay-opt-actions-cell">
-        <span className="replay-exec-row-actions">
+      <td className={rl.optActionsCell}>
+        <span className={rl.execRowActions}>
           <ExecRowIconButton
             onClick={e => {
               e.stopPropagation()

@@ -1,3 +1,4 @@
+import { rl } from '@/lib/replayLayout'
 interface Props {
   source: string | null | undefined
 }
@@ -20,7 +21,7 @@ const labelMap: Record<string, string> = {
 
 export default function ExecSourceBadge({ source }: Props) {
   const s = (source ?? '').trim()
-  if (!s) return <span className="replay-muted">—</span>
+  if (!s) return <span className={rl.muted}>—</span>
   const cls = classMap[s] ?? 'exec-source-badge--unknown'
   const label = labelMap[s] ?? s
   const title = s === 'journal_closed' ? 'Manual accounting adjustment (journal entry)' : s

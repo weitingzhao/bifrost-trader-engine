@@ -1,3 +1,6 @@
+import { rl, bubbleSwitchBtn } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useEffect, useId, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { Execution } from '../../types'
@@ -186,19 +189,19 @@ export function ExecutionFormModal({
       aria-modal="true"
       aria-labelledby="exec-modal-title"
     >
-      <div className="modal-panel replay-exec-modal" onClick={e => e.stopPropagation()}>
+      <div className={rl.execModal} onClick={e => e.stopPropagation()}>
         <h3 id="exec-modal-title">
           {editExec ? 'Edit execution' : createExecutionSource === 'journal_closed' ? 'Add journal' : 'Add history'}
         </h3>
         {!editExec && createExecutionSource === 'journal_closed' && (
-          <p className="section-hint execution-flex-manual-warning" role="alert">
+          <p className={cn(w9.sectionHint, 'execution-flex-manual-warning')} role="alert">
             Manual journal entry: stored as <code className="performance-inline-code">journal_closed</code> in the journal
             execution store. Use only when IB / Flex cannot supply the fill (e.g. reconciliation or expired exercise).
           </p>
         )}
-        {execFormError && <p className="section-hint replay-form-error">{execFormError}</p>}
+        {execFormError && <p className={rl.formError}>{execFormError}</p>}
         <form
-          className="replay-exec-form"
+          className={rl.execForm}
           onSubmit={async e => {
             e.preventDefault()
             setExecFormError(null)
@@ -340,12 +343,12 @@ export function ExecutionFormModal({
             }
           }}
         >
-          <div className="replay-exec-form-row">
+          <div className={rl.execFormRow}>
             <label>Account</label>
             {lockContractContext && !editExec ? (
               <input
                 type="text"
-                className="replay-exec-readonly"
+                className={rl.execReadonly}
                 readOnly
                 value={execForm.account_id}
                 aria-readonly="true"
@@ -358,7 +361,7 @@ export function ExecutionFormModal({
               />
             )}
           </div>
-          <div className="replay-exec-form-row">
+          <div className={rl.execFormRow}>
             <label>Strategy (optional)</label>
             <AppSelect
               value={execForm.strategy_opportunity_id}
@@ -367,7 +370,7 @@ export function ExecutionFormModal({
               options={opportunities.map(o => ({ value: String(o.strategy_opportunity_id), label: o.name ?? `#${o.strategy_opportunity_id}` }))}
             />
           </div>
-          <div className="replay-exec-form-row">
+          <div className={rl.execFormRow}>
             <label>Instance (optional)</label>
             <AppSelect
               value={execForm.strategy_instance_id}
@@ -388,11 +391,11 @@ export function ExecutionFormModal({
               }))}
             />
           </div>
-          <div className="replay-exec-splits-section">
-            <div className="replay-exec-form-row replay-exec-splits-section-header">
+          <div className={rl.execSplitsSection}>
+            <div className={cn(rl.execFormRow, rl.execSplitsSectionHeader)}>
               <label id={splitSectionId}>Multi-instance split</label>
-              <div className="replay-exec-splits-controls">
-                <label className="replay-exec-checkbox-label">
+              <div className={rl.execSplitsControls}>
+                <label className={rl.execCheckboxLabel}>
                   <input
                     type="checkbox"
                     checked={useInstanceSplits}
@@ -425,15 +428,15 @@ export function ExecutionFormModal({
               </div>
             </div>
             {useInstanceSplits && (
-              <p className="section-hint replay-exec-splits-hint">
+              <p className={rl.execSplitsHint}>
                 Signed quantities must sum to the execution quantity. Saving with splits enabled and no rows clears
                 allocation rows. Single Strategy / Instance fields are ignored when splits are saved.
               </p>
             )}
             {useInstanceSplits && (
-              <div className="replay-exec-splits-rows">
+              <div className={rl.execSplitsRows}>
                 {splitRows.map(row => (
-                  <div key={row.uid} className="replay-exec-split-row">
+                  <div key={row.uid} className={rl.execSplitRow}>
                     <AppSelect
                       value={row.strategy_instance_id}
                       onChange={(v) =>
@@ -453,7 +456,7 @@ export function ExecutionFormModal({
                     <input
                       type="number"
                       step="any"
-                      className="replay-exec-split-qty"
+                      className={rl.execSplitQty}
                       value={row.allocated_quantity}
                       onChange={e =>
                         setSplitRows(rows =>
@@ -467,7 +470,7 @@ export function ExecutionFormModal({
                       type="button"
                       variant="secondary"
                       size="sm"
-                      className="replay-exec-split-remove"
+                      className={rl.execSplitRemove}
                       onClick={() => setSplitRows(rows => rows.filter(r => r.uid !== row.uid))}
                     >
                       Remove
@@ -477,16 +480,16 @@ export function ExecutionFormModal({
               </div>
             )}
           </div>
-          <div className="replay-exec-form-row">
+          <div className={rl.execFormRow}>
             <label>Time</label>
             <input type="datetime-local" value={execForm.time} onChange={e => setExecForm(f => ({ ...f, time: e.target.value }))} required />
           </div>
-          <div className="replay-exec-form-row">
+          <div className={rl.execFormRow}>
             <label>Symbol</label>
             {lockContractContext && !editExec ? (
               <input
                 type="text"
-                className="replay-exec-readonly"
+                className={rl.execReadonly}
                 readOnly
                 value={execForm.symbol}
                 aria-readonly="true"
@@ -501,21 +504,21 @@ export function ExecutionFormModal({
               />
             )}
           </div>
-          <div className="replay-exec-form-row">
+          <div className={rl.execFormRow}>
             <label>Type</label>
             {lockContractContext && !editExec ? (
-              <div className="replay-exec-seg-bubbles" role="group" aria-label="Security type">
-                <span className="replay-bubble-switch-btn active replay-exec-bubble-locked" aria-current="true">
+              <div className={rl.execSegBubbles} role="group" aria-label="Security type">
+                <span className={bubbleSwitchBtn(true)} aria-current="true">
                   STK
                 </span>
               </div>
             ) : (
-              <div className="replay-exec-seg-bubbles" role="radiogroup" aria-label="Security type">
+              <div className={rl.execSegBubbles} role="radiogroup" aria-label="Security type">
                 <button
                   type="button"
                   role="radio"
                   aria-checked={(execForm.sec_type || 'STK').toUpperCase() === 'STK'}
-                  className={`replay-bubble-switch-btn ${(execForm.sec_type || 'STK').toUpperCase() === 'STK' ? 'active' : ''}`}
+                  className={bubbleSwitchBtn((execForm.sec_type || 'STK').toUpperCase() === 'STK')}
                   onClick={() => setExecForm(f => ({ ...f, sec_type: 'STK' }))}
                 >
                   STK
@@ -524,7 +527,7 @@ export function ExecutionFormModal({
                   type="button"
                   role="radio"
                   aria-checked={(execForm.sec_type || 'STK').toUpperCase() === 'OPT'}
-                  className={`replay-bubble-switch-btn ${(execForm.sec_type || 'STK').toUpperCase() === 'OPT' ? 'active' : ''}`}
+                  className={bubbleSwitchBtn((execForm.sec_type || 'STK').toUpperCase() === 'OPT')}
                   onClick={() => setExecForm(f => ({ ...f, sec_type: 'OPT' }))}
                 >
                   OPT
@@ -532,14 +535,14 @@ export function ExecutionFormModal({
               </div>
             )}
           </div>
-          <div className="replay-exec-form-row">
+          <div className={rl.execFormRow}>
             <label>Side</label>
-            <div className="replay-exec-seg-bubbles" role="radiogroup" aria-label="Side">
+            <div className={rl.execSegBubbles} role="radiogroup" aria-label="Side">
               <button
                 type="button"
                 role="radio"
                 aria-checked={(execForm.side || 'BUY').toUpperCase() === 'BUY'}
-                className={`replay-bubble-switch-btn ${(execForm.side || 'BUY').toUpperCase() === 'BUY' ? 'active' : ''}`}
+                className={bubbleSwitchBtn((execForm.side || 'BUY').toUpperCase() === 'BUY')}
                 onClick={() => setExecForm(f => ({ ...f, side: 'BUY' }))}
               >
                 Buy
@@ -548,15 +551,15 @@ export function ExecutionFormModal({
                 type="button"
                 role="radio"
                 aria-checked={(execForm.side || 'BUY').toUpperCase() === 'SELL'}
-                className={`replay-bubble-switch-btn ${(execForm.side || 'BUY').toUpperCase() === 'SELL' ? 'active' : ''}`}
+                className={bubbleSwitchBtn((execForm.side || 'BUY').toUpperCase() === 'SELL')}
                 onClick={() => setExecForm(f => ({ ...f, side: 'SELL' }))}
               >
                 Sell
               </button>
             </div>
           </div>
-          <div className="replay-exec-form-row replay-exec-form-row-metrics">
-            <div className="replay-exec-metric-field">
+          <div className={cn(rl.execFormRow, rl.execFormRowMetrics)}>
+            <div className={rl.execMetricField}>
               <label htmlFor="exec-qty">Quantity</label>
               <input
                 id="exec-qty"
@@ -568,7 +571,7 @@ export function ExecutionFormModal({
                 required
               />
             </div>
-            <div className="replay-exec-metric-field">
+            <div className={rl.execMetricField}>
               <label htmlFor="exec-price">Price</label>
               <input
                 id="exec-price"
@@ -579,7 +582,7 @@ export function ExecutionFormModal({
                 required
               />
             </div>
-            <div className="replay-exec-metric-field">
+            <div className={rl.execMetricField}>
               <label htmlFor="exec-comm">Commission</label>
               <input
                 id="exec-comm"
@@ -593,17 +596,17 @@ export function ExecutionFormModal({
           </div>
           {(execForm.sec_type || 'STK').toUpperCase() === 'OPT' && (
             <>
-              <div className="replay-exec-form-row">
+              <div className={rl.execFormRow}>
                 <label>Expiry (YYYYMMDD)</label>
                 <input type="text" value={execForm.expiry} onChange={e => setExecForm(f => ({ ...f, expiry: e.target.value }))} placeholder="20251219" />
               </div>
-              <div className="replay-exec-form-row">
+              <div className={rl.execFormRow}>
                 <label>STRIKE</label>
                 <input type="number" step="0.1" min="0.1" value={execForm.strike} onChange={e => setExecForm(f => ({ ...f, strike: e.target.value }))} required placeholder="Required, > 0" />
               </div>
-              <div className="replay-exec-form-row">
+              <div className={rl.execFormRow}>
                 <label>Right</label>
-                <div className="replay-exec-type-radios">
+                <div className={rl.execTypeRadios}>
                   <label>
                     <input type="radio" name="exec-option-right" value="C" checked={(execForm.option_right || 'C').toUpperCase() === 'C'} onChange={e => setExecForm(f => ({ ...f, option_right: e.target.value }))} />
                     Call
@@ -616,8 +619,8 @@ export function ExecutionFormModal({
               </div>
             </>
           )}
-          <div className="replay-exec-form-row replay-exec-form-row-metrics replay-exec-form-row-metrics--pnl">
-            <div className="replay-exec-metric-field">
+          <div className={cn(rl.execFormRow, rl.execFormRowMetrics, rl.execFormRowMetricsPnl)}>
+            <div className={rl.execMetricField}>
               <label htmlFor="exec-realized">Realized PnL</label>
               <input
                 id="exec-realized"
@@ -628,7 +631,7 @@ export function ExecutionFormModal({
                 placeholder="Optional"
               />
             </div>
-            <div className="replay-exec-metric-field">
+            <div className={rl.execMetricField}>
               <label htmlFor="exec-ccy">Currency</label>
               <input
                 id="exec-ccy"
@@ -639,7 +642,7 @@ export function ExecutionFormModal({
               />
             </div>
           </div>
-          <div className="replay-exec-form-actions">
+          <div className={rl.execFormActions}>
             <Button type="button" variant="secondary" onClick={() => { onClose(); setExecFormError(null) }}>
               Cancel
             </Button>

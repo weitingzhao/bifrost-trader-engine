@@ -1,4 +1,7 @@
 import { createPortal } from 'react-dom'
+import { pnlNegativeClass, pnlPositiveClass } from '@/components/shared/appUi'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { RiskProfile, RiskPosition, RiskScenarioBreakdown } from '../utils/riskProfile'
 import {
@@ -217,7 +220,7 @@ function ClickablePnlCell({
     <td className="risk-scenario-matrix-click-wrap">
       <button
         type="button"
-        className={`risk-scenario-matrix-cell-btn ${v >= 0 ? 'pnl-positive' : 'pnl-negative'}${active ? ' risk-scenario-matrix-cell-btn-active' : ''}`}
+        className={`risk-scenario-matrix-cell-btn ${v >= 0 ? pnlPositiveClass : pnlNegativeClass}${active ? ' risk-scenario-matrix-cell-btn-active' : ''}`}
         onClick={e => {
           e.stopPropagation()
           onClick()
@@ -428,16 +431,16 @@ function ScenarioPnLMatrix({
           <th scope="col" className="risk-scenario-matrix-scenario">
             Scenario
           </th>
-          <th scope="col" className="risk-scenario-matrix-num">
+          <th scope="col" className={w9.riskScenarioMatrixNum}>
             Spot
           </th>
-          <th scope="col" className="risk-scenario-matrix-num" title="Click value for calculation">
+          <th scope="col" className={w9.riskScenarioMatrixNum} title="Click value for calculation">
             Option
           </th>
-          <th scope="col" className="risk-scenario-matrix-num" title="Click value for calculation">
+          <th scope="col" className={w9.riskScenarioMatrixNum} title="Click value for calculation">
             Stk
           </th>
-          <th scope="col" className="risk-scenario-matrix-num">
+          <th scope="col" className={w9.riskScenarioMatrixNum}>
             Total
           </th>
         </tr>
@@ -457,7 +460,7 @@ function ScenarioPnLMatrix({
           </th>
           {g ? (
             <>
-              <td className="risk-scenario-matrix-num">{g.underlying_price.toFixed(2)}</td>
+              <td className={w9.riskScenarioMatrixNum}>{g.underlying_price.toFixed(2)}</td>
               <ClickablePnlCell
                 v={g.options_pnl}
                 active={isActive('gain', 'option', g)}
@@ -468,13 +471,13 @@ function ScenarioPnLMatrix({
                 active={isActive('gain', 'stk', g)}
                 onClick={() => pick('gain', 'stk', g)}
               />
-              <td className="risk-scenario-matrix-num risk-value-gain">
+              <td className={cn(w9.riskScenarioMatrixNum, w9.riskValueGain)}>
                 {formatRiskUsd(g.options_pnl + g.stock_pnl)}
               </td>
             </>
           ) : (
             <>
-              <td colSpan={4} className="risk-scenario-matrix-na">
+              <td colSpan={4} className={w9.riskScenarioMatrixNa}>
                 No sample — see ?
               </td>
             </>
@@ -494,17 +497,17 @@ function ScenarioPnLMatrix({
           </th>
           {lossUnlimited && !l ? (
             <>
-              <td className="risk-scenario-matrix-num risk-scenario-matrix-na">—</td>
-              <td colSpan={2} className="risk-scenario-matrix-na">
+              <td className={cn(w9.riskScenarioMatrixNum, w9.riskScenarioMatrixNa)}>—</td>
+              <td colSpan={2} className={w9.riskScenarioMatrixNa}>
                 Naked short call tail
               </td>
-              <td className="risk-scenario-matrix-num risk-value-loss risk-value-unlimited">
+              <td className={cn(w9.riskScenarioMatrixNum, w9.riskValueLoss, w9.riskValueUnlimited)}>
                 Unlimited
               </td>
             </>
           ) : l ? (
             <>
-              <td className="risk-scenario-matrix-num">{l.underlying_price.toFixed(2)}</td>
+              <td className={w9.riskScenarioMatrixNum}>{l.underlying_price.toFixed(2)}</td>
               <ClickablePnlCell
                 v={l.options_pnl}
                 active={isActive('loss', 'option', l)}
@@ -515,12 +518,12 @@ function ScenarioPnLMatrix({
                 active={isActive('loss', 'stk', l)}
                 onClick={() => pick('loss', 'stk', l)}
               />
-              <td className="risk-scenario-matrix-num risk-value-loss">
+              <td className={cn(w9.riskScenarioMatrixNum, w9.riskValueLoss)}>
                 {formatRiskUsd(l.options_pnl + l.stock_pnl)}
               </td>
             </>
           ) : (
-            <td colSpan={4} className="risk-scenario-matrix-na">
+            <td colSpan={4} className={w9.riskScenarioMatrixNa}>
               —
             </td>
           )}
@@ -528,7 +531,7 @@ function ScenarioPnLMatrix({
         {lossUnlimited && h ? (
           <tr className="risk-scenario-matrix-row-hedged">
             <th scope="row">Hedged worst</th>
-            <td className="risk-scenario-matrix-num">{h.underlying_price.toFixed(2)}</td>
+            <td className={w9.riskScenarioMatrixNum}>{h.underlying_price.toFixed(2)}</td>
             <ClickablePnlCell
               v={h.options_pnl}
               active={isActive('hedged', 'option', h)}
@@ -539,7 +542,7 @@ function ScenarioPnLMatrix({
               active={isActive('hedged', 'stk', h)}
               onClick={() => pick('hedged', 'stk', h)}
             />
-            <td className="risk-scenario-matrix-num risk-value-loss">
+            <td className={cn(w9.riskScenarioMatrixNum, w9.riskValueLoss)}>
               {formatRiskUsd(h.options_pnl + h.stock_pnl)}
             </td>
           </tr>
@@ -575,7 +578,7 @@ function scenarioWorksheet(
     )
   } else if (ctx.covered_shares > 0) {
     stockBlock = (
-      <HelpP className="risk-profile-warn">
+      <HelpP className={w9.riskProfileWarn}>
         Stock coverage {ctx.covered_shares} sh but avg cost missing → stock P&amp;L treated as 0 in model.
       </HelpP>
     )
@@ -1117,7 +1120,7 @@ export function RiskProfileDl({
             }
           />
           <dd>
-            <span className="risk-value-loss">{formatApproxUsd(profile.hedged_max_loss ?? 0)}</span>
+            <span className={w9.riskValueLoss}>{formatApproxUsd(profile.hedged_max_loss ?? 0)}</span>
           </dd>
           <Dt
             helpKey="naked-short-calls"

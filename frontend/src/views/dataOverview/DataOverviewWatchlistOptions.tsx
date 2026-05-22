@@ -1,3 +1,4 @@
+import { rl } from '@/lib/replayLayout'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { postOptionBarsContractsGapBatch } from '../../api'
@@ -790,7 +791,7 @@ export function DataOverviewWatchlistOptions({
   return (
     <>
       {showWatchlistSummary ? (
-        <details open className="replay-section data-overview-watchlist-summary" style={{ marginBottom: 'var(--space-3)' }}>
+        <details open className={rl.section} style={{ marginBottom: 'var(--space-3)' }}>
           <summary
             className="m-0 inline-flex flex-wrap items-center gap-2 text-[length:var(--text-body)] font-semibold tracking-tight text-foreground data-overview-watchlist-summary__summary"
             style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)', cursor: 'pointer' }}
@@ -916,7 +917,7 @@ export function DataOverviewWatchlistOptions({
             table={barQualityTable}
           />
 
-          <div className="replay-section data-overview-wl-matrix" style={{ marginBottom: 'var(--space-3)' }}>
+          <div className={rl.section} style={{ marginBottom: 'var(--space-3)' }}>
             <div className="feed-massive-table-wrap">
               <table className="data-table data-overview-wl-matrix__table">
                 <thead>

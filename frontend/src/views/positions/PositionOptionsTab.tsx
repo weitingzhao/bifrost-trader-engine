@@ -1,3 +1,6 @@
+import { rl, expandIcon, pnlUnrealizedClass } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { optContractInspectorBtnClass } from '@/components/shared/exec-row-buttons'
 import type { Execution, RealtimeQuote } from '../../types'
 import type { OpenOptionPosition } from '../portfolio/types'
@@ -72,14 +75,14 @@ export function PositionOptionsTab({
       id="open-panel-options"
       role="tabpanel"
       aria-labelledby="open-tab-options"
-      className="system-tab-panel"
+      className={w9.systemTabPanel}
     >
-      <h5 className="replay-sub">Option positions</h5>
+      <h5 className={rl.sub}>Option positions</h5>
       {positions.length === 0 ? (
-        <p className="section-hint">No open option positions under the current filters.</p>
+        <p className={w9.sectionHint}>No open option positions under the current filters.</p>
       ) : (
-        <div className="replay-portfolio-table-wrap replay-portfolio-table-wrap--no-scroll">
-          <table className="table-operations replay-opt-groups positions-opt-main-table">
+        <div className={cn(rl.portfolioTableWrap, rl.portfolioTableWrapNoScroll)}>
+          <table className={rl.optGroups}>
             <colgroup>
               <col className="pom-col-expand" />
               <col className="pom-col-contract" />
@@ -97,7 +100,7 @@ export function PositionOptionsTab({
             </colgroup>
             <thead>
               <tr>
-                <th className="replay-opt-expand-col" />
+                <th className={rl.optExpandCol} />
                 {(() => {
                   const cols: { col: OpenOptSortCol; label: string; title?: string }[] = [
                     { col: 'contract', label: 'Contract' },
@@ -114,7 +117,7 @@ export function PositionOptionsTab({
                     const th = (
                       <th
                         key={c.col}
-                        className="replay-th-sortable"
+                        className={rl.thSortable}
                         title={c.title ?? `Sort by ${c.label}`}
                         onClick={() => onSortToggle(c.col)}
                         role="button"
@@ -132,7 +135,7 @@ export function PositionOptionsTab({
                   })
                 })()}
                 <th title="Opportunity">Opp</th>
-                <th className="replay-opt-actions-cell">Actions</th>
+                <th className={rl.optActionsCell}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -156,14 +159,14 @@ export function PositionOptionsTab({
                     onKeyDown={hasExecutions ? e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onToggleExpand(posKey) } } : undefined}
                     aria-expanded={hasExecutions ? isPosExpanded : undefined}
                   >
-                    <td className="replay-opt-expand-col">
+                    <td className={rl.optExpandCol}>
                       {hasExecutions ? (
-                        <span className={`replay-opt-expand-icon ${isPosExpanded ? 'expanded' : ''}`} aria-hidden>
+                        <span className={expandIcon(isPosExpanded)} aria-hidden>
                           {isPosExpanded ? '▼' : '▶'}
                         </span>
                       ) : null}
                     </td>
-                    <td className="replay-opt-contract">
+                    <td className={rl.optContract}>
                       {(() => {
                         const p = getContractLabelParts(pos.contract_key)
                         const strikeStr = pos.strike != null ? ` ${pos.strike}` : ''
@@ -265,7 +268,7 @@ export function PositionOptionsTab({
                             <div className="positions-opt-last-line1">{last != null ? fmtUsd(last) : '—'}</div>
                             {pct != null ? (
                               <div className="positions-opt-last-line2">
-                                <span className={`replay-last-strike-pct ${pctClass}`.trim()} title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}>
+                                <span className={`rl.lastStrikePct ${pctClass}`.trim()} title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}>
                                   {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
                                 </span>
                               </div>
@@ -280,18 +283,18 @@ export function PositionOptionsTab({
                     <td className="positions-opt-live-quote">
                       {(() => {
                         const liveQ = quotesMap[pos.contract_key]
-                        if (!liveQ) return <span className="replay-muted">—</span>
+                        if (!liveQ) return <span className={rl.muted}>—</span>
                         const mid = liveQ.mid ?? (liveQ.bid != null && liveQ.ask != null ? (liveQ.bid + liveQ.ask) / 2 : null)
                         return (
                           <>
                             <div className="positions-opt-quote-line positions-opt-quote-line--bid">
-                              {liveQ.bid != null ? <span className="positions-opt-quote-bid">{liveQ.bid.toFixed(2)}</span> : <span className="replay-muted">—</span>}
+                              {liveQ.bid != null ? <span className="positions-opt-quote-bid">{liveQ.bid.toFixed(2)}</span> : <span className={rl.muted}>—</span>}
                             </div>
                             <div className="positions-opt-quote-line positions-opt-quote-line--mid">
                               <strong>{mid != null ? mid.toFixed(2) : '—'}</strong>
                             </div>
                             <div className="positions-opt-quote-line positions-opt-quote-line--ask">
-                              {liveQ.ask != null ? <span className="positions-opt-quote-ask">{liveQ.ask.toFixed(2)}</span> : <span className="replay-muted">—</span>}
+                              {liveQ.ask != null ? <span className="positions-opt-quote-ask">{liveQ.ask.toFixed(2)}</span> : <span className={rl.muted}>—</span>}
                             </div>
                           </>
                         )
@@ -301,7 +304,7 @@ export function PositionOptionsTab({
                       {ts != null ? (
                         <>
                           <div className="positions-opt-time-line1">{fmtDate(ts)}</div>
-                          {fmtDaysAgo(ts) ? <div className="positions-opt-time-line2"><span className="replay-time-ago">{fmtDaysAgo(ts)}</span></div> : null}
+                          {fmtDaysAgo(ts) ? <div className="positions-opt-time-line2"><span className={rl.timeAgo}>{fmtDaysAgo(ts)}</span></div> : null}
                         </>
                       ) : '—'}
                     </td>
@@ -315,26 +318,26 @@ export function PositionOptionsTab({
                           <>
                             {livePnl != null && (
                               <div>
-                                <span className={`replay-pnl-unrealized ${livePnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(livePnl)}</span>
-                                <span className="replay-muted" style={{fontSize:'0.7em'}}> live</span>
+                                <span className={pnlUnrealizedClass(livePnl)}>{fmtUsd(livePnl)}</span>
+                                <span className={rl.muted} style={{fontSize:'0.7em'}}> live</span>
                               </div>
                             )}
-                            <div className={livePnl != null ? 'replay-muted' : undefined} style={livePnl != null ? {fontSize:'0.75em'} : undefined}>
-                              <span className={`replay-pnl-unrealized ${pos.unrealized_pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(pos.unrealized_pnl)}</span>
+                            <div className={livePnl != null ? 'rl.muted' : undefined} style={livePnl != null ? {fontSize:'0.75em'} : undefined}>
+                              <span className={pnlUnrealizedClass(pos.unrealized_pnl)}>{fmtUsd(pos.unrealized_pnl)}</span>
                               {livePnl != null && <span style={{fontSize:'0.7em'}}> snap</span>}
                             </div>
                           </>
                         )
                       })()}
                     </td>
-                    <td className="replay-strategy-opp-cell positions-opt-opp-hint-cell">
+                    <td className={rl.strategyOppCell}>
                       {execCount === 0 ? '—' : (
-                        <span className="replay-muted" title={`${execCount} execution${execCount > 1 ? 's' : ''} — expand row`}>
+                        <span className={rl.muted} title={`${execCount} execution${execCount > 1 ? 's' : ''} — expand row`}>
                           {execCount} exec{execCount > 1 ? 's' : ''} ↓
                         </span>
                       )}
                     </td>
-                    <td className="replay-opt-actions-cell">—</td>
+                    <td className={rl.optActionsCell}>—</td>
                   </tr>
                 )
                 const execRows = isPosExpanded
@@ -369,10 +372,10 @@ export function PositionOptionsTab({
               })}
             </tbody>
             <tfoot>
-              <tr className="replay-opt-tfoot-total">
-                <td colSpan={12} className="replay-opt-tfoot-label">Total</td>
+              <tr className={rl.optTfootTotal}>
+                <td colSpan={12} className={rl.optTfootLabel}>Total</td>
                 <td>
-                  <span className="replay-pnl-unrealized">
+                  <span className={rl.pnlUnrealized}>
                     {fmtUsd(positions.reduce((acc, p) => acc + p.unrealized_pnl, 0))}
                   </span>
                 </td>

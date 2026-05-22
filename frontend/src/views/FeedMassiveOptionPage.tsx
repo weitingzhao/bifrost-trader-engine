@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { StatusResponse } from '../types'
 import {
   fetchMassiveStatus,
@@ -1375,7 +1377,7 @@ export function FeedMassiveOptionPage({
       </nav>
 
       {!configured && (
-        <p className="status-page-msg err" role="alert">
+        <p className={cn(w9.statusPageMsg, 'err')} role="alert">
           Massive API key not configured. Set massive credentials in server config.
         </p>
       )}
@@ -1565,7 +1567,7 @@ export function FeedMassiveOptionPage({
                       {ctCoverageBusy ? 'Loading\u2026' : 'Check Coverage'}
                     </Button>
                   </div>
-                  {ctListErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ctListErr}</p> : null}
+                  {ctListErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{ctListErr}</p> : null}
                   {ctCoverage && ctCoverage.ok && ctCoverage.total != null && ctCoverage.total > 0 ? (
                     <div className="gk-quality-summary-strip" style={{ marginTop: 'var(--space-3)' }}>
                       <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val">{ctCoverage.total}</span><span className="gk-quality-summary-lbl">Contracts</span></div>
@@ -1603,7 +1605,7 @@ export function FeedMassiveOptionPage({
                   <Button variant="secondary" type="button" disabled={ctDetailBusy || !configured} onClick={() => runCtContractDetail()}>
                     {ctDetailBusy ? 'Running\u2026' : 'Fetch overview'}
                   </Button>
-                  {ctDetailErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ctDetailErr}</p> : null}
+                  {ctDetailErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{ctDetailErr}</p> : null}
                   {ctDetailResult ? (
                     <div style={{ marginTop: 'var(--space-3)' }}>
                       <table className="status-page-table" style={{ fontSize: '0.82rem' }}>
@@ -1661,9 +1663,9 @@ export function FeedMassiveOptionPage({
                       </table>
                     </div>
                   ) : ctCoverage && ctCoverage.ok && ctCoverage.total === 0 ? (
-                    <p className="status-page-msg" style={{ marginTop: 'var(--space-3)' }}>No contracts found in <code>option_contracts</code> for this symbol. Run a chain snapshot first to populate.</p>
+                    <p className={w9.statusPageMsg} style={{ marginTop: 'var(--space-3)' }}>No contracts found in <code>option_contracts</code> for this symbol. Run a chain snapshot first to populate.</p>
                   ) : ctCoverage && !ctCoverage.ok ? (
-                    <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ctCoverage.error ?? 'Failed to load coverage'}</p>
+                    <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{ctCoverage.error ?? 'Failed to load coverage'}</p>
                   ) : null}
                 </div>
               ) : null}
@@ -1690,7 +1692,7 @@ export function FeedMassiveOptionPage({
                       {ctSnapBusy ? 'Running\u2026' : 'Fetch Contract Snapshot'}
                     </Button>
                   </div>
-                  {ctSnapErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ctSnapErr}</p> : null}
+                  {ctSnapErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{ctSnapErr}</p> : null}
                   {ctSnapResult ? (
                     <div style={{ marginTop: 'var(--space-3)' }}>
                       <details>
@@ -1857,7 +1859,7 @@ export function FeedMassiveOptionPage({
                       {aggBusy ? 'Running\u2026' : 'Enqueue Custom Bars (OHLC)'}
                     </Button>
                   </div>
-                  {aggErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{aggErr}</p> : null}
+                  {aggErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{aggErr}</p> : null}
                 </div>
               ) : null}
 
@@ -1888,7 +1890,7 @@ export function FeedMassiveOptionPage({
                       {ocBusy ? 'Running\u2026' : 'Enqueue Daily Ticker Summary (OHLC)'}
                     </Button>
                   </div>
-                  {ocErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ocErr}</p> : null}
+                  {ocErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{ocErr}</p> : null}
                 </div>
               ) : null}
 
@@ -1915,7 +1917,7 @@ export function FeedMassiveOptionPage({
                       {prevBusy ? 'Running\u2026' : 'Enqueue Previous Day Bar (OHLC)'}
                     </Button>
                   </div>
-                  {prevErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{prevErr}</p> : null}
+                  {prevErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{prevErr}</p> : null}
                 </div>
               ) : null}
 
@@ -2217,7 +2219,7 @@ export function FeedMassiveOptionPage({
 
           {/* Error */}
           {snapErr ? (
-            <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>
+            <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>
               {snapErr}
             </p>
           ) : null}
@@ -2418,7 +2420,7 @@ export function FeedMassiveOptionPage({
                       {tqHistTradesBusy ? 'Fetching\u2026' : 'Fetch Trades'}
                     </Button>
                   </div>
-                  {tqHistTradesErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tqHistTradesErr}</p> : null}
+                  {tqHistTradesErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{tqHistTradesErr}</p> : null}
                   {tqHistTradesResult ? (
                     <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                       <summary>
@@ -2463,7 +2465,7 @@ export function FeedMassiveOptionPage({
                       {tqLastTradeBusy ? 'Fetching\u2026' : 'Fetch Last Trade'}
                     </Button>
                   </div>
-                  {tqLastTradeErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tqLastTradeErr}</p> : null}
+                  {tqLastTradeErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{tqLastTradeErr}</p> : null}
                   {tqLastTradeResult ? (
                     <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                       <summary>Result</summary>
@@ -2531,7 +2533,7 @@ export function FeedMassiveOptionPage({
                       {tqHistQuotesBusy ? 'Fetching\u2026' : 'Fetch Quotes'}
                     </Button>
                   </div>
-                  {tqHistQuotesErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tqHistQuotesErr}</p> : null}
+                  {tqHistQuotesErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{tqHistQuotesErr}</p> : null}
                   {tqHistQuotesResult ? (
                     <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                       <summary>
@@ -3103,7 +3105,7 @@ export function FeedMassiveOptionPage({
             </Button>
           </div>
           {oiErr ? (
-            <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>
+            <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>
               {oiErr}
             </p>
           ) : null}
@@ -3161,7 +3163,7 @@ export function FeedMassiveOptionPage({
             </p>
           </FeedMassiveServiceBlock>
           {corpErr ? (
-            <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>
+            <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>
               {corpErr}
             </p>
           ) : null}

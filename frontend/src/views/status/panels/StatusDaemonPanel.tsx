@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { DaemonHeartbeat, StatusResponse } from '../../../types'
 import { fmtTs } from '../../../utils/format'
 import { ingestRedisHealthLamp } from '../../../utils/socketIngestLamp'
@@ -66,9 +68,9 @@ export function StatusDaemonPanel({
   return (
     <div id="system-panel-daemon" role="tabpanel" aria-labelledby="tab-daemon" className={className ? `system-tab-panel ${className}` : 'system-tab-panel'}>
       <div className="daemon-header">
-        <div className="daemon-header-main daemon-header-with-lamp">
+        <div className={cn(w9.daemonHeaderMain, 'daemon-header-with-lamp')}>
           <div>
-            <h3 id="daemon-panel-head" className="daemon-card-title inline-flex flex-wrap items-center gap-2 m-0">
+            <h3 id="daemon-panel-head" className={cn(w9.daemonCardTitle, 'inline-flex', 'flex-wrap', 'items-center', 'gap-2', 'm-0')}>
               <SettingsTitleLamp lamp={daemonLamp as LampTone} title="Daemon status lamp">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden><path d="M8 5v14l11-7L8 5z" /></svg>
               </SettingsTitleLamp>
@@ -82,39 +84,39 @@ export function StatusDaemonPanel({
         </div>
       </div>
 
-      <div className="daemon-groups daemon-groups-layout">
-          <div className="daemon-group daemon-group-heartbeat">
-          <div className="daemon-group-header">
+      <div className={cn(w9.daemonGroups, 'daemon-groups-layout')}>
+          <div className={cn(w9.daemonGroup)}>
+          <div className={w9.daemonGroupHeader}>
             <SettingsTitleLamp lamp={heartbeatGroupLamp as LampTone} title="Heartbeat status">
               {ACTIVITY_LAMP_SVG}
             </SettingsTitleLamp>
-            <span className="daemon-group-title">Heartbeat</span>
+            <span className={w9.daemonGroupTitle}>Heartbeat</span>
           </div>
-          <div className="daemon-group-body">
+          <div className={w9.daemonGroupBody}>
             {hb?.daemon_alive && hb.last_ts != null ? (
-              <p className="section-hint">Last heartbeat: <strong>{fmtTs(hb.last_ts)}</strong></p>
+              <p className={w9.sectionHint}>Last heartbeat: <strong>{fmtTs(hb.last_ts)}</strong></p>
             ) : hb?.graceful_shutdown_at != null ? (
-              <p className="section-hint">Gracefully stopped at <strong>{fmtTs(hb.graceful_shutdown_at)}</strong> (SIGTERM/Stop)</p>
+              <p className={w9.sectionHint}>Gracefully stopped at <strong>{fmtTs(hb.graceful_shutdown_at)}</strong> (SIGTERM/Stop)</p>
             ) : hb?.last_ts != null ? (
-              <p className="section-hint">Last heartbeat: <strong>{fmtTs(hb.last_ts)}</strong> (timed out; may have been kill -9 or crash)</p>
+              <p className={w9.sectionHint}>Last heartbeat: <strong>{fmtTs(hb.last_ts)}</strong> (timed out; may have been kill -9 or crash)</p>
             ) : (
-              <p className="section-hint">{daemonHint || '—'}</p>
+              <p className={w9.sectionHint}>{daemonHint || '—'}</p>
             )}
             {hb?.daemon_alive && secondsUntilNextHeartbeat != null && (
-              <p className="section-hint countdown-line">
-                Next heartbeat: <span className="countdown-num">{secondsUntilNextHeartbeat}</span> s
+              <p className={cn(w9.sectionHint, w9.countdownLine)}>
+                Next heartbeat: <span className={w9.countdownNum}>{secondsUntilNextHeartbeat}</span> s
               </p>
             )}
           </div>
         </div>
-        <div className="daemon-group daemon-group-ib">
-          <div className="daemon-group-header">
+        <div className={cn(w9.daemonGroup)}>
+          <div className={w9.daemonGroupHeader}>
             <SettingsTitleLamp lamp={ibGroupLamp as LampTone} title={ibGroupTitle}>
               {ACTIVITY_LAMP_SVG}
             </SettingsTitleLamp>
-            <span className="daemon-group-title">IB broker</span>
+            <span className={w9.daemonGroupTitle}>IB broker</span>
           </div>
-          <div className="daemon-group-body">
+          <div className={w9.daemonGroupBody}>
             <table className="ib-connection-table" aria-label="IB broker path services">
               <thead>
                 <tr>
@@ -145,7 +147,7 @@ export function StatusDaemonPanel({
             </table>
             <a
               href="#settings-ws-connector"
-              className="daemon-ib-broker-socket-link section-hint"
+              className={cn(w9.sectionHint, 'daemon-ib-broker-socket-link')}
               onClick={e => {
                 if (onNavigateToSocket) {
                   e.preventDefault()
@@ -157,8 +159,8 @@ export function StatusDaemonPanel({
             </a>
           </div>
         </div>
-        <div className="daemon-group daemon-group-strategy">
-          <div className="daemon-group-body daemon-group-strategy-body">
+        <div className={cn(w9.daemonGroup)}>
+          <div className={cn(w9.daemonGroupBody, 'daemon-group-strategy-body')}>
             {strategyPanel}
           </div>
         </div>

@@ -1,3 +1,5 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
 import { Button } from '@/components/ui/button'
 import { SECTION_TITLE_CLASS } from '../../../components/SectionPageTitle'
 import { InfoTooltip } from '../../../components/InfoTooltip'
@@ -63,12 +65,12 @@ export function DataJobsPanel({
   const statusLabel = (s: string) => (s === 'done' ? 'Done' : s === 'failed' ? 'Failed' : s === 'pending' ? 'Pending' : 'Running')
 
   return (
-    <section className="replay-section" aria-labelledby="data-jobs-head">
+    <section className={rl.section} aria-labelledby="data-jobs-head">
       <h3 id="data-jobs-head" className={SECTION_TITLE_CLASS}>
         Job Queue
         <InfoTooltip text="View and manage Celery backfill job history. Filter by status, sort by job ID / status / created / updated. Failed jobs can be reset to pending and re-queued (requires Ops operator token). Each row is one symbol-period backfill task." />
       </h3>
-      <div className="replay-toolbar data-jobs-toolbar" style={{ marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+      <div className={rl.toolbar} style={{ marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
         <div className="data-jobs-status-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
           <span className="data-jobs-status-label">Status:</span>
           {JOB_STATUSES.map((s) => (
@@ -116,23 +118,23 @@ export function DataJobsPanel({
         <Button type="button" variant="secondary" size="sm" disabled={barsJobsLoading} onClick={() => onRefreshJobs()} aria-label="Refresh backfill jobs">
           {barsJobsLoading ? '…' : 'Refresh'}
         </Button>
-        <span className="replay-sync-hint" style={{ marginLeft: 'auto' }}>
+        <span className={rl.syncHint} style={{ marginLeft: 'auto' }}>
           {barsJobsTotal > 0 ? `${sortedBarsJobs.length} shown (${barsJobsTotal} total)` : '0 jobs'}
         </span>
       </div>
       {barsJobsError && (
-        <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>
+        <div className={rl.placeholder} role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>
           {barsJobsError}
         </div>
       )}
-      <p className="replay-sync-hint" style={{ marginBottom: '0.5rem', fontSize: '0.9em' }}>
+      <p className={rl.syncHint} style={{ marginBottom: '0.5rem', fontSize: '0.9em' }}>
         Jobs are created when you click Pull above (one per period: 1 D, 1 min, 5 mins, 1 hour). Pending → Worker picks up → running → done/failed.
       </p>
       {sortedBarsJobs.length === 0 && !barsJobsLoading ? (
-        <div className="replay-placeholder">No pull jobs yet. Run Pull for a symbol above.</div>
+        <div className={rl.placeholder}>No pull jobs yet. Run Pull for a symbol above.</div>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border min-w-0">
-          <table className="table-operations">
+          <table className={w9.tableOperations}>
           <thead>
             <tr>
               <th>

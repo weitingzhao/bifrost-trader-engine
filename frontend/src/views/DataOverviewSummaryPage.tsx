@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useCallback, useEffect, useState } from 'react'
 import type { StatusResponse } from '../types'
 import {
@@ -315,12 +318,12 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
         </Button>
       </div>
 
-      <section className="replay-section" aria-labelledby="data-overview-wl-summary-head" style={{ marginBottom: 'var(--space-4)' }}>
+      <section className={rl.section} aria-labelledby="data-overview-wl-summary-head" style={{ marginBottom: 'var(--space-4)' }}>
         <h3 id="data-overview-wl-summary-head" className={SECTION_TITLE} style={{ marginBottom: 'var(--space-2)' }}>
           Watchlist coverage (summary)
           <InfoTooltip text="Watchlist-scoped aggregates by dataset. For per-symbol columns, use Data Overview → Detail." />
         </h3>
-        {wlError ? <p className="status-page-msg err" role="alert">{wlError}</p> : null}
+        {wlError ? <p className={cn(w9.statusPageMsg, 'err')} role="alert">{wlError}</p> : null}
         {wlGeneratedAt ? (
           <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
             Generated at {wlGeneratedAt}
@@ -353,13 +356,13 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
         ) : null}
       </section>
 
-      <section className="replay-section" aria-labelledby="data-overview-pipeline-head" style={{ marginBottom: 'var(--space-4)' }}>
+      <section className={rl.section} aria-labelledby="data-overview-pipeline-head" style={{ marginBottom: 'var(--space-4)' }}>
         <h3 id="data-overview-pipeline-head" className={SECTION_TITLE} style={{ marginBottom: 'var(--space-2)' }}>
           Massive job queues and schedule
           <InfoTooltip text="Queue counts come from job_massive_backfill (Ops API). Scheduled tasks list Celery Beat entries in UTC; actual execution requires Celery Beat and workers. Full job tables: Option Coverage and Massive Stock pages." />
         </h3>
         {jobsSummaryError ? (
-          <p className="status-page-msg err" role="alert">{jobsSummaryError}</p>
+          <p className={cn(w9.statusPageMsg, 'err')} role="alert">{jobsSummaryError}</p>
         ) : null}
         <div
           style={{
@@ -370,7 +373,7 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
           }}
         >
           <div
-            className="replay-section"
+            className={rl.section}
             style={{ flex: '1 1 260px', margin: 0, padding: 'var(--space-3)' }}
           >
             <h4 className="mp-chart-subtitle" style={{ marginTop: 0 }}>Options Massive queue</h4>
@@ -381,7 +384,7 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
             </Button>
           </div>
           <div
-            className="replay-section"
+            className={rl.section}
             style={{ flex: '1 1 260px', margin: 0, padding: 'var(--space-3)' }}
           >
             <h4 className="mp-chart-subtitle" style={{ marginTop: 0 }}>Stocks Massive queue</h4>
@@ -393,7 +396,7 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
           </div>
         </div>
 
-        {beatError ? <p className="status-page-msg err" role="alert">{beatError}</p> : null}
+        {beatError ? <p className={cn(w9.statusPageMsg, 'err')} role="alert">{beatError}</p> : null}
         {!beatError && beatEntries.length > 0 ? (
           <div className="feed-massive-table-wrap" style={{ marginBottom: 'var(--space-3)' }}>
             <h4 className="mp-chart-subtitle">Scheduled tasks (Celery Beat, UTC)</h4>
@@ -423,7 +426,7 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
           </div>
         ) : null}
 
-        {jobsListError ? <p className="status-page-msg err" role="alert">{jobsListError}</p> : null}
+        {jobsListError ? <p className={cn(w9.statusPageMsg, 'err')} role="alert">{jobsListError}</p> : null}
         {!jobsListError && recentJobs.length > 0 ? (
           <div className="feed-massive-table-wrap">
             <h4 className="mp-chart-subtitle">Recent jobs (newest first)</h4>
@@ -451,13 +454,13 @@ export function DataOverviewSummaryPage(_props: DataOverviewSummaryPageProps) {
         ) : null}
       </section>
 
-      <section className="replay-section" aria-labelledby="data-overview-summary-head">
+      <section className={rl.section} aria-labelledby="data-overview-summary-head">
         <h3 id="data-overview-summary-head" className={SECTION_TITLE} style={{ marginBottom: 'var(--space-2)' }}>
           Global PostgreSQL coverage (Massive)
           <InfoTooltip text="Whole-database aggregates for Massive source rows. Option contracts count symbols with massive_option_ticker set. Distinct symbols use normalized tickers; option_snapshots counts the underlying segment of contract_key." />
         </h3>
 
-        {globalError ? <p className="status-page-msg err" role="alert">{globalError}</p> : null}
+        {globalError ? <p className={cn(w9.statusPageMsg, 'err')} role="alert">{globalError}</p> : null}
         {generatedAt ? (
           <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
             Generated at {generatedAt}

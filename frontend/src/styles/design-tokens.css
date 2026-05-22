@@ -1,7 +1,7 @@
 /* ==========================================================================
    Bifrost design tokens (canonical :root / light theme)
-   Extracted from legacy.css — component rules live in app-surfaces.css / domain CSS until retired.
-   Load before shadcn-tokens.css and app-surfaces.css (see app/globals.css).
+   Extracted from legacy.css — component rules migrated to Tailwind modules (appUi, rl, w9, domain *Ui.ts).
+   Load before shadcn-tokens.css (see app/globals.css).
    ========================================================================== */
 
 :root {

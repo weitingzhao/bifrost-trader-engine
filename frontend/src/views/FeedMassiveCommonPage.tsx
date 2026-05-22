@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { StatusResponse } from '../types'
 import {
   fetchMassiveStatus,
@@ -447,7 +449,7 @@ export function FeedMassiveCommonPage({
       </nav>
 
       {!configured && (
-        <p className="status-page-msg err" role="alert">
+        <p className={cn(w9.statusPageMsg, 'err')} role="alert">
           Massive API key not configured. Set massive credentials in server config.
         </p>
       )}
@@ -581,7 +583,7 @@ export function FeedMassiveCommonPage({
                       {tiBusy ? 'Loading\u2026' : `Fetch ${TI_DOC_PAGE_LABEL[tiSubTab]}`}
                     </Button>
                   </div>
-                  {tiErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tiErr}</p> : null}
+                  {tiErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{tiErr}</p> : null}
                   {tiResult?.ok && tiResult.results?.values ? (
                     <div style={{ marginTop: 'var(--space-3)' }}>
                       <p style={{ fontSize: '0.82rem', marginBottom: 'var(--space-2)' }}>
@@ -702,7 +704,7 @@ export function FeedMassiveCommonPage({
                         {moExchBusy ? 'Loading\u2026' : 'Fetch Exchanges'}
                       </Button>
                     </div>
-                    {moExchErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{moExchErr}</p> : null}
+                    {moExchErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{moExchErr}</p> : null}
                     {moExchResults ? (
                       <div style={{ marginTop: 'var(--space-3)' }}>
                         <p style={{ fontSize: '0.82rem', marginBottom: 'var(--space-2)' }}><strong>{moExchResults.length}</strong> exchange(s) returned</p>
@@ -740,7 +742,7 @@ export function FeedMassiveCommonPage({
                         {moHolBusy ? 'Loading\u2026' : 'Fetch & Compare Holidays'}
                       </Button>
                     </div>
-                    {moHolErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{moHolErr}</p> : null}
+                    {moHolErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{moHolErr}</p> : null}
                     {moHolData?.ok ? (
                       <div style={{ marginTop: 'var(--space-3)' }}>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
@@ -812,7 +814,7 @@ export function FeedMassiveCommonPage({
                         {moStatusBusy ? 'Loading\u2026' : 'Fetch Market Status'}
                       </Button>
                     </div>
-                    {moStatusErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{moStatusErr}</p> : null}
+                    {moStatusErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{moStatusErr}</p> : null}
                     {moStatusData ? (
                       <div style={{ marginTop: 'var(--space-3)' }}>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(14rem, 1fr))', gap: 'var(--space-3)' }}>
@@ -875,7 +877,7 @@ export function FeedMassiveCommonPage({
                         {moCondBusy ? 'Loading\u2026' : 'Fetch Condition Codes'}
                       </Button>
                     </div>
-                    {moCondErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{moCondErr}</p> : null}
+                    {moCondErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{moCondErr}</p> : null}
                     {moCondResults ? (
                       <div style={{ marginTop: 'var(--space-3)' }}>
                         <p style={{ fontSize: '0.82rem', marginBottom: 'var(--space-2)' }}><strong>{moCondResults.length}</strong> condition(s) returned</p>

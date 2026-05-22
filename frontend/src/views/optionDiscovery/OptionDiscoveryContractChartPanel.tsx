@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
 import type { Bar } from '../../types'
 import { fetchOptionBars, pollMassiveJobUntilDone, postMassiveSync } from '../../api'
 import { BarsCandlestickChart, finiteVwap } from '../data/BarsCandlestickChart'
@@ -232,15 +233,15 @@ export function OptionDiscoveryContractChartPanel({
           </label>
         </div>
       </div>
-      {syncHint && <p className="section-hint" role="status">{syncHint}</p>}
-      {error && <p className="section-hint" role="status">{error}</p>}
+      {syncHint && <p className={w9.sectionHint} role="status">{syncHint}</p>}
+      {error && <p className={w9.sectionHint} role="status">{error}</p>}
       {chartBars.length > 0 && (
         <OdChartExpandOnHover
           title={`${symbol.trim().toUpperCase()} ${optionRight === 'C' ? 'Call' : 'Put'} ${strike.toFixed(2)} · ${period}`}
         >
           <div className="data-bars-chart-container" style={{ marginTop: '0.75rem' }}>
-            <div className="data-bars-chart-header">
-              <span className="data-bars-chart-title">
+            <div className={w9.dataBarsChartHeader}>
+              <span className={w9.dataBarsChartTitle}>
                 {symbol.trim().toUpperCase()} {optionRight === 'C' ? 'Call' : 'Put'} {strike.toFixed(2)} · {period} · Massive (DB) · {chartBars.length} bars
               </span>
             </div>
@@ -259,7 +260,7 @@ export function OptionDiscoveryContractChartPanel({
         </OdChartExpandOnHover>
       )}
       {!loading && chartBars.length === 0 && !error && (
-        <p className="section-hint" role="status">No bars returned.</p>
+        <p className={w9.sectionHint} role="status">No bars returned.</p>
       )}
     </div>
   )

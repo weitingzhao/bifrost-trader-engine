@@ -1,3 +1,4 @@
+import { w9 } from '@/styles/wave9Classes'
 /** Indices row: show DB symbol as primary; optional muted Polygon ticker (avoid "Label^SYM" clutter). */
 
 export function ReferenceIndexCoverageSymbolCell({
@@ -21,7 +22,7 @@ export function ReferenceIndexCoverageSymbolCell({
     <span className="data-coverage-ref-symbol-wrap">
       <strong title={title}>{symbol}</strong>
       {px ? (
-        <span className="data-coverage-ref-polygon" title="Aggregate ticker used for Massive/Polygon sync">
+        <span className={w9.dataCoverageRefPolygon} title="Aggregate ticker used for Massive/Polygon sync">
           {' · '}
           {px}
         </span>

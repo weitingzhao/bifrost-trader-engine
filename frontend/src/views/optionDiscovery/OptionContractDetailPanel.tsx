@@ -1,4 +1,5 @@
 import { bsComputeDetail } from '../../utils/bsCalc'
+import { w9 } from '@/styles/wave9Classes'
 import type { GreeksCoverageResponse, LiquiditySummaryResponse, RelativeValueResponse, OptionSnapshotRow } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import { Button } from '@/components/ui/button'
@@ -442,7 +443,7 @@ export function OptionContractDetailPanel({
             <h4 id="od-contract-sec-chart" className={odPanelSectionTitleCls}>
               Chart (K-line)
             </h4>
-            <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
+            <p className={w9.sectionHint} style={{ marginTop: 0, marginBottom: '0.5rem' }}>
               OHLC below uses contract history. If the chart is empty, click Backfill from Massive (Celery worker on the massive queue required).
             </p>
             <OptionDiscoveryContractChartPanel
@@ -480,7 +481,7 @@ export function OptionContractDetailPanel({
                 <h4 id="od-contract-sec-liquidity" className={odPanelSectionTitleCls}>
                   Liquidity
                 </h4>
-                {liquidityLoading && <p className="section-hint">Loading liquidity data…</p>}
+                {liquidityLoading && <p className={w9.sectionHint}>Loading liquidity data…</p>}
                 <div className="od-card-grid">
                   <div className="od-card-section">
                     <div className="od-card-section-title">Tradability Score</div>
@@ -567,7 +568,7 @@ export function OptionContractDetailPanel({
                         <span className="od-kv-v">{String(liquidityLastTrade.exchange ?? '—')}</span>
                       </div>
                     ) : (
-                      <p className="section-hint">{liquidityLoading ? 'Loading…' : 'No last trade data available.'}</p>
+                      <p className={w9.sectionHint}>{liquidityLoading ? 'Loading…' : 'No last trade data available.'}</p>
                     )}
                   </div>
                   <div className="od-card-section">
@@ -616,7 +617,7 @@ export function OptionContractDetailPanel({
                   Risk
                 </h4>
                 {!hasGreeks && (
-                  <p className="section-hint">Greeks not available for this contract. Risk scenarios require at least delta.</p>
+                  <p className={w9.sectionHint}>Greeks not available for this contract. Risk scenarios require at least delta.</p>
                 )}
                 <div className="od-card-grid">
                   <div className="od-card-section">

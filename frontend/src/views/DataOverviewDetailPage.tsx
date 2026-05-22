@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useCallback, useEffect, useState } from 'react'
 import type { OptionsFocusDataset } from './dataOverview/optionFocusDataset'
 import type { StocksFocusDataset } from './dataOverview/stockFocusDataset'
@@ -326,7 +329,7 @@ export function DataOverviewDetailPage(_props: DataOverviewDetailPageProps) {
         </div>
       </div>
 
-      <section className="replay-section" aria-labelledby="data-overview-wl-head" style={{ marginBottom: 'var(--space-4)' }}>
+      <section className={rl.section} aria-labelledby="data-overview-wl-head" style={{ marginBottom: 'var(--space-4)' }}>
         <div
           style={{
             display: 'flex',
@@ -346,12 +349,12 @@ export function DataOverviewDetailPage(_props: DataOverviewDetailPageProps) {
             {loading ? 'Loading…' : 'Refresh'}
           </Button>
         </div>
-        {wlError ? <p className="status-page-msg err" role="alert">{wlError}</p> : null}
+        {wlError ? <p className={cn(w9.statusPageMsg, 'err')} role="alert">{wlError}</p> : null}
         {wlMessage && !wlError ? (
           <p style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>{wlMessage}</p>
         ) : null}
 
-        <div className="replay-section" style={{ marginBottom: 'var(--space-4)' }}>
+        <div className={rl.section} style={{ marginBottom: 'var(--space-4)' }}>
           <WatchlistCoverageFocusChips embedded value={unifiedFocus} onChange={setUnifiedFocus} />
         </div>
 

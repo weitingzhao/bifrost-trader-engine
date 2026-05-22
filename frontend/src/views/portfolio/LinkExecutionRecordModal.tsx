@@ -1,3 +1,5 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { Execution } from '../../types'
@@ -231,19 +233,19 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
       aria-modal="true"
       aria-labelledby="link-exec-modal-title"
     >
-      <div className="modal-panel replay-exec-modal link-exec-modal" onClick={ev => ev.stopPropagation()}>
+      <div className={rl.execModal} onClick={ev => ev.stopPropagation()}>
         <h3 id="link-exec-modal-title">Assign strategy</h3>
-        <p className="section-hint" style={{ marginTop: 0 }}>
+        <p className={w9.sectionHint} style={{ marginTop: 0 }}>
           Set strategy opportunity and instance for execution #{execId}. No new execution row is created.
         </p>
         {ex ? (
-          <p className="section-hint replay-muted" style={{ fontSize: '0.85rem', marginBottom: '0.75rem' }}>
+          <p className={rl.muted} style={{ fontSize: '0.85rem', marginBottom: '0.75rem' }}>
             {eTs != null && Number.isFinite(eTs) ? `${fmtDate(eTs)} · ` : ''}
             {ex.side ?? '—'} {ex.quantity ?? '—'} @ {ex.price != null ? fmtUsd(Number(ex.price)) : '—'} · <ExecSourceBadge source={ex.source} />
           </p>
         ) : null}
-        {formError ? <p className="section-hint replay-form-error">{formError}</p> : null}
-        <form onSubmit={onSubmit} className="replay-exec-form">
+        {formError ? <p className={rl.formError}>{formError}</p> : null}
+        <form onSubmit={onSubmit} className={rl.execForm}>
           {peerPicks && peerPicks.length > 0 ? (
             <div className="link-exec-peer-quick">
               <div className="link-exec-inline-bubbles-block">
@@ -251,7 +253,7 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
                   Reuse from this contract
                 </div>
                 <div
-                  className="replay-bubble-switch link-exec-inline-bubble-group"
+                  className={rl.bubbleSwitch}
                   role="radiogroup"
                   aria-labelledby="link-peer-shortcut-label"
                 >
@@ -266,7 +268,7 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
                         role="radio"
                         aria-checked={isActive}
                         ref={!hasOppRow && idx === 0 ? firstFieldRef : undefined}
-                        className={`replay-bubble-switch-btn${isActive ? ' active' : ''}`}
+                        className={`rl.bubbleSwitchBtn${isActive ? ' active' : ''}`}
                         title={p.label}
                         onClick={() => {
                           setPeerShortcut(key)
@@ -281,12 +283,12 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
                   })}
                 </div>
               </div>
-              <p className="section-hint replay-muted link-exec-peer-quick-hint">
+              <p className={rl.muted}>
                 Optional: apply strategy opportunity and instance already used on another fill for this contract. You can still set them manually below.
               </p>
             </div>
           ) : null}
-          <div className="replay-exec-form-row link-exec-opp-field-row link-exec-bubbles-field-col">
+          <div className={rl.execFormRow}>
             <label id="link-strategy-opp-label">
               Strategy opportunity
               {symbolFiltered && (
@@ -297,7 +299,7 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
             </label>
             {filteredOpportunities.length > 0 ? (
               <div
-                className="replay-bubble-switch link-exec-inline-bubble-group link-exec-opp-inline-group"
+                className={rl.bubbleSwitch}
                 role="radiogroup"
                 aria-labelledby="link-strategy-opp-label"
               >
@@ -312,7 +314,7 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
                       role="radio"
                       aria-checked={isActive}
                       ref={idx === 0 ? firstFieldRef : undefined}
-                      className={`replay-bubble-switch-btn${isActive ? ' active' : ''}`}
+                      className={`rl.bubbleSwitchBtn${isActive ? ' active' : ''}`}
                       title={label}
                       onClick={() => {
                         setStrategyOpportunityId(idStr)
@@ -326,7 +328,7 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
                 })}
               </div>
             ) : (
-              <p className="section-hint replay-muted link-exec-no-match-hint">
+              <p className={rl.muted}>
                 {symbolFiltered
                   ? `No opportunities match symbol ${execSymbol}. Check scope settings in Strategy / Opportunity.`
                   : 'No strategy opportunities loaded.'}
@@ -360,7 +362,7 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
               </div>
 
               {instanceMode === 'existing' ? (
-                <div className="replay-exec-form-row link-exec-instance-row">
+                <div className={rl.execFormRow}>
                   <label htmlFor="link-strategy-inst">Strategy instance</label>
                   <select
                     id="link-strategy-inst"
@@ -378,14 +380,14 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
                     ))}
                   </select>
                   {instances.length === 0 && (
-                    <p className="section-hint replay-muted link-exec-no-instances">
+                    <p className={rl.muted}>
                       No instances yet for this opportunity. Switch to "Create new" to add one.
                     </p>
                   )}
                 </div>
               ) : (
                 <div className="link-exec-new-instance-fields">
-                  <div className="replay-exec-form-row">
+                  <div className={rl.execFormRow}>
                     <label htmlFor="link-new-inst-date">Opened at</label>
                     <input
                       id="link-new-inst-date"
@@ -395,17 +397,17 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
                       required
                     />
                   </div>
-                  <div className="replay-exec-form-row link-exec-account-row">
+                  <div className={rl.execFormRow}>
                     <span className="link-exec-account-label">Account</span>
                     <span className="link-exec-account-readonly" title={executionAccountId || undefined}>
                       {executionAccountId || '—'}
                     </span>
-                    <p className="section-hint replay-muted link-exec-account-hint">
+                    <p className={rl.muted}>
                       Uses this execution&apos;s account; not editable.
                     </p>
                   </div>
-                  <div className="replay-exec-form-row">
-                    <label htmlFor="link-new-inst-label">Label <span className="replay-muted">(optional)</span></label>
+                  <div className={rl.execFormRow}>
+                    <label htmlFor="link-new-inst-label">Label <span className={rl.muted}>(optional)</span></label>
                     <input
                       id="link-new-inst-label"
                       type="text"

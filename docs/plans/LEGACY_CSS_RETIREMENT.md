@@ -1,73 +1,97 @@
 # Legacy CSS retirement tracker
 
-Goal: remove monolithic `legacy.css` and migrate UI to Tailwind + shadcn + [`design-tokens.css`](../../frontend/src/styles/design-tokens.css).
-
-**Status: Phase 6 complete (2026-05-22)** — `legacy.css` deleted; styles split into domain bundles; allowlist empty.
-
-## Metrics (run `cd frontend && npm run css:metrics`)
-
-| Snapshot | legacy.css | allowlist TSX | notes |
-|----------|------------|---------------|-------|
-| Phase 0 baseline | ~31468 lines | 113 | tokens extracted |
-| Phase 1–4 | ~30963 | 73→54 | app header, partial domains |
-| Phase 6 complete | **0 (file removed)** | **0** | `app-surfaces.css` + `feed-massive.css` + satellites |
+Goal: **CSS debt zero** — Tailwind + shadcn + design tokens only, plus explicitly allowed component CSS.
 
 ## Phase status
 
 | Phase | Scope | Status |
 |-------|--------|--------|
-| 0 | design-tokens, metrics, lint:legacy-classes | **Done** |
-| 1 | AppLayout header, LampIndicator | **Done** |
-| 2 | SectionPageTitle, SettingsShell, PageSection | **Done** |
-| 3 | Satellite CSS (screener, data-readiness, inspector, celery) | **Done** (globals import) |
-| 4 | Domain page banned-class migration | **Done** |
-| 5 / 6 G | Delete `legacy.css` | **Done** — replaced by `app-surfaces.css` + `feed-massive.css` |
-| 6 A–F | Waves Celery → shared → research → feed → API → remainder | **Done** (banned tokens cleared) |
+| 0–6 | Delete `legacy.css`, allowlist 0, banned tokens | **Done** |
+| **7** | Delete `app-surfaces` + satellite BEM CSS | **Done** (Wave 9, 2026-05-21) |
 
-## Post-retirement CSS layout
+## Phase 7 Done definition
 
-| File | Role |
-|------|------|
-| [`design-tokens.css`](../../frontend/src/styles/design-tokens.css) | `:root` / light theme |
-| [`shadcn-tokens.css`](../../frontend/src/styles/shadcn-tokens.css) | shadcn bridge |
-| [`message-center.css`](../../frontend/src/styles/message-center.css) | MessageCenter (extracted from legacy) |
-| [`app-surfaces.css`](../../frontend/src/styles/app-surfaces.css) | Remaining domain surfaces (shrink over time) |
-| [`feed-massive.css`](../../frontend/src/styles/feed-massive.css) | Feed → Massive BEM |
-| [`settings-celery.css`](../../frontend/src/styles/settings-celery.css) | Celery / dashboard console |
-| [`stock-inspector.css`](../../frontend/src/styles/stock-inspector.css) | Stock inspector |
-| [`stock-screener.css`](../../frontend/src/styles/stock-screener.css) | Screener (global import) |
-| [`data-readiness.css`](../../frontend/src/styles/data-readiness.css) | Data readiness (global import) |
+1. `globals.css` does not import: `app-surfaces`, `feed-massive`, `settings-celery`, `data-readiness`, `stock-screener`, `stock-inspector`.
+2. Those files are deleted from the repo.
+3. Global base lives in [`tailwind-base.css`](../../frontend/src/styles/tailwind-base.css).
+4. Domain BEM line count **&lt; 500** (including allowed component CSS).
+5. `lint:legacy-classes` passes; Playwright baselines committed.
 
-Load order: [`globals.css`](../../frontend/src/app/globals.css) — Tailwind → tokens → message-center → shadcn → surfaces → feed-massive → satellites.
+## Allowed component CSS (explicit registry)
 
-## Governance
+| File | Purpose | Budget |
+|------|---------|--------|
+| [`message-center.css`](../../frontend/src/styles/message-center.css) | Toast/drawer animations | ~400 lines |
+| [`log-console.css`](../../frontend/src/styles/log-console.css) | Optional — only if Wave 1 needs it | TBD |
+| [`option-discovery-chrome.css`](../../frontend/src/styles/option-discovery-chrome.css) | ~~Optional — strike ladder~~ **Not used** (Wave 7: ~72 strike-ladder rules → full Tailwind in `optionDiscoveryClasses.ts`) | — |
 
-- [`scripts/legacy-class-match.mjs`](../../frontend/scripts/legacy-class-match.mjs) — token-level banned class detection (avoids `action-btn` false positives)
-- [`scripts/legacy-class-allowlist.json`](../../frontend/scripts/legacy-class-allowlist.json) — must stay **empty**
-- `npm run lint:legacy-classes` — fails on banned tokens outside allowlist
+New entries require a line in this table before merge.
+
+## Current CSS layout (CSS debt zero)
+
+| File | Lines (approx) | Status |
+|------|----------------|--------|
+| `tailwind-base.css` | ~61 | Keep |
+| `design-tokens.css` | 177 | Keep |
+| `shadcn-tokens.css` | 100 | Keep |
+| `message-center.css` | 381 | Keep |
+| `wave9Classes.ts` | ~450 | Tailwind tokens (generated from deleted `app-surfaces.css`) |
+| ~~`app-surfaces.css`~~ | ~~9,838~~ | **Deleted** |
+| ~~`feed-massive.css`~~ | — | **Deleted** (Wave 6–8) |
+| ~~`settings-celery.css`~~ | — | **Deleted** (Wave 6–8) |
+| ~~`data-readiness.css`~~ | — | **Deleted** (Wave 6–8) |
+| ~~`stock-screener.css`~~ | — | **Deleted** (Wave 6–8) |
+| ~~`stock-inspector.css`~~ | — | **Deleted** (Wave 6–8) |
+
+Load order: [`globals.css`](../../frontend/src/app/globals.css) — Tailwind → tokens → **tailwind-base** → message-center → shadcn.
+
+## Metrics
+
+```bash
+cd frontend
+npm run css:retirement:status
+npm run css:dead-rules:verbose
+npm run lint:legacy-classes
+npx playwright install chromium
+npm run test:visual:update   # intentional UI changes
+npm run test:visual
+```
 
 ## Shared migration components
 
 - `@/components/shared/page-section` — `PageSection`
-- `@/components/SectionPageTitle` — titles + `SECTION_TITLE_CLASS`
-- `@/views/settings/*` — Settings shells
-- `@/components/shared/lamp-indicator` — `LampIndicator`, `LampGlyphSlot`
+- `@/components/SectionPageTitle` — `SECTION_TITLE_CLASS`
+- `@/components/ui/*` — Button, Dialog, Select, Table
+- `@/components/shared/lamp-indicator` — lamps
+- `@/components/shared/data-table` — tables
 - `@/components/shared/exec-row-buttons` — portfolio row actions
+- `@/components/shared/appUi.ts` — app-tab pills, table pagination, data-table wrap, section hints, PnL tones
+- `@/lib/replayLayout.ts` — `rl` portfolio / ledger / positions / live replay UI
+- `@/styles/wave9Classes.ts` — `w9` residual app-surfaces tokens (Wave 9)
+- `@/views/status/statusUi.tsx` — daemon groups, system tabs, event-subscribe tables
+- `@/views/settings/settingsUi.ts` — IB config / holidays / heartbeat blocks
+- `@/views/performance/performanceUi.ts` — Performance summary, filters, growth, calendar tables
+- `@/views/gates/gatesUi.ts` — GatesConfig form + list table
+- `@/views/strategy/strategyWinRateUi.ts` — Strategy win-rate cards
+- `@/components/risk/riskScenarioUi.ts` — RiskProfileDl scenario matrix + help portal
+- `@/views/dataOverview/dataOverviewClasses.ts` — `dov`
+- `@/views/massive/refJobsClasses.ts` — `rj`
+- `@/views/feed/feedMassiveStyles.ts` — `fm`
+- `@/views/celery/celeryUi.tsx` — Celery sections + tables
+- `@/views/optionDiscovery/optionDiscoveryClasses.ts` — `od`
 
-## Next shrink targets (optional)
+## Phase 7 Wave 9 (2026-05-21)
 
-1. Tailwind-migrate `app-surfaces.css` by domain (replay, gates, IB settings, tables).
-2. Tailwind-migrate `feed-massive.css` + delete file.
-3. Retire `settings-celery.css` after full Celery Tailwind pass.
+**Done.** Deleted `app-surfaces.css` (~9,838 lines). Migrated remaining TSX to Tailwind modules:
 
-## Commands
+- Extended `appUi.ts` (operations table, section hints, PnL tones, page stack)
+- Generated [`wave9Classes.ts`](../../frontend/src/styles/wave9Classes.ts) (~441 keys) for residual selectors
+- Codemods: `generate-wave9-classes.mjs`, `migrate-wave9-classes.mjs` + replay/wave6 migrations
+- Settings groups: `settingsUi.SETTINGS_GROUP_CARD` replaces `.daemon-group` hooks
+- `globals.css` no longer imports `app-surfaces.css`
 
-```bash
-cd frontend
-npm run css:metrics
-npm run css:metrics:verbose
-npm run lint:legacy-classes
-npm run css:retirement:status
-node scripts/generate-legacy-class-allowlist.mjs   # should print 0 paths
-npm run test:visual:update   # when dev server available
-```
+**Verification:** zero `className` tokens from deleted `app-surfaces` selectors; `lint:legacy-classes` OK.
+
+## Plan reference
+
+Phase 7 waves: `.cursor/plans/css_debt_zero_plan_ed27f763.plan.md` (do not edit plan file from agents; update this tracker only).

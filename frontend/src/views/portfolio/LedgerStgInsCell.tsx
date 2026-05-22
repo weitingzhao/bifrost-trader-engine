@@ -1,3 +1,5 @@
+import { rl } from '@/lib/replayLayout'
+import { cn } from '@/lib/utils'
 import type { Execution } from '../../types'
 import { executionInstanceLabel } from './ledgerOptHelpers'
 
@@ -20,28 +22,28 @@ export function LedgerStgInsCell({ ex }: { ex: Execution }) {
 
   if (hasSplits) {
     return (
-      <div className="replay-stg-ins replay-stg-ins--split">
+      <div className={cn(rl.stgIns, rl.stgInsSplit)}>
         {strategyName ? (
-          <div className="replay-stg-ins-head">
-            <span className="replay-stg-ins-strategy">{strategyName}</span>
+          <div className={rl.stgInsHead}>
+            <span className={rl.stgInsStrategy}>{strategyName}</span>
           </div>
         ) : null}
-        <ul className="replay-stg-ins-alloc-list" aria-label="Instance allocations">
+        <ul className={rl.stgInsAllocList} aria-label="Instance allocations">
           {allocs!.map(a => {
             const sid = a.strategy_instance_id
             const label =
               a.strategy_instance_label?.trim() || executionInstanceLabel(ex, sid) || undefined
             const qty = a.allocated_quantity
             return (
-              <li key={sid} className="replay-stg-ins-alloc-item">
+              <li key={sid} className={rl.stgInsAllocItem}>
                 {label ? (
-                  <span className="replay-stg-ins-alloc-label" title={label}>
+                  <span className={rl.stgInsAllocLabel} title={label}>
                     {label}
                   </span>
                 ) : null}
                 <a
                   href={`#/strategies/instances/${sid}`}
-                  className="replay-stg-ins-link replay-stg-ins-link--compact"
+                  className={cn(rl.stgInsLink, rl.stgInsLinkCompact)}
                   target="_blank"
                   rel="noopener noreferrer"
                   title={label ? `Open instance #${sid} (${label})` : `Open instance #${sid}`}
@@ -49,7 +51,7 @@ export function LedgerStgInsCell({ ex }: { ex: Execution }) {
                 >
                   #{sid}
                 </a>
-                <span className="replay-stg-ins-alloc-qty">{formatAllocQty(qty)}</span>
+                <span className={rl.stgInsAllocQty}>{formatAllocQty(qty)}</span>
               </li>
             )
           })}
@@ -61,21 +63,21 @@ export function LedgerStgInsCell({ ex }: { ex: Execution }) {
   if (instanceId != null) {
     const instLabel = executionInstanceLabel(ex, instanceId)?.trim()
     return (
-      <span className="replay-stg-ins">
+      <span className={rl.stgIns}>
         {strategyName ? (
           <>
-            <span className="replay-stg-ins-strategy">{strategyName}</span>
-            <span className="replay-stg-ins-sep">/</span>
+            <span className={rl.stgInsStrategy}>{strategyName}</span>
+            <span className={rl.stgInsSep}>/</span>
           </>
         ) : null}
         {instLabel ? (
-          <span className="replay-stg-ins-pre-id" title={instLabel}>
+          <span className={rl.stgInsPreId} title={instLabel}>
             {instLabel}
           </span>
         ) : null}
         <a
           href={`#/strategies/instances/${instanceId}`}
-          className="replay-stg-ins-link"
+          className={rl.stgInsLink}
           target="_blank"
           rel="noopener noreferrer"
           title={
@@ -93,10 +95,10 @@ export function LedgerStgInsCell({ ex }: { ex: Execution }) {
 
   if (strategyName) {
     return (
-      <span className="replay-stg-ins">
-        <span className="replay-stg-ins-strategy">{strategyName}</span>
-        <span className="replay-stg-ins-sep">/</span>
-        <span className="replay-stg-ins-empty">—</span>
+      <span className={rl.stgIns}>
+        <span className={rl.stgInsStrategy}>{strategyName}</span>
+        <span className={rl.stgInsSep}>/</span>
+        <span className={rl.stgInsEmpty}>—</span>
       </span>
     )
   }

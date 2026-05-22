@@ -1,3 +1,4 @@
+import { rl } from '@/lib/replayLayout'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { Execution } from '../../types'
@@ -38,11 +39,11 @@ export function QuickCloseModal({ exec, onClose, onSuccess }: QuickCloseModalPro
       aria-modal="true"
       aria-labelledby="close-trade-modal-title"
     >
-      <div className="modal-panel replay-exec-modal" onClick={e => e.stopPropagation()}>
+      <div className={rl.execModal} onClick={e => e.stopPropagation()}>
         <h3 id="close-trade-modal-title">Quick Trade (Close) — Pool=Off only</h3>
-        {closeError && <p className="section-hint replay-form-error">{closeError}</p>}
+        {closeError && <p className={rl.formError}>{closeError}</p>}
         <form
-          className="replay-exec-form"
+          className={rl.execForm}
           onSubmit={async e => {
             e.preventDefault()
             setCloseError(null)
@@ -77,48 +78,48 @@ export function QuickCloseModal({ exec, onClose, onSuccess }: QuickCloseModalPro
             }
           }}
         >
-          <div className="replay-exec-form-row">
+          <div className={rl.execFormRow}>
             <label>Account</label>
-            <input type="text" value={exec.account_id ?? ''} readOnly className="replay-exec-readonly" />
+            <input type="text" value={exec.account_id ?? ''} readOnly className={rl.execReadonly} />
           </div>
-          <div className="replay-exec-form-row">
+          <div className={rl.execFormRow}>
             <label>Symbol</label>
-            <input type="text" value={exec.symbol ?? ''} readOnly className="replay-exec-readonly" />
+            <input type="text" value={exec.symbol ?? ''} readOnly className={rl.execReadonly} />
           </div>
-          <div className="replay-exec-form-row">
+          <div className={rl.execFormRow}>
             <label>Quantity</label>
-            <input type="text" value={exec.quantity ?? ''} readOnly className="replay-exec-readonly" />
+            <input type="text" value={exec.quantity ?? ''} readOnly className={rl.execReadonly} />
           </div>
-          <div className="replay-exec-form-row">
+          <div className={rl.execFormRow}>
             <label>Expiry</label>
-            <input type="text" value={exec.expiry ?? ''} readOnly className="replay-exec-readonly" />
+            <input type="text" value={exec.expiry ?? ''} readOnly className={rl.execReadonly} />
           </div>
-          <div className="replay-exec-form-row">
+          <div className={rl.execFormRow}>
             <label>Strike</label>
-            <input type="text" value={exec.strike ?? ''} readOnly className="replay-exec-readonly" />
+            <input type="text" value={exec.strike ?? ''} readOnly className={rl.execReadonly} />
           </div>
-          <div className="replay-exec-form-row">
+          <div className={rl.execFormRow}>
             <label>Side (close)</label>
             <input
               type="text"
               value={(exec.side ?? '').toUpperCase().startsWith('B') ? 'Sell' : 'Buy'}
               readOnly
-              className="replay-exec-readonly"
+              className={rl.execReadonly}
             />
           </div>
-          <div className="replay-exec-form-row">
+          <div className={rl.execFormRow}>
             <label>Time</label>
             <input type="datetime-local" value={closeForm.time} onChange={e => setCloseForm(f => ({ ...f, time: e.target.value }))} required />
           </div>
-          <div className="replay-exec-form-row">
+          <div className={rl.execFormRow}>
             <label>Price (optional)</label>
             <input type="number" step="any" value={closeForm.price} onChange={e => setCloseForm(f => ({ ...f, price: e.target.value }))} placeholder="Leave empty for 0" />
           </div>
-          <div className="replay-exec-form-row">
+          <div className={rl.execFormRow}>
             <label>Commission (optional)</label>
             <input type="number" step="any" value={closeForm.commission} onChange={e => setCloseForm(f => ({ ...f, commission: e.target.value }))} placeholder="Leave empty" />
           </div>
-          <div className="replay-exec-form-actions">
+          <div className={rl.execFormActions}>
             <Button type="button" variant="secondary" onClick={() => { onClose(); setCloseError(null) }}>
               Cancel
             </Button>

@@ -1,4 +1,6 @@
 import { Fragment, useCallback, useMemo, useState } from 'react'
+import { pnlNegativeClass, pnlPositiveClass } from '@/components/shared/appUi'
+import { w9 } from '@/styles/wave9Classes'
 import type { Execution, OptExecutionGroup, OptionStockLinkRow, OptionStockLinkSummary } from '../../../types'
 import { fmtTsShort, fmtUsd } from '../../../utils/format'
 import { buildOptExecutionGroups } from '../../portfolio/buildOptExecutionGroups'
@@ -122,7 +124,7 @@ function FillCells({
               </>
             )}
             {stockLinkDetail.linkIds.length > 0 && (
-              <span className="ledger-opt-link-stock-badges">
+              <span className={w9.ledgerOptLinkStockBadges}>
                 {stockLinkDetail.linkIds.map((lid) => (
                   <button
                     key={lid}
@@ -351,7 +353,7 @@ function ExecutionFillsTable({
                     </>
                   ) : null}
                   {stockLinkDetail.linkIds.length > 0 ? (
-                    <span className="ledger-opt-link-stock-badges">
+                    <span className={w9.ledgerOptLinkStockBadges}>
                       {stockLinkDetail.linkIds.map((lid) => (
                         <button
                           key={lid}
@@ -693,7 +695,7 @@ export function InstanceExecutionsPanel({
                               )}
                               <span className="instance-detail-group-pnl-net">
                                 <span className="muted">Net</span>{' '}
-                                <span className={`tabular-nums ${netPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(netPnl)}</span>
+                                <span className={`tabular-nums ${netPnl >= 0 ? pnlPositiveClass : pnlNegativeClass}`}>{fmtUsd(netPnl)}</span>
                               </span>
                             </div>
                           </td>
@@ -759,7 +761,7 @@ export function InstanceExecutionsPanel({
                           )}
                           <span className="instance-detail-group-pnl-net">
                             <span className="muted">Net</span>{' '}
-                            <span className={`tabular-nums ${groupTotals.totalNetPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`} style={{ fontWeight: 600 }}>{fmtUsd(groupTotals.totalNetPnl)}</span>
+                            <span className={`tabular-nums ${groupTotals.totalNetPnl >= 0 ? pnlPositiveClass : pnlNegativeClass}`} style={{ fontWeight: 600 }}>{fmtUsd(groupTotals.totalNetPnl)}</span>
                           </span>
                         </div>
                       </td>

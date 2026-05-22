@@ -1,3 +1,5 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { OptionSnapshotRow } from '../../api'
 import { fetchGreeksCoverage, fetchOptionSnapshotsPg, postWatchlist } from '../../api'
@@ -260,7 +262,7 @@ export function OptionContractDetailFromOpenPosition({
             ✕
           </Button>
         </div>
-        <p className="section-hint" style={{ margin: '0.75rem 0 0' }}>
+        <p className={w9.sectionHint} style={{ margin: '0.75rem 0 0' }}>
           Loading contract detail (Massive snapshots)…
         </p>
       </div>
@@ -270,7 +272,7 @@ export function OptionContractDetailFromOpenPosition({
   return (
     <>
       {loadError != null && (
-        <p className="section-hint replay-form-error" style={{ margin: '0 0 0.75rem' }} role="alert">
+        <p className={rl.formError} style={{ margin: '0 0 0.75rem' }} role="alert">
           {loadError}
         </p>
       )}

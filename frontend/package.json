@@ -10,6 +10,8 @@
     "lint:legacy-classes": "node scripts/check-legacy-classnames.mjs",
     "css:metrics": "node scripts/css-legacy-metrics.mjs",
     "css:metrics:verbose": "node scripts/css-legacy-metrics.mjs --verbose",
+    "css:dead-rules": "node scripts/css-dead-rules.mjs",
+    "css:dead-rules:verbose": "node scripts/css-dead-rules.mjs --verbose",
     "test:visual": "playwright test",
     "test:visual:update": "playwright test --update-snapshots",
     "postinstall": "playwright install chromium || true",

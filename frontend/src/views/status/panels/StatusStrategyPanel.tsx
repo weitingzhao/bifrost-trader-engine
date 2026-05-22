@@ -1,4 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { StatusResponse } from '../../../types'
 import { DraggableModal } from '../../../components/DraggableModal'
 import { InfoTooltip } from '../../../components/InfoTooltip'
@@ -104,7 +106,7 @@ export function StatusStrategyPanel({
       title="Emergency flatten"
       titleId="strategy-flatten-confirm-title"
       footer={
-        <div className="data-reset-modal-actions">
+        <div className={w9.dataResetModalActions}>
           <Button
             type="button"
             variant="secondary"
@@ -138,7 +140,7 @@ export function StatusStrategyPanel({
   const emergencyFlattenButton = (
     <button
       type="button"
-      className="strategy-flatten-emergency-btn"
+      className={w9.strategyFlattenEmergencyBtn}
       title="Emergency: request flatten of hedge exposure (opens confirmation)"
       aria-label="Emergency flatten exposure"
       onClick={openFlattenDialog}
@@ -151,15 +153,15 @@ export function StatusStrategyPanel({
     return (
       <>
       <div id="system-panel-strategy" role="tabpanel" aria-labelledby="tab-strategy" className={panelClass}>
-        <div className="strategy-compact-header">
+        <div className={w9.strategyCompactHeader}>
           <SettingsTitleLamp lamp={hedgeLamp as LampTone} title="Trading strategy status">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /></svg>
           </SettingsTitleLamp>
-          <span className="strategy-compact-title">Trading Strategy</span>
+          <span className={w9.strategyCompactTitle}>Trading Strategy</span>
         </div>
         <div className="strategy-compact-meta-row">
           <div
-            className="strategy-compact-status"
+            className={w9.strategyCompactStatus}
             title={
               j
                 ? `${hedgeLabel}${hedgeBlockReasons && hedgeBlockReasons !== 'None' ? ` · ${hedgeBlockReasons}` : ''}`
@@ -168,9 +170,9 @@ export function StatusStrategyPanel({
           >
             {j && hedgeStatusCompact != null ? (
               <>
-                <span className="strategy-compact-status-k">{hedgeStatusCompact}</span>
+                <span className={w9.strategyCompactStatusK}>{hedgeStatusCompact}</span>
                 {hedgeBlockReasonsCompact ? (
-                  <span className="strategy-compact-status-blocks"> · {hedgeBlockReasonsCompact}</span>
+                  <span className={w9.strategyCompactStatusBlocks}> · {hedgeBlockReasonsCompact}</span>
                 ) : null}
               </>
             ) : j ? (
@@ -182,10 +184,10 @@ export function StatusStrategyPanel({
               'Fetch failed'
             )}
           </div>
-          <div className="strategy-compact-summary strategy-compact-summary--inline" role="list" aria-label="Trading metrics">
+          <div className={cn(w9.strategyCompactSummary, 'strategy-compact-summary--inline')} role="list" aria-label="Trading metrics">
             {compactMetricItems.map(({ label, value }) => (
-              <span key={label} className="strategy-compact-summary-item" role="listitem">
-                <span className="strategy-compact-label">
+              <span key={label} className={w9.strategyCompactSummaryItem} role="listitem">
+                <span className={w9.strategyCompactLabel}>
                   {STRATEGY_METRIC_LABEL_COMPACT[label] ?? label}
                 </span>
                 <span className="status-summary-value">{value}</span>
@@ -194,12 +196,12 @@ export function StatusStrategyPanel({
           </div>
         </div>
         {(activeStructureName != null || activeGateSafetyName != null) && (
-          <div className="strategy-active-names strategy-active-names--compact">
+          <div className={cn(w9.strategyActiveNames, 'strategy-active-names--compact')}>
             <span title="Active structure">S:{activeStructureName ?? '—'}</span>
             <span title="Active gate safety set">G:{activeGateSafetyName ?? '—'}</span>
           </div>
         )}
-        <div className="controls strategy-compact-controls strategy-controls-primary-row">
+        <div className={cn(w9.strategyCompactControls, w9.strategyControlsPrimaryRow, 'controls')}>
           {onManage && (
             <button
               type="button"
@@ -238,8 +240,8 @@ export function StatusStrategyPanel({
             )
           )}
         </div>
-        <div className="strategy-emergency-bar" role="group" aria-label="Emergency trading actions">
-          <span className="strategy-emergency-bar-label">
+        <div className={w9.strategyEmergencyBar} role="group" aria-label="Emergency trading actions">
+          <span className={w9.strategyEmergencyBarLabel}>
             Emergency
             <InfoTooltip text="Flatten requests the daemon control channel to close or reduce hedge exposure. Confirm in the dialog; use only when you understand the risk." />
           </span>
@@ -261,7 +263,7 @@ export function StatusStrategyPanel({
     <div id="system-panel-strategy" role="tabpanel" aria-labelledby="tab-strategy" className={panelClass}>
       <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
         <div>
-          <h2 className="daemon-card-title inline-flex flex-wrap items-center gap-2 m-0">
+          <h2 className={cn(w9.daemonCardTitle, 'inline-flex', 'flex-wrap', 'items-center', 'gap-2', 'm-0')}>
             <SettingsTitleLamp lamp={hedgeLamp as LampTone} title="Trading strategy status lamp">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /></svg>
             </SettingsTitleLamp>
@@ -270,32 +272,32 @@ export function StatusStrategyPanel({
           </h2>
         </div>
       </div>
-      <div className="strategy-full-meta-row">
-        <div className="strategy-full-meta-primary">
+      <div className={w9.strategyFullMetaRow}>
+        <div className={w9.strategyFullMetaPrimary}>
           <strong>Status: {j ? `${hedgeLabel} (${hedgeSelfCheckText})` : 'Fetch failed'}</strong>
           {j && hedgeBlockReasons && hedgeBlockReasons !== 'None' ? ` Block reasons: ${hedgeBlockReasons}` : ''}
         </div>
         <div
-          className="strategy-compact-summary strategy-compact-summary--inline strategy-compact-summary--full"
+          className={cn(w9.strategyCompactSummary, 'strategy-compact-summary--inline', 'strategy-compact-summary--full')}
           role="list"
           aria-label="Trading metrics"
         >
           {statusSummaryItems.map(({ label, value }) => (
-            <span key={label} className="strategy-compact-summary-item" role="listitem">
-              <span className="strategy-compact-label">{label}</span>
+            <span key={label} className={w9.strategyCompactSummaryItem} role="listitem">
+              <span className={w9.strategyCompactLabel}>{label}</span>
               <span className="status-summary-value">{value}</span>
             </span>
           ))}
         </div>
       </div>
-      <p className="section-hint">{hedgeHint}</p>
+      <p className={w9.sectionHint}>{hedgeHint}</p>
       {(activeStructureName != null || activeGateSafetyName != null) && (
-        <div className="strategy-active-names" style={{ marginTop: '0.5rem' }}>
+        <div className={w9.strategyActiveNames} style={{ marginTop: '0.5rem' }}>
           <div><strong>Active structure:</strong> {activeStructureName ?? '—'}</div>
           <div><strong>Active gate safety:</strong> {activeGateSafetyName ?? '—'}</div>
         </div>
       )}
-      <div className="controls strategy-controls-primary-row" style={{ marginTop: '0.5rem' }}>
+      <div className={cn(w9.strategyControlsPrimaryRow, 'controls')} style={{ marginTop: '0.5rem' }}>
         {onManage && (
           <button
             type="button"
@@ -334,8 +336,8 @@ export function StatusStrategyPanel({
           )
         )}
       </div>
-      <div className="strategy-emergency-bar" role="group" aria-label="Emergency trading actions">
-        <span className="strategy-emergency-bar-label">
+      <div className={w9.strategyEmergencyBar} role="group" aria-label="Emergency trading actions">
+        <span className={w9.strategyEmergencyBarLabel}>
           Emergency
           <InfoTooltip text="Flatten requests the daemon control channel to close or reduce hedge exposure. Confirm in the dialog; use only when you understand the risk." />
         </span>

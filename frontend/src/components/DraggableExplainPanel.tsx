@@ -1,3 +1,4 @@
+import { w9 } from '@/styles/wave9Classes'
 import {
   useCallback,
   useEffect,
@@ -138,24 +139,24 @@ export function DraggableExplainPanel({
       }}
     >
       <div
-        className="draggable-explain-panel-header"
+        className={w9.draggableExplainPanelHeader}
         onMouseDown={onHeaderMouseDown}
         role="presentation"
       >
-        <h3 id={titleId} className="draggable-explain-panel-title">
+        <h3 id={titleId} className={w9.draggableExplainPanelTitle}>
           {title}
         </h3>
         <button
           type="button"
-          className="draggable-explain-panel-close"
+          className={w9.draggableExplainPanelClose}
           onClick={onClose}
           aria-label="Close"
         >
           ×
         </button>
       </div>
-      <div className="draggable-explain-panel-body">{children}</div>
-      <p className="draggable-explain-panel-hint">
+      <div className={w9.draggableExplainPanelBody}>{children}</div>
+      <p className={w9.draggableExplainPanelHint}>
         Drag the header to move. Click × or press Escape to close.
       </p>
     </div>

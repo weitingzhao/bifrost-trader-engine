@@ -1,3 +1,6 @@
+import { filterPill } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { StatusResponse, IbAccountSnapshot } from '../types'
 import { getPortfolioApiBaseForBrowser, joinServiceBase } from '../api/shared/apiRouting'
@@ -206,7 +209,7 @@ export function ModelAnalysisPage({ status, onViewChange }: Props) {
           >
             <button
               type="button"
-              className={`replay-filter-pill ${selectedAccount === hostId ? 'active' : ''}`}
+              className={filterPill(selectedAccount === hostId, { draggable: true })}
               disabled={!hostSelectable}
               onClick={() => hostSelectable && setSelectedAccount(hostId)}
               title={
@@ -220,7 +223,7 @@ export function ModelAnalysisPage({ status, onViewChange }: Props) {
             </button>
             <button
               type="button"
-              className={`replay-filter-pill ${selectedAccount === secondaryId ? 'active' : ''}`}
+              className={filterPill(selectedAccount === secondaryId, { draggable: true })}
               disabled={!secondarySelectable}
               onClick={() => secondarySelectable && setSelectedAccount(secondaryId)}
               title={
@@ -280,7 +283,7 @@ export function ModelAnalysisPage({ status, onViewChange }: Props) {
             Values are the <strong>sum</strong> of per-symbol stress totals for the same (spot shock, IV shock) key.
             Open any <strong>symbol</strong> row below for full CAR and stress methodology (formulas, Black–Scholes assumptions).
           </p>
-          <table className="table-operations model-analysis-table table-sm">
+          <table className={cn(w9.tableOperations, 'model-analysis-table', 'table-sm')}>
             <thead>
               <tr><th>Spot shock</th><th>IV shock</th><th>P&amp;L</th></tr>
             </thead>
@@ -300,7 +303,7 @@ export function ModelAnalysisPage({ status, onViewChange }: Props) {
       {/* Per underlying table */}
       {hasEntries && (
         <div className="table-wrap model-analysis-table-wrap">
-        <table className="table-operations model-analysis-main-table">
+        <table className={cn(w9.tableOperations, 'model-analysis-main-table')}>
           <thead>
             <tr>
               <th>Symbol</th>
@@ -433,7 +436,7 @@ function UnderlyingDetail({ entry: u }: { entry: UnderlyingEntry }) {
         {car.leg_details && car.leg_details.length > 0 && (
           <div className="model-analysis-car-legs-wrap">
             <div className="model-analysis-muted model-analysis-car-legs-caption">Per-leg heuristic (not additive when Explain = net portfolio max loss)</div>
-            <table className="table-operations model-analysis-nested-table model-analysis-car-legs-table">
+            <table className={cn(w9.tableOperations, 'model-analysis-nested-table', 'model-analysis-car-legs-table')}>
               <thead>
                 <tr>
                   <th>Strike</th>
@@ -479,7 +482,7 @@ function UnderlyingDetail({ entry: u }: { entry: UnderlyingEntry }) {
       {u.greeks.per_leg && u.greeks.per_leg.length > 0 && (
         <div className="model-analysis-detail-section">
           <strong className="model-analysis-detail-section-title">Option legs</strong>
-          <table className="table-operations model-analysis-nested-table">
+          <table className={cn(w9.tableOperations, 'model-analysis-nested-table')}>
             <thead><tr><th>Strike</th><th>R</th><th>Qty</th><th>IV</th><th>Delta</th></tr></thead>
             <tbody>
               {u.greeks.per_leg!.map((leg, i) => (
@@ -504,7 +507,7 @@ function UnderlyingDetail({ entry: u }: { entry: UnderlyingEntry }) {
             <span className="model-analysis-muted model-analysis-iv-note"> (IV stress unavailable for this symbol — intrinsic-only rows)</span>
           )}
           <StressMethodologyIntro className="model-analysis-methodology-block model-analysis-methodology-block--nested" />
-          <table className="table-operations model-analysis-nested-table model-analysis-stress-table">
+          <table className={cn(w9.tableOperations, 'model-analysis-nested-table', 'model-analysis-stress-table')}>
             <thead>
               <tr>
                 <th>Spot Δ</th>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
 import { DraggableModal } from '../components/DraggableModal'
 import { PageSection } from '@/components/shared/page-section'
 import { SectionPageTitle } from '../components/SectionPageTitle'
@@ -210,7 +211,7 @@ export function DataPage({
         title="Delete jobs by status?"
         titleId="delete-all-jobs-title"
         footer={
-          <div className="data-reset-modal-actions">
+          <div className={w9.dataResetModalActions}>
             <Button type="button" variant="secondary" onClick={() => setConfirmDeleteAll(false)}>
               Cancel
             </Button>
@@ -248,7 +249,7 @@ export function DataPage({
         title="Reset failed jobs"
         titleId="retry-failed-jobs-title"
         footer={
-          <div className="data-reset-modal-actions">
+          <div className={w9.dataResetModalActions}>
             <Button type="button" variant="secondary" disabled={retryBatchBusy} onClick={() => setConfirmRetryFailed(false)}>
               Cancel
             </Button>

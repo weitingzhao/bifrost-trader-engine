@@ -1,4 +1,6 @@
 import { useId, useMemo, useState, type ReactNode } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { Execution, PerformanceResponse } from '../../../types'
 import { DraggableModal } from '../../../components/DraggableModal'
 import { Button } from '@/components/ui/button'
@@ -384,7 +386,7 @@ export function InstancePnLStrip({
             titleId={metricsExplainTitleId}
             maxWidth="min(560px, calc(100vw - 24px))"
             footer={
-              <div className="data-reset-modal-actions">
+              <div className={w9.dataResetModalActions}>
                 <Button type="button" onClick={() => setMetricsExplainOpen(false)}>
                   Close
                 </Button>
@@ -424,7 +426,7 @@ export function InstancePnLStrip({
                   <PnlExplainKpi>Attributed</PnlExplainKpi> column sums to the <PnlExplainKpi>Net PnL</PnlExplainKpi> add-on above.
                 </p>
                 <div className="instance-detail-pnl-underlying-breakdown-wrap" style={{ marginBottom: 'var(--space-3)' }}>
-                  <table className="table-operations instance-detail-pnl-underlying-table">
+                  <table className={cn(w9.tableOperations, 'instance-detail-pnl-underlying-table')}>
                     <thead>
                       <tr>
                         <th>OPT exec #</th>
@@ -477,7 +479,7 @@ export function InstancePnLStrip({
               </p>
             ) : (
               <div className="instance-detail-pnl-underlying-breakdown-wrap">
-                <table className="table-operations instance-detail-pnl-underlying-table">
+                <table className={cn(w9.tableOperations, 'instance-detail-pnl-underlying-table')}>
                   <thead>
                     <tr>
                       <th>Contract</th>
@@ -666,7 +668,7 @@ export function InstancePnLStrip({
             maxWidth="min(820px, calc(100vw - 40px))"
             panelClassName="instance-detail-risk-cost-explain-modal"
             footer={
-              <div className="data-reset-modal-actions">
+              <div className={w9.dataResetModalActions}>
                 <Button type="button" onClick={() => setReturnExplainOpen(false)}>
                   Close
                 </Button>
@@ -699,7 +701,7 @@ export function InstancePnLStrip({
             maxWidth="min(820px, calc(100vw - 40px))"
             panelClassName="instance-detail-risk-cost-explain-modal"
             footer={
-              <div className="data-reset-modal-actions">
+              <div className={w9.dataResetModalActions}>
                 <Button type="button" onClick={() => setRiskCostExplainOpen(false)}>
                   Close
                 </Button>

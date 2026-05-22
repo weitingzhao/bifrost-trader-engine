@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
 import type { StatusResponse } from '../types'
 import { DraggableModal } from '../components/DraggableModal'
 import { InfoTooltip } from '../components/InfoTooltip'
@@ -452,7 +453,7 @@ export function DaemonEngineOpsSection({ status, loadStatus }: DaemonEngineOpsSe
 
       {localAgentPanel ? (
         <div style={{ marginTop: 'var(--space-3)' }}>
-          <h4 className="daemon-group-title" style={{ marginBottom: 'var(--space-2)' }}>
+          <h4 className={w9.daemonGroupTitle} style={{ marginBottom: 'var(--space-2)' }}>
             <SettingsTitleLamp lamp={localAgentPanel.lamp as LampTone} title={localAgentPanel.detail}>
               <SettingsSidebarLampGlyph id="api-ops" />
             </SettingsTitleLamp>

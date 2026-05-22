@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useMemo, useState } from 'react'
 import type { IvVolatilityConePoint, OptionSnapshotRow } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
@@ -73,7 +76,7 @@ export function IvSmileChart({
   const activePts = [...(showCall ? callPts : []), ...(showPut ? putPts : [])]
 
   if (activePts.length < 2) {
-    return <p className="section-hint">Not enough IV data for smile chart.</p>
+    return <p className={w9.sectionHint}>Not enough IV data for smile chart.</p>
   }
 
   const w = 640
@@ -214,7 +217,7 @@ export function OiProfileChart({ rows, underlying }: {
   }, [rows])
 
   if (data.length < 2) {
-    return <p className="section-hint">Not enough OI data for profile chart.</p>
+    return <p className={w9.sectionHint}>Not enough OI data for profile chart.</p>
   }
 
   const w = 640
@@ -358,7 +361,7 @@ export function GammaExposureChart({ rows, underlying }: {
   }, [rows])
 
   if (data.length < 1) {
-    return <p className="section-hint">Not enough gamma and OI data for exposure chart.</p>
+    return <p className={w9.sectionHint}>Not enough gamma and OI data for exposure chart.</p>
   }
 
   const w = 640
@@ -542,7 +545,7 @@ export function IvTermStructureChart({ points }: { points: IvTermPoint[] }) {
   )
 
   if (valid.length < 2) {
-    return <p className="section-hint">Not enough term structure data (need at least 2 expirations with ATM IV).</p>
+    return <p className={w9.sectionHint}>Not enough term structure data (need at least 2 expirations with ATM IV).</p>
   }
 
   const w = OD_IV_TERM_VIEWBOX_W
@@ -634,7 +637,7 @@ export function IvVolConeChart({ points }: { points: IvVolConePoint[] }) {
 
   if (valid.length < 2 || (!hasLine && !hasBand)) {
     return (
-      <p className="section-hint">
+      <p className={w9.sectionHint}>
         Not enough IV cone data (need at least 2 expirations with ATM IV and historical samples in PostgreSQL).
       </p>
     )
@@ -662,7 +665,7 @@ export function IvVolConeChart({ points }: { points: IvVolConePoint[] }) {
     if (p.iv_max != null && Number.isFinite(p.iv_max)) ivVals.push(p.iv_max)
   }
   if (ivVals.length === 0) {
-    return <p className="section-hint">Not enough IV cone data.</p>
+    return <p className={w9.sectionHint}>Not enough IV cone data.</p>
   }
   const minIv = Math.min(...ivVals)
   const maxIv = Math.max(...ivVals)
@@ -840,7 +843,7 @@ export function IvParametricConeChart({ points }: { points: IvVolatilityConePoin
 
   if (valid.length < 2) {
     return (
-      <p className="section-hint">
+      <p className={w9.sectionHint}>
         Not enough data for parametric chart (need at least 2 expirations with DTE ≥ 0).
       </p>
     )
@@ -848,7 +851,7 @@ export function IvParametricConeChart({ points }: { points: IvVolatilityConePoin
 
   if (!hasHist && !hasCp) {
     return (
-      <p className="section-hint">
+      <p className={w9.sectionHint}>
         No historical ATM IV samples or latest Call/Put IV for this selection — load cone data with daily snapshots.
       </p>
     )
@@ -856,7 +859,7 @@ export function IvParametricConeChart({ points }: { points: IvVolatilityConePoin
 
   const ext0 = extentParametricCone(valid)
   if (ext0 == null) {
-    return <p className="section-hint">Not enough numeric IV values to plot.</p>
+    return <p className={w9.sectionHint}>Not enough numeric IV values to plot.</p>
   }
 
   const w = OD_IV_TERM_VIEWBOX_W
@@ -1060,7 +1063,7 @@ export function OptionDiscoveryAnalyticsPanel({
   const chartCount = [hasIv, hasOi, hasGex].filter(Boolean).length
 
   return (
-    <section className="replay-section od-analytics-section" aria-label="Option analytics">
+    <section className={rl.section} aria-label="Option analytics">
       <h3 className="od-analytics-title">
         Option Analytics
         <InfoTooltip text="Derived from current-expiry snapshot data (Massive, ~15 min delayed). IV Smile and OI by strike for loaded contracts. Scoped to the selected strike window." />
@@ -1150,7 +1153,7 @@ export function OptionDiscoveryAnalyticsPanel({
                 <>
                   <GammaExposureLegend underlying={underlying} />
                   <GammaExposureChart rows={rows} underlying={underlying} />
-                  <p className="section-hint od-gex-disclaimer">
+                  <p className={cn(w9.sectionHint, 'od-gex-disclaimer')}>
                     Approximate notional gamma exposure (gamma × OI × 100). For illustration only; not a hedge-flow forecast.
                   </p>
                 </>

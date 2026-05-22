@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { WatchlistItem } from '../../types'
 import {
   fetchWatchlist,
@@ -294,7 +296,7 @@ export function DailyDataChecklistSection({
       {stkSymbols.length === 0 ? (
         <p className="feed-massive-daily-warn">No optionable STK symbols on the watchlist.</p>
       ) : null}
-      {loadErr ? <p className="msg-error feed-massive-daily-warn">{loadErr}</p> : null}
+      {loadErr ? <p className={cn(w9.msgError, 'feed-massive-daily-warn')}>{loadErr}</p> : null}
       {resolvedTradeDate ? (
         <p className="feed-massive-daily-meta">Evaluated for <strong>{resolvedTradeDate}</strong> (US calendar).</p>
       ) : null}

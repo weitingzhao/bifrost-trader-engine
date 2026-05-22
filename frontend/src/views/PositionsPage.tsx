@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Execution, IbPositionRow, StatusResponse } from '../types'
 import { deleteExecution, updateExecution } from '../api'
@@ -1967,7 +1970,7 @@ export function PositionsPage({
 
 
   return (
-    <PageSection className="replay-page">
+    <PageSection className={rl.page}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
         <SectionPageTitle
           menu="Portfolio"
@@ -1996,11 +1999,11 @@ export function PositionsPage({
           </div>
           <div className="coverage-asset-pie-section pos-comp-chart-col pos-comp-chart-col--span-4" style={{ minWidth: 0, maxWidth: 'none' }}>
             <div
-              className="coverage-asset-pie-chart-toggle-row"
+              className={w9.coverageAssetPieChartToggleRow}
               style={{ marginBottom: '0.45rem', gap: '0.35rem', flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}
             >
-              <span className="coverage-asset-pie-bp-label">Underlying category</span>
-              <div className="coverage-asset-pie-bubble-switch" role="group" aria-label="Toggle underlying categories">
+              <span className={w9.coverageAssetPieBpLabel}>Underlying category</span>
+              <div className={w9.coverageAssetPieBubbleSwitch} role="group" aria-label="Toggle underlying categories">
                 {UNDERLYING_CATEGORY_ORDER.map(cat => {
                   const active = underlyingCategoryFilter[cat]
                   return (
@@ -2034,12 +2037,12 @@ export function PositionsPage({
                   embedded
                   showActiveChip={false}
                 />
-                <div className="coverage-asset-pie-legend" style={{ minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', gap: '0.25rem 0.4rem' }}>
+                <div className={w9.coverageAssetPieLegend} style={{ minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', gap: '0.25rem 0.4rem' }}>
                   {categoryDetailLegendGroups.map(group => (
                     <div key={`detail-group-${group.category}`} style={{ flex: '1 1 100%', minWidth: 0 }}>
-                      <div className="coverage-asset-pie-bp-label" style={{ marginBottom: '0.08rem' }}>{group.category}</div>
+                      <div className={w9.coverageAssetPieBpLabel} style={{ marginBottom: '0.08rem' }}>{group.category}</div>
                       <div
-                        className="coverage-asset-pie-legend"
+                        className={w9.coverageAssetPieLegend}
                         style={
                           group.category === 'Stocks'
                             ? {
@@ -2058,7 +2061,7 @@ export function PositionsPage({
                           return (
                             <div
                               key={`sym-${group.category}-${seg.label}`}
-                              className="coverage-asset-pie-legend-item"
+                              className={w9.coverageAssetPieLegendItem}
                               style={{
                                 cursor: 'pointer',
                                 opacity: isDimmed ? 0.38 : 1,
@@ -2075,7 +2078,7 @@ export function PositionsPage({
                               }}
                               title={`Click to filter: ${seg.label}`}
                             >
-                              <span className="coverage-asset-pie-dot" style={{ background: seg.color }} />
+                              <span className={w9.coverageAssetPieDot} style={{ background: seg.color }} />
                               <span
                                 className={
                                   seg.marketValueTooltip
@@ -2090,8 +2093,8 @@ export function PositionsPage({
                                   </span>
                                 ) : null}
                               </span>
-                              <span className="coverage-asset-pie-legend-pct">{pct.toFixed(1)}%</span>
-                              <span className="coverage-asset-pie-legend-value">{fmtMvAbbrev(seg.value)}</span>
+                              <span className={w9.coverageAssetPieLegendPct}>{pct.toFixed(1)}%</span>
+                              <span className={w9.coverageAssetPieLegendValue}>{fmtMvAbbrev(seg.value)}</span>
                             </div>
                           )
                         })}
@@ -2111,7 +2114,7 @@ export function PositionsPage({
                   embedded
                 showActiveChip={false}
                 />
-                <div className="coverage-asset-pie-legend" style={{ minWidth: 0, flexDirection: 'column', gap: '0.25rem' }}>
+                <div className={w9.coverageAssetPieLegend} style={{ minWidth: 0, flexDirection: 'column', gap: '0.25rem' }}>
                   {underlyingCategorySegments.map(seg => {
                     const total = underlyingCategorySegments.reduce((acc, s) => acc + s.value, 0)
                     const pct = total > 0 ? (seg.value / total) * 100 : 0
@@ -2119,7 +2122,7 @@ export function PositionsPage({
                     return (
                       <div
                         key={`cat-${seg.label}`}
-                        className="coverage-asset-pie-legend-item"
+                        className={w9.coverageAssetPieLegendItem}
                         style={{
                           cursor: 'pointer',
                           borderRadius: 4,
@@ -2130,10 +2133,10 @@ export function PositionsPage({
                         onClick={() => handleCategoryWeightSelect(seg.label)}
                         title={`Switch instruments tab: ${seg.label}`}
                       >
-                        <span className="coverage-asset-pie-dot" style={{ background: seg.color }} />
-                        <span className="coverage-asset-pie-legend-label">{seg.label}</span>
-                        <span className="coverage-asset-pie-legend-pct">{pct.toFixed(1)}%</span>
-                        <span className="coverage-asset-pie-legend-value">{fmtMvAbbrev(seg.value)}</span>
+                        <span className={w9.coverageAssetPieDot} style={{ background: seg.color }} />
+                        <span className={w9.coverageAssetPieLegendLabel}>{seg.label}</span>
+                        <span className={w9.coverageAssetPieLegendPct}>{pct.toFixed(1)}%</span>
+                        <span className={w9.coverageAssetPieLegendValue}>{fmtMvAbbrev(seg.value)}</span>
                       </div>
                     )
                   })}
@@ -2141,21 +2144,21 @@ export function PositionsPage({
               </div>
             </div>
             {!anyUnderlyingCategoryEnabled && (
-              <p className="section-hint" style={{ marginTop: '0.45rem' }}>
+              <p className={w9.sectionHint} style={{ marginTop: '0.45rem' }}>
                 Turn on at least one category to show symbol proportions.
               </p>
             )}
           </div>
           <div className="coverage-asset-pie-section pos-comp-chart-col pos-comp-chart-col--span-4" style={{ minWidth: 0, maxWidth: 'none' }}>
             <div
-              className="coverage-asset-pie-header"
+              className={w9.coverageAssetPieHeader}
               style={{ flexWrap: 'nowrap', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}
             >
-              <span className="coverage-asset-pie-title" style={{ flexShrink: 0 }}>
+              <span className={w9.coverageAssetPieTitle} style={{ flexShrink: 0 }}>
                 Option
               </span>
               <div
-                className="coverage-asset-pie-bubble-switch"
+                className={w9.coverageAssetPieBubbleSwitch}
                 style={{ flexShrink: 0 }}
                 role="group"
                 aria-label="Option ring legend: percent or dollars"
@@ -2252,7 +2255,7 @@ export function PositionsPage({
                 embedded
                 showActiveChip={false}
               />
-              <div className="coverage-asset-pie-legend" style={{ minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', gap: '0.25rem 0.4rem' }}>
+              <div className={w9.coverageAssetPieLegend} style={{ minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', gap: '0.25rem 0.4rem' }}>
                 {optionDetailSegments.map(seg => {
                   const total = optionDetailSegments.reduce((acc, s) => acc + s.value, 0)
                   const pct = total > 0 ? (seg.value / total) * 100 : 0
@@ -2280,36 +2283,36 @@ export function PositionsPage({
                       title={`Filter by ${seg.label}`}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
-                        <span className="coverage-asset-pie-dot" style={{ background: seg.color, flexShrink: 0 }} />
-                        <span className="coverage-asset-pie-legend-label" style={{ wordBreak: 'break-word' }}>{seg.label}</span>
+                        <span className={w9.coverageAssetPieDot} style={{ background: seg.color, flexShrink: 0 }} />
+                        <span className={w9.coverageAssetPieLegendLabel} style={{ wordBreak: 'break-word' }}>{seg.label}</span>
                         {optionRingLegendMode === 'pct' ? (
-                          <span className="coverage-asset-pie-legend-pct">{pct.toFixed(1)}%</span>
+                          <span className={w9.coverageAssetPieLegendPct}>{pct.toFixed(1)}%</span>
                         ) : (
-                          <span className="coverage-asset-pie-legend-value">{fmtMvAbbrev(seg.value)}</span>
+                          <span className={w9.coverageAssetPieLegendValue}>{fmtMvAbbrev(seg.value)}</span>
                         )}
                       </div>
                       {seg.optionDetailFoot ? (
                         <div style={{ fontSize: '0.68rem', lineHeight: 1.25, paddingLeft: '1.1rem' }}>
                           {seg.optionDetailFoot.kind === 'stock' ? (
                             <>
-                              <span className="replay-muted">Stock cost </span>
+                              <span className={rl.muted}>Stock cost </span>
                               <span className={`tabular-nums ${pnlClassForTone(seg.optionDetailFoot.tone)}`}>
                                 {seg.optionDetailFoot.costFmt}
                               </span>
-                              <span className="replay-muted"> · Market value </span>
+                              <span className={rl.muted}> · Market value </span>
                               <span className={`tabular-nums ${pnlClassForTone(seg.optionDetailFoot.tone)}`}>
                                 {seg.optionDetailFoot.mvFmt}
                               </span>
                             </>
                           ) : seg.optionDetailFoot.text.startsWith('Margin (est.) ') ? (
                             <>
-                              <span className="replay-muted">Margin (est.) </span>
+                              <span className={rl.muted}>Margin (est.) </span>
                               <span className={`tabular-nums ${pnlClassForTone(seg.optionDetailFoot.tone)}`}>
                                 {seg.optionDetailFoot.text.slice('Margin (est.) '.length)}
                               </span>
                             </>
                           ) : (
-                            <span className="replay-muted">{seg.optionDetailFoot.text}</span>
+                            <span className={rl.muted}>{seg.optionDetailFoot.text}</span>
                           )}
                         </div>
                       ) : null}
@@ -2330,7 +2333,7 @@ export function PositionsPage({
                 embedded
                 showActiveChip={false}
               />
-              <div className="coverage-asset-pie-legend" style={{ minWidth: 0, flexDirection: 'column', gap: '0.22rem' }}>
+              <div className={w9.coverageAssetPieLegend} style={{ minWidth: 0, flexDirection: 'column', gap: '0.22rem' }}>
                 {optionStockMix.segments.map(seg => {
                   const total = optionStockMix.segments.reduce((acc, s) => acc + s.value, 0)
                   const pct = total > 0 ? (seg.value / total) * 100 : 0
@@ -2338,7 +2341,7 @@ export function PositionsPage({
                   return (
                     <div
                       key={`opt-cat-${seg.label}`}
-                      className="coverage-asset-pie-legend-item"
+                      className={w9.coverageAssetPieLegendItem}
                       style={{
                         padding: '0.06rem 0.25rem',
                         cursor: 'pointer',
@@ -2357,12 +2360,12 @@ export function PositionsPage({
                         }
                       }}
                     >
-                      <span className="coverage-asset-pie-dot" style={{ background: seg.color }} />
-                      <span className="coverage-asset-pie-legend-label">{seg.label}</span>
+                      <span className={w9.coverageAssetPieDot} style={{ background: seg.color }} />
+                      <span className={w9.coverageAssetPieLegendLabel}>{seg.label}</span>
                       {optionRingLegendMode === 'pct' ? (
-                        <span className="coverage-asset-pie-legend-pct">{pct.toFixed(1)}%</span>
+                        <span className={w9.coverageAssetPieLegendPct}>{pct.toFixed(1)}%</span>
                       ) : (
-                        <span className="coverage-asset-pie-legend-value">{fmtMvAbbrev(seg.value)}</span>
+                        <span className={w9.coverageAssetPieLegendValue}>{fmtMvAbbrev(seg.value)}</span>
                       )}
                     </div>
                   )
@@ -2373,15 +2376,15 @@ export function PositionsPage({
         </div>
       )}
 
-      <section className="replay-section replay-section-trade-records" aria-label="Open positions">
+      <section className={cn(rl.section, rl.sectionTradeRecords)} aria-label="Open positions">
           <div className="positions-open-controls-row">
-            <div className="replay-fetch-range-group positions-open-filters" aria-label="Position filters">
+            <div className={rl.fetchRangeGroup} aria-label="Position filters">
               <input
                 type="text"
                 placeholder="Symbol"
                 value={openFilterSymbol}
                 onChange={e => setOpenFilterSymbol(e.target.value)}
-                className="replay-filter-input replay-filter-input-symbol positions-open-filter-symbol"
+                className={cn(rl.filterInput, rl.filterInputSymbol)}
               />
               <input
                 type="text"
@@ -2389,7 +2392,7 @@ export function PositionsPage({
                 placeholder="YYYYMMDD"
                 value={openFilterExpiryStart}
                 onChange={e => setOpenFilterExpiryStart(e.target.value.replace(/\D/g, '').slice(0, 8))}
-                className="replay-filter-input replay-filter-date positions-open-filter-expiry"
+                className={cn(rl.filterInput, rl.filterDate)}
                 title="Option expiry: YYYYMMDD digits; shorter prefix also matches (e.g. 202503)"
                 maxLength={8}
                 aria-label="Filter by option expiry YYYYMMDD"
@@ -2398,7 +2401,7 @@ export function PositionsPage({
             {(streamHostAccountId ||
               (streamSecondaryAccountId && streamSecondaryAccountId !== streamHostAccountId)) && (
               <div
-                className="coverage-asset-pie-bubble-switch positions-open-acct-bubbles"
+                className={cn(w9.coverageAssetPieBubbleSwitch, 'positions-open-acct-bubbles')}
                 role="group"
                 aria-label="Filter open positions by account (multi-select)"
               >
@@ -2439,16 +2442,16 @@ export function PositionsPage({
               </div>
             )}
             <div
-              className="replay-fetch-range-group positions-open-detail-rg"
+              className={rl.fetchRangeGroup}
               role="radiogroup"
               aria-label="Detail view: accordion for Strategy rows and option execution rows"
             >
-              <span className="replay-fetch-days-label">Detail</span>
-              <label className="replay-fetch-radio">
+              <span className={rl.fetchDaysLabel}>Detail</span>
+              <label className={rl.fetchRadio}>
                 <input type="radio" name="open-detail-view" value="accordion" checked={openAccordionMode} onChange={() => setOpenAccordionMode(true)} />
                 <span>Accordion</span>
               </label>
-              <label className="replay-fetch-radio">
+              <label className={rl.fetchRadio}>
                 <input type="radio" name="open-detail-view" value="multi" checked={!openAccordionMode} onChange={() => setOpenAccordionMode(false)} />
                 <span>Multi</span>
               </label>
@@ -2456,9 +2459,9 @@ export function PositionsPage({
             {optionsTabPositions.length > 0 || liveStockPositions.length > 0 ? (
               <>
                 <span className="positions-open-controls-sep" aria-hidden />
-                <div className="replay-ledger-tab-matrix replay-ledger-tab-matrix--aligned replay-ledger-tab-matrix--open-positions positions-open-tabs-merged">
+                <div className={cn(rl.ledgerTabMatrix, rl.ledgerTabMatrixAligned, rl.ledgerTabMatrixOpenPositions)}>
                   <div
-                    className="system-tabs replay-portfolio-tabs replay-ledger-tab-button-row"
+                    className={cn(rl.portfolioTabs, rl.ledgerTabButtonRow)}
                     role="tablist"
                     aria-label="Open positions: Strategy, Options, Stocks, Fixed income, Cash-like"
                   >
@@ -2480,7 +2483,7 @@ export function PositionsPage({
                       id="open-tab-options"
                       aria-selected={openTab === 'options'}
                       aria-controls="open-panel-options"
-                      className={`system-tab replay-ledger-tab-at-instruments ${openTab === 'options' ? 'active' : ''}`}
+                      className={`system-tab rl.ledgerTabAtInstruments ${openTab === 'options' ? rl.bubbleSwitchBtnActive : ''}`}
                       onClick={() => setOpenTab('options')}
                       disabled={!hasOpenOptions}
                     >
@@ -2528,12 +2531,12 @@ export function PositionsPage({
             ) : null}
           </div>
           {optionsTabPositions.length === 0 && liveStockPositions.length === 0 ? (
-            <p className="section-hint">No open positions under the current filters. Position data comes from account snapshots in `Accounts`, while Off-Track options are inferred from execution history.</p>
+            <p className={w9.sectionHint}>No open positions under the current filters. Position data comes from account snapshots in `Accounts`, while Off-Track options are inferred from execution history.</p>
           ) : (
-            <div className="replay-portfolio-block">
+            <div className={rl.portfolioBlock}>
               {chartTypeFilter ? (
-                <div className="replay-portfolio-header">
-                  <div className="replay-portfolio-tabs-wrap">
+                <div className={rl.portfolioHeader}>
+                  <div className={rl.portfolioTabsWrap}>
                     <button type="button" className="pos-comp-filter-chip" onClick={() => setChartTypeFilter(null)}>
                       <svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="2.2" style={{ flexShrink: 0 }}><path d="M9 3 3 9M3 3l6 6"/></svg>
                       Type: {chartTypeFilter}
@@ -2650,7 +2653,7 @@ export function PositionsPage({
 
 
       {pageError && (
-        <p className="section-hint replay-form-error" style={{ marginTop: '0.5rem' }}>{pageError}</p>
+        <p className={rl.formError} style={{ marginTop: '0.5rem' }}>{pageError}</p>
       )}
       {editExecConfirmState.open && (
         <div
@@ -2661,14 +2664,14 @@ export function PositionsPage({
           onClick={() => setEditExecConfirmState({ open: false, exec: null })}
         >
           <div
-            className="modal-panel replay-exec-modal"
+            className={rl.execModal}
             style={{ maxWidth: 440 }}
             onClick={e => e.stopPropagation()}
           >
             <h3 id="positions-edit-exec-confirm-title" className="section-subtitle" style={{ marginTop: 0 }}>
               Edit execution?
             </h3>
-            <p className="section-hint execution-flex-manual-warning" role="alert" style={{ marginTop: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
+            <p className={cn(w9.sectionHint, 'execution-flex-manual-warning')} role="alert" style={{ marginTop: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
               When Flex and TWS sync are healthy, missing or late fills usually appear automatically after the next Flex refresh.
               Manual edits can conflict with or duplicate those rows. Continue only if you are intentionally reconciling or correcting
               this line.
@@ -2739,14 +2742,14 @@ export function PositionsPage({
           }}
         >
           <div
-            className="modal-panel replay-exec-modal"
+            className={rl.execModal}
             style={{ maxWidth: 400 }}
             onClick={e => e.stopPropagation()}
           >
             <h3 id="positions-delete-exec-title" className="section-subtitle" style={{ marginTop: 0 }}>
               {deleteConfirmState.title}
             </h3>
-            <p className="section-hint" style={{ marginTop: 'var(--space-2)', marginBottom: 'var(--space-4)' }}>
+            <p className={w9.sectionHint} style={{ marginTop: 'var(--space-2)', marginBottom: 'var(--space-4)' }}>
               {deleteConfirmState.message}
             </p>
             <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>

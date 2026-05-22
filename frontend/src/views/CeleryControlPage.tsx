@@ -1,3 +1,6 @@
+import { rl, bubbleSwitchBtn } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react'
 import { DraggableModal } from '../components/DraggableModal'
 import { InfoTooltip } from '../components/InfoTooltip'
@@ -1509,7 +1512,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
       titleId="celery-control-confirm-title"
       overlayClassName="celery-control-confirm-overlay"
       footer={
-        <div className="data-reset-modal-actions">
+        <div className={w9.dataResetModalActions}>
           <Button
             type="button"
             variant="secondary"
@@ -1663,7 +1666,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           onTotalsRowClearWorkerFilter={clearWorkerInstancesQueueFilterFromTotals}
         />
         <section
-          className="replay-section dashboard-section dashboard-worker-instance-situation"
+          className={rl.section}
           aria-labelledby="dashboard-worker-instance-situation-head"
         >
           <h3 id="dashboard-worker-instance-situation-head" className={CELERY_SECTION_TITLE}>
@@ -1672,7 +1675,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           </h3>
           {workerProfilesDistinct.length > 0 ? (
             <div className="dashboard-worker-instance-limits" role="region" aria-label="Worker instance limits and stack on this host">
-              <table className="table-operations dashboard-worker-instance-limits-table">
+              <table className={cn(w9.tableOperations, 'dashboard-worker-instance-limits-table')}>
                 <thead>
                   <tr>
                     <th scope="col">Profile</th>
@@ -1820,7 +1823,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           <div className="dashboard-celery-worker-broker-split">
             <div className="dashboard-celery-worker-instances-main">
             {/* ── Worker Instances (7/12): running units + scale controls ─────────────────────────────────── */}
-            <section className="replay-section dashboard-section dashboard-scaling" aria-labelledby="dashboard-scale-head">
+            <section className={rl.section} aria-labelledby="dashboard-scale-head">
               <h3 id="dashboard-scale-head" className={CELERY_SECTION_TITLE}>
                 Worker Instances
                 <InfoTooltip text="Running systemd/Celery worker units on this Ops host. Instance IDs are profile_key-sequence (Cycle). Queue summary: click a queue cell to filter this list. Profile bubbles: Add Instance / ALL with Add all, Reset all, Remove all. Per row: Recreate / Remove. Limits and Dev/Prod stack counts are in Worker instance situation (next to Queue summary above). Host chip = Ops API environment (GET /ops/health), not broker queue scope." />
@@ -1848,7 +1851,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               {instances.length > 0 && (
                 <div className="dashboard-instances-sheet-wrap">
                   <table
-                    className="table-operations dashboard-worker-instances-table"
+                    className={cn(w9.tableOperations, 'dashboard-worker-instances-table')}
                     role="grid"
                     aria-label="Worker instances on this Ops host"
                   >
@@ -1980,13 +1983,13 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                   <span className="dashboard-empty-inline">No profiles</span>
                 ) : (
                   <div
-                    className="replay-bubble-switch instance-sheet-bubble-switch--wrap dashboard-scale-add-profile-bubbles"
+                    className={rl.bubbleSwitch}
                     role="radiogroup"
                     aria-label="Worker profile or ALL"
                   >
                     <button
                       type="button"
-                      className={`replay-bubble-switch-btn ${scaleWorkerType === SCALE_SELECTION_ALL ? 'active' : ''}`}
+                      className={bubbleSwitchBtn(scaleWorkerType === SCALE_SELECTION_ALL)}
                       role="radio"
                       aria-checked={scaleWorkerType === SCALE_SELECTION_ALL}
                       disabled={scaleBusy}
@@ -2002,7 +2005,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                         <button
                           key={p.key}
                           type="button"
-                          className={`replay-bubble-switch-btn ${selected ? 'active' : ''}`}
+                          className={bubbleSwitchBtn(selected)}
                           role="radio"
                           aria-checked={selected}
                           disabled={scaleBusy}
@@ -2026,13 +2029,13 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                         Max
                       </span>
                       <div
-                        className="replay-bubble-switch dashboard-celery-remove-all-force-switch"
+                        className={rl.bubbleSwitch}
                         role="group"
                         aria-label="Add instance count: one unit or fill remaining from max minus Dev and Prod"
                       >
                         <button
                           type="button"
-                          className={`replay-bubble-switch-btn ${!scaleAddMaxMode ? 'active' : ''}`}
+                          className={bubbleSwitchBtn(!scaleAddMaxMode)}
                           onClick={() => setScaleAddMaxMode(false)}
                           disabled={scaleBusy || !canOperate}
                           title="Add a single worker instance on this host (same as before)"
@@ -2041,7 +2044,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                         </button>
                         <button
                           type="button"
-                          className={`replay-bubble-switch-btn ${scaleAddMaxMode ? 'active' : ''}`}
+                          className={bubbleSwitchBtn(scaleAddMaxMode)}
                           onClick={() => setScaleAddMaxMode(true)}
                           disabled={scaleBusy || !canOperate}
                           title="Add up to (max workers − Dev − Prod) instances in one action, limited by free slots on this Ops host"
@@ -2135,13 +2138,13 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                       Force
                     </span>
                     <div
-                      className="replay-bubble-switch dashboard-celery-remove-all-force-switch"
+                      className={rl.bubbleSwitch}
                       role="group"
                       aria-labelledby="celery-remove-all-force-label"
                     >
                       <button
                         type="button"
-                        className={`replay-bubble-switch-btn ${!scaleRemoveAllForce ? 'active' : ''}`}
+                        className={bubbleSwitchBtn(!scaleRemoveAllForce)}
                         onClick={() => {
                           scaleRemoveAllForceRef.current = false
                           setScaleRemoveAllForce(false)
@@ -2153,7 +2156,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                       </button>
                       <button
                         type="button"
-                        className={`replay-bubble-switch-btn ${scaleRemoveAllForce ? 'active' : ''}`}
+                        className={bubbleSwitchBtn(scaleRemoveAllForce)}
                         onClick={() => {
                           scaleRemoveAllForceRef.current = true
                           setScaleRemoveAllForce(true)
@@ -2181,7 +2184,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
 
             {/* ── Broker Control (side column, below Scheduled Celery Beat) ───────────────────────────────── */}
             <section
-              className="replay-section dashboard-section dashboard-broker-ctrl dashboard-broker-ctrl--celery-column"
+              className={rl.section}
               aria-labelledby="dashboard-broker-ctrl-head"
             >
               <h3 id="dashboard-broker-ctrl-head" className={CELERY_SECTION_TITLE}>
@@ -2260,7 +2263,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           <section
             ref={consoleSectionRef}
             id="dashboard-console-section"
-            className={`replay-section dashboard-section dashboard-console-section${consoleTarget !== 'none' && (consoleTarget === 'broker' ? !!consoleUrl : true) ? ' dashboard-console-section--active' : ''}`}
+            className={`rl.section dashboard-section dashboard-console-section${consoleTarget !== 'none' && (consoleTarget === 'broker' ? !!consoleUrl : true) ? ' dashboard-console-section--active' : ''}`}
             aria-labelledby="dashboard-console-head"
           >
             <h3 id="dashboard-console-head" className={CELERY_SECTION_TITLE}>
@@ -2296,7 +2299,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           </section>
 
           {/* ── Runtime Snapshot (below Console) ── */}
-          <section className="replay-section dashboard-section dashboard-snapshot" aria-labelledby="dashboard-snapshot-head">
+          <section className={rl.section} aria-labelledby="dashboard-snapshot-head">
             <h3 id="dashboard-snapshot-head" className={CELERY_SECTION_TITLE}>
               Runtime Snapshot
               <InfoTooltip text="Broker from Redis; workers from Redis presence + Celery inspect. Worker Dev/Prod badge = that process BIFROST_CONFIG (config.dev.yaml vs config.prod.yaml) from the worker Redis heartbeat. Ops role in the header = this Ops API host only. Text after @ in the worker id is the machine hostname. Remove stops the unit on the Ops control host; another machine using the same broker can still show a worker with the same instance id until stopped there." />
@@ -2472,7 +2475,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             hidden={celerySectionTab !== 'support_tasks'}
             className="dashboard-celery-tab-panel"
           >
-            <section className="replay-section dashboard-section" aria-labelledby="celery-support-tasks-head">
+            <section className={rl.section} aria-labelledby="celery-support-tasks-head">
               <div className="celery-support-tasks-sheet">
                 <div className="celery-support-tasks-sheet__head">
                   <div className="celery-support-tasks-sheet__head-lead">
@@ -2602,13 +2605,13 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                             <div className="celery-matrix-filter-toolbar celery-matrix-control-segment">
                               <span className="celery-matrix-filter-toolbar__label">Job style</span>
                               <div
-                                className="replay-bubble-switch instance-sheet-bubble-switch--wrap celery-matrix-bubble-row"
+                                className={rl.bubbleSwitch}
                                 role="group"
                                 aria-label="Filter rows by job style"
                               >
                                 <button
                                   type="button"
-                                  className={`replay-bubble-switch-btn ${matrixJobStyleIncludeScheduled ? 'active' : ''}`}
+                                  className={bubbleSwitchBtn(matrixJobStyleIncludeScheduled)}
                                   aria-pressed={matrixJobStyleIncludeScheduled}
                                   onClick={() => setMatrixJobStyleIncludeScheduled(v => !v)}
                                 >
@@ -2616,7 +2619,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                                 </button>
                                 <button
                                   type="button"
-                                  className={`replay-bubble-switch-btn ${matrixJobStyleIncludeOnDemand ? 'active' : ''}`}
+                                  className={bubbleSwitchBtn(matrixJobStyleIncludeOnDemand)}
                                   aria-pressed={matrixJobStyleIncludeOnDemand}
                                   onClick={() => setMatrixJobStyleIncludeOnDemand(v => !v)}
                                 >
@@ -2628,13 +2631,13 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                             <div className="celery-matrix-filter-toolbar celery-matrix-control-segment">
                               <span className="celery-matrix-filter-toolbar__label">Mode column</span>
                               <div
-                                className="replay-bubble-switch instance-sheet-bubble-switch--wrap celery-matrix-bubble-row"
+                                className={rl.bubbleSwitch}
                                 role="group"
                                 aria-label="Mode column fields to show"
                               >
                                 <button
                                   type="button"
-                                  className={`replay-bubble-switch-btn ${matrixModeColumnVisibility.showMode ? 'active' : ''}`}
+                                  className={bubbleSwitchBtn(matrixModeColumnVisibility.showMode)}
                                   aria-pressed={matrixModeColumnVisibility.showMode}
                                   onClick={() =>
                                     setMatrixModeColumnVisibility(v => ({ ...v, showMode: !v.showMode }))
@@ -2644,7 +2647,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                                 </button>
                                 <button
                                   type="button"
-                                  className={`replay-bubble-switch-btn ${matrixModeColumnVisibility.showModeSource ? 'active' : ''}`}
+                                  className={bubbleSwitchBtn(matrixModeColumnVisibility.showModeSource)}
                                   aria-pressed={matrixModeColumnVisibility.showModeSource}
                                   onClick={() =>
                                     setMatrixModeColumnVisibility(v => ({
@@ -2661,13 +2664,13 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                             <div className="celery-matrix-filter-toolbar celery-matrix-control-segment">
                               <span className="celery-matrix-filter-toolbar__label">Effects</span>
                               <div
-                                className="replay-bubble-switch instance-sheet-bubble-switch--wrap celery-matrix-bubble-row"
+                                className={rl.bubbleSwitch}
                                 role="group"
                                 aria-label="Effects subsections to show when data exists"
                               >
                                 <button
                                   type="button"
-                                  className={`replay-bubble-switch-btn ${matrixEffectsSectionVisibility.showFeedApi ? 'active' : ''}`}
+                                  className={bubbleSwitchBtn(matrixEffectsSectionVisibility.showFeedApi)}
                                   aria-pressed={matrixEffectsSectionVisibility.showFeedApi}
                                   onClick={() =>
                                     setMatrixEffectsSectionVisibility(v => ({
@@ -2680,7 +2683,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                                 </button>
                                 <button
                                   type="button"
-                                  className={`replay-bubble-switch-btn ${matrixEffectsSectionVisibility.showDb ? 'active' : ''}`}
+                                  className={bubbleSwitchBtn(matrixEffectsSectionVisibility.showDb)}
                                   aria-pressed={matrixEffectsSectionVisibility.showDb}
                                   onClick={() =>
                                     setMatrixEffectsSectionVisibility(v => ({
@@ -2693,7 +2696,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                                 </button>
                                 <button
                                   type="button"
-                                  className={`replay-bubble-switch-btn ${matrixEffectsSectionVisibility.showRedis ? 'active' : ''}`}
+                                  className={bubbleSwitchBtn(matrixEffectsSectionVisibility.showRedis)}
                                   aria-pressed={matrixEffectsSectionVisibility.showRedis}
                                   onClick={() =>
                                     setMatrixEffectsSectionVisibility(v => ({
@@ -2710,13 +2713,13 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                             <div className="celery-matrix-filter-toolbar celery-matrix-control-segment celery-matrix-filter-toolbar--broker">
                               <span className="celery-matrix-filter-toolbar__label">Broker queue</span>
                               <div
-                                className="replay-bubble-switch instance-sheet-bubble-switch--wrap celery-matrix-bubble-row"
+                                className={rl.bubbleSwitch}
                                 role="group"
                                 aria-label="Broker queue column visibility"
                               >
                                 <button
                                   type="button"
-                                  className={`replay-bubble-switch-btn ${matrixShowBrokerQueueColumn ? 'active' : ''}`}
+                                  className={bubbleSwitchBtn(matrixShowBrokerQueueColumn)}
                                   aria-pressed={matrixShowBrokerQueueColumn}
                                   title={
                                     matrixShowBrokerQueueColumn
@@ -2954,7 +2957,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             hidden={celerySectionTab !== 'scheduled_jobs'}
             className="dashboard-celery-tab-panel"
           >
-            <section className="replay-section dashboard-section" aria-labelledby="celery-scheduled-jobs-head">
+            <section className={rl.section} aria-labelledby="celery-scheduled-jobs-head">
               <div className="celery-support-tasks-sheet">
                 <div className="celery-support-tasks-sheet__head">
                   <div className="celery-support-tasks-sheet__head-lead">

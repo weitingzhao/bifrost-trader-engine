@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { Operation, StatusResponse } from '../types'
 import { postSuspend, postResume, postFlatten } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
@@ -210,7 +212,7 @@ export function DaemonStatusPage({
 
   return (
     <SettingsPageCard embedded={embeddedInSettings} className="daemon-status-page">
-      <SettingsPageGroups className="daemon-groups">
+      <SettingsPageGroups className={w9.daemonGroups}>
         <DaemonEngineOpsSection status={j} loadStatus={loadStatus} />
 
         <SettingsSection aria-labelledby="daemon-panel-head">
@@ -262,7 +264,7 @@ export function DaemonStatusPage({
           return (
             <SettingsSection aria-labelledby="daemon-account-sync-head">
               <div className="daemon-header" style={{ marginBottom: 'var(--space-3)' }}>
-                <div className="daemon-header-main daemon-header-with-lamp">
+                <div className={cn(w9.daemonHeaderMain, 'daemon-header-with-lamp')}>
                   <div>
                     <h3 id="daemon-account-sync-head" className="inline-flex flex-wrap items-center gap-2">
                       <SettingsTitleLamp lamp={asdL.lamp as LampTone} title={asdL.title}>
@@ -279,12 +281,12 @@ export function DaemonStatusPage({
                           : status ? 'No heartbeat row' : 'Fetch failed'}
                       </strong>
                       {asdHb && !asdHb.daemon_alive && (
-                        <p className="section-hint section-hint--retry" style={{ marginTop: '0.35rem', marginBottom: 0 }}>
+                        <p className={cn(w9.sectionHint, 'section-hint--retry')} style={{ marginTop: '0.35rem', marginBottom: 0 }}>
                           Last DB heartbeat is older than ~35s, or Redis health shows down. Start the process (Ops above or manual script), then check PostgreSQL connectivity and IB Account Agent stream.
                         </p>
                       )}
                       {!asdHb && status ? (
-                        <p className="section-hint" style={{ marginTop: '0.35rem', marginBottom: 0 }}>
+                        <p className={w9.sectionHint} style={{ marginTop: '0.35rem', marginBottom: 0 }}>
                           Start Account Sync Daemon from Ops (authenticated) or run{' '}
                           <code style={{ fontSize: '0.85em' }}>python scripts/systemd/run_account_sync_daemon.py --config …</code>
                           . Ensure <code>account_sync_heartbeat</code> exists and Redis hash <code>bifrost:health:daemon_account_sync</code> updates when running.
@@ -295,54 +297,54 @@ export function DaemonStatusPage({
                 </div>
               </div>
 
-              <div className="daemon-groups daemon-groups-layout daemon-groups-account-sync-layout">
-                <div className="daemon-group daemon-group-heartbeat">
-                  <div className="daemon-group-header">
+              <div className={cn(w9.daemonGroups, 'daemon-groups-layout', 'daemon-groups-account-sync-layout')}>
+                <div className={cn(w9.daemonGroup)}>
+                  <div className={w9.daemonGroupHeader}>
                     <SettingsTitleLamp lamp={asdL.lamp as LampTone} title={asdL.title}>
                       {ACCOUNT_SYNC_GROUP_LAMP_SVG}
                     </SettingsTitleLamp>
-                    <span className="daemon-group-title">Heartbeat</span>
+                    <span className={w9.daemonGroupTitle}>Heartbeat</span>
                   </div>
-                  <div className="daemon-group-body">
+                  <div className={w9.daemonGroupBody}>
                     {asdHb?.daemon_alive && asdHb.last_ts != null ? (
                       <>
-                        <p className="section-hint">
+                        <p className={w9.sectionHint}>
                           Last heartbeat: <strong>{fmtTs(asdHb.last_ts)}</strong>
                         </p>
                         {secondsUntilNextAccountSyncHb != null && (
-                          <p className="section-hint countdown-line account-sync-next-hb-countdown">
+                          <p className={cn(w9.sectionHint, w9.countdownLine, 'account-sync-next-hb-countdown')}>
                             Next heartbeat:{' '}
-                            <span className="countdown-num">{secondsUntilNextAccountSyncHb}</span> s
-                            <span className="account-sync-hb-interval-hint"> (interval {asIntervalSec}s from DB)</span>
+                            <span className={w9.countdownNum}>{secondsUntilNextAccountSyncHb}</span> s
+                            <span className={w9.accountSyncHbIntervalHint}> (interval {asIntervalSec}s from DB)</span>
                           </p>
                         )}
                       </>
                     ) : asdHb?.last_ts != null ? (
-                      <p className="section-hint">
+                      <p className={w9.sectionHint}>
                         Last heartbeat: <strong>{fmtTs(asdHb.last_ts)}</strong> (timed out; start Account Sync Daemon or check Redis/PostgreSQL)
                       </p>
                     ) : asdHb ? (
-                      <p className="section-hint">Heartbeat present but no timestamp — check PostgreSQL <code>account_sync_heartbeat</code>.</p>
+                      <p className={w9.sectionHint}>Heartbeat present but no timestamp — check PostgreSQL <code>account_sync_heartbeat</code>.</p>
                     ) : (
-                      <p className="section-hint">
+                      <p className={w9.sectionHint}>
                         No heartbeat in GET /status yet (PostgreSQL <code>account_sync_heartbeat</code> or Redis <code>bifrost:health:daemon_account_sync</code>).
                       </p>
                     )}
                     {asdHb?.daemon_alive === true && (
-                      <p className="section-hint" style={{ opacity: 0.85, fontSize: '0.8rem', marginTop: '0.35rem' }}>
+                      <p className={w9.sectionHint} style={{ opacity: 0.85, fontSize: '0.8rem', marginTop: '0.35rem' }}>
                         Monitor marks the daemon down if last update is older than ~35s (same freshness idea as Strategy Trading Daemon).
                       </p>
                     )}
                   </div>
                 </div>
-                <div className="daemon-group daemon-group-ib">
-                  <div className="daemon-group-header">
+                <div className={cn(w9.daemonGroup)}>
+                  <div className={w9.daemonGroupHeader}>
                     <SettingsTitleLamp lamp={ibAccountGroupLamp as LampTone} title={ibAccountGroupTitle}>
                       {ACCOUNT_SYNC_GROUP_LAMP_SVG}
                     </SettingsTitleLamp>
-                    <span className="daemon-group-title">IB account</span>
+                    <span className={w9.daemonGroupTitle}>IB account</span>
                   </div>
-                  <div className="daemon-group-body">
+                  <div className={w9.daemonGroupBody}>
                     <table className="ib-connection-table" aria-label="IB account sync path services">
                       <thead>
                         <tr>
@@ -373,7 +375,7 @@ export function DaemonStatusPage({
                     </table>
                     <a
                       href="#settings-ws-connector"
-                      className="daemon-ib-broker-socket-link section-hint"
+                      className={cn(w9.sectionHint, 'daemon-ib-broker-socket-link')}
                       onClick={e => {
                         if (onNavigateToSocket) {
                           e.preventDefault()
@@ -385,11 +387,11 @@ export function DaemonStatusPage({
                     </a>
                   </div>
                 </div>
-                <div className="daemon-group daemon-group-account-sync-sync">
-                  <div className="daemon-group-header">
-                    <span className="daemon-group-title">Sync details</span>
+                <div className={cn(w9.daemonGroup, 'daemon-group-account-sync-sync')}>
+                  <div className={w9.daemonGroupHeader}>
+                    <span className={w9.daemonGroupTitle}>Sync details</span>
                   </div>
-                  <div className="daemon-group-body">
+                  <div className={w9.daemonGroupBody}>
                     {asdHb ? (
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.5rem 1rem', fontSize: '0.85rem', lineHeight: 1.5 }}>
                         <div><span style={{ opacity: 0.65 }}>Stream lag</span>{' '}{asdHb.stream_lag ?? '—'}</div>
@@ -400,7 +402,7 @@ export function DaemonStatusPage({
                         <div><span style={{ opacity: 0.65 }}>Open orders</span>{' '}{asdHb.open_orders_synced ?? '—'}</div>
                       </div>
                     ) : (
-                      <p className="section-hint">—</p>
+                      <p className={w9.sectionHint}>—</p>
                     )}
                   </div>
                 </div>
@@ -444,7 +446,7 @@ export function DaemonStatusPage({
             <InfoTooltip text="Recent automated trading operations executed by the daemon." />
           </h3>
           <div className="overflow-x-auto">
-            <table className="table-operations">
+            <table className={w9.tableOperations}>
               <thead>
                 <tr>
                   <th>Time</th><th>Type</th><th>Side</th><th>Qty</th><th>Price</th><th>Reason</th>

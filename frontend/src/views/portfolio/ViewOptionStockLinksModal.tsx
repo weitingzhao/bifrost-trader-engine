@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import type { OptionStockLinkRow } from '../../types'
 import { fmtTradeDate, fmtUsd } from '../../utils/format'
@@ -27,29 +30,29 @@ export function ViewOptionStockLinksModal({
   if (!open) return null
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="view-opt-stock-links-title" onClick={onClose}>
-      <div className="modal-panel replay-exec-modal" style={{ maxWidth: 720 }} onClick={e => e.stopPropagation()}>
+      <div className={rl.execModal} style={{ maxWidth: 720 }} onClick={e => e.stopPropagation()}>
         <h3 id="view-opt-stock-links-title" className="section-subtitle" style={{ marginTop: 0 }}>
           Linked stock executions
         </h3>
-        <p className="section-hint" style={{ marginBottom: 'var(--space-3)' }}>
+        <p className={w9.sectionHint} style={{ marginBottom: 'var(--space-3)' }}>
           {title}
         </p>
         {slippageTotal != null && Number.isFinite(slippageTotal) && (
-          <p className="section-hint" style={{ marginBottom: 'var(--space-2)' }}>
+          <p className={w9.sectionHint} style={{ marginBottom: 'var(--space-2)' }}>
             Total stock slippage vs close (signed qty × (price − close)): <strong>{fmtUsd(slippageTotal)}</strong>
           </p>
         )}
         {instanceAttributedSlippage != null && Number.isFinite(instanceAttributedSlippage) && (
-          <p className="section-hint" style={{ marginBottom: 'var(--space-3)' }}>
+          <p className={w9.sectionHint} style={{ marginBottom: 'var(--space-3)' }}>
             <strong>This instance’s attributed slippage</strong> (prorated by allocated |qty| ÷ parent |qty|):{' '}
             <strong>{fmtUsd(instanceAttributedSlippage)}</strong>
           </p>
         )}
         {rows.length === 0 ? (
-          <p className="section-hint">No link rows.</p>
+          <p className={w9.sectionHint}>No link rows.</p>
         ) : (
-          <div className="replay-portfolio-table-wrap" style={{ maxHeight: 360, overflow: 'auto' }}>
-            <table className="table-operations table-compact">
+          <div className={rl.portfolioTableWrap} style={{ maxHeight: 360, overflow: 'auto' }}>
+            <table className={cn(w9.tableOperations, 'table-compact')}>
               <thead>
                 <tr>
                   <th>Link id</th>

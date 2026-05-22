@@ -1,3 +1,6 @@
+import { filterInputClass } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { StrategyOpportunity } from '../api'
 
@@ -121,9 +124,12 @@ export function StrategyOpportunityCombobox({
         spellCheck={false}
         placeholder={open ? 'Search strategy, structure, symbol…' : undefined}
         title={!open && !disabled ? 'Strategy filter — click to search or pick' : undefined}
-        className={`replay-filter-input replay-filter-select strategy-opp-combobox__input ${
-          closedValueDim ? 'ledger-filter-combobox__value--dim' : ''
-        } ${inputClassName}`.trim()}
+        className={cn(
+          filterInputClass(),
+          w9.strategyOppComboboxInput,
+          closedValueDim && w9.ledgerFilterComboboxValueDim,
+          inputClassName,
+        )}
         value={open ? query : closedDisplay}
         onChange={e => {
           if (disabled) return

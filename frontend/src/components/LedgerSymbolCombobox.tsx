@@ -1,3 +1,6 @@
+import { filterInputClass } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 
 export interface LedgerSymbolComboboxProps {
@@ -81,7 +84,7 @@ export function LedgerSymbolCombobox({
         spellCheck={false}
         placeholder="Search symbol…"
         title="Type a prefix (e.g. NV) or pick a symbol from the list"
-        className={`replay-filter-input replay-filter-select ledger-symbol-combobox__input ${inputClassName}`.trim()}
+        className={cn(filterInputClass(), w9.ledgerSymbolComboboxInput, inputClassName)}
         value={value}
         onChange={e => {
           if (disabled) return

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { w9 } from '@/styles/wave9Classes'
 import type { Bar } from '../../types'
 import { fmtTs, fmtTsForPeriod, fmtUsd } from '../../utils/format'
 import {
@@ -582,16 +583,16 @@ export function BarsCandlestickChart({
 
   if (fullCount === 0) {
     return (
-      <div className="data-bars-chart">
-        <p className="section-hint" style={{ margin: 0 }}>No bar rows to chart.</p>
+      <div className={w9.dataBarsChart}>
+        <p className={w9.sectionHint} style={{ margin: 0 }}>No bar rows to chart.</p>
       </div>
     )
   }
 
   if (!priceStats) {
     return (
-      <div className="data-bars-chart">
-        <p className="section-hint" style={{ margin: 0 }}>Unable to derive price scale (check OHLC values).</p>
+      <div className={w9.dataBarsChart}>
+        <p className={w9.sectionHint} style={{ margin: 0 }}>Unable to derive price scale (check OHLC values).</p>
       </div>
     )
   }
@@ -655,16 +656,16 @@ export function BarsCandlestickChart({
   const brushBottom = (showVolPanel ? volumeBottom : paddingTop + innerPriceHeight)
 
   return (
-    <div className="data-bars-chart">
+    <div className={w9.dataBarsChart}>
       {enableTimeRangeBrush && fullCount > 1 && (
-        <p className="data-bars-chart-brush-hint">
+        <p className={w9.dataBarsChartBrushHint}>
           Drag on the chart to select a time range. Double-click the chart to reset.
         </p>
       )}
       <svg
         ref={svgRef}
         viewBox={`0 0 ${width} ${height}`}
-        className="data-bars-chart-svg"
+        className={w9.dataBarsChartSvg}
         preserveAspectRatio="none"
         role="img"
         aria-label="Candlestick preview for loaded bars"
@@ -859,8 +860,8 @@ export function BarsCandlestickChart({
       </svg>
 
       {lastBar && (
-        <div className="data-bars-chart-legend">
-          <span className="data-bars-chart-legend-time">{fmtTsForPeriod(lastBar.time, period)}</span>
+        <div className={w9.dataBarsChartLegend}>
+          <span className={w9.dataBarsChartLegendTime}>{fmtTsForPeriod(lastBar.time, period)}</span>
           <span>O {fmtUsd(lastBar.open)}</span>
           <span>H {fmtUsd(lastBar.high)}</span>
           <span>L {fmtUsd(lastBar.low)}</span>
@@ -873,14 +874,14 @@ export function BarsCandlestickChart({
       )}
 
       {enableTimeRangeBrush && isFiltered && firstFull && lastFull && (
-        <div className="data-bars-chart-range-bar">
+        <div className={w9.dataBarsChartRangeBar}>
           <span>
             Range: {fmtTsForPeriod(firstFull.time, period)} — {fmtTsForPeriod(lastFull.time, period)} ·{' '}
             {bars.length} of {fullCount} bars
           </span>
           <button
             type="button"
-            className="data-bars-chart-range-reset"
+            className={w9.dataBarsChartRangeReset}
             onClick={() => setViewRange(null)}
           >
             Reset range

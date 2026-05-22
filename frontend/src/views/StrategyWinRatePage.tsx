@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
+import { pnlNegativeClass, pnlPositiveClass } from '@/components/shared/appUi'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { WinRateStructureRow, WinRateResponse } from '../api/strategy/strategyInstances'
 import { fetchStrategyWinRate } from '../api'
 import { PageSection } from '@/components/shared/page-section'
@@ -56,9 +59,9 @@ function winRateTotalProfitDisplayUsd(row: WinRateStructureRow): number {
 
 function winRateTotalProfitValueClassName(row: WinRateStructureRow): string {
   const v = winRateTotalProfitDisplayUsd(row)
-  if (v > 0) return 'pnl-positive'
+  if (v > 0) return pnlPositiveClass
   if (v === 0) return 'strategy-win-rate-metric__value--muted'
-  return 'pnl-negative'
+  return pnlNegativeClass
 }
 
 /**
@@ -86,7 +89,7 @@ function winRateTotalLossDisplayUsd(row: WinRateStructureRow): number | null {
 function winRateTotalLossValueClassName(row: WinRateStructureRow): string {
   const v = winRateTotalLossDisplayUsd(row)
   if (v == null) return 'strategy-win-rate-metric__value--muted'
-  if (v < 0) return 'pnl-negative'
+  if (v < 0) return pnlNegativeClass
   return 'strategy-win-rate-metric__value--muted'
 }
 
@@ -137,7 +140,7 @@ function WinRateStructureCard({
           </div>
           <div className="strategy-win-rate-kpi">
             <span className="strategy-win-rate-kpi__label">Loss</span>
-            <span className="strategy-win-rate-kpi__value pnl-negative">{row.loss_trades}</span>
+            <span className={cn(w9.pnlNegative, 'strategy-win-rate-kpi__value')}>{row.loss_trades}</span>
           </div>
           <div className="strategy-win-rate-kpi">
             <span className="strategy-win-rate-kpi__label">Total</span>
@@ -194,7 +197,7 @@ function WinRateStructureCard({
             </span>
             <span
               className={`strategy-win-rate-metric__value strategy-win-rate-metric__value--pnl ${
-                row.structure_return_pct == null ? 'strategy-win-rate-metric__value--muted' : row.structure_return_pct >= 0 ? 'pnl-positive' : 'pnl-negative'
+                row.structure_return_pct == null ? 'strategy-win-rate-metric__value--muted' : row.structure_return_pct >= 0 ? pnlPositiveClass : pnlNegativeClass
               }`}
             >
               {row.structure_return_pct == null ? '—' : `${row.structure_return_pct >= 0 ? '+' : ''}${row.structure_return_pct.toFixed(2)}%`}
@@ -241,11 +244,11 @@ function WinRateStructureCard({
           </div>
           <div className="strategy-win-rate-metric">
             <span className="strategy-win-rate-metric__label">Loss avg %</span>
-            <span className="strategy-win-rate-metric__value pnl-negative">{fmtPct(row.loss_avg_pct)}</span>
+            <span className={cn(w9.pnlNegative, 'strategy-win-rate-metric__value')}>{fmtPct(row.loss_avg_pct)}</span>
           </div>
           <div className="strategy-win-rate-metric">
             <span className="strategy-win-rate-metric__label">Max loss %</span>
-            <span className="strategy-win-rate-metric__value pnl-negative">{fmtPct(row.single_max_loss_pct)}</span>
+            <span className={cn(w9.pnlNegative, 'strategy-win-rate-metric__value')}>{fmtPct(row.single_max_loss_pct)}</span>
           </div>
           <div className="strategy-win-rate-metric">
             <span className="strategy-win-rate-metric__label">Profit avg $</span>
@@ -253,7 +256,7 @@ function WinRateStructureCard({
           </div>
           <div className="strategy-win-rate-metric">
             <span className="strategy-win-rate-metric__label">Loss avg $</span>
-            <span className="strategy-win-rate-metric__value pnl-negative">{fmtUsdOrDash(row.loss_avg_usd)}</span>
+            <span className={cn(w9.pnlNegative, 'strategy-win-rate-metric__value')}>{fmtUsdOrDash(row.loss_avg_usd)}</span>
           </div>
         </div>
       </div>
@@ -365,7 +368,7 @@ function WinRateTotalsCard({ totals }: { totals: WinRateStructureRow }) {
               </div>
               <div className="strategy-win-rate-kpi">
                 <span className="strategy-win-rate-kpi__label">Loss</span>
-                <span className="strategy-win-rate-kpi__value pnl-negative">{totals.loss_trades}</span>
+                <span className={cn(w9.pnlNegative, 'strategy-win-rate-kpi__value')}>{totals.loss_trades}</span>
               </div>
               <div className="strategy-win-rate-kpi">
                 <span className="strategy-win-rate-kpi__label">Total</span>
@@ -425,8 +428,8 @@ function WinRateTotalsCard({ totals }: { totals: WinRateStructureRow }) {
                     totals.structure_return_pct == null
                       ? 'strategy-win-rate-metric__value--muted'
                       : totals.structure_return_pct >= 0
-                        ? 'pnl-positive'
-                        : 'pnl-negative'
+                        ? pnlPositiveClass
+                        : pnlNegativeClass
                   }`}
                 >
                   {totals.structure_return_pct == null
@@ -475,11 +478,11 @@ function WinRateTotalsCard({ totals }: { totals: WinRateStructureRow }) {
               </div>
               <div className="strategy-win-rate-kpi">
                 <span className="strategy-win-rate-kpi__label">Loss avg %</span>
-                <span className="strategy-win-rate-kpi__value pnl-negative">{fmtPct(totals.loss_avg_pct)}</span>
+                <span className={cn(w9.pnlNegative, 'strategy-win-rate-kpi__value')}>{fmtPct(totals.loss_avg_pct)}</span>
               </div>
               <div className="strategy-win-rate-kpi">
                 <span className="strategy-win-rate-kpi__label">Max loss %</span>
-                <span className="strategy-win-rate-kpi__value pnl-negative">{fmtPct(totals.single_max_loss_pct)}</span>
+                <span className={cn(w9.pnlNegative, 'strategy-win-rate-kpi__value')}>{fmtPct(totals.single_max_loss_pct)}</span>
               </div>
               <div className="strategy-win-rate-kpi">
                 <span className="strategy-win-rate-kpi__label">Profit avg $</span>
@@ -487,7 +490,7 @@ function WinRateTotalsCard({ totals }: { totals: WinRateStructureRow }) {
               </div>
               <div className="strategy-win-rate-kpi">
                 <span className="strategy-win-rate-kpi__label">Loss avg $</span>
-                <span className="strategy-win-rate-kpi__value pnl-negative">{fmtUsdOrDash(totals.loss_avg_usd)}</span>
+                <span className={cn(w9.pnlNegative, 'strategy-win-rate-kpi__value')}>{fmtUsdOrDash(totals.loss_avg_usd)}</span>
               </div>
             </div>
           </div>
@@ -537,7 +540,7 @@ export function StrategyWinRatePage({ onGoToInstances }: StrategyWinRatePageProp
             menuNavigateAriaLabel="Strategy home"
             infoText="Per-structure win-rate from instances with executions. Underlying cost matches Instance detail (sell OPT: strike × |qty| × 100 per instance; allocation splits qty when present). P&L: Total profit = sum of execution Net PnL where net &gt; 0; Total loss = sum where net &lt; 0 — same formulas for every structure (grouping by name only). On wins / On losses for notional = net PnL &gt; 0 vs ≤ 0."
           />
-          <p className="section-hint strategy-win-rate-page__hint">
+          <p className={cn(w9.sectionHint, 'strategy-win-rate-page__hint')}>
             Aggregated results per Strategy Structure. Each instance with executions is one row; Profit vs Loss trade counts follow the same net PnL sign rules as Total profit / Total loss for all structures. Click a structure card to open Instances with that structure filter.
           </p>
         </div>
@@ -545,18 +548,18 @@ export function StrategyWinRatePage({ onGoToInstances }: StrategyWinRatePageProp
           <Button type="button" variant="secondary" onClick={() => void load()} disabled={loading}>
             {loading ? 'Loading…' : 'Refresh'}
           </Button>
-          {loading ? <span className="section-hint strategy-win-rate-page__loading">Loading…</span> : null}
+          {loading ? <span className={cn(w9.sectionHint, 'strategy-win-rate-page__loading')}>Loading…</span> : null}
         </div>
       </div>
 
       {error && (
-        <p className="msg-error" role="alert" style={{ marginBottom: 'var(--space-3)' }}>
+        <p className={w9.msgError} role="alert" style={{ marginBottom: 'var(--space-3)' }}>
           {error}
         </p>
       )}
 
       {!loading && !error && structures.length === 0 && (
-        <p className="section-hint">No closed strategy instances found. Run some strategies and close them to see win-rate statistics.</p>
+        <p className={w9.sectionHint}>No closed strategy instances found. Run some strategies and close them to see win-rate statistics.</p>
       )}
 
       {structures.length > 0 && (

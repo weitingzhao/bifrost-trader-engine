@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { StatusResponse } from '../types'
 import {
   fetchStructures,
@@ -346,7 +348,7 @@ export function StrategyOpportunityPage({
         titleId="opportunity-availability-error-modal-title"
         maxWidth="min(520px, calc(100vw - 24px))"
         footer={
-          <div className="data-reset-modal-actions">
+          <div className={w9.dataResetModalActions}>
             <Button type="button" onClick={() => setAvailabilityError(null)}>
               Close
             </Button>
@@ -368,9 +370,9 @@ export function StrategyOpportunityPage({
 
       {/* ── List section ── */}
       <section className="opp-list-section">
-        <div className="opp-list-toolbar">
-          <h3 className="opp-list-title">Opportunity strategies</h3>
-          <div className="opp-list-actions">
+        <div className={w9.oppListToolbar}>
+          <h3 className={w9.oppListTitle}>Opportunity strategies</h3>
+          <div className={w9.oppListActions}>
             <div className="structure-active-filter-pills" role="group" aria-label="Filter by availability">
               {(['all', 'active', 'inactive'] as const).map((value) => (
                 <button
@@ -383,17 +385,17 @@ export function StrategyOpportunityPage({
                 </button>
               ))}
             </div>
-            <Button type="button" className="opp-create-btn" onClick={openOppCreate}>
+            <Button type="button" className={w9.oppCreateBtn} onClick={openOppCreate}>
               + Create opportunity
             </Button>
           </div>
         </div>
 
-        {opportunitiesLoading && <p className="section-hint">Loading…</p>}
-        {opportunitiesError && <p className="msg-error">{opportunitiesError}</p>}
+        {opportunitiesLoading && <p className={w9.sectionHint}>Loading…</p>}
+        {opportunitiesError && <p className={w9.msgError}>{opportunitiesError}</p>}
         {!opportunitiesLoading && !opportunitiesError && (
-          <div className="opp-table-wrap">
-            <table className="table-operations opp-table">
+          <div className={w9.oppTableWrap}>
+            <table className={cn(w9.tableOperations, w9.oppTable)}>
               <thead>
                 <tr>
                   <th>Name</th>
@@ -410,14 +412,14 @@ export function StrategyOpportunityPage({
                   const scopeDisplay = getScopeDisplay(row.scope_type, row.symbols)
                   return (
                     <tr key={row.strategy_opportunity_id}>
-                      <td className="opp-table-name-cell">{row.name}</td>
+                      <td className={w9.oppTableNameCell}>{row.name}</td>
                       <td>{row.structure_name ?? row.strategy_structure_id}</td>
                       <td className="opp-table-scope-cell">
-                        <span className="opp-table-scope-text" title={scopeDisplay.title || undefined}>
+                        <span className={w9.oppTableScopeText} title={scopeDisplay.title || undefined}>
                           {scopeDisplay.text}
                         </span>
                       </td>
-                      <td>{row.gate_safety_name ?? <span className="opp-table-none">—</span>}</td>
+                      <td>{row.gate_safety_name ?? <span className={w9.oppTableNone}>—</span>}</td>
                       <td style={{ textAlign: 'center' }}>
                         <label className="toggle-switch" style={{ cursor: availabilityUpdating ? 'not-allowed' : 'pointer' }}>
                           <input
@@ -430,11 +432,11 @@ export function StrategyOpportunityPage({
                         </label>
                       </td>
                       <td>
-                        <span className="opp-table-row-actions">
-                          <button type="button" className="opp-row-action opp-row-action--edit" onClick={() => openOppEdit(row.strategy_opportunity_id)}>
+                        <span className={w9.oppTableRowActions}>
+                          <button type="button" className={cn(w9.oppRowAction, 'opp-row-action--edit')} onClick={() => openOppEdit(row.strategy_opportunity_id)}>
                             Edit
                           </button>
-                          <button type="button" className="opp-row-action opp-row-action--copy" onClick={() => openOppCopy(row.strategy_opportunity_id)}>
+                          <button type="button" className={cn(w9.oppRowAction, 'opp-row-action--copy')} onClick={() => openOppCopy(row.strategy_opportunity_id)}>
                             Copy
                           </button>
                         </span>
@@ -447,38 +449,38 @@ export function StrategyOpportunityPage({
           </div>
         )}
         {!opportunitiesLoading && !opportunitiesError && opportunities.length === 0 && (
-          <p className="section-hint">No opportunity strategies in database.</p>
+          <p className={w9.sectionHint}>No opportunity strategies in database.</p>
         )}
         {!opportunitiesLoading && !opportunitiesError && opportunities.length > 0 && filteredOpportunities.length === 0 && (
-          <p className="section-hint">No opportunities match the current filter.</p>
+          <p className={w9.sectionHint}>No opportunities match the current filter.</p>
         )}
       </section>
 
       {/* ── Create / Edit form panel ── */}
       {oppFormOpen !== null && (
         <section className="opp-form-panel">
-          <div className="opp-form-header">
-            <h3 className="opp-form-title">{formTitle}</h3>
-            <button type="button" className="opp-form-close" onClick={closeOppForm} aria-label="Close form">×</button>
+          <div className={w9.oppFormHeader}>
+            <h3 className={w9.oppFormTitle}>{formTitle}</h3>
+            <button type="button" className={w9.oppFormClose} onClick={closeOppForm} aria-label="Close form">×</button>
           </div>
 
-          {oppFormLoading && !oppFormPayload.name && <div className="opp-form-loading">Loading…</div>}
+          {oppFormLoading && !oppFormPayload.name && <div className={w9.oppFormLoading}>Loading…</div>}
           {oppFormError && (
-            <div className="opp-form-error">
-              <span className="opp-form-error-icon">!</span>
+            <div className={w9.oppFormError}>
+              <span className={w9.oppFormErrorIcon}>!</span>
               {oppFormError}
             </div>
           )}
 
-          <div className="opp-form-body">
+          <div className={w9.oppFormBody}>
             {/* ── Row 1: Name + Availability ── */}
             <div className="opp-field-row opp-field-row--identity">
               <div className="opp-field opp-field--name">
-                <label className="opp-field-label" htmlFor="opp-name">Name</label>
+                <label className={w9.oppFieldLabel} htmlFor="opp-name">Name</label>
                 <input
                   id="opp-name"
                   type="text"
-                  className="opp-input"
+                  className={w9.oppInput}
                   value={oppFormPayload.name}
                   onChange={(e) => {
                     if (isFormCreate && !oppFormIsCopy) oppCreateNameUserEdited.current = true
@@ -488,7 +490,7 @@ export function StrategyOpportunityPage({
                   aria-describedby={isFormCreate && !oppFormIsCopy ? 'opp-name-hint' : undefined}
                 />
                 {isFormCreate && !oppFormIsCopy && (
-                  <p id="opp-name-hint" className="opp-field-hint" style={{ marginTop: 'var(--space-1)' }}>
+                  <p id="opp-name-hint" className={w9.oppFieldHint} style={{ marginTop: 'var(--space-1)' }}>
                     Name fills from symbol scope, structure, and entry conditions; you can edit it anytime.
                   </p>
                 )}
@@ -501,17 +503,17 @@ export function StrategyOpportunityPage({
                     onChange={(e) => setOppFormPayload((p) => ({ ...p, is_active: e.target.checked }))}
                     aria-label="Available"
                   />
-                  <span className="toggle-switch-caption">Available</span>
+                  <span className={w9.toggleSwitchCaption}>Available</span>
                 </label>
               </div>
             </div>
 
             {/* ── Structure picker ── */}
             <div className="opp-field">
-              <span className="opp-field-label">Structure</span>
-              <div className="opp-structure-panels" role="radiogroup" aria-label="Structure (required)" aria-required>
+              <span className={w9.oppFieldLabel}>Structure</span>
+              <div className={w9.oppStructurePanels} role="radiogroup" aria-label="Structure (required)" aria-required>
                 {structures.length === 0 ? (
-                  <p className="opp-field-hint">No structures. Create one in Structure first.</p>
+                  <p className={w9.oppFieldHint}>No structures. Create one in Structure first.</p>
                 ) : (
                   structures.map((s) => {
                     const selected = oppFormPayload.strategy_structure_id === s.strategy_structure_id
@@ -525,11 +527,11 @@ export function StrategyOpportunityPage({
                           onChange={() => setOppFormPayload((p) => ({ ...p, strategy_structure_id: s.strategy_structure_id }))}
                           aria-label={`Structure: ${s.name}`}
                         />
-                        <span className="opp-structure-panel-title">{s.name}</span>
+                        <span className={w9.oppStructurePanelTitle}>{s.name}</span>
                         {(s.version != null && s.version !== '') ||
                         (s.template_display_name != null && s.template_display_name !== '') ||
                         (s.structure_type != null && s.structure_type !== '') ? (
-                          <span className="opp-structure-panel-meta">
+                          <span className={w9.oppStructurePanelMeta}>
                             {s.version != null && s.version !== '' ? `v${s.version}` : ''}
                             {(s.version != null && s.version !== '') && (s.template_display_name || s.structure_type) ? ' · ' : ''}
                             {getStructureDisplayLabel(s)}
@@ -544,7 +546,7 @@ export function StrategyOpportunityPage({
 
             {/* ── Gate safety picker ── */}
             <div className="opp-field">
-              <span className="opp-field-label">Default gate safety</span>
+              <span className={w9.oppFieldLabel}>Default gate safety</span>
               <div className="opp-gate-pills" role="radiogroup" aria-label="Default gate safety">
                 <label className={`opp-gate-pill ${(oppFormPayload.default_gate_safety_strategy_id ?? null) === null ? 'opp-gate-pill--selected' : ''}`}>
                   <input
@@ -572,7 +574,7 @@ export function StrategyOpportunityPage({
                     />
                     <span>{g.name}</span>
                     {g.version != null && g.version !== '' && (
-                      <span className="opp-gate-pill-version">v{g.version}</span>
+                      <span className={w9.oppGatePillVersion}>v{g.version}</span>
                     )}
                   </label>
                 ))}
@@ -583,10 +585,10 @@ export function StrategyOpportunityPage({
             <div className="opp-form-columns">
               {/* Scope column */}
               <div className="opp-form-col">
-                <div className="opp-col-header">
-                  <h4 className="opp-col-title">Symbol scope</h4>
+                <div className={w9.oppColHeader}>
+                  <h4 className={w9.oppColTitle}>Symbol scope</h4>
                 </div>
-                <div className="opp-col-body">
+                <div className={w9.oppColBody}>
                   <div className="opp-scope-type-row">
                     <div className="structure-active-filter-pills" role="radiogroup" aria-label="Scope type">
                       {SCOPE_TYPES.map((t) => {
@@ -611,17 +613,17 @@ export function StrategyOpportunityPage({
 
                   {oppFormPayload.scope_type === 'explicit_symbols' && (
                     <div className="opp-symbols-explicit">
-                      <div className="opp-symbol-tags">
+                      <div className={w9.oppSymbolTags}>
                         {oppFormSymbols.map((sym, i) => (
-                          <span key={i} className="opp-symbol-tag">
+                          <span key={i} className={w9.oppSymbolTag}>
                             <input
                               type="text"
-                              className="opp-symbol-tag-input"
+                              className={w9.oppSymbolTagInput}
                               value={sym}
                               onChange={(e) => updateOppSymbol(i, e.target.value.toUpperCase())}
                               placeholder="SYM"
                             />
-                            <button type="button" className="opp-symbol-tag-remove" onClick={() => removeOppSymbol(i)} aria-label={`Remove ${sym || 'symbol'}`}>×</button>
+                            <button type="button" className={w9.oppSymbolTagRemove} onClick={() => removeOppSymbol(i)} aria-label={`Remove ${sym || 'symbol'}`}>×</button>
                           </span>
                         ))}
                       </div>
@@ -632,32 +634,32 @@ export function StrategyOpportunityPage({
                   )}
 
                   {oppFormPayload.scope_type === 'watchlist_stk' && (
-                    <div className="opp-watchlist-stk-list">
+                    <div className={w9.oppWatchlistStkList}>
                       {watchlistLoading ? (
-                        <p className="opp-field-hint">Loading watchlist…</p>
+                        <p className={w9.oppFieldHint}>Loading watchlist…</p>
                       ) : watchlistStkSymbols.length === 0 ? (
-                        <p className="opp-field-hint">
+                        <p className={w9.oppFieldHint}>
                           No watchlist stocks with Option? on. Turn Option? on in Watchlist, or use Explicit symbols.
                         </p>
                       ) : (
                         <>
-                          <div className="opp-watchlist-stk-actions">
+                          <div className={w9.oppWatchlistStkActions}>
                             <button type="button" className="opp-add-btn" onClick={() => setOppFormSymbols([...watchlistStkSymbols])}>
                               Select all
                             </button>
                             <button type="button" className="opp-add-btn" onClick={() => setOppFormSymbols([])}>
                               Clear
                             </button>
-                            <span className="opp-field-hint" style={{ marginLeft: 'auto' }}>
+                            <span className={w9.oppFieldHint} style={{ marginLeft: 'auto' }}>
                               {oppFormSymbols.length === 0 ? 'All symbols (empty = all)' : `${oppFormSymbols.length} selected`}
                             </span>
                           </div>
-                          <ul className="opp-watchlist-stk-symbols" role="group" aria-label="Select symbols from Watchlist STK">
+                          <ul className={w9.oppWatchlistStkSymbols} role="group" aria-label="Select symbols from Watchlist STK">
                             {watchlistStkSymbols.map((sym) => {
                               const checked = oppFormSymbols.includes(sym)
                               return (
                                 <li key={sym}>
-                                  <label className="opp-watchlist-stk-check">
+                                  <label className={w9.oppWatchlistStkCheck}>
                                     <input
                                       type="checkbox"
                                       checked={checked}
@@ -683,18 +685,18 @@ export function StrategyOpportunityPage({
 
               {/* Conditions column */}
               <div className="opp-form-col">
-                <div className="opp-col-header">
-                  <h4 className="opp-col-title">Entry conditions</h4>
+                <div className={w9.oppColHeader}>
+                  <h4 className={w9.oppColTitle}>Entry conditions</h4>
                 </div>
-                <div className="opp-col-body">
+                <div className={w9.oppColBody}>
                   {oppFormEntryConditions.length === 0 && (
-                    <p className="opp-field-hint">No entry conditions yet.</p>
+                    <p className={w9.oppFieldHint}>No entry conditions yet.</p>
                   )}
                   <div className="opp-conditions-list">
                     {oppFormEntryConditions.map((c, i) => (
-                      <div key={i} className="opp-condition-row">
+                      <div key={i} className={w9.oppConditionRow}>
                         <select
-                          className="opp-condition-select"
+                          className={w9.oppConditionSelect}
                           value={c.condition_type}
                           onChange={(e) => updateOppCondition(i, { condition_type: e.target.value })}
                         >
@@ -704,7 +706,7 @@ export function StrategyOpportunityPage({
                         </select>
                         <input
                           type="text"
-                          className="opp-condition-input"
+                          className={w9.oppConditionInput}
                           value={c.value_text ?? ''}
                           onChange={(e) => updateOppCondition(i, { value_text: e.target.value || null })}
                           placeholder="text"
@@ -712,14 +714,14 @@ export function StrategyOpportunityPage({
                         <input
                           type="number"
                           step="any"
-                          className="opp-condition-input opp-condition-input--num"
+                          className={cn(w9.oppConditionInput, 'opp-condition-input--num')}
                           value={c.value_numeric ?? ''}
                           onChange={(e) =>
                             updateOppCondition(i, { value_numeric: e.target.value === '' ? null : parseFloat(e.target.value) })
                           }
                           placeholder="numeric"
                         />
-                        <button type="button" className="opp-condition-remove" onClick={() => removeOppCondition(i)} aria-label="Remove condition">×</button>
+                        <button type="button" className={w9.oppConditionRemove} onClick={() => removeOppCondition(i)} aria-label="Remove condition">×</button>
                       </div>
                     ))}
                   </div>

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { pnlNegativeClass, pnlPositiveClass } from '@/components/shared/appUi'
+import { w9 } from '@/styles/wave9Classes'
 import {
   fetchBarsBenchmark,
   fetchPutCallRatioHistory,
@@ -1022,19 +1024,19 @@ export function StockInspectorPanel({
               <span className={SIP_KV_K}>Market value</span>
               <span className={SIP_KV_V}>{fmtMarketValue(position)}</span>
               <span className={SIP_KV_K}>Daily $</span>
-              <span className={cn(SIP_KV_V, (dailyPnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative')}>
+              <span className={cn(SIP_KV_V, (dailyPnl ?? 0) >= 0 ? pnlPositiveClass : pnlNegativeClass)}>
                 {dailyPnl != null ? fmtUsd(dailyPnl) : '—'}
               </span>
               <span className={SIP_KV_K}>Daily %</span>
-              <span className={cn(SIP_KV_V, (dailyPct ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative')}>
+              <span className={cn(SIP_KV_V, (dailyPct ?? 0) >= 0 ? pnlPositiveClass : pnlNegativeClass)}>
                 {dailyPct != null ? fmtPctCompact(dailyPct) : '—'}
               </span>
               <span className={SIP_KV_K}>Since $</span>
-              <span className={cn(SIP_KV_V, (pnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative')}>
+              <span className={cn(SIP_KV_V, (pnl ?? 0) >= 0 ? pnlPositiveClass : pnlNegativeClass)}>
                 {pnl != null ? fmtUsd(pnl) : '—'}
               </span>
               <span className={SIP_KV_K}>Since %</span>
-              <span className={cn(SIP_KV_V, (sincePct ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative')}>
+              <span className={cn(SIP_KV_V, (sincePct ?? 0) >= 0 ? pnlPositiveClass : pnlNegativeClass)}>
                 {sincePct != null ? fmtPctCompact(sincePct) : '—'}
               </span>
             </div>
@@ -1046,14 +1048,14 @@ export function StockInspectorPanel({
             <h4 id="stock-sec-benchmark" className={SIP_SECTION_TITLE}>
               Daily benchmark
             </h4>
-            {benchLoading && <p className="section-hint">Loading stock_day close…</p>}
+            {benchLoading && <p className={w9.sectionHint}>Loading stock_day close…</p>}
             {!benchLoading && benchClose != null && (
               <div className={SIP_KV_GRID}>
                 <span className={SIP_KV_K}>stock_day close</span>
                 <span className={SIP_KV_V}>{fmtUsd(benchClose)}</span>
               </div>
             )}
-            {!benchLoading && benchClose == null && <p className="section-hint">No benchmark bar for this symbol.</p>}
+            {!benchLoading && benchClose == null && <p className={w9.sectionHint}>No benchmark bar for this symbol.</p>}
           </section>
         )}
 
@@ -1072,15 +1074,15 @@ export function StockInspectorPanel({
           </h4>
 
           {fundLoading && !fund && !fundamentalSeed && (
-            <p className="section-hint sip-fund-hint">Loading conditions…</p>
+            <p className={cn(w9.sectionHint, 'sip-fund-hint')}>Loading conditions…</p>
           )}
 
           {fundError && !hasAnyFundData && (
-            <p className="section-hint sip-fund-hint sip-fund-hint--err">{fundError}</p>
+            <p className={cn(w9.sectionHint, 'sip-fund-hint', 'sip-fund-hint--err')}>{fundError}</p>
           )}
 
           {!fundLoading && !fundError && !hasAnyFundData && (
-            <p className="section-hint sip-fund-hint">
+            <p className={cn(w9.sectionHint, 'sip-fund-hint')}>
               No fundamentals snapshot recorded for this symbol yet.
             </p>
           )}
@@ -1201,13 +1203,13 @@ export function StockInspectorPanel({
           </h4>
 
           {techLoading && !tech && (
-            <p className="section-hint sip-fund-hint">Loading conditions…</p>
+            <p className={cn(w9.sectionHint, 'sip-fund-hint')}>Loading conditions…</p>
           )}
           {techError && !hasAnyTechData && (
-            <p className="section-hint sip-fund-hint sip-fund-hint--err">{techError}</p>
+            <p className={cn(w9.sectionHint, 'sip-fund-hint', 'sip-fund-hint--err')}>{techError}</p>
           )}
           {!techLoading && !techError && !hasAnyTechData && (
-            <p className="section-hint sip-fund-hint">
+            <p className={cn(w9.sectionHint, 'sip-fund-hint')}>
               No technical snapshot recorded for this symbol yet. Run the technical backfill.
             </p>
           )}
@@ -1374,7 +1376,7 @@ export function StockInspectorPanel({
               )}
             </h4>
 
-            {rawLoading && <p className="section-hint">Loading source data…</p>}
+            {rawLoading && <p className={w9.sectionHint}>Loading source data…</p>}
 
             {rawData && rawData.quarterly.length > 0 && (() => {
               const [minQEps, maxQEps] = colRange(rawData.quarterly.map(r => r.eps))
@@ -1449,7 +1451,7 @@ export function StockInspectorPanel({
             })()}
 
             {rawData && rawData.quarterly.length === 0 && rawData.annual.length === 0 && (
-              <p className="section-hint">No income statement data found for this symbol.</p>
+              <p className={w9.sectionHint}>No income statement data found for this symbol.</p>
             )}
           </section>
         )}
@@ -1500,7 +1502,7 @@ export function StockInspectorPanel({
 
             {pcrExpanded && (
               <>
-                {pcrLoading && <p className="section-hint">Loading PCR data…</p>}
+                {pcrLoading && <p className={w9.sectionHint}>Loading PCR data…</p>}
 
                 {/* Non-blocking background-refresh banner */}
                 {pcrRetrieving && (
@@ -1546,13 +1548,13 @@ export function StockInspectorPanel({
                 )}
 
                 {pcrRetrieveError && (
-                  <p className="section-hint sip-fund-hint--err">{pcrRetrieveError}</p>
+                  <p className={cn(w9.sectionHint, 'sip-fund-hint--err')}>{pcrRetrieveError}</p>
                 )}
 
                 {/* Empty state: no data yet, not currently fetching */}
                 {!pcrLoading && !pcrRetrieving && pcrSeries.length === 0 && (
                   <div className="sip-pcr-retrieve-block">
-                    <p className="section-hint">
+                    <p className={w9.sectionHint}>
                       No PCR history for this symbol. Retrieve loads ~1 year of option volume
                       from Massive (per-contract daily bars), then computes daily Put/Call ratios.
                     </p>
@@ -1569,7 +1571,7 @@ export function StockInspectorPanel({
                 {/* First-fetch placeholder: job running but no data written yet */}
                 {!pcrLoading && pcrRetrieving && pcrSeries.length === 0 && (
                   <div className="sip-pcr-first-fetch">
-                    <p className="section-hint">
+                    <p className={w9.sectionHint}>
                       Fetching option contracts — chart will appear automatically when ready.
                     </p>
                   </div>
@@ -1648,7 +1650,7 @@ export function StockInspectorPanel({
                         >
                           {pcrShowTables ? '▴ Hide Data' : '▾ Show Data'} · {pcrSeries.length}d
                         </button>
-                        <span className="section-hint sip-pcr-hint" style={{ margin: 0 }}>
+                        <span className={cn(w9.sectionHint, 'sip-pcr-hint')} style={{ margin: 0 }}>
                           OI ratio &gt; 1 = more puts (bearish lean)
                         </span>
                       </div>
@@ -1841,7 +1843,7 @@ export function StockInspectorPanel({
 
           {stmtsExpanded && (
             <>
-              {stmtsLoading && <p className="section-hint">Loading…</p>}
+              {stmtsLoading && <p className={w9.sectionHint}>Loading…</p>}
 
               {/* Balance Sheet — chart left | key-column table right */}
               {stmts && stmts.balance_sheets.length > 0 && (() => {
@@ -2072,7 +2074,7 @@ export function StockInspectorPanel({
                 stmts.ratios.length === 0 &&
                 stmts.short_interest.length === 0 &&
                 stmts.short_volume.length === 0 && (
-                  <p className="section-hint">No statements data found for this symbol.</p>
+                  <p className={w9.sectionHint}>No statements data found for this symbol.</p>
                 )}
             </>
           )}

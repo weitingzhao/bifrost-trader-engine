@@ -1,3 +1,6 @@
+import { rl, bubbleSwitchBtn } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { bsComputeDetail } from '../utils/bsCalc'
 import type { StatusResponse, WatchlistItem } from '../types'
@@ -1160,7 +1163,7 @@ export function OptionDiscoveryPage({
         >
           {massiveStatus?.configured && (
             <span
-              className="section-hint"
+              className={w9.sectionHint}
               style={{ marginLeft: '0.5rem', fontWeight: 600 }}
               title={massiveStatus.delay_notice}
             >
@@ -1176,19 +1179,19 @@ export function OptionDiscoveryPage({
       </div>
 
       {/* ── Session bar: Chain title + daily data on one row ── */}
-      <section className="replay-section option-discovery-session-bar" aria-label="Session">
+      <section className={rl.section} aria-label="Session">
         <div className="option-discovery-conditions-head-row">
           <h3 id="option-discovery-conditions-head">Chain</h3>
           {massiveStatus?.configured && selectedSymbol.trim() ? (
             <div className="option-discovery-daily-summary option-discovery-daily-summary--inline" role="status">
               {dailyDimsLoading ? (
-                <span className="section-hint">Loading daily data status…</span>
+                <span className={w9.sectionHint}>Loading daily data status…</span>
               ) : dailyDims ? (
                 <>
                   <span className="option-discovery-daily-summary-label">
                     Daily data ({dailyDimsDate ?? '—'})
                   </span>
-                  <span className="section-hint option-discovery-daily-summary-bits">
+                  <span className={cn(w9.sectionHint, 'option-discovery-daily-summary-bits')}>
                     {`${selectedSymbol.trim().toUpperCase()} · Snapshot: ${formatSnapshotTime(dailyDims['daily-snapshot'])} · OI: ${formatDimShort('daily-oi', dailyDims['daily-oi'])} · Max pain: ${formatDimShort('daily-max-pain', dailyDims['daily-max-pain'])} · Corporate: ${formatDimShort('daily-corporate', dailyDims['daily-corporate'])} · WS: ${formatDimShort('daily-ws-alive', dailyDims['daily-ws-alive'])}`}
                   </span>
                   {onOpenMassiveFeed && (
@@ -1220,7 +1223,7 @@ export function OptionDiscoveryPage({
                   )}
                 </>
               ) : (
-                <span className="section-hint">Daily data status unavailable.</span>
+                <span className={w9.sectionHint}>Daily data status unavailable.</span>
               )}
             </div>
           ) : null}
@@ -1233,7 +1236,7 @@ export function OptionDiscoveryPage({
           <div className="option-discovery-main-inner">
             <div className="option-discovery-sticky-stack">
               <div className="option-discovery-controls" aria-label="Underlying selection">
-                <section className="replay-section option-discovery-underlying" aria-label="Underlying">
+                <section className={rl.section} aria-label="Underlying">
                   <div className="option-discovery-underlying-body">
                     <div className="od-underlying-manual-row">
                       <label className="od-underlying-manual-label" htmlFor="od-underlying-manual-input">
@@ -1304,7 +1307,7 @@ export function OptionDiscoveryPage({
                         </div>
                       </div>
                     ) : (
-                      <p className="section-hint od-underlying-empty-hint" role="status">
+                      <p className={cn(w9.sectionHint, 'od-underlying-empty-hint')} role="status">
                         Add optionable STK symbols to Watchlist for quick picks, or type a symbol above and Apply.
                       </p>
                     )}
@@ -1402,7 +1405,7 @@ export function OptionDiscoveryPage({
                     aria-label="Chain and quotes expiration date"
                   />
                   {visibleExpirations.length === 0 && (
-                    <span className="section-hint od-chain-expiry-hint" role="status">
+                    <span className={cn(w9.sectionHint, 'od-chain-expiry-hint')} role="status">
                       No expirations for this symbol or filter.
                     </span>
                   )}
@@ -1436,16 +1439,16 @@ export function OptionDiscoveryPage({
           <details className="option-discovery-strike-window" open aria-label="Strike window">
             <summary className="option-discovery-strike-window-summary">
               Strike window
-              <span className="section-hint option-discovery-strike-window-count">
+              <span className={cn(w9.sectionHint, 'option-discovery-strike-window-count')}>
                 {effectiveStrikes.length} selected · {computedStrikes.length} in range
               </span>
             </summary>
-            <p className="section-hint option-discovery-strike-window-hint">
+            <p className={cn(w9.sectionHint, 'option-discovery-strike-window-hint')}>
               Select strikes for the option chain table and window-scoped charts below.
             </p>
             <div className="option-discovery-strikes-content">
         {strikesLoading ? (
-          <p className="section-hint strike-ladder-hint-below" style={{ marginTop: '0.35rem', marginBottom: 0 }}>Loading strikes for selected expiration…</p>
+          <p className={cn(w9.sectionHint, 'strike-ladder-hint-below')} style={{ marginTop: '0.35rem', marginBottom: 0 }}>Loading strikes for selected expiration…</p>
         ) : computedStrikes.length > 0 ? (() => {
           const spot = stockDayLastPrice ?? undefined
           const below = spot != null ? computedStrikes.filter(s => s < spot).sort((a, b) => b - a) : []
@@ -1536,13 +1539,13 @@ export function OptionDiscoveryPage({
                     Sides
                   </span>
                   <div
-                    className="replay-bubble-switch"
+                    className={rl.bubbleSwitch}
                     role="group"
                     aria-labelledby="option-discovery-strike-sides-label"
                   >
                     <button
                       type="button"
-                      className={`replay-bubble-switch-btn ${strikeSideMode === 'all' ? 'active' : ''}`}
+                      className={bubbleSwitchBtn(strikeSideMode === 'all')}
                       onClick={() => setStrikeSideMode('all')}
                       aria-pressed={strikeSideMode === 'all'}
                     >
@@ -1550,7 +1553,7 @@ export function OptionDiscoveryPage({
                     </button>
                     <button
                       type="button"
-                      className={`replay-bubble-switch-btn ${strikeSideMode === 'call' ? 'active' : ''}`}
+                      className={bubbleSwitchBtn(strikeSideMode === 'call')}
                       onClick={() => setStrikeSideMode('call')}
                       aria-pressed={strikeSideMode === 'call'}
                     >
@@ -1558,7 +1561,7 @@ export function OptionDiscoveryPage({
                     </button>
                     <button
                       type="button"
-                      className={`replay-bubble-switch-btn ${strikeSideMode === 'put' ? 'active' : ''}`}
+                      className={bubbleSwitchBtn(strikeSideMode === 'put')}
                       onClick={() => setStrikeSideMode('put')}
                       aria-pressed={strikeSideMode === 'put'}
                     >
@@ -1734,9 +1737,9 @@ export function OptionDiscoveryPage({
             </div>
           )
         })() : strikes.length > 0 ? (
-          <p className="section-hint strike-ladder-hint-below" style={{ marginTop: '0.35rem', marginBottom: 0 }}>Select symbol with daily data or adjust count/std dev.</p>
+          <p className={cn(w9.sectionHint, 'strike-ladder-hint-below')} style={{ marginTop: '0.35rem', marginBottom: 0 }}>Select symbol with daily data or adjust count/std dev.</p>
         ) : (
-          <p className="section-hint strike-ladder-hint-below" style={{ marginTop: '0.35rem', marginBottom: 0 }}>Select symbol and expiration to see strikes.</p>
+          <p className={cn(w9.sectionHint, 'strike-ladder-hint-below')} style={{ marginTop: '0.35rem', marginBottom: 0 }}>Select symbol and expiration to see strikes.</p>
         )}
             </div>
           </details>
@@ -1747,7 +1750,7 @@ export function OptionDiscoveryPage({
             data-analytics-scope="strike-window"
             aria-label="Strike window scope"
           >
-            <p className="section-hint option-discovery-view-scope-hint" id="option-discovery-view-scope-hint">
+            <p className={cn(w9.sectionHint, 'option-discovery-view-scope-hint')} id="option-discovery-view-scope-hint">
               Scoped to the selected strike window.
             </p>
 
@@ -1779,7 +1782,7 @@ export function OptionDiscoveryPage({
             >
           {/* ── Option quotes ── */}
           <section
-            className="replay-section"
+            className={rl.section}
             aria-labelledby="option-discovery-table-head"
             aria-describedby="option-discovery-view-scope-hint"
           >
@@ -1824,18 +1827,18 @@ export function OptionDiscoveryPage({
                 </svg>
               </button>
               {underlyingPrice != null && (
-                <span className="section-hint od-option-quotes-underlying">Underlying: {fmtUsd(underlyingPrice)}</span>
+                <span className={cn(w9.sectionHint, 'od-option-quotes-underlying')}>Underlying: {fmtUsd(underlyingPrice)}</span>
               )}
             </div>
             {addWatchlistFeedback != null && (
               <div style={{ marginBottom: '0.5rem' }}>
-                <span className="section-hint" role="status">
+                <span className={w9.sectionHint} role="status">
                   {addWatchlistFeedback.includes('|') ? 'Added to Watchlist.' : addWatchlistFeedback}
                 </span>
               </div>
             )}
         {snapshotLoading && (
-          <p className="section-hint">Fetching option quotes (may take ~10s)…</p>
+          <p className={w9.sectionHint}>Fetching option quotes (may take ~10s)…</p>
         )}
         {snapshotFeedback != null && !snapshotLoading && (
           <div
@@ -1894,7 +1897,7 @@ export function OptionDiscoveryPage({
               </div>
             </div>
             {chainColumnList.length === 0 ? (
-              <p className="section-hint" role="status">
+              <p className={w9.sectionHint} role="status">
                 Select at least one column in Columns filter.
               </p>
             ) : (
@@ -2030,7 +2033,7 @@ export function OptionDiscoveryPage({
           </>
         )}
         {snapshotRows.length === 0 && !snapshotLoading && !snapshotFeedback && (
-          <p className="section-hint" role="status">
+          <p className={w9.sectionHint} role="status">
             {!snapshotLoadAttempted
               ? 'Select symbol and expiration to load quotes automatically.'
               : 'No quotes returned. Check Massive job queue, Celery worker, and PostgreSQL option_snapshots.'}

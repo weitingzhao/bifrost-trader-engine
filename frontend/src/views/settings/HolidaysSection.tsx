@@ -1,4 +1,6 @@
 import type { MarketHolidayRow } from '../../api'
+import { msgErrorClass, msgOkClass } from '@/components/shared/appUi'
+import { w9 } from '@/styles/wave9Classes'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import { Button } from '@/components/ui/button'
 
@@ -34,12 +36,12 @@ export function HolidaysSection({
   onDeleteHoliday,
 }: HolidaysSectionProps) {
   return (
-    <div className="daemon-group" id="settings-holidays">
-      <div className="daemon-group-header">
-        <span className="daemon-group-title">US market holidays (NYSE)</span>
+    <div className={w9.daemonGroup} id="settings-holidays">
+      <div className={w9.daemonGroupHeader}>
+        <span className={w9.daemonGroupTitle}>US market holidays (NYSE)</span>
         <InfoTooltip text="Holidays used to decide trading days (e.g. Settings → Status → Feed → Interactive Brokers coverage yellow (end)). Add or delete as needed." />
       </div>
-      <div className="daemon-group-body">
+      <div className={w9.daemonGroupBody}>
         <div className="controls settings-holidays-filters">
           <label>
             Year
@@ -86,7 +88,7 @@ export function HolidaysSection({
           </Button>
         </div>
         {holidayMsg.text && (
-          <div className={`settings-holidays-msg ${holidayMsg.isErr ? 'msg-error' : 'msg-ok'}`}>
+          <div className={`settings-holidays-msg ${holidayMsg.isErr ? msgErrorClass : msgOkClass}`}>
             {holidayMsg.text}
           </div>
         )}

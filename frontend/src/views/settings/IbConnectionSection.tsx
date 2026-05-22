@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { FlexAccountItem } from '../../types'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import {
@@ -90,14 +92,14 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
 
   return (
     <div id="settings-ib-connection" className="settings-ib-connection-group">
-      <div className="daemon-group settings-ib-config-sheet" id="ib-config-sheet">
-        <div className="daemon-group-header">
-          <span className="daemon-group-title">IB Configure</span>
+      <div className={cn(w9.daemonGroup, 'settings-ib-config-sheet')} id="ib-config-sheet">
+        <div className={w9.daemonGroupHeader}>
+          <span className={w9.daemonGroupTitle}>IB Configure</span>
           <InfoTooltip text="User and Client ID blocks are read-only and reflect config.yaml. Edit that file and restart processes to change host, port, or client IDs. Account, Flex Query, and preferences below can still be saved to the database." />
         </div>
         <p className="settings-ib-config-subtitle">Host, Secondary, and all Client IDs come from config.yaml (ib.host and optional ib.secondary). Read-only below. Account stream IDs, Flex, and range preferences are saved via this page.</p>
-        <div className="daemon-group-body">
-          <section className="settings-ib-section">
+        <div className={w9.daemonGroupBody}>
+          <section className={w9.settingsIbSection}>
             <h3 className="settings-ib-config-sheet-title">Host &amp; Client ID (read-only · YAML)</h3>
             <div className="flex-query-table-wrap settings-ib-config-table-wrap">
             <table className="flex-query-table settings-ib-config-table" aria-label="IB connection: read-only User and Client ID from config.yaml; editable Account and Flex below">
@@ -469,13 +471,13 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
             </table>
           </div>
           </section>
-          <section className="settings-ib-section settings-ib-preference-section">
+          <section className={cn(w9.settingsIbSection, 'settings-ib-preference-section')}>
             <h3 className="settings-ib-config-sheet-title">IB Preference</h3>
             <div id="flex-preference" className="settings-flex-preference">
               <h4 className="settings-flex-preference-title">Flex Preference</h4>
               <p className="settings-ib-config-subtitle">Default ranges for Flex Query when no date range is sent. Init: for initial/full pull.</p>
-              <div className="controls settings-ib-preference-controls">
-                <label className="settings-ib-preference-range-row">
+              <div className={cn(w9.settingsIbPreferenceControls, 'controls')}>
+                <label className={w9.settingsIbPreferenceRangeRow}>
                   Default range
                   <input
                     type="number"
@@ -486,9 +488,9 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                     className="settings-flex-range-select"
                     aria-label="Default Flex Query range in days"
                   />
-                  <span className="settings-ib-range-suffix">days</span>
+                  <span className={w9.settingsIbRangeSuffix}>days</span>
                 </label>
-                <label className="settings-ib-preference-range-row">
+                <label className={w9.settingsIbPreferenceRangeRow}>
                   Init range
                   <input
                     type="number"
@@ -499,7 +501,7 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                     className="settings-flex-range-select"
                     aria-label="Init Flex Query range in days"
                   />
-                  <span className="settings-ib-range-suffix">days</span>
+                  <span className={w9.settingsIbRangeSuffix}>days</span>
                 </label>
               </div>
             </div>

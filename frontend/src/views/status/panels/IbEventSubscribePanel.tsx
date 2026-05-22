@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Execution, IbPositionRow, StatusResponse, StatusSocketIbAccountAgent } from '../../../types'
 import { fetchExecutions, postReleaseTickerSubscriptions } from '../../../api'
@@ -302,7 +305,7 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
   return (
     <div className="status-panel-section card-event-subscribe event-subscribe-section">
       <div className="event-subscribe-header-row">
-        <h2 className="daemon-card-title inline-flex flex-wrap items-center gap-2 m-0">
+        <h2 className={cn(w9.daemonCardTitle, 'inline-flex', 'flex-wrap', 'items-center', 'gap-2', 'm-0')}>
           <StreamHealthLamp lamp={headerLamp} title={headerTitle} />
           IB Event Subscribe
           <InfoTooltip text="Market and account-domain data reach the stack via Redis: IB Ingestor (quotes notify + tick hashes) and IB Account Agent (snapshot + notify)." />
@@ -346,7 +349,7 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
           </button>
         </div>
       </div>
-      <p className="section-hint event-subscribe-page-hint">
+      <p className={cn(w9.sectionHint, 'event-subscribe-page-hint')}>
         Redis stream health from Monitor GET /status (<code className="event-subscribe-inline-code">socket</code>). Ticker
         release is a daemon control action (requires engine running).
         <a href="#settings-ws-connector" className="event-subscribe-socket-link">
@@ -355,8 +358,8 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
       </p>
 
       <div className="event-subscribe-body">
-        <div className="replay-portfolio-tabs-wrap">
-          <div className="system-tabs replay-portfolio-tabs" role="tablist" aria-label="Subscribe sections">
+        <div className={rl.portfolioTabsWrap}>
+          <div className={rl.portfolioTabs} role="tablist" aria-label="Subscribe sections">
             <button
               type="button"
               role="tab"
@@ -397,18 +400,18 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
           id="event-subscribe-panel-data"
           role="tabpanel"
           aria-labelledby="event-subscribe-tab-data"
-          className="system-tab-panel"
+          className={w9.systemTabPanel}
           hidden={subscribeTab !== 'data'}
         >
           <h3 className="event-subscribe-subheading event-subscribe-tab-panel-first-heading">Host real-time tickers (daemon)</h3>
           <div className="event-subscribe-ticker-block">
-            <p className="section-hint event-subscribe-agent-wide-hint" style={{ marginBottom: '0.35rem' }}>
+            <p className={cn(w9.sectionHint, 'event-subscribe-agent-wide-hint')} style={{ marginBottom: '0.35rem' }}>
               Symbols the engine reports as subscribed (GET /status <code className="event-subscribe-inline-code">live_ui</code>
               ). Pub/sub notify channel:{' '}
               <code className="event-subscribe-inline-code">{subscribeChannel}</code>.
             </p>
             {!hb?.daemon_alive ? (
-              <p className="section-hint event-subscribe-agent-wide-hint" style={{ color: 'var(--color-warning)' }}>
+              <p className={cn(w9.sectionHint, 'event-subscribe-agent-wide-hint')} style={{ color: 'var(--color-warning)' }}>
                 Engine heartbeat is stale; ticker list may be outdated.
               </p>
             ) : null}
@@ -425,7 +428,7 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
                 ))}
               </div>
             ) : (
-              <p className="section-hint event-subscribe-agent-wide-hint">No symbols reported (engine off or no active tick subscriptions).</p>
+              <p className={cn(w9.sectionHint, 'event-subscribe-agent-wide-hint')}>No symbols reported (engine off or no active tick subscriptions).</p>
             )}
             {referenceIndices.length > 0 ? (
               <div style={{ marginTop: 'var(--space-3)' }}>
@@ -445,7 +448,7 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
           </div>
 
           <h3 className="event-subscribe-subheading">Position snapshot (from DB)</h3>
-          <p className="section-hint event-subscribe-agent-wide-hint">
+          <p className={cn(w9.sectionHint, 'event-subscribe-agent-wide-hint')}>
             Synced positions written by the daemon (<code className="event-subscribe-inline-code">account_positions</code>); aligns
             with the account stream pipeline, not raw Redis notify payloads.
             {positionFilterAccountIds.size > 0
@@ -453,10 +456,10 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
               : ' All accounts shown.'}
           </p>
           {positionRows.length === 0 ? (
-            <p className="section-hint event-subscribe-agent-wide-hint">No position rows in this status response.</p>
+            <p className={cn(w9.sectionHint, 'event-subscribe-agent-wide-hint')}>No position rows in this status response.</p>
           ) : (
             <div className="event-subscribe-redis-paths-scroll">
-              <table className="table-operations table-event-subscribe event-subscribe-positions-table">
+              <table className={cn(w9.tableOperations, 'table-event-subscribe', 'event-subscribe-positions-table')}>
                 <thead>
                   <tr>
                     {showPositionAccountColumn && <th scope="col">Account</th>}
@@ -489,8 +492,8 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
           )}
 
           <h3 className="event-subscribe-subheading">Open orders</h3>
-          <p className="section-hint event-subscribe-agent-wide-hint">Counts from this status response&apos;s portfolio snapshot (not Redis health).</p>
-          <table className="table-operations table-event-subscribe table-event-subscribe-horizontal">
+          <p className={cn(w9.sectionHint, 'event-subscribe-agent-wide-hint')}>Counts from this status response&apos;s portfolio snapshot (not Redis health).</p>
+          <table className={cn(w9.tableOperations, 'table-event-subscribe', 'table-event-subscribe-horizontal')}>
             <thead>
               <tr>
                 <th className="event-subscribe-col-subscription">Source</th>
@@ -514,7 +517,7 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
                     <span className="event-subscribe-status-text">
                       {hb?.daemon_alive ? (
                         <>
-                          <span className="countdown-num">{hostOpenOrderCount}</span>
+                          <span className={w9.countdownNum}>{hostOpenOrderCount}</span>
                           {' open order'}
                           {hostOpenOrderCount === 1 ? '' : 's'}
                         </>
@@ -538,7 +541,7 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
                       <span className="event-subscribe-status-text">
                         {hb?.daemon_alive ? (
                           <>
-                            <span className="countdown-num">{secondaryOpenOrderCount}</span>
+                            <span className={w9.countdownNum}>{secondaryOpenOrderCount}</span>
                             {' open order'}
                             {secondaryOpenOrderCount === 1 ? '' : 's'}
                           </>
@@ -554,7 +557,7 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
           </table>
 
           <h3 className="event-subscribe-subheading">Recent executions (DB)</h3>
-          <p className="section-hint event-subscribe-agent-wide-hint">
+          <p className={cn(w9.sectionHint, 'event-subscribe-agent-wide-hint')}>
             Fill and commission details from the trading API (<code className="event-subscribe-inline-code">GET /executions</code>
             , persisted rows), not live IB socket frames. Refreshes when status is refetched.
           </p>
@@ -564,11 +567,11 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
             </div>
           ) : null}
           {execRows.length === 0 && !execError ? (
-            <p className="section-hint event-subscribe-agent-wide-hint">No execution rows returned (empty or trading API unavailable).</p>
+            <p className={cn(w9.sectionHint, 'event-subscribe-agent-wide-hint')}>No execution rows returned (empty or trading API unavailable).</p>
           ) : null}
           {execRows.length > 0 ? (
             <div className="event-subscribe-redis-paths-scroll">
-              <table className="table-operations table-event-subscribe event-subscribe-executions-table">
+              <table className={cn(w9.tableOperations, 'table-event-subscribe', 'event-subscribe-executions-table')}>
                 <thead>
                   <tr>
                     <th scope="col">Time</th>
@@ -604,18 +607,18 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
           id="event-subscribe-panel-redis"
           role="tabpanel"
           aria-labelledby="event-subscribe-tab-redis"
-          className="system-tab-panel"
+          className={w9.systemTabPanel}
           hidden={subscribeTab !== 'redis'}
         >
           <h3 className="event-subscribe-subheading event-subscribe-tab-panel-first-heading">Redis paths</h3>
-          <p className="section-hint event-subscribe-redis-paths-hint">
+          <p className={cn(w9.sectionHint, 'event-subscribe-redis-paths-hint')}>
             Total = health hash <code className="event-subscribe-inline-code">msg_count</code> where available. Quote notify / tick
             payload <strong>Count</strong> matches daemon tick keys (<code className="event-subscribe-inline-code">live_ui.subscribed_tickers</code>
             ). Msg/s is estimated from consecutive status polls (often ~2s); idle streams show{' '}
             <code className="event-subscribe-inline-code">0/s</code>. Redis key cells show one line (hover for full key).
           </p>
           <div className="event-subscribe-redis-paths-scroll">
-            <table className="table-operations table-event-subscribe event-subscribe-redis-paths-table">
+            <table className={cn(w9.tableOperations, 'table-event-subscribe', 'event-subscribe-redis-paths-table')}>
               <colgroup>
                 <col className="event-subscribe-redis-col-path" />
                 <col className="event-subscribe-redis-col-key" />
@@ -738,7 +741,7 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
           id="event-subscribe-panel-services"
           role="tabpanel"
           aria-labelledby="event-subscribe-tab-services"
-          className="system-tab-panel"
+          className={w9.systemTabPanel}
           hidden={subscribeTab !== 'services'}
         >
           <h3 className="event-subscribe-subheading event-subscribe-tab-panel-first-heading">Summary</h3>
@@ -794,7 +797,7 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
           </div>
 
           <h3 className="event-subscribe-subheading">IB Ingestor</h3>
-          <table className="table-operations table-event-subscribe event-subscribe-metric-table">
+          <table className={cn(w9.tableOperations, 'table-event-subscribe', 'event-subscribe-metric-table')}>
             <tbody>
               <tr>
                 <th scope="row">IB API connected</th>
@@ -820,11 +823,11 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
           </table>
 
           <h3 className="event-subscribe-subheading">IB Account Agent</h3>
-          <p className="section-hint event-subscribe-agent-wide-hint">
+          <p className={cn(w9.sectionHint, 'event-subscribe-agent-wide-hint')}>
             Agent-wide metrics are a single Redis health hash (combined across accounts). Per-account rows show connection slots
             only.
           </p>
-          <table className="table-operations table-event-subscribe event-subscribe-metric-table">
+          <table className={cn(w9.tableOperations, 'table-event-subscribe', 'event-subscribe-metric-table')}>
             <tbody>
               <tr>
                 <th scope="row">Process in service</th>
@@ -845,7 +848,7 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
             </tbody>
           </table>
 
-          <table className="table-operations table-event-subscribe event-subscribe-slots-table">
+          <table className={cn(w9.tableOperations, 'table-event-subscribe', 'event-subscribe-slots-table')}>
             <thead>
               <tr>
                 <th scope="col">Slot</th>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
 import type { Bar, Execution } from '../../../types'
 import { fetchBars, fetchOptionBars, fetchOptionSnapshot, postMassiveSync } from '../../../api'
 import { fmtExpiry, parseOptionContractKey } from '../../../utils/format'
@@ -374,16 +375,16 @@ export function InstanceKlineSection({
         </div>
       )}
       {tabs.length === 1 && (
-        <p className="section-hint" style={{ marginBottom: '0.4rem', marginTop: 0 }}>
+        <p className={w9.sectionHint} style={{ marginBottom: '0.4rem', marginTop: 0 }}>
           {tabs[0].label}
         </p>
       )}
 
       {/* Chart area */}
-      {loading && <p className="section-hint">Loading bars…</p>}
-      {error && <p className="section-hint" style={{ color: 'var(--color-lamp-red)' }}>{error}</p>}
+      {loading && <p className={w9.sectionHint}>Loading bars…</p>}
+      {error && <p className={w9.sectionHint} style={{ color: 'var(--color-lamp-red)' }}>{error}</p>}
       {!loading && !error && bars.length === 0 && (
-        <p className="section-hint">No bar data available for this contract.</p>
+        <p className={w9.sectionHint}>No bar data available for this contract.</p>
       )}
       {!loading && !error && windowedBars.length > 0 && (
         <div style={{ position: 'relative' }}>
@@ -503,7 +504,7 @@ export function InstanceKlineSection({
           </svg>
 
           {/* Status line */}
-          <p className="section-hint" style={{ marginTop: '0.25rem' }}>
+          <p className={w9.sectionHint} style={{ marginTop: '0.25rem' }}>
             {windowedBars.length} bars
             {markers.filter(m => m.side === 'BUY').length > 0 && (
               <span style={{ marginLeft: 10, color: '#4ade80' }}>

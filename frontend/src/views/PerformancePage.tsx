@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type {
   Execution,
   OptionStockLinkRow,
@@ -910,7 +912,7 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
   }, [byDayRangeData, timeRange, calendarMonth, growthUnit, status])
 
   return (
-    <div className="app-page-stack performance-page">
+    <div className={cn(w9.appPageStack, 'performance-page')}>
       <PageSection className="performance-summary-section" aria-label="Performance">
         <SectionPageTitle
           menu="Portfolio"
@@ -923,7 +925,7 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
         </p>
         <section className="performance-time-range-block performance-pane" aria-label="Time range and daily statistics">
         <div className="performance-filters performance-filters-inline">
-          {loading && <p className="section-hint performance-filters-loading">Loading…</p>}
+          {loading && <p className={cn(w9.sectionHint, 'performance-filters-loading')}>Loading…</p>}
           <div className="performance-filter-group">
             <fieldset className="performance-filter performance-filter-time-range" aria-label="Time range">
               <span className="performance-filter-legend-inline">Time range</span>
@@ -1424,9 +1426,9 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
           </section>
         )}
         {byDayRangeLoading ? (
-          <p className="section-hint">Loading…</p>
+          <p className={w9.sectionHint}>Loading…</p>
         ) : !byDayRangeData ? (
-          <p className="section-hint">Select time range above to load daily PnL.</p>
+          <p className={w9.sectionHint}>Select time range above to load daily PnL.</p>
         ) : (() => {
           const optMap = byDayRangeData.opt
           const stocksMap = byDayRangeData.stocks
@@ -1470,7 +1472,7 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
               cashRealized: cash.realized,
             }
           })
-          if (dateStrs.length === 0) return <p className="section-hint">No Option or Stock PnL in the selected range.</p>
+          if (dateStrs.length === 0) return <p className={w9.sectionHint}>No Option or Stock PnL in the selected range.</p>
           const ZERO_THRESH = 0.005
           const pnlTd = (val: number, col: ByCol) => {
             if (Math.abs(val) < ZERO_THRESH) return <td>—</td>
@@ -1485,7 +1487,7 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
             }
             if (col === 'cashNotional') {
               return (
-                <td className="performance-by-day-notional performance-by-day-notional-cash-like">{fmtUsd(val)}</td>
+                <td className={cn(w9.performanceByDayNotional, 'performance-by-day-notional-cash-like')}>{fmtUsd(val)}</td>
               )
             }
             const isUnrealized = col === 'optUnrealized'
@@ -1591,7 +1593,7 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
         })()}
         </section>
 
-      <section className="performance-calendar-section performance-pane" aria-label="Calendar">
+      <section className={cn(w9.performanceCalendarSection, 'performance-pane')} aria-label="Calendar">
         <h3 className="inline-flex items-center gap-1 text-sm font-semibold">
           Calendar
           <InfoTooltip text="Options: daily Realized and Unrealized (R/U)—FIFO option PnL plus prorated option–stock link slippage. Stocks / Fixed income: daily Realized is Σ realized_pnl; daily Notional is signed net trade size (qty×price) for coloring. Cash-like: Realized same; Notional is Σ |qty|×price. Unrealized is not shown for STK tabs. Category labels use GET /status (approximate on history)." />
@@ -1648,8 +1650,8 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                 return (
                   <>
                     <div className="performance-calendar-with-summary">
-                      <div className="performance-calendar-left">
-                    <div className="performance-calendar-asset-tabs system-tabs" role="tablist" aria-label="Calendar asset class">
+                      <div className={w9.performanceCalendarLeft}>
+                    <div className={cn(w9.performanceCalendarAssetTabs, w9.systemTabs)} role="tablist" aria-label="Calendar asset class">
                       {(
                         [
                           ['options', 'Options'],
@@ -1671,24 +1673,24 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                       ))}
                     </div>
                     {calendarAssetTab === 'options' && optUnrealized != null && (
-                      <p className="performance-calendar-total-unrealized">
+                      <p className={w9.performanceCalendarTotalUnrealized}>
                         Option Unrealized (as of now):{' '}
                         <strong className={(optUnrealized ?? 0) >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtUsd(optUnrealized)}</strong>
                       </p>
                     )}
                     {!hasAnyCalendarActivity && (
-                      <p className="section-hint performance-calendar-no-data">
+                      <p className={cn(w9.sectionHint, 'performance-calendar-no-data')}>
                         {calendarAssetTab === 'options'
                           ? 'No option PnL in this month for the selected filters. Try another month or a larger range.'
                           : `No ${CALENDAR_STK_TAB_LABEL[calendarAssetTab].toLowerCase()} PnL in this month. Try another month or a larger range.`}
                       </p>
                     )}
                     {calendarDayPnLLoading && (
-                      <p className="section-hint performance-calendar-loading">Loading daily metrics…</p>
+                      <p className={cn(w9.sectionHint, 'performance-calendar-loading')}>Loading daily metrics…</p>
                     )}
                     <div className="performance-calendar-nav">
                       <Button type="button" variant="secondary" onClick={goPrev} aria-label="Previous month">&larr; Prev</Button>
-                      <span className="performance-calendar-title">{monthLabel}</span>
+                      <span className={w9.performanceCalendarTitle}>{monthLabel}</span>
                       <Button type="button" variant="secondary" onClick={goNext} aria-label="Next month">Next &rarr;</Button>
                     </div>
                     <div className="performance-calendar-legend" aria-label="PnL legend">
@@ -1696,19 +1698,19 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                       {calendarAssetTab === 'options' ? (
                         <span className="performance-calendar-legend-item performance-calendar-legend-item-unrealized">U = Unrealized</span>
                       ) : (
-                        <span className="performance-calendar-legend-item performance-calendar-legend-item-notional">
+                        <span className={cn(w9.performanceCalendarLegendItemNotional, 'performance-calendar-legend-item')}>
                           N = Notional (signed net Stocks/FI; Cash-like |qty|×price)
                         </span>
                       )}
                     </div>
-                    <div className="performance-calendar-grid" role="grid">
-                      <div className="performance-calendar-row performance-calendar-header">
+                    <div className={w9.performanceCalendarGrid} role="grid">
+                      <div className={cn(w9.performanceCalendarRow, w9.performanceCalendarHeader)}>
                         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((wd) => (
-                          <div key={wd} className="performance-calendar-cell performance-calendar-dow">{wd}</div>
+                          <div key={wd} className={cn(w9.performanceCalendarCell, w9.performanceCalendarDow)}>{wd}</div>
                         ))}
                       </div>
                       {Array.from({ length: totalCells / 7 }, (_, rowIdx) => (
-                        <div key={rowIdx} className="performance-calendar-row">
+                        <div key={rowIdx} className={w9.performanceCalendarRow}>
                           {cells.slice(rowIdx * 7, rowIdx * 7 + 7).map((c, colIdx) => {
                             /** Missing date key → zeros so STK Realized is never dropped (was null → no R line). */
                             const dayPnL =
@@ -1781,9 +1783,9 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                                 className={`performance-calendar-cell ${c.day == null ? 'performance-calendar-cell-outside' : ''} ${toneR} ${c.dateStr ? 'performance-calendar-cell-clickable' : ''} ${selectedDay === c.dateStr ? 'performance-calendar-cell-selected' : ''}`}
                                 title={titleParts.length ? titleParts.join('\n') : (c.dateStr ? 'Click to see contributing records' : undefined)}
                               >
-                                {c.day != null && <span className="performance-calendar-day">{c.day}</span>}
+                                {c.day != null && <span className={w9.performanceCalendarDay}>{c.day}</span>}
                                 {(showR || showU || showN) && (
-                                  <div className="performance-calendar-pnl-lines">
+                                  <div className={w9.performanceCalendarPnlLines}>
                                     {showR && (
                                       <span className={`performance-calendar-pnl performance-calendar-realized ${toneR}`}>
                                         R:{' '}
@@ -1823,54 +1825,54 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                       ))}
                     </div>
                       </div>
-                    <div className="performance-calendar-summary performance-calendar-summary-panel">
+                    <div className={cn(w9.performanceCalendarSummary, 'performance-calendar-summary-panel')}>
                     <div className="performance-summary-rows performance-summary-inside-calendar">
-                      <div className="performance-summary-row performance-summary-row-summary">
-                        <span className="performance-summary-type">Summary</span>
-                        <div className="performance-summary-metrics">
-                          <div className="performance-summary-metric">
-                            <span className="performance-summary-metric-label">Total PnL</span>
+                      <div className={cn(w9.performanceSummaryRow, 'performance-summary-row-summary')}>
+                        <span className={w9.performanceSummaryType}>Summary</span>
+                        <div className={w9.performanceSummaryMetrics}>
+                          <div className={w9.performanceSummaryMetric}>
+                            <span className={w9.performanceSummaryMetricLabel}>Total PnL</span>
                             <span className={`performance-summary-metric-value ${(summary.total_pnl ?? 0) >= 0 ? 'tone-positive' : 'tone-negative'}`}>{fmtUsd(summary.total_pnl)}</span>
                           </div>
-                          <div className="performance-summary-metric">
-                            <span className="performance-summary-metric-label">Realized</span>
-                            <span className="performance-summary-metric-value">{fmtUsd(summary.total_realized_pnl ?? summary.total_pnl)}</span>
+                          <div className={w9.performanceSummaryMetric}>
+                            <span className={w9.performanceSummaryMetricLabel}>Realized</span>
+                            <span className={w9.performanceSummaryMetricValue}>{fmtUsd(summary.total_realized_pnl ?? summary.total_pnl)}</span>
                           </div>
-                          <div className="performance-summary-metric">
-                            <span className="performance-summary-metric-label">Net</span>
+                          <div className={w9.performanceSummaryMetric}>
+                            <span className={w9.performanceSummaryMetricLabel}>Net</span>
                             <span className={`performance-summary-metric-value ${(summary.net_pnl ?? 0) >= 0 ? 'tone-positive' : 'tone-negative'}`}>{fmtUsd(summary.net_pnl)}</span>
                           </div>
-                          <div className="performance-summary-metric">
-                            <span className="performance-summary-metric-label">Unrealized</span>
-                            <span className="performance-summary-metric-value">{fmtUsd(summary.total_unrealized_pnl)}</span>
+                          <div className={w9.performanceSummaryMetric}>
+                            <span className={w9.performanceSummaryMetricLabel}>Unrealized</span>
+                            <span className={w9.performanceSummaryMetricValue}>{fmtUsd(summary.total_unrealized_pnl)}</span>
                           </div>
-                          <div className="performance-summary-metric">
-                            <span className="performance-summary-metric-label">Comm</span>
-                            <span className="performance-summary-metric-value">{fmtUsd(summary.total_commission)}</span>
+                          <div className={w9.performanceSummaryMetric}>
+                            <span className={w9.performanceSummaryMetricLabel}>Comm</span>
+                            <span className={w9.performanceSummaryMetricValue}>{fmtUsd(summary.total_commission)}</span>
                           </div>
-                          <div className="performance-summary-metric">
-                            <span className="performance-summary-metric-label">Trades</span>
-                            <span className="performance-summary-metric-value">{summary.trade_count ?? 0}</span>
+                          <div className={w9.performanceSummaryMetric}>
+                            <span className={w9.performanceSummaryMetricLabel}>Trades</span>
+                            <span className={w9.performanceSummaryMetricValue}>{summary.trade_count ?? 0}</span>
                           </div>
-                          <div className="performance-summary-metric">
-                            <span className="performance-summary-metric-label">Win rate</span>
-                            <span className="performance-summary-metric-value">{summary.win_rate != null ? `${(summary.win_rate * 100).toFixed(1)}%` : '—'}</span>
+                          <div className={w9.performanceSummaryMetric}>
+                            <span className={w9.performanceSummaryMetricLabel}>Win rate</span>
+                            <span className={w9.performanceSummaryMetricValue}>{summary.win_rate != null ? `${(summary.win_rate * 100).toFixed(1)}%` : '—'}</span>
                           </div>
-                          <div className="performance-summary-metric">
-                            <span className="performance-summary-metric-label">Return%</span>
-                            <span className="performance-summary-metric-value">{summary.return_pct != null ? `${summary.return_pct.toFixed(2)}%` : '—'}</span>
+                          <div className={w9.performanceSummaryMetric}>
+                            <span className={w9.performanceSummaryMetricLabel}>Return%</span>
+                            <span className={w9.performanceSummaryMetricValue}>{summary.return_pct != null ? `${summary.return_pct.toFixed(2)}%` : '—'}</span>
                           </div>
-                          <div className="performance-summary-metric">
-                            <span className="performance-summary-metric-label">PF</span>
-                            <span className="performance-summary-metric-value">{summary.profit_factor != null ? (Number.isFinite(summary.profit_factor) ? summary.profit_factor.toFixed(2) : '∞') : '—'}</span>
+                          <div className={w9.performanceSummaryMetric}>
+                            <span className={w9.performanceSummaryMetricLabel}>PF</span>
+                            <span className={w9.performanceSummaryMetricValue}>{summary.profit_factor != null ? (Number.isFinite(summary.profit_factor) ? summary.profit_factor.toFixed(2) : '∞') : '—'}</span>
                           </div>
-                          <div className="performance-summary-metric">
-                            <span className="performance-summary-metric-label">Max DD</span>
-                            <span className="performance-summary-metric-value">{summary.max_drawdown != null ? fmtUsd(-summary.max_drawdown) : '—'}</span>
+                          <div className={w9.performanceSummaryMetric}>
+                            <span className={w9.performanceSummaryMetricLabel}>Max DD</span>
+                            <span className={w9.performanceSummaryMetricValue}>{summary.max_drawdown != null ? fmtUsd(-summary.max_drawdown) : '—'}</span>
                           </div>
-                          <div className="performance-summary-metric">
-                            <span className="performance-summary-metric-label">Avg W/L</span>
-                            <span className="performance-summary-metric-value">{fmtUsd(summary.avg_win)} / {fmtUsd(summary.avg_loss)}</span>
+                          <div className={w9.performanceSummaryMetric}>
+                            <span className={w9.performanceSummaryMetricLabel}>Avg W/L</span>
+                            <span className={w9.performanceSummaryMetricValue}>{fmtUsd(summary.avg_win)} / {fmtUsd(summary.avg_loss)}</span>
                           </div>
                         </div>
                       </div>
@@ -1928,27 +1930,27 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                           toneN: 'positive' | 'negative'
                           toneU: 'positive' | 'negative'
                         }) => (
-                          <div className="performance-summary-row">
-                            <span className="performance-summary-type">{type}</span>
-                            <div className="performance-summary-metrics">
-                              <div className="performance-summary-metric">
-                                <span className="performance-summary-metric-label">Realized</span>
+                          <div className={w9.performanceSummaryRow}>
+                            <span className={w9.performanceSummaryType}>{type}</span>
+                            <div className={w9.performanceSummaryMetrics}>
+                              <div className={w9.performanceSummaryMetric}>
+                                <span className={w9.performanceSummaryMetricLabel}>Realized</span>
                                 <span className={`performance-summary-metric-value ${toneR === 'positive' ? 'tone-positive' : 'tone-negative'}`}>{rVal}</span>
                               </div>
-                              <div className="performance-summary-metric">
-                                <span className="performance-summary-metric-label">Comm</span>
-                                <span className="performance-summary-metric-value">{commission}</span>
+                              <div className={w9.performanceSummaryMetric}>
+                                <span className={w9.performanceSummaryMetricLabel}>Comm</span>
+                                <span className={w9.performanceSummaryMetricValue}>{commission}</span>
                               </div>
-                              <div className="performance-summary-metric">
-                                <span className="performance-summary-metric-label">Net</span>
+                              <div className={w9.performanceSummaryMetric}>
+                                <span className={w9.performanceSummaryMetricLabel}>Net</span>
                                 <span className={`performance-summary-metric-value ${toneN === 'positive' ? 'tone-positive' : 'tone-negative'}`}>{net}</span>
                               </div>
-                              <div className="performance-summary-metric">
-                                <span className="performance-summary-metric-label">Trades</span>
-                                <span className="performance-summary-metric-value">{trades}</span>
+                              <div className={w9.performanceSummaryMetric}>
+                                <span className={w9.performanceSummaryMetricLabel}>Trades</span>
+                                <span className={w9.performanceSummaryMetricValue}>{trades}</span>
                               </div>
-                              <div className="performance-summary-metric">
-                                <span className="performance-summary-metric-label">Unrealized</span>
+                              <div className={w9.performanceSummaryMetric}>
+                                <span className={w9.performanceSummaryMetricLabel}>Unrealized</span>
                                 <span className={`performance-summary-metric-value ${toneU === 'positive' ? 'tone-positive' : 'tone-negative'}`}>{uVal}</span>
                               </div>
                             </div>
@@ -1975,15 +1977,15 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                           notionalCashLike?: boolean
                           notionalSignedTone?: 'pos' | 'neg' | 'zero'
                         }) => (
-                          <div className="performance-summary-row">
-                            <span className="performance-summary-type">{rowType}</span>
-                            <div className="performance-summary-metrics">
-                              <div className="performance-summary-metric">
-                                <span className="performance-summary-metric-label">Realized</span>
+                          <div className={w9.performanceSummaryRow}>
+                            <span className={w9.performanceSummaryType}>{rowType}</span>
+                            <div className={w9.performanceSummaryMetrics}>
+                              <div className={w9.performanceSummaryMetric}>
+                                <span className={w9.performanceSummaryMetricLabel}>Realized</span>
                                 <span className={`performance-summary-metric-value ${toneR === 'positive' ? 'tone-positive' : 'tone-negative'}`}>{rStr}</span>
                               </div>
-                              <div className="performance-summary-metric">
-                                <span className="performance-summary-metric-label">Notional</span>
+                              <div className={w9.performanceSummaryMetric}>
+                                <span className={w9.performanceSummaryMetricLabel}>Notional</span>
                                 <span
                                   className={`performance-summary-metric-value performance-summary-metric-notional${
                                     notionalCashLike
@@ -2000,17 +2002,17 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                                   {nStr}
                                 </span>
                               </div>
-                              <div className="performance-summary-metric">
-                                <span className="performance-summary-metric-label">Comm</span>
-                                <span className="performance-summary-metric-value">{commission}</span>
+                              <div className={w9.performanceSummaryMetric}>
+                                <span className={w9.performanceSummaryMetricLabel}>Comm</span>
+                                <span className={w9.performanceSummaryMetricValue}>{commission}</span>
                               </div>
-                              <div className="performance-summary-metric">
-                                <span className="performance-summary-metric-label">Net</span>
+                              <div className={w9.performanceSummaryMetric}>
+                                <span className={w9.performanceSummaryMetricLabel}>Net</span>
                                 <span className={`performance-summary-metric-value ${toneR === 'positive' ? 'tone-positive' : 'tone-negative'}`}>{net}</span>
                               </div>
-                              <div className="performance-summary-metric">
-                                <span className="performance-summary-metric-label">Trades</span>
-                                <span className="performance-summary-metric-value">{trades}</span>
+                              <div className={w9.performanceSummaryMetric}>
+                                <span className={w9.performanceSummaryMetricLabel}>Trades</span>
+                                <span className={w9.performanceSummaryMetricValue}>{trades}</span>
                               </div>
                             </div>
                           </div>
@@ -2031,9 +2033,9 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                               : showFallback && Math.abs(fallbackR) >= 0.005
                           if (!hasRow) {
                             return (
-                              <div className="performance-summary-row">
-                                <span className="performance-summary-type">{label}</span>
-                                <span className="section-hint performance-summary-empty">No data in the selected range.</span>
+                              <div className={w9.performanceSummaryRow}>
+                                <span className={w9.performanceSummaryType}>{label}</span>
+                                <span className={cn(w9.sectionHint, w9.performanceSummaryEmpty)}>No data in the selected range.</span>
                               </div>
                             )
                           }
@@ -2071,9 +2073,9 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                                 toneU={(optUnrealizedPnl ?? 0) >= 0 ? 'positive' : 'negative'}
                               />
                             ) : (
-                              <div className="performance-summary-row">
-                                <span className="performance-summary-type">Option</span>
-                                <span className="section-hint performance-summary-empty">No data in the selected range.</span>
+                              <div className={w9.performanceSummaryRow}>
+                                <span className={w9.performanceSummaryType}>Option</span>
+                                <span className={cn(w9.sectionHint, w9.performanceSummaryEmpty)}>No data in the selected range.</span>
                               </div>
                             )}
                             {stkBucketRow('Stocks', stocksM.r, stocksNMonth, rStk?.total_pnl ?? 0, hasStkBackend)}
@@ -2086,13 +2088,13 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                     </div>
                     </div>
                     {selectedDay != null && (
-                      <div className="performance-calendar-day-detail" aria-live="polite">
-                        <h4 className="performance-calendar-day-detail-title">
+                      <div className={w9.performanceCalendarDayDetail} aria-live="polite">
+                        <h4 className={w9.performanceCalendarDayDetailTitle}>
                           Records for {selectedDay}
-                          <Button type="button" variant="secondary" size="sm" className="performance-calendar-day-detail-close" onClick={() => setSelectedDay(null)} aria-label="Close">×</Button>
+                          <Button type="button" variant="secondary" size="sm" className={w9.performanceCalendarDayDetailClose} onClick={() => setSelectedDay(null)} aria-label="Close">×</Button>
                         </h4>
                         {selectedDayExecutionsLoading ? (
-                          <p className="section-hint">Loading executions…</p>
+                          <p className={w9.sectionHint}>Loading executions…</p>
                         ) : (
                           <>
                             {calendarAssetTab !== 'options' &&
@@ -2107,15 +2109,15 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                                 const lbl = CALENDAR_STK_TAB_LABEL[calendarAssetTab]
                                 if (bucketExecs.length === 0) {
                                   return (
-                                    <p className="section-hint">
+                                    <p className={w9.sectionHint}>
                                       No {lbl} executions on this trade date in the loaded window.
                                     </p>
                                   )
                                 }
                                 return (
-                                  <div className="performance-calendar-stk-day-detail">
-                                    <h5 className="performance-calendar-day-detail-subtitle">STK executions ({lbl})</h5>
-                                    <p className="section-hint">
+                                  <div className={w9.performanceCalendarStkDayDetail}>
+                                    <h5 className={w9.performanceCalendarDayDetailSubtitle}>STK executions ({lbl})</h5>
+                                    <p className={w9.sectionHint}>
                                       Calendar daily realized is the sum of broker <code className="performance-inline-code">realized_pnl</code> on fills for this trade date in this bucket (same as column totals below). Stocks / Fixed income Notional is signed trade size (qty×price, net buy vs sell); Cash-like uses |qty|×price. Category is from GET /status (same as Trade Ledger).
                                     </p>
                                     <div className="table-wrap performance-calendar-stk-day-table-wrap">
@@ -2367,21 +2369,21 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                               const effectiveSymbol = (selectedDaySymbolTab && symbolsForType.includes(selectedDaySymbolTab) ? selectedDaySymbolTab : symbolsForType[0]) ?? null
                               return (
                                 <>
-                                  <h5 className="performance-calendar-day-detail-subtitle">
+                                  <h5 className={w9.performanceCalendarDayDetailSubtitle}>
                                     {selectedDayPnLType === 'realized'
                                       ? 'Matched legs and pairs by contract (FIFO)'
                                       : 'Executions by contract (unmatched quantity)'}
                                   </h5>
                                   {selectedDayPnLType === 'realized' && (
-                                    <p className="section-hint performance-calendar-records-realized-hint">
+                                    <p className={cn(w9.sectionHint, 'performance-calendar-records-realized-hint')}>
                                       Realized lists execution legs that participate in a FIFO match (scaled to matched qty when partial), then match rows. Match row PnL is option (FIFO) only. Execution rows show per-leg premium plus prorated linked stock (Trade Ledger detail). Realized tab and symbol totals = sum of Match option PnL (FIFO) for the contract plus prorated linked-stock slippage on matched fills. Open quantity appears under Unrealized.
                                     </p>
                                   )}
                                   {contractKeys.length === 0 ? (
-                                    <p className="section-hint">No Option executions in DB for this trade date.</p>
+                                    <p className={w9.sectionHint}>No Option executions in DB for this trade date.</p>
                                   ) : (
                                     <>
-                                      <div className="performance-calendar-pnl-type-tabs system-tabs" role="tablist" aria-label="PnL type">
+                                      <div className={cn(w9.performanceCalendarPnlTypeTabs, w9.systemTabs)} role="tablist" aria-label="PnL type">
                                         <button
                                           type="button"
                                           role="tab"
@@ -2392,7 +2394,7 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                                           Realized
                                           {symbolsRealized.length > 0 && (
                                             <>
-                                              <span className="performance-calendar-tab-count">({symbolsRealized.reduce((n, s) => n + (keysBySymbolRealized.get(s) ?? []).length, 0)})</span>
+                                              <span className={w9.performanceCalendarTabCount}>({symbolsRealized.reduce((n, s) => n + (keysBySymbolRealized.get(s) ?? []).length, 0)})</span>
                                               <span className={`performance-calendar-tab-sum ${totalRealizedSum >= 0 ? 'tone-positive' : 'tone-negative'}`}>
                                                 {fmtUsd(totalRealizedSum)}
                                               </span>
@@ -2410,8 +2412,8 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                                           Unrealized
                                           {symbolsUnrealized.length > 0 && (
                                             <>
-                                              <span className="performance-calendar-tab-count">({symbolsUnrealized.reduce((n, s) => n + (keysBySymbolUnrealized.get(s) ?? []).length, 0)})</span>
-                                              <span className="performance-calendar-tab-sum tone-unrealized">
+                                              <span className={w9.performanceCalendarTabCount}>({symbolsUnrealized.reduce((n, s) => n + (keysBySymbolUnrealized.get(s) ?? []).length, 0)})</span>
+                                              <span className={cn(w9.performanceCalendarTabSum, 'tone-unrealized')}>
                                                 {fmtUsd(totalUnrealizedSum)}
                                               </span>
                                               <span className="performance-records-commission-sum"> {fmtUsd(totalCommissionUnrealized)}</span>
@@ -2419,7 +2421,7 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                                           )}
                                         </button>
                                       </div>
-                                      <div className="performance-calendar-symbol-tabs system-tabs" role="tablist" aria-label="Symbol">
+                                      <div className={cn(w9.performanceCalendarSymbolTabs, w9.systemTabs)} role="tablist" aria-label="Symbol">
                                         {symbolsForType.map((sym) => {
                                           const sum = symbolSumForType.get(sym) ?? 0
                                           const comm = symbolCommissionForType.get(sym) ?? 0
@@ -2444,9 +2446,9 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                                           )
                                         })}
                                       </div>
-                                      <div className="system-tab-panel performance-calendar-symbol-panel" role="tabpanel">
+                                      <div className={cn(w9.systemTabPanel, w9.performanceCalendarSymbolPanel)} role="tabpanel">
                                         {symbolsForType.length === 0 ? (
-                                          <p className="section-hint">
+                                          <p className={w9.sectionHint}>
                                             {selectedDayPnLType === 'realized'
                                               ? 'No realized (matched BUY↔SELL) pairs for this day.'
                                               : 'No unrealized (unmatched) executions for this day.'}
@@ -2541,8 +2543,8 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                                         : tabUnrealizedComm
                                       if (rows.length === 0) return null
                                       return (
-                                        <div key={key} className="performance-calendar-contract-group">
-                                          <h6 className="performance-calendar-contract-title">
+                                        <div key={key} className={w9.performanceCalendarContractGroup}>
+                                          <h6 className={w9.performanceCalendarContractTitle}>
                                             {symbol} {expiry} {strike} {rightFull !== '—' ? rightFull : ''}
                                             <span className={
                                               isRealizedTab
@@ -2639,10 +2641,10 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
                                                   <tr key={row.e.account_executions_id ?? idx} className="performance-calendar-row-execution">
                                                     <td>Execution</td>
                                                     <td>
-                                                      <span className="performance-calendar-exec-id-wrap">
+                                                      <span className={w9.performanceCalendarExecIdWrap}>
                                                         {ex.account_executions_id ?? '—'}
                                                         {isRealizedTab && linkIds.length > 0 ? (
-                                                          <span className="ledger-opt-link-stock-badges">
+                                                          <span className={w9.ledgerOptLinkStockBadges}>
                                                             {linkIds.map((lid) => (
                                                               <button
                                                                 key={lid}
@@ -2707,7 +2709,7 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
               })()}
           </>
         ) : (
-          <p className="section-hint">Select time range above and load data to see calendar.</p>
+          <p className={w9.sectionHint}>Select time range above and load data to see calendar.</p>
         )}
       </section>
 
@@ -2724,15 +2726,15 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
             {onTheFlyOpen ? 'Hide' : 'Show'}
           </Button>
         </div>
-        <p className="section-hint performance-on-the-fly-hint">
+        <p className={cn(w9.sectionHint, 'performance-on-the-fly-hint')}>
           TWS-side executions that are not already covered by the official book (same account and contract as a row in
           the Flex/Journal ledger). Option combo legs (<code className="performance-inline-code">BAG</code>) are
           omitted. Same time range and strategy filters as above.
         </p>
         {onTheFlyOpen && (
           <>
-            {onTheFlyLoading && <p className="section-hint">Loading…</p>}
-            {onTheFlyError && <p className="section-hint tone-negative">{onTheFlyError}</p>}
+            {onTheFlyLoading && <p className={w9.sectionHint}>Loading…</p>}
+            {onTheFlyError && <p className={cn(w9.sectionHint, 'tone-negative')}>{onTheFlyError}</p>}
             {!onTheFlyLoading && !onTheFlyError && onTheFlyPerf?.summary != null && (
               <div className="performance-on-the-fly-summary" aria-label="On the fly summary total">
                 <span className="performance-on-the-fly-summary-kv">
@@ -2809,7 +2811,7 @@ export function PerformancePage({ status, onViewChange }: PerformancePageProps) 
               )
             })()}
             {!onTheFlyLoading && !onTheFlyError && onTheFlyExecs.length === 0 && (
-              <p className="section-hint">No on-the-fly executions in this range.</p>
+              <p className={w9.sectionHint}>No on-the-fly executions in this range.</p>
             )}
             {!onTheFlyLoading && onTheFlyExecs.length > 0 && (
               <>

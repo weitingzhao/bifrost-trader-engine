@@ -1,4 +1,5 @@
 import { InfoTooltip } from '../../components/InfoTooltip'
+import { w9 } from '@/styles/wave9Classes'
 import { DEFAULT_HEARTBEAT_SEC } from './settingsConstants'
 
 export const DEFAULT_ACCOUNT_SYNC_HEARTBEAT_SEC = 5
@@ -17,12 +18,12 @@ export function HeartbeatSection({
   setAccountSyncIntervalSec,
 }: HeartbeatSectionProps) {
   return (
-    <div className="daemon-group" id="settings-heartbeat">
-      <div className="daemon-group-header">
-        <span className="daemon-group-title">Daemon App</span>
+    <div className={w9.daemonGroup} id="settings-heartbeat">
+      <div className={w9.daemonGroupHeader}>
+        <span className={w9.daemonGroupTitle}>Daemon App</span>
         <InfoTooltip text="Daemon heartbeat write interval (seconds); takes effect on next heartbeat." />
       </div>
-      <div className="daemon-group-body">
+      <div className={w9.daemonGroupBody}>
         <div className="settings-heartbeat-row">
           <label className="settings-heartbeat-label">
             <span className="settings-heartbeat-label-text">Strategy Trading Daemon Heartbeat</span>

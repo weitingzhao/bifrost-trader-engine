@@ -1,4 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { StatusResponse } from '../types'
 import { DraggableModal } from '../components/DraggableModal'
 import { InfoTooltip } from '../components/InfoTooltip'
@@ -1580,7 +1582,7 @@ export function MarketIngestOpsPage({
         <SettingsSection id="settings-ws-agent" aria-labelledby="local-control-agent-heading">
           <h3
             id="local-control-agent-heading"
-            className="daemon-group-title mb-2"
+            className={cn(w9.daemonGroupTitle, 'mb-2')}
           >
             <SettingsTitleLamp lamp={localAgentPanel.lamp as LampTone} title={localAgentPanel.detail}>
               <SettingsSidebarLampGlyph id="api-ops" />
@@ -1654,7 +1656,7 @@ export function MarketIngestOpsPage({
       </SettingsSection>
 
       <SettingsSection aria-labelledby="socket-logs-heading">
-        <h3 id="socket-logs-heading" className="daemon-group-title" style={{ marginBottom: 'var(--space-2)' }}>
+        <h3 id="socket-logs-heading" className={w9.daemonGroupTitle} style={{ marginBottom: 'var(--space-2)' }}>
           Logs
         </h3>
         <p className="massive-api-doc-hint" style={{ marginBottom: 'var(--space-3)' }}>

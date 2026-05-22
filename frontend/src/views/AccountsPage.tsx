@@ -1,3 +1,6 @@
+import { rl, fetchRefreshBtn } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useEffect, useMemo, useState } from 'react'
 import type { ExecutionFreshnessItem, IbAccountSnapshot, IbPositionRow, RealtimeQuote, StatusResponse } from '../types'
 import { fetchBarsBenchmark, fetchQuotes, fetchExecutionsFreshness, postExecutionsFetch, postExecutionsFetchFlex, postExecutionsFetchFlexUpload, subscribeQuotes } from '../api'
@@ -68,7 +71,7 @@ function AccountsCategoriesIcon({ size = 16 }: { size?: number }) {
 function ReplayRefreshIcon({ spinning, size = 14 }: { spinning?: boolean; size?: number }) {
   return (
     <svg
-      className={spinning ? 'replay-fetch-refresh-svg replay-fetch-refresh-svg--spin' : 'replay-fetch-refresh-svg'}
+      className={spinning ? 'rl.fetchRefreshSvg rl.fetchRefreshSvgSpin' : 'rl.fetchRefreshSvg'}
       viewBox="0 0 24 24"
       width={size}
       height={size}
@@ -494,7 +497,7 @@ export function AccountsPage({
           </SectionPageTitle>
           <div className="accounts-page-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
             <span
-              className="accounts-page-header-icon-wrap"
+              className={w9.accountsPageHeaderIconWrap}
               title="Manage position categories"
             >
               <button
@@ -511,7 +514,7 @@ export function AccountsPage({
               </button>
             </span>
             <span
-              className="accounts-page-header-icon-wrap"
+              className={w9.accountsPageHeaderIconWrap}
               title="Monitor Account Client fetches accounts & positions from IB, writes to DB, then updates display"
             >
               <button
@@ -527,24 +530,24 @@ export function AccountsPage({
             </span>
           </div>
         </div>
-        <section className="replay-section accounts-import-pills" aria-label="Execution import from Tws and Flex">
-          <div className="replay-toolbar">
-            <div className="replay-fetch-range-group" role="radiogroup" aria-label="Execution fetch time range">
-              <label className="replay-fetch-radio">
+        <section className={rl.section} aria-label="Execution import from Tws and Flex">
+          <div className={rl.toolbar}>
+            <div className={rl.fetchRangeGroup} role="radiogroup" aria-label="Execution fetch time range">
+              <label className={rl.fetchRadio}>
                 <input type="radio" name="ib-replay-fetch-days" value={1} checked={replayFetchDays === 1} onChange={() => setReplayFetchDays(1)} disabled={replaySyncing} />
                 <span>Today</span>
               </label>
-              <label className="replay-fetch-radio">
+              <label className={rl.fetchRadio}>
                 <input type="radio" name="ib-replay-fetch-days" value={3} checked={replayFetchDays === 3} onChange={() => setReplayFetchDays(3)} disabled={replaySyncing} />
                 <span>Last 3 days</span>
               </label>
-              <label className="replay-fetch-radio">
+              <label className={rl.fetchRadio}>
                 <input type="radio" name="ib-replay-fetch-days" value={7} checked={replayFetchDays === 7} onChange={() => setReplayFetchDays(7)} disabled={replaySyncing} />
                 <span>Last 7 days</span>
               </label>
               <button
                 type="button"
-                className={`replay-fetch-refresh-btn${replaySyncing ? ' replay-fetch-refresh-btn--busy' : ''}`}
+                className={fetchRefreshBtn(replaySyncing)}
                 disabled={replaySyncing}
                 onClick={() => {
                   void runTwsRefresh()
@@ -555,10 +558,10 @@ export function AccountsPage({
                 <span>{replaySyncing ? 'Fetching…' : 'Tws Refresh'}</span>
               </button>
             </div>
-            {replaySyncing && <span className="replay-sync-hint">Fetching executions from IB…</span>}
+            {replaySyncing && <span className={rl.syncHint}>Fetching executions from IB…</span>}
             {twsFetchMessage && (
               <p
-                className="section-hint"
+                className={w9.sectionHint}
                 style={{
                   marginTop: '0.25rem',
                   marginBottom: 0,
@@ -571,7 +574,7 @@ export function AccountsPage({
           </div>
         </section>
         {refreshFeedback != null && refreshFeedback !== '' && (
-          <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0, color: refreshFeedback.startsWith('Refreshed') ? 'var(--color-success, green)' : undefined }}>
+          <p className={w9.sectionHint} style={{ marginTop: '0.25rem', marginBottom: 0, color: refreshFeedback.startsWith('Refreshed') ? 'var(--color-success, green)' : undefined }}>
             {refreshFeedback}
           </p>
         )}
@@ -586,7 +589,7 @@ export function AccountsPage({
           <span><span className="ib-portfolio-overview-label">Unrealized PnL</span> {fmtUsd(overviewTotals.unrealizedPnl)}</span>
         </div>
 
-        <p className="section-hint">
+        <p className={w9.sectionHint}>
           No account data (IB not connected or daemon has not written yet; after connection, data is pulled on heartbeat and written to accounts / account_positions)
         </p>
 
@@ -606,11 +609,11 @@ export function AccountsPage({
             <div className="modal-content rounded-lg border border-border bg-background p-4 shadow-sm" style={{ maxWidth: '28rem' }} onClick={(e) => e.stopPropagation()}>
               <h3 id="category-modal-title" style={{ marginTop: 0 }}>Position categories</h3>
               {categoryError && (
-                <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem', color: 'var(--color-danger, #c00)' }}>
+                <p className={w9.sectionHint} style={{ marginTop: 0, marginBottom: '0.5rem', color: 'var(--color-danger, #c00)' }}>
                   {categoryError}
                 </p>
               )}
-              <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.75rem' }}>
+              <p className={w9.sectionHint} style={{ marginTop: 0, marginBottom: '0.75rem' }}>
                 Add or edit categories to tag STK positions (e.g. Dividend, Short-term). Use the Category column in the table to assign.
               </p>
               <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 1rem 0' }}>
@@ -658,7 +661,7 @@ export function AccountsPage({
                       <>
                         <span style={{ flex: 1 }}>{c.name}</span>
                         {c.description && (
-                          <span className="section-hint" style={{ fontSize: '0.85rem' }}>{c.description}</span>
+                          <span className={w9.sectionHint} style={{ fontSize: '0.85rem' }}>{c.description}</span>
                         )}
                         <Button
                           type="button"
@@ -794,7 +797,7 @@ export function AccountsPage({
         />
         <div className="accounts-page-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
           <span
-            className="accounts-page-header-icon-wrap"
+            className={w9.accountsPageHeaderIconWrap}
             title="Manage position categories"
           >
             <button
@@ -811,7 +814,7 @@ export function AccountsPage({
             </button>
           </span>
           <span
-            className="accounts-page-header-icon-wrap"
+            className={w9.accountsPageHeaderIconWrap}
             title="Monitor Account Client fetches accounts & positions from IB, writes to DB, then updates display"
           >
             <button
@@ -827,24 +830,24 @@ export function AccountsPage({
           </span>
         </div>
       </div>
-      <section className="replay-section accounts-import-pills" aria-label="Execution import from Tws and Flex">
-        <div className="replay-toolbar">
-          <div className="replay-fetch-range-group" role="radiogroup" aria-label="Execution fetch time range">
-            <label className="replay-fetch-radio">
+      <section className={rl.section} aria-label="Execution import from Tws and Flex">
+        <div className={rl.toolbar}>
+          <div className={rl.fetchRangeGroup} role="radiogroup" aria-label="Execution fetch time range">
+            <label className={rl.fetchRadio}>
               <input type="radio" name="ib-replay-fetch-days" value={1} checked={replayFetchDays === 1} onChange={() => setReplayFetchDays(1)} disabled={replaySyncing} />
               <span>Today</span>
             </label>
-            <label className="replay-fetch-radio">
+            <label className={rl.fetchRadio}>
               <input type="radio" name="ib-replay-fetch-days" value={3} checked={replayFetchDays === 3} onChange={() => setReplayFetchDays(3)} disabled={replaySyncing} />
               <span>Last 3 days</span>
             </label>
-            <label className="replay-fetch-radio">
+            <label className={rl.fetchRadio}>
               <input type="radio" name="ib-replay-fetch-days" value={7} checked={replayFetchDays === 7} onChange={() => setReplayFetchDays(7)} disabled={replaySyncing} />
               <span>Last 7 days</span>
             </label>
             <button
               type="button"
-              className={`replay-fetch-refresh-btn${replaySyncing ? ' replay-fetch-refresh-btn--busy' : ''}`}
+              className={fetchRefreshBtn(replaySyncing)}
               disabled={replaySyncing || flexSyncing}
               onClick={() => {
                 setFlexMessage(null)
@@ -856,7 +859,7 @@ export function AccountsPage({
               <span>{replaySyncing ? 'Fetching…' : 'Tws Refresh'}</span>
             </button>
           </div>
-          <div className="replay-fetch-range-group" role="group" aria-label="Flex executions import">
+          <div className={rl.fetchRangeGroup} role="group" aria-label="Flex executions import">
             <div className="accounts-flex-xml-toggle-wrap">
               <span className="accounts-flex-xml-toggle-label" id="flex-xml-local-label">
                 Use local Flex XML
@@ -875,7 +878,7 @@ export function AccountsPage({
                   if (!replaySyncing && !flexSyncing) setFlexUseUpload((v) => !v)
                 }}
               >
-                <span className="watchlist-toggle-switch-track" />
+                <span className={w9.watchlistToggleSwitchTrack} />
                 <span
                   className={
                     flexUseUpload ? 'watchlist-toggle-switch-thumb on' : 'watchlist-toggle-switch-thumb'
@@ -885,7 +888,7 @@ export function AccountsPage({
             </div>
             <button
               type="button"
-              className={`replay-fetch-refresh-btn${flexSyncing ? ' replay-fetch-refresh-btn--busy' : ''}`}
+              className={fetchRefreshBtn(flexSyncing)}
               disabled={replaySyncing || flexSyncing}
               onClick={async () => {
                 if (flexUseUpload) {
@@ -1046,12 +1049,12 @@ export function AccountsPage({
             </button>
           </div>
           {(replaySyncing || flexSyncing) && (
-            <span className="replay-sync-hint">
+            <span className={rl.syncHint}>
               {replaySyncing ? 'Fetching executions from IB (TWS)…' : 'Fetching executions from IB Flex…'}
             </span>
           )}
           {fetchedAt != null && Number.isFinite(fetchedAt) && (
-            <span className="section-hint replay-data-from-inline">
+            <span className={rl.dataFromInline}>
               Data from {new Date(fetchedAt * 1000).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'medium' })}
               , {(() => {
                 const sec = Math.floor(Date.now() / 1000 - fetchedAt)
@@ -1062,14 +1065,14 @@ export function AccountsPage({
             </span>
           )}
           {hasAccounts && (fetchedAt == null || !Number.isFinite(fetchedAt)) && (
-            <span className="section-hint replay-data-from-inline">
+            <span className={rl.dataFromInline}>
               Data time unknown (click "Refresh" to have monitor fetch from IB and write to DB)
             </span>
           )}
         </div>
         {twsFetchMessage && (
           <p
-            className="section-hint"
+            className={w9.sectionHint}
             style={{
               marginTop: '0.25rem',
               marginBottom: 0,
@@ -1080,14 +1083,14 @@ export function AccountsPage({
           </p>
         )}
         {flexMessage && (
-          <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
+          <p className={w9.sectionHint} style={{ marginTop: '0.25rem', marginBottom: 0 }}>
             {flexMessage}
           </p>
         )}
       </section>
 
       {refreshFeedback != null && refreshFeedback !== '' && (
-        <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0, color: refreshFeedback.startsWith('Refreshed') ? 'var(--color-success, green)' : undefined }}>
+        <p className={w9.sectionHint} style={{ marginTop: '0.25rem', marginBottom: 0, color: refreshFeedback.startsWith('Refreshed') ? 'var(--color-success, green)' : undefined }}>
           {refreshFeedback}
         </p>
       )}
@@ -1126,8 +1129,8 @@ export function AccountsPage({
         {portfolioCategoryPie.ringHasData && (
         <div className="ib-portfolio-overview-row-pie">
           <div className="coverage-asset-pie-section accounts-portfolio-by-category-pie">
-            <div className="coverage-asset-pie-header">
-              <span className="coverage-asset-pie-title">Portfolio by category</span>
+            <div className={w9.coverageAssetPieHeader}>
+              <span className={w9.coverageAssetPieTitle}>Portfolio by category</span>
               <InfoTooltip text="Stock = core STK (same ledger rules as Positions: not Fixed income or Cash-like), including SEPA, Option Pool, and other equity categories. Cash + Cash-like = IB TotalCashValue plus cash-like STK market value. Fixed income and Options can be excluded from the ring via Include/Exclude; dollar amounts stay in the legend. Center shows total net liquidation when available." />
             </div>
             {(() => {
@@ -1198,13 +1201,13 @@ export function AccountsPage({
                 includeOptInChart ? 'Options' : null,
               ].filter(Boolean) as string[]
               return (
-                <div className="coverage-asset-pie-body">
-                  <div className="coverage-asset-pie-chart-block">
+                <div className={w9.coverageAssetPieBody}>
+                  <div className={w9.coverageAssetPieChartBlock}>
                     <svg
                       width={132}
                       height={132}
                       viewBox="0 0 132 132"
-                      className="coverage-asset-pie-svg"
+                      className={w9.coverageAssetPieSvg}
                       role="img"
                       aria-label={`Ring chart: ${ringAriaParts.join(', ')} as shares of their sum`}
                     >
@@ -1246,18 +1249,18 @@ export function AccountsPage({
                       <text
                         x={cx}
                         y={cy + 11}
-                        className="coverage-asset-pie-center-sub"
+                        className={w9.coverageAssetPieCenterSub}
                         textAnchor="middle"
                         dominantBaseline="auto"
                       >
                         {centerSub}
                       </text>
                     </svg>
-                    <div className="coverage-asset-pie-bp-side">
-                      <div className="coverage-asset-pie-chart-toggle-row">
-                        <span className="coverage-asset-pie-bp-label">Fixed income in chart</span>
+                    <div className={w9.coverageAssetPieBpSide}>
+                      <div className={w9.coverageAssetPieChartToggleRow}>
+                        <span className={w9.coverageAssetPieBpLabel}>Fixed income in chart</span>
                         <div
-                          className="coverage-asset-pie-bubble-switch"
+                          className={w9.coverageAssetPieBubbleSwitch}
                           role="group"
                           aria-label="Include fixed income in ring denominator"
                         >
@@ -1279,10 +1282,10 @@ export function AccountsPage({
                           </button>
                         </div>
                       </div>
-                      <div className="coverage-asset-pie-chart-toggle-row">
-                        <span className="coverage-asset-pie-bp-label">Options in chart</span>
+                      <div className={w9.coverageAssetPieChartToggleRow}>
+                        <span className={w9.coverageAssetPieBpLabel}>Options in chart</span>
                         <div
-                          className="coverage-asset-pie-bubble-switch"
+                          className={w9.coverageAssetPieBubbleSwitch}
                           role="group"
                           aria-label="Include options in ring denominator"
                         >
@@ -1306,14 +1309,14 @@ export function AccountsPage({
                       </div>
                     </div>
                   </div>
-                  <div className="coverage-asset-pie-legend">
-                    <div className="coverage-asset-pie-legend-item">
-                      <span className="coverage-asset-pie-dot coverage-asset-pie-dot--stock" />
-                      <span className="coverage-asset-pie-legend-label">Stock</span>
-                      <span className="coverage-asset-pie-legend-pct">
+                  <div className={w9.coverageAssetPieLegend}>
+                    <div className={w9.coverageAssetPieLegendItem}>
+                      <span className={cn(w9.coverageAssetPieDot, 'coverage-asset-pie-dot--stock')} />
+                      <span className={w9.coverageAssetPieLegendLabel}>Stock</span>
+                      <span className={w9.coverageAssetPieLegendPct}>
                         {denom > 0 ? `${(pStock * 100).toFixed(1)}%` : '—'}
                       </span>
-                      <span className="coverage-asset-pie-legend-value">{fmtUsd(coreStockMV)}</span>
+                      <span className={w9.coverageAssetPieLegendValue}>{fmtUsd(coreStockMV)}</span>
                     </div>
                     <div
                       className={`coverage-asset-pie-legend-item${!includeFiInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
@@ -1323,20 +1326,20 @@ export function AccountsPage({
                           : undefined
                       }
                     >
-                      <span className="coverage-asset-pie-dot coverage-asset-pie-dot--fi" />
-                      <span className="coverage-asset-pie-legend-label">Fixed income</span>
-                      <span className="coverage-asset-pie-legend-pct">
+                      <span className={cn(w9.coverageAssetPieDot, 'coverage-asset-pie-dot--fi')} />
+                      <span className={w9.coverageAssetPieLegendLabel}>Fixed income</span>
+                      <span className={w9.coverageAssetPieLegendPct}>
                         {includeFiInChart && denom > 0 ? `${(pFixedIncome * 100).toFixed(1)}%` : '—'}
                       </span>
-                      <span className="coverage-asset-pie-legend-value">{fmtUsd(fixedIncomeMV)}</span>
+                      <span className={w9.coverageAssetPieLegendValue}>{fmtUsd(fixedIncomeMV)}</span>
                     </div>
-                    <div className="coverage-asset-pie-legend-item">
-                      <span className="coverage-asset-pie-dot coverage-asset-pie-dot--cash" />
-                      <span className="coverage-asset-pie-legend-label">Cash + Cash-like</span>
-                      <span className="coverage-asset-pie-legend-pct">
+                    <div className={w9.coverageAssetPieLegendItem}>
+                      <span className={cn(w9.coverageAssetPieDot, 'coverage-asset-pie-dot--cash')} />
+                      <span className={w9.coverageAssetPieLegendLabel}>Cash + Cash-like</span>
+                      <span className={w9.coverageAssetPieLegendPct}>
                         {denom > 0 && cashMergedMV > 0 ? `${(pCashMerged * 100).toFixed(1)}%` : '—'}
                       </span>
-                      <span className="coverage-asset-pie-legend-value">{fmtUsd(cashMergedMV)}</span>
+                      <span className={w9.coverageAssetPieLegendValue}>{fmtUsd(cashMergedMV)}</span>
                     </div>
                     <div
                       className={`coverage-asset-pie-legend-item${!includeOptInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
@@ -1346,12 +1349,12 @@ export function AccountsPage({
                           : undefined
                       }
                     >
-                      <span className="coverage-asset-pie-dot coverage-asset-pie-dot--opt" />
-                      <span className="coverage-asset-pie-legend-label">Options</span>
-                      <span className="coverage-asset-pie-legend-pct">
+                      <span className={cn(w9.coverageAssetPieDot, 'coverage-asset-pie-dot--opt')} />
+                      <span className={w9.coverageAssetPieLegendLabel}>Options</span>
+                      <span className={w9.coverageAssetPieLegendPct}>
                         {includeOptInChart && denom > 0 ? `${(pOpt * 100).toFixed(1)}%` : '—'}
                       </span>
-                      <span className="coverage-asset-pie-legend-value">{fmtUsd(optionsMV)}</span>
+                      <span className={w9.coverageAssetPieLegendValue}>{fmtUsd(optionsMV)}</span>
                     </div>
                   </div>
                 </div>
@@ -1429,7 +1432,7 @@ export function AccountsPage({
 
       <div className="ib-accounts-wrap">
         {accounts.length > 1 && (
-          <div className="system-tabs ib-accounts-tab-row" role="tablist" aria-label="Account">
+          <div className={cn(w9.systemTabs, 'ib-accounts-tab-row')} role="tablist" aria-label="Account">
             {accounts.map((a, idx) => (
               <button
                 key={a.account_id ?? idx}
@@ -1441,43 +1444,43 @@ export function AccountsPage({
               >
                 {a.account_id ?? `Account-${idx + 1}`}
                 {(a.positions?.length ?? 0) > 0 && (
-                  <span className="ib-accounts-tab-count">({a.positions!.length})</span>
+                  <span className={w9.ibAccountsTabCount}>({a.positions!.length})</span>
                 )}
               </button>
             ))}
           </div>
         )}
-        <div className="ib-accounts-content system-tab-panel">
+        <div className={cn(w9.ibAccountsContent, w9.systemTabPanel)}>
           {!acc ? (
-            <p className="section-hint" style={{ marginTop: '0.5rem' }}>No accounts</p>
+            <p className={w9.sectionHint} style={{ marginTop: '0.5rem' }}>No accounts</p>
           ) : (
           <>
-          <div className="ib-summary-panel">
-            <div className="ib-summary-row">
-            <div className="ib-summary-item">
+          <div className={w9.ibSummaryPanel}>
+            <div className={w9.ibSummaryRow}>
+            <div className={w9.ibSummaryItem}>
               <span className="label">Account</span>
               <span className="value">{aid}</span>
             </div>
             {netLiq != null && Number.isFinite(netLiq) && (
-              <div className="ib-summary-item">
+              <div className={w9.ibSummaryItem}>
                 <span className="label">Net liquidation</span>
                 <span className="value">{fmtUsd(netLiq)}</span>
               </div>
             )}
             {totalCash != null && Number.isFinite(totalCash) && (
-              <div className="ib-summary-item">
+              <div className={w9.ibSummaryItem}>
                 <span className="label">Total cash</span>
                 <span className="value">{fmtUsd(totalCash)}</span>
               </div>
             )}
             {buyingPower != null && Number.isFinite(buyingPower) && (
-              <div className="ib-summary-item">
+              <div className={w9.ibSummaryItem}>
                 <span className="label">Buying power</span>
                 <span className="value">{fmtUsd(buyingPower)}</span>
               </div>
             )}
-            <section className="ib-summary-ib-section" aria-label="IB execution data">
-              <div className="ib-summary-item">
+            <section className={w9.ibSummaryIbSection} aria-label="IB execution data">
+              <div className={w9.ibSummaryItem}>
                 <span className="label">IB Flex</span>
                 <span className="value">
                   {execFreshnessForAccount.ibFlex
@@ -1485,7 +1488,7 @@ export function AccountsPage({
                     : '—'}
                 </span>
               </div>
-              <div className="ib-summary-item">
+              <div className={w9.ibSummaryItem}>
                 <span className="label">IB Stream</span>
                 <span className="value">
                   {execFreshnessForAccount.ibStream
@@ -1497,14 +1500,14 @@ export function AccountsPage({
             </div>
           </div>
 
-          <div className="ib-positions-title">Stock positions</div>
+          <div className={w9.ibPositionsTitle}>Stock positions</div>
           {stockPositions.length === 0 ? (
-            <p className="ib-positions-empty">None</p>
+            <p className={w9.ibPositionsEmpty}>None</p>
           ) : (
             <>
               <div style={{ marginBottom: '0.35rem' }} />
               <div className="ib-accounts-stock-table-wrap">
-              <table className="ib-positions-table ib-accounts-stock-positions">
+              <table className={cn(w9.ibPositionsTable, 'ib-accounts-stock-positions')}>
                 <colgroup>
                   <col className="ib-acs-col-symbol" />
                   <col className="ib-acs-col-qty" />
@@ -1543,7 +1546,7 @@ export function AccountsPage({
                       <td colSpan={13}>
                         <button
                           type="button"
-                          className="ib-stock-group-header-btn"
+                          className={w9.ibStockGroupHeaderBtn}
                           onClick={() => {
                             setCategoryModalOpen(true)
                             setCategoryAssignTab('host')
@@ -1849,7 +1852,7 @@ export function AccountsPage({
                 })
                 const dailyPct = dailyDenom !== 0 && Number.isFinite(sumDailyDollar) ? (sumDailyDollar / dailyDenom) * 100 : null
                 return (
-                  <div className="ib-positions-empty ib-positions-stock-totals" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
+                  <div className={cn(w9.ibPositionsEmpty, 'ib-positions-stock-totals')} style={{ marginTop: '0.5rem', fontWeight: 600 }}>
                     <span className="ib-positions-stock-totals__metric">
                       <span className="ib-positions-stock-totals__k">Stock total cost:</span>{' '}
                       <span className="ib-positions-stock-totals__v">{fmtUsd(sumTotal)}</span>
@@ -1900,13 +1903,13 @@ export function AccountsPage({
             </>
           )}
 
-          <div className="ib-positions-title" style={{ marginTop: '1rem' }}>Option positions</div>
+          <div className={w9.ibPositionsTitle} style={{ marginTop: '1rem' }}>Option positions</div>
           {optionPositions.length === 0 ? (
-            <p className="ib-positions-empty">None</p>
+            <p className={w9.ibPositionsEmpty}>None</p>
           ) : (
             <>
               <div className="ib-accounts-stock-table-wrap">
-              <table className="ib-positions-table ib-accounts-option-positions">
+              <table className={cn(w9.ibPositionsTable, 'ib-accounts-option-positions')}>
                 <thead>
                   <tr>
                     <th>Symbol</th>
@@ -2006,18 +2009,18 @@ export function AccountsPage({
                         <td>{sideLabel}</td>
                         <td>{pos.avgCost != null ? fmtUsd(pos.avgCost) : '—'}</td>
                         <td>{premium != null ? fmtUsd(premium) : '—'}</td>
-                        <td className="ib-accounts-opt-details">
+                        <td className={w9.ibAccountsOptDetails}>
                           {hasDetails ? (
-                            <div className="ib-accounts-opt-details-lines">
+                            <div className={w9.ibAccountsOptDetailsLines}>
                               {intrinsic != null && Number.isFinite(intrinsic) && (
                                 <div>
-                                  <span className="ib-accounts-opt-details-k">Intrinsic</span>{' '}
+                                  <span className={w9.ibAccountsOptDetailsK}>Intrinsic</span>{' '}
                                   {fmtUsd(intrinsic)}
                                 </div>
                               )}
-                              {strategyName !== '' && <div className="ib-accounts-opt-details-strategy">{strategyName}</div>}
+                              {strategyName !== '' && <div className={w9.ibAccountsOptDetailsStrategy}>{strategyName}</div>}
                               {instanceLabel !== '' && (
-                                <div className="ib-accounts-opt-details-instance section-hint">{instanceLabel}</div>
+                                <div className={cn(w9.ibAccountsOptDetailsInstance, w9.sectionHint)}>{instanceLabel}</div>
                               )}
                             </div>
                           ) : (
@@ -2092,10 +2095,10 @@ export function AccountsPage({
                 }, 0)
                 if (!Number.isFinite(sumPremium)) return null
                 return (
-                  <p className="ib-positions-empty" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
+                  <p className={w9.ibPositionsEmpty} style={{ marginTop: '0.5rem', fontWeight: 600 }}>
                     Option premium total: {fmtUsd(sumPremium)}
                     {spot != null && (
-                      <span className="section-desc" style={{ marginLeft: '0.5rem' }}>
+                      <span className={w9.sectionDesc} style={{ marginLeft: '0.5rem' }}>
                         (spot {fmtUsd(spot)})
                       </span>
                     )}
@@ -2125,11 +2128,11 @@ export function AccountsPage({
           <div className="modal-content rounded-lg border border-border bg-background p-4 shadow-sm" style={{ maxWidth: '30rem' }} onClick={(e) => e.stopPropagation()}>
             <h3 id="category-modal-title" style={{ marginTop: 0 }}>Position categories</h3>
             {categoryError && (
-              <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem', color: 'var(--color-danger, #c00)' }}>
+              <p className={w9.sectionHint} style={{ marginTop: 0, marginBottom: '0.5rem', color: 'var(--color-danger, #c00)' }}>
                 {categoryError}
               </p>
             )}
-            <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.75rem' }}>
+            <p className={w9.sectionHint} style={{ marginTop: 0, marginBottom: '0.75rem' }}>
               Add or edit categories, then assign them to STK positions below. Positions are grouped by category in the table.
             </p>
             <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 1rem 0' }}>
@@ -2177,7 +2180,7 @@ export function AccountsPage({
                     <>
                       <span style={{ flex: 1 }}>{c.name}</span>
                       {c.description && (
-                        <span className="section-hint" style={{ fontSize: '0.85rem' }}>{c.description}</span>
+                        <span className={w9.sectionHint} style={{ fontSize: '0.85rem' }}>{c.description}</span>
                       )}
                       <Button
                         type="button"
@@ -2236,7 +2239,7 @@ export function AccountsPage({
               <strong style={{ display: 'block', marginBottom: '0.5rem' }}>Assign category to positions</strong>
               {showCategoryAssignHostSecondaryTabs && (
                 <div
-                  className="system-tabs ib-accounts-tab-row"
+                  className={cn(w9.systemTabs, 'ib-accounts-tab-row')}
                   style={{ marginBottom: '0.65rem' }}
                   role="tablist"
                   aria-label="Host or Secondary account for category tags"
@@ -2250,7 +2253,7 @@ export function AccountsPage({
                   >
                     Host
                     {hostAssignId ? (
-                      <span className="ib-accounts-tab-count" title={hostAssignId}>
+                      <span className={w9.ibAccountsTabCount} title={hostAssignId}>
                         ({hostAssignId})
                       </span>
                     ) : null}
@@ -2264,14 +2267,14 @@ export function AccountsPage({
                   >
                     Secondary
                     {secondaryAssignId ? (
-                      <span className="ib-accounts-tab-count" title={secondaryAssignId}>
+                      <span className={w9.ibAccountsTabCount} title={secondaryAssignId}>
                         ({secondaryAssignId})
                       </span>
                     ) : null}
                   </button>
                 </div>
               )}
-              <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+              <p className={w9.sectionHint} style={{ marginTop: 0, marginBottom: '0.5rem', fontSize: '0.85rem' }}>
                 {(() => {
                   if (showCategoryAssignHostSecondaryTabs) {
                     return categoryAssignTab === 'host'
@@ -2294,7 +2297,7 @@ export function AccountsPage({
                     ? (categoryAssignTab === 'secondary' ? secondaryAssignId : hostAssignId)
                     : (hostAssignId || acc?.account_id || '')
                   return (
-                    <p className="section-hint" style={{ margin: 0, fontSize: '0.85rem' }}>
+                    <p className={w9.sectionHint} style={{ margin: 0, fontSize: '0.85rem' }}>
                       {wantId
                         ? `Account ${wantId} is not in the current portfolio snapshot. Refresh accounts from IB, or verify Settings → Event account IDs.`
                         : 'Configure Host account under Settings → IB Connection, or pick an account tab on this page when no Host ID is set.'}
@@ -2305,7 +2308,7 @@ export function AccountsPage({
                   (p) => (p.secType ?? '').toUpperCase() === 'STK',
                 )
                 if (stkPositions.length === 0) {
-                  return <p className="section-hint" style={{ margin: 0, fontSize: '0.85rem' }}>No STK positions in this account.</p>
+                  return <p className={w9.sectionHint} style={{ margin: 0, fontSize: '0.85rem' }}>No STK positions in this account.</p>
                 }
                 return (
                   <ul style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: '12rem', overflowY: 'auto' }}>

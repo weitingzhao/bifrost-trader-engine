@@ -1,3 +1,5 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { StrategyOpportunity } from '../../api'
@@ -189,18 +191,18 @@ export function LinkPositionModal({ open, context, onClose, onSuccess }: LinkPos
       aria-modal="true"
       aria-labelledby="link-position-modal-title"
     >
-      <div className="modal-panel replay-exec-modal link-exec-modal" onClick={ev => ev.stopPropagation()}>
+      <div className={rl.execModal} onClick={ev => ev.stopPropagation()}>
         <h3 id="link-position-modal-title">Tag executions with strategy</h3>
-        <p className="section-hint" style={{ marginTop: 0 }}>
+        <p className={w9.sectionHint} style={{ marginTop: 0 }}>
           Assign strategy opportunity and instance to all executions for this contract. One position can have multiple strategies.
         </p>
-        <p className="section-hint replay-muted" style={{ fontSize: '0.85rem', marginBottom: '0.75rem' }}>
+        <p className={rl.muted} style={{ fontSize: '0.85rem', marginBottom: '0.75rem' }}>
           {context.symbol ?? '—'} · {context.account_id ?? '—'} · {context.position != null ? `${context.position > 0 ? 'Long' : 'Short'} ${Math.abs(context.position)}` : '—'}
           {context.avgCost != null ? ` @ ${fmtUsd(context.avgCost)}` : ''}
         </p>
-        {formError ? <p className="section-hint replay-form-error">{formError}</p> : null}
-        <form onSubmit={onSubmit} className="replay-exec-form">
-          <div className="replay-exec-form-row">
+        {formError ? <p className={rl.formError}>{formError}</p> : null}
+        <form onSubmit={onSubmit} className={rl.execForm}>
+          <div className={rl.execFormRow}>
             <label htmlFor="link-pos-strategy-opp">
               Strategy opportunity
               {symbolFiltered && (
@@ -227,7 +229,7 @@ export function LinkPositionModal({ open, context, onClose, onSuccess }: LinkPos
               ))}
             </select>
             {symbolFiltered && filteredOpportunities.length === 0 && (
-              <p className="section-hint replay-muted link-exec-no-match-hint">
+              <p className={rl.muted}>
                 No opportunities match symbol {symbol}. Check scope settings in Strategy / Opportunity.
               </p>
             )}
@@ -255,7 +257,7 @@ export function LinkPositionModal({ open, context, onClose, onSuccess }: LinkPos
               </div>
 
               {instanceMode === 'existing' ? (
-                <div className="replay-exec-form-row link-exec-instance-row">
+                <div className={rl.execFormRow}>
                   <label htmlFor="link-pos-strategy-inst">Strategy instance</label>
                   <select
                     id="link-pos-strategy-inst"
@@ -270,14 +272,14 @@ export function LinkPositionModal({ open, context, onClose, onSuccess }: LinkPos
                     ))}
                   </select>
                   {instances.length === 0 && (
-                    <p className="section-hint replay-muted link-exec-no-instances">
+                    <p className={rl.muted}>
                       No instances yet for this opportunity. Switch to &quot;Create new&quot; to add one.
                     </p>
                   )}
                 </div>
               ) : (
                 <div className="link-exec-new-instance-fields">
-                  <div className="replay-exec-form-row">
+                  <div className={rl.execFormRow}>
                     <label htmlFor="link-pos-new-inst-date">Opened at</label>
                     <input
                       id="link-pos-new-inst-date"
@@ -287,17 +289,17 @@ export function LinkPositionModal({ open, context, onClose, onSuccess }: LinkPos
                       required
                     />
                   </div>
-                  <div className="replay-exec-form-row link-exec-account-row">
+                  <div className={rl.execFormRow}>
                     <span className="link-exec-account-label">Account</span>
                     <span className="link-exec-account-readonly" title={executionAccountId || undefined}>
                       {executionAccountId || '—'}
                     </span>
-                    <p className="section-hint replay-muted link-exec-account-hint">
+                    <p className={rl.muted}>
                       Uses this position&apos;s account; not editable.
                     </p>
                   </div>
-                  <div className="replay-exec-form-row">
-                    <label htmlFor="link-pos-new-inst-label">Label <span className="replay-muted">(optional)</span></label>
+                  <div className={rl.execFormRow}>
+                    <label htmlFor="link-pos-new-inst-label">Label <span className={rl.muted}>(optional)</span></label>
                     <input
                       id="link-pos-new-inst-label"
                       type="text"

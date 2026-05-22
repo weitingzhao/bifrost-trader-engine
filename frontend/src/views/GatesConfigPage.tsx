@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
+import { msgErrorClass, msgOkClass } from '@/components/shared/appUi'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { StatusResponse } from '../types'
 import {
   fetchGateSafetySets,
@@ -317,11 +320,11 @@ export function GatesConfigPage({
             {status?.strategy?.active?.allocation?.id != null && ` (${status?.strategy?.active?.allocation?.id})`}
           </div>
         </div>
-        <p className="section-hint">Daemon uses this on next start.</p>
+        <p className={w9.sectionHint}>Daemon uses this on next start.</p>
       </section>
 
       {setActiveMsg.text && (
-        <p className={setActiveMsg.isErr ? 'msg-error' : 'msg-ok'} style={{ marginBottom: 'var(--space-2)' }}>
+        <p className={setActiveMsg.isErr ? msgErrorClass : msgOkClass} style={{ marginBottom: 'var(--space-2)' }}>
           {setActiveMsg.text}
         </p>
       )}
@@ -333,8 +336,8 @@ export function GatesConfigPage({
             Create gate set
           </Button>
         </div>
-        {loading && <p className="section-hint">Loading…</p>}
-        {error && <p className="msg-error">{error}</p>}
+        {loading && <p className={w9.sectionHint}>Loading…</p>}
+        {error && <p className={w9.msgError}>{error}</p>}
         {!loading && !error && (
           <div className="table-wrap">
             <table className="data-table">
@@ -374,7 +377,7 @@ export function GatesConfigPage({
           </div>
         )}
         {!loading && !error && sets.length === 0 && (
-          <p className="section-hint">No gate safety sets. Create one to get started.</p>
+          <p className={w9.sectionHint}>No gate safety sets. Create one to get started.</p>
         )}
       </section>
 
@@ -384,14 +387,14 @@ export function GatesConfigPage({
             <h3 className="section-subtitle" style={{ marginBottom: 0 }}>
               {formOpen === 'create' ? 'New gate set' : `Edit gate set ${formOpen}`}
             </h3>
-            {formLoading && !formPayload.name && <p className="section-hint" style={{ marginTop: 'var(--space-2)', marginBottom: 0 }}>Loading…</p>}
-            {formError && <p className="msg-error" style={{ marginTop: 'var(--space-2)', marginBottom: 0 }}>{formError}</p>}
+            {formLoading && !formPayload.name && <p className={w9.sectionHint} style={{ marginTop: 'var(--space-2)', marginBottom: 0 }}>Loading…</p>}
+            {formError && <p className={w9.msgError} style={{ marginTop: 'var(--space-2)', marginBottom: 0 }}>{formError}</p>}
           </div>
 
           <div className="gates-form">
-            <div className="gates-form-group gates-form-group--metadata-root">
-              <h4 className="gates-form-group-title">Metadata</h4>
-              <div className="gates-form-row">
+            <div className={cn(w9.gatesFormGroup, 'gates-form-group--metadata-root')}>
+              <h4 className={w9.gatesFormGroupTitle}>Metadata</h4>
+              <div className={w9.gatesFormRow}>
                 <label>Name</label>
                 <input
                   type="text"
@@ -400,7 +403,7 @@ export function GatesConfigPage({
                   placeholder="Gate set name"
                 />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>Version</label>
                 <input
                   type="number"
@@ -413,7 +416,7 @@ export function GatesConfigPage({
                 Optional filters by strategy dimensions. Leave blank to apply broadly.
               </p>
               {GATE_DIM_FIELDS.map(({ payloadKey, dimType, label }) => (
-                <div key={payloadKey} className="gates-form-row">
+                <div key={payloadKey} className={w9.gatesFormRow}>
                   <label>{label}</label>
                   <AppSelect
                     value={formPayload[payloadKey] ?? ''}
@@ -425,7 +428,7 @@ export function GatesConfigPage({
                   />
                 </div>
               ))}
-              <div className="gates-form-row gates-form-row--full">
+              <div className={cn(w9.gatesFormRow, 'gates-form-row--full')}>
                 <label className="toggle-switch" style={{ cursor: 'pointer' }}>
                   <input
                     type="checkbox"
@@ -433,34 +436,34 @@ export function GatesConfigPage({
                     onChange={(e) => updateForm({ is_active: e.target.checked })}
                     aria-label="Active"
                   />
-                  <span className="toggle-switch-caption">Active</span>
+                  <span className={w9.toggleSwitchCaption}>Active</span>
                 </label>
               </div>
             </div>
 
-            <div className="gates-form-group">
-              <h4 className="gates-form-group-title">Strategy (structure &amp; earnings)</h4>
-              <div className="gates-form-row">
+            <div className={w9.gatesFormGroup}>
+              <h4 className={w9.gatesFormGroupTitle}>Strategy (structure &amp; earnings)</h4>
+              <div className={w9.gatesFormRow}>
                 <label>min_dte</label>
                 <input type="number" value={st.min_dte ?? 21} onChange={(e) => updateGates('strategy.structure.min_dte', parseInt(e.target.value, 10) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>max_dte</label>
                 <input type="number" value={st.max_dte ?? 35} onChange={(e) => updateGates('strategy.structure.max_dte', parseInt(e.target.value, 10) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>atm_band_pct</label>
                 <input type="number" step="0.01" value={st.atm_band_pct ?? 0.03} onChange={(e) => updateGates('strategy.structure.atm_band_pct', parseFloat(e.target.value) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>blackout_days_before</label>
                 <input type="number" value={earn.blackout_days_before ?? 3} onChange={(e) => updateGates('strategy.earnings.blackout_days_before', parseInt(e.target.value, 10) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>blackout_days_after</label>
                 <input type="number" value={earn.blackout_days_after ?? 1} onChange={(e) => updateGates('strategy.earnings.blackout_days_after', parseInt(e.target.value, 10) || 0)} />
               </div>
-              <div className="gates-form-row gates-form-row--full">
+              <div className={cn(w9.gatesFormRow, 'gates-form-row--full')}>
                 <label className="toggle-switch" style={{ cursor: 'pointer' }}>
                   <input
                     type="checkbox"
@@ -468,90 +471,90 @@ export function GatesConfigPage({
                     onChange={(e) => updateGates('strategy.trading_hours_only', e.target.checked)}
                     aria-label="Trading hours only"
                   />
-                  <span className="toggle-switch-caption">trading_hours_only</span>
+                  <span className={w9.toggleSwitchCaption}>trading_hours_only</span>
                 </label>
               </div>
             </div>
 
-            <div className="gates-form-group">
-              <h4 className="gates-form-group-title">State (delta, market, liquidity, system)</h4>
-              <div className="gates-form-row">
+            <div className={w9.gatesFormGroup}>
+              <h4 className={w9.gatesFormGroupTitle}>State (delta, market, liquidity, system)</h4>
+              <div className={w9.gatesFormRow}>
                 <label>epsilon_band</label>
                 <input type="number" value={delta.epsilon_band ?? 10} onChange={(e) => updateGates('state.delta.epsilon_band', parseInt(e.target.value, 10) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>threshold_hedge_shares</label>
                 <input type="number" value={delta.threshold_hedge_shares ?? 25} onChange={(e) => updateGates('state.delta.threshold_hedge_shares', parseInt(e.target.value, 10) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>max_delta_limit</label>
                 <input type="number" value={delta.max_delta_limit ?? 500} onChange={(e) => updateGates('state.delta.max_delta_limit', parseInt(e.target.value, 10) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>vol_window_min</label>
                 <input type="number" value={market.vol_window_min ?? 5} onChange={(e) => updateGates('state.market.vol_window_min', parseInt(e.target.value, 10) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>stale_ts_threshold_ms</label>
                 <input type="number" value={market.stale_ts_threshold_ms ?? 5000} onChange={(e) => updateGates('state.market.stale_ts_threshold_ms', parseInt(e.target.value, 10) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>wide_spread_pct</label>
                 <input type="number" step="0.01" value={liquidity.wide_spread_pct ?? 0.1} onChange={(e) => updateGates('state.liquidity.wide_spread_pct', parseFloat(e.target.value) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>extreme_spread_pct</label>
                 <input type="number" step="0.01" value={liquidity.extreme_spread_pct ?? 0.5} onChange={(e) => updateGates('state.liquidity.extreme_spread_pct', parseFloat(e.target.value) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>data_lag_threshold_ms</label>
                 <input type="number" value={system.data_lag_threshold_ms ?? 1000} onChange={(e) => updateGates('state.system.data_lag_threshold_ms', parseInt(e.target.value, 10) || 0)} />
               </div>
             </div>
 
-            <div className="gates-form-group">
-              <h4 className="gates-form-group-title">Intent (hedge)</h4>
-              <div className="gates-form-row">
+            <div className={w9.gatesFormGroup}>
+              <h4 className={w9.gatesFormGroupTitle}>Intent (hedge)</h4>
+              <div className={w9.gatesFormRow}>
                 <label>min_hedge_shares</label>
                 <input type="number" value={intentHedge.min_hedge_shares ?? 10} onChange={(e) => updateGates('intent.hedge.min_hedge_shares', parseInt(e.target.value, 10) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>cooldown_seconds</label>
                 <input type="number" value={intentHedge.cooldown_seconds ?? 60} onChange={(e) => updateGates('intent.hedge.cooldown_seconds', parseInt(e.target.value, 10) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>max_hedge_shares_per_order</label>
                 <input type="number" value={intentHedge.max_hedge_shares_per_order ?? 500} onChange={(e) => updateGates('intent.hedge.max_hedge_shares_per_order', parseInt(e.target.value, 10) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>min_price_move_pct</label>
                 <input type="number" step="0.01" value={intentHedge.min_price_move_pct ?? 0.2} onChange={(e) => updateGates('intent.hedge.min_price_move_pct', parseFloat(e.target.value) || 0)} />
               </div>
             </div>
 
-            <div className="gates-form-group">
-              <h4 className="gates-form-group-title">Guard (risk)</h4>
-              <div className="gates-form-row">
+            <div className={w9.gatesFormGroup}>
+              <h4 className={w9.gatesFormGroupTitle}>Guard (risk)</h4>
+              <div className={w9.gatesFormRow}>
                 <label>max_daily_hedge_count</label>
                 <input type="number" value={guardRisk.max_daily_hedge_count ?? 50} onChange={(e) => updateGates('guard.risk.max_daily_hedge_count', parseInt(e.target.value, 10) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>max_position_shares</label>
                 <input type="number" value={guardRisk.max_position_shares ?? 2000} onChange={(e) => updateGates('guard.risk.max_position_shares', parseInt(e.target.value, 10) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>max_daily_loss_usd</label>
                 <input type="number" value={guardRisk.max_daily_loss_usd ?? 5000} onChange={(e) => updateGates('guard.risk.max_daily_loss_usd', parseFloat(e.target.value) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>max_net_delta_shares</label>
                 <input type="number" value={guardRisk.max_net_delta_shares ?? 100} onChange={(e) => updateGates('guard.risk.max_net_delta_shares', parseInt(e.target.value, 10) || 0)} />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>max_spread_pct</label>
                 <input type="number" step="0.01" value={guardRisk.max_spread_pct ?? 0.05} onChange={(e) => updateGates('guard.risk.max_spread_pct', parseFloat(e.target.value) || 0)} />
               </div>
-              <div className="gates-form-row gates-form-row--full">
+              <div className={cn(w9.gatesFormRow, 'gates-form-row--full')}>
                 <label className="toggle-switch" style={{ cursor: 'pointer' }}>
                   <input
                     type="checkbox"
@@ -559,15 +562,15 @@ export function GatesConfigPage({
                     onChange={(e) => updateGates('guard.risk.paper_trade', e.target.checked)}
                     aria-label="Paper trade"
                   />
-                  <span className="toggle-switch-caption">paper_trade</span>
+                  <span className={w9.toggleSwitchCaption}>paper_trade</span>
                 </label>
               </div>
             </div>
 
-            <div className="gates-form-group">
-              <h4 className="gates-form-group-title">Earnings dates (blacklist YYYY-MM-DD)</h4>
+            <div className={w9.gatesFormGroup}>
+              <h4 className={w9.gatesFormGroupTitle}>Earnings dates (blacklist YYYY-MM-DD)</h4>
               {earningsDates.map((d, i) => (
-                <div key={i} className="gates-form-row gates-form-row--inline">
+                <div key={i} className={cn(w9.gatesFormRow, 'gates-form-row--inline')}>
                   <input
                     type="date"
                     value={d}
@@ -576,12 +579,12 @@ export function GatesConfigPage({
                   <Button type="button" variant="secondary" size="sm" onClick={() => removeEarningsDate(i)}>Remove</Button>
                 </div>
               ))}
-              <div className="gates-form-row gates-form-row--full">
+              <div className={cn(w9.gatesFormRow, 'gates-form-row--full')}>
                 <Button type="button" variant="secondary" onClick={addEarningsDate}>Add date</Button>
               </div>
             </div>
 
-            <div className="gates-form-actions">
+            <div className={w9.gatesFormActions}>
               <Button type="button" onClick={submitForm} disabled={formLoading}>
                 {formOpen === 'create' ? 'Create' : 'Update'}
               </Button>

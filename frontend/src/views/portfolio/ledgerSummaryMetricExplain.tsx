@@ -1,5 +1,8 @@
 /** English copy for Trade ledger Summary metric explain panel (UI strings). */
 
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { ReactNode } from 'react'
 import type { LedgerMetricExplainKind } from './ledgerMetricExplainKinds'
 import {
@@ -31,7 +34,7 @@ export function ledgerMetricExplainTitle(kind: LedgerMetricExplainKind): string 
 }
 
 function SectionTitle({ n, children }: { n: 1 | 2 | 3 | 4; children: ReactNode }) {
-  return <h4 className="ledger-metric-explain-section">{n}. {children}</h4>
+  return <h4 className={w9.ledgerMetricExplainSection}>{n}. {children}</h4>
 }
 
 function LedgerMetricExplainLiveExample({ payload }: { payload: LedgerMetricExplainPayload }) {
@@ -45,27 +48,27 @@ function LedgerMetricExplainLiveExample({ payload }: { payload: LedgerMetricExpl
         {' · '}
         <strong>Bucket:</strong> {payload.bucketLabel}
       </p>
-      <p className="ledger-metric-explain-live-metric">
+      <p className={w9.ledgerMetricExplainLiveMetric}>
         <strong>{payload.metricLabel}</strong> — value shown in the grid:{' '}
         <strong>{payload.displayedFormatted}</strong>
-        <span className="ledger-metric-explain-live-raw">
+        <span className={w9.ledgerMetricExplainLiveRaw}>
           {' '}
           (numeric:{' '}
           {Number.isFinite(payload.displayedRaw) ? payload.displayedRaw.toFixed(4) : '—'})
         </span>
       </p>
-      <p className="ledger-metric-explain-live-sub">Substitution with rows in this bucket:</p>
+      <p className={w9.ledgerMetricExplainLiveSub}>Substitution with rows in this bucket:</p>
       {payload.formulaLines.map((line, i) => (
-        <pre key={i} className="ledger-metric-explain-formula ledger-metric-explain-formula--compact">
+        <pre key={i} className={cn(w9.ledgerMetricExplainFormula, 'ledger-metric-explain-formula--compact')}>
           {line}
         </pre>
       ))}
       {payload.emptyMessage ? (
-        <p className="ledger-metric-explain-note">{payload.emptyMessage}</p>
+        <p className={w9.ledgerMetricExplainNote}>{payload.emptyMessage}</p>
       ) : null}
       {payload.detailRows.length > 0 ? (
-        <div className="ledger-metric-explain-table-wrap">
-          <table className="ledger-metric-explain-table">
+        <div className={w9.ledgerMetricExplainTableWrap}>
+          <table className={w9.ledgerMetricExplainTable}>
             <thead>
               <tr>
                 {payload.detailColumnHeaders.map(h => (
@@ -84,7 +87,7 @@ function LedgerMetricExplainLiveExample({ payload }: { payload: LedgerMetricExpl
             </tbody>
           </table>
           {payload.truncatedCount > 0 ? (
-            <p className="ledger-metric-explain-note">
+            <p className={w9.ledgerMetricExplainNote}>
               … and {payload.truncatedCount} more row(s) not shown (display limit {LEDGER_METRIC_EXPLAIN_MAX_ROWS}
               ).
             </p>
@@ -144,7 +147,7 @@ export function LedgerSummaryMetricExplainContent({
             </li>
             <li>
               For the cell labeled period key <code>P*</code>:
-              <pre className="ledger-metric-explain-formula">
+              <pre className={w9.ledgerMetricExplainFormula}>
                 {`value(P*) = Σ  g.realized_pnl
   over all g ∈ G such that periodKey(m(g)) = P*`}
               </pre>
@@ -156,8 +159,8 @@ export function LedgerSummaryMetricExplainContent({
               The number is <code>fmtUsd0(value)</code> — USD with no decimals in this formatter.
             </li>
             <li>
-              Color: <span className="replay-pnl-realized">positive</span> &gt; 0,{' '}
-              <span className="replay-pnl-detail-negative">negative</span> &lt; 0, neutral gray for exactly 0.
+              Color: <span className={rl.pnlRealized}>positive</span> &gt; 0,{' '}
+              <span className={rl.pnlDetailNegative}>negative</span> &lt; 0, neutral gray for exactly 0.
             </li>
             <li>
               Same row also shows <code>N groups</code> and the period label (e.g. <code>2024 Q2</code>).
@@ -182,11 +185,11 @@ export function LedgerSummaryMetricExplainContent({
           <p>
             Let <code>G</code> be all closed option groups in scope after filters.
           </p>
-          <pre className="ledger-metric-explain-formula">
+          <pre className={w9.ledgerMetricExplainFormula}>
             {`totalRealizedPnL = Σ  g.realized_pnl
   for g ∈ G where g.status === 'realized'`}
           </pre>
-          <p className="ledger-metric-explain-note">
+          <p className={w9.ledgerMetricExplainNote}>
             The grid above does not change this total — it is the full sum over the same filtered closed groups.
           </p>
           <SectionTitle n={3}>Result on screen</SectionTitle>
@@ -240,7 +243,7 @@ export function LedgerSummaryMetricExplainContent({
             </li>
             <li>
               For the cell with period key <code>P*</code>:
-              <pre className="ledger-metric-explain-formula">
+              <pre className={w9.ledgerMetricExplainFormula}>
                 {`realizedPnL(P*) = Σ  COALESCE(e.realized_pnl, 0)
   for e ∈ E such that periodKey(m(e)) = P*`}
               </pre>
@@ -275,11 +278,11 @@ export function LedgerSummaryMetricExplainContent({
           </ul>
           <SectionTitle n={2}>Formula and calculation</SectionTitle>
           <p>Per execution:</p>
-          <pre className="ledger-metric-explain-formula">
+          <pre className={w9.ledgerMetricExplainFormula}>
             {`notional(e) = |quantity(e)| × price(e)`}
           </pre>
           <p>For the period cell <code>P*</code>:</p>
-          <pre className="ledger-metric-explain-formula">
+          <pre className={w9.ledgerMetricExplainFormula}>
             {`notional(P*) = Σ  notional(e)
   for e in the same bucket as P*`}
           </pre>
@@ -306,7 +309,7 @@ export function LedgerSummaryMetricExplainContent({
             </li>
           </ul>
           <SectionTitle n={2}>Formula and calculation</SectionTitle>
-          <pre className="ledger-metric-explain-formula">
+          <pre className={w9.ledgerMetricExplainFormula}>
             {`totalRealizedPnL = Σ  COALESCE(e.realized_pnl, 0)
   for all stock executions e in scope (no period filter)`}
           </pre>
@@ -354,7 +357,7 @@ export function LedgerSummaryMetricExplainContent({
               For each <code>k ∈ K</code>, read <code>U(k)</code> from the position map if present.
             </li>
             <li>
-              <pre className="ledger-metric-explain-formula">
+              <pre className={w9.ledgerMetricExplainFormula}>
                 {`totalUnrealized = Σ  U(k)   over k where a position row exists
   (missing position → omitted; if none exist, show em dash)`}
               </pre>
@@ -381,7 +384,7 @@ export function LedgerSummaryMetricExplainContent({
             </li>
           </ul>
           <SectionTitle n={2}>Formula and calculation</SectionTitle>
-          <pre className="ledger-metric-explain-formula">
+          <pre className={w9.ledgerMetricExplainFormula}>
             {`totalNotional = Σ  |quantity(e)| × price(e)
   for all stock executions e in scope`}
           </pre>

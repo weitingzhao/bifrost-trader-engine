@@ -1,3 +1,4 @@
+import { rl } from '@/lib/replayLayout'
 import { useCallback, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import {
@@ -315,7 +316,7 @@ export function DataOverviewStocksUtilitiesSection({
 }) {
   const utilRows = useMemo(() => buildStocksUtilitiesSummaryRows(wlRows), [wlRows])
   return (
-    <section className="replay-section" aria-labelledby="data-overview-stocks-util-head" style={{ marginBottom: 'var(--space-4)' }}>
+    <section className={rl.section} aria-labelledby="data-overview-stocks-util-head" style={{ marginBottom: 'var(--space-4)' }}>
       <h3 id="data-overview-stocks-util-head" className="m-0 inline-flex flex-wrap items-center gap-2 text-[length:var(--text-body)] font-semibold tracking-tight text-foreground" style={{ marginBottom: 'var(--space-2)' }}>
         Utilities
         <InfoTooltip text="PostgreSQL reference tables covering the full Massive stocks universe (not scoped to the watchlist). Coverage uses the watchlist as a convenience slice for per-symbol tables; ticker_types is one global dictionary." />
@@ -405,7 +406,7 @@ export function DataOverviewWatchlistStocks({
   return (
     <>
       {showWatchlistSummary ? (
-        <details open className="replay-section data-overview-watchlist-summary" style={{ marginBottom: 'var(--space-3)' }}>
+        <details open className={rl.section} style={{ marginBottom: 'var(--space-3)' }}>
           <summary
             className="m-0 inline-flex flex-wrap items-center gap-2 text-[length:var(--text-body)] font-semibold tracking-tight text-foreground data-overview-watchlist-summary__summary"
             style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)', cursor: 'pointer' }}
@@ -438,7 +439,7 @@ export function DataOverviewWatchlistStocks({
             onGapResultsUpdate={setMatrixGapBySymbol}
           />
 
-          <div className="replay-section data-overview-wl-matrix" style={{ marginBottom: 'var(--space-3)' }}>
+          <div className={rl.section} style={{ marginBottom: 'var(--space-3)' }}>
             <div className="feed-massive-table-wrap">
               <table className="data-table data-overview-wl-matrix__table">
                 <thead>

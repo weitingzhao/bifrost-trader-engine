@@ -1,4 +1,6 @@
 import type { StatusResponse } from '../../../types'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { InfoTooltip } from '../../../components/InfoTooltip'
 import { Button } from '@/components/ui/button'
 import { SettingsTitleLamp } from '../../settings/SettingsTitleLamp'
@@ -50,9 +52,9 @@ export function StatusMonitorPanel({
   return (
     <div id="system-panel-monitor" role="tabpanel" aria-labelledby="tab-monitor" className={className ? `system-tab-panel ${className}` : 'system-tab-panel'}>
       <div className="daemon-header">
-        <div className="daemon-header-main daemon-header-with-lamp">
+        <div className={cn(w9.daemonHeaderMain, 'daemon-header-with-lamp')}>
           <div>
-            <h2 className="daemon-card-title inline-flex flex-wrap items-center gap-2 m-0">
+            <h2 className={cn(w9.daemonCardTitle, 'inline-flex', 'flex-wrap', 'items-center', 'gap-2', 'm-0')}>
               <SettingsTitleLamp lamp={monitorLamp as LampTone} title="Monitor status lamp">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
               </SettingsTitleLamp>
@@ -64,7 +66,7 @@ export function StatusMonitorPanel({
             </div>
           </div>
         </div>
-        <div className="monitor-header-actions">
+        <div className={w9.monitorHeaderActions}>
           <button
             type="button"
             className="section-header-icon-btn"
@@ -80,22 +82,22 @@ export function StatusMonitorPanel({
         </div>
       </div>
 
-      <div className="daemon-groups monitor-api-ib-row">
+      <div className={cn(w9.daemonGroups, 'monitor-api-ib-row')}>
         <div className="monitor-api-ib-col monitor-api-ib-col-api">
-          <div className="daemon-group">
-            <div className="daemon-group-header">
+          <div className={w9.daemonGroup}>
+            <div className={w9.daemonGroupHeader}>
               <SettingsTitleLamp lamp={apiHealthLamp as LampTone} title="API service (green if /health reachable, else red)">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
               </SettingsTitleLamp>
-              <span className="daemon-group-title">API service</span>
+              <span className={w9.daemonGroupTitle}>API service</span>
             </div>
-            <div className="daemon-group-body">
-              <p className="section-hint">
+            <div className={w9.daemonGroupBody}>
+              <p className={w9.sectionHint}>
                 <strong>
                   Status:{' '}
                   {j ? (
                     <>
-{monitorEnabled ? <span className="countdown-num">Running (OK)</span> : <>Stopped <span>({monitorSelfCheckText})</span></>}
+{monitorEnabled ? <span className={w9.countdownNum}>Running (OK)</span> : <>Stopped <span>({monitorSelfCheckText})</span></>}
                     </>
                   ) : (
                     'Fetch failed'
@@ -104,34 +106,34 @@ export function StatusMonitorPanel({
                 {j && monitorBlockReasons && monitorBlockReasons !== 'None' ? ` Block reasons: ${monitorBlockReasons}` : ''}
               </p>
               {healthCountdownSec != null ? (
-                <p className="section-hint countdown-line">
-                  Next health check: <span className="countdown-num">{healthCountdownSec}</span> s
+                <p className={cn(w9.sectionHint, w9.countdownLine)}>
+                  Next health check: <span className={w9.countdownNum}>{healthCountdownSec}</span> s
                 </p>
               ) : (
-                <p className="section-hint">Health check: —</p>
+                <p className={w9.sectionHint}>Health check: —</p>
               )}
               {/* Database/Redis status under API service */}
               {!monitorEnabled ? (
-                <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>Redis: —</p>
+                <p className={w9.sectionHint} style={{ marginTop: 'var(--space-2)' }}>Redis: —</p>
               ) : j?.market_data?.quotes_redis_reader_ok ? (
-                <p className="section-hint countdown-line" style={{ marginTop: 'var(--space-2)' }}>
-                  Redis: <span className="countdown-num">Connected</span>{' '}
+                <p className={cn(w9.sectionHint, w9.countdownLine)} style={{ marginTop: 'var(--space-2)' }}>
+                  Redis: <span className={w9.countdownNum}>Connected</span>{' '}
                   <InfoTooltip text="GET /quotes available" />
                 </p>
               ) : (
-                <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>Redis: Not connected or not configured</p>
+                <p className={w9.sectionHint} style={{ marginTop: 'var(--space-2)' }}>Redis: Not connected or not configured</p>
               )}
             </div>
           </div>
         </div>
         <div className="monitor-api-ib-col monitor-api-ib-col-ib">
-          <div className="daemon-group">
-            <div className="daemon-group-header daemon-group-header-with-action">
+          <div className={w9.daemonGroup}>
+            <div className={cn(w9.daemonGroupHeader, 'daemon-group-header-with-action')}>
               <div className="daemon-group-header-left">
                 <SettingsTitleLamp lamp={monitorIbGroupLamp as LampTone} title="Monitor IB connection status">
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
                 </SettingsTitleLamp>
-                <span className="daemon-group-title">IB connection</span>
+                <span className={w9.daemonGroupTitle}>IB connection</span>
               </div>
               {(monitorOperator?.connected || monitorAccount2?.connected) ? (
                 <button
@@ -159,7 +161,7 @@ export function StatusMonitorPanel({
                 </Button>
               )}
             </div>
-            <div className="daemon-group-body">
+            <div className={w9.daemonGroupBody}>
               <table className="ib-connection-table" aria-label="IB connection status by Host and type">
                 <thead>
                   <tr>
@@ -173,7 +175,7 @@ export function StatusMonitorPanel({
                     <th scope="row" className="ib-connection-row-label">Host</th>
                     <td className="ib-connection-cell">
                       {monitorOperator?.connected ? (
-                        <span className="countdown-num">Operator @ {monitorOperator?.client_id ?? '—'}</span>
+                        <span className={w9.countdownNum}>Operator @ {monitorOperator?.client_id ?? '—'}</span>
                       ) : (
                         `Not connected${monitorOperator?.last_error ? ` (${monitorOperator.last_error})` : ''}`
                       )}
@@ -188,7 +190,7 @@ export function StatusMonitorPanel({
                       {monitorAccount2 === undefined ? (
                         'Not configured'
                       ) : monitorAccount2?.connected ? (
-                        <span className="countdown-num">Connected @ {monitorAccount2?.client_id ?? '—'}</span>
+                        <span className={w9.countdownNum}>Connected @ {monitorAccount2?.client_id ?? '—'}</span>
                       ) : (
                         `Not connected${monitorAccount2?.last_error ? ` (${monitorAccount2.last_error})` : ''}`
                       )}

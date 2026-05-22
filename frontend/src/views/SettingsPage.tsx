@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
 import { slugToDefaultHash, settingsPathFromSlug } from '@/lib/settingsSlugRouting'
 import type { Operation, StatusResponse } from '../types'
 import type { FlexAccountItem } from '../types'
@@ -598,7 +599,7 @@ export function SettingsPage({
             </SettingsPageTitle>
             <SettingsPageSubtitle>Configure daemon, IB connection and market calendar</SettingsPageSubtitle>
           </SettingsPageHeader>
-          <SettingsPageGroups className="daemon-groups">
+          <SettingsPageGroups className={w9.daemonGroups}>
             <HeartbeatSection
               heartbeatIntervalSec={heartbeatIntervalSec}
               setHeartbeatIntervalSec={setHeartbeatIntervalSec}

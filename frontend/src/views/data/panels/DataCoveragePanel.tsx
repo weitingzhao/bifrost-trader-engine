@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { Fragment } from 'react'
 import type { BarCoverageItem, BarsCoverageResponse, StatusResponse } from '../../../types'
 import { Button } from '@/components/ui/button'
@@ -69,7 +72,7 @@ export function DataCoveragePanel({
   onBackfillApiIntervalSecChange,
 }: DataCoveragePanelProps) {
   return (
-    <section className="replay-section" aria-labelledby="data-coverage-head">
+    <section className={rl.section} aria-labelledby="data-coverage-head">
       <h3 id="data-coverage-head" className={SECTION_TITLE_CLASS}>
         Coverage
         <InfoTooltip
@@ -80,7 +83,7 @@ export function DataCoveragePanel({
           }
         />
       </h3>
-      <div className="replay-toolbar data-backfill-options" style={{ marginBottom: '0.5rem', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
+      <div className={rl.toolbar} style={{ marginBottom: '0.5rem', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
         <label className="data-toggle-switch-wrap" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
           <span
             className="toggle-switch"
@@ -176,32 +179,32 @@ export function DataCoveragePanel({
         <InfoTooltip text="Refresh reference indices (^GSPC, ^DJI, ^IXIC, ^VIX, …) via Massive/Polygon daily aggs. Writes source=massive." />
       </div>
       {indicesRefreshMessage && (
-        <div className="replay-placeholder" role="status" style={{ marginBottom: '0.5rem' }}>
+        <div className={rl.placeholder} role="status" style={{ marginBottom: '0.5rem' }}>
           {indicesRefreshMessage}
         </div>
       )}
       {watchlistRefreshMessage && (
-        <div className="replay-placeholder" role="status" style={{ marginBottom: '0.5rem' }}>
+        <div className={rl.placeholder} role="status" style={{ marginBottom: '0.5rem' }}>
           {watchlistRefreshMessage}
         </div>
       )}
       {coverageError && (
-        <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>
+        <div className={rl.placeholder} role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>
           {coverageError}
         </div>
       )}
       {deleteSymbolError && (
-        <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>
+        <div className={rl.placeholder} role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>
           {deleteSymbolError}
         </div>
       )}
       {coverage && coverage.length === 0 && !coverageLoading && (
-        <div className="replay-placeholder">No stocks in Watchlist and no reference indices configured. Add stocks on the Watchlist tab or configure reference_indices, then refresh.</div>
+        <div className={rl.placeholder}>No stocks in Watchlist and no reference indices configured. Add stocks on the Watchlist tab or configure reference_indices, then refresh.</div>
       )}
       {coverage && coverage.length > 0 && (
         <>
           <div className="data-coverage-table-wrap">
-            <table className="table-operations data-coverage-table">
+            <table className={cn(w9.tableOperations, 'data-coverage-table')}>
               <thead>
                 <tr>
                   <th>Symbol</th>
@@ -259,7 +262,7 @@ export function DataCoveragePanel({
                       ) => (
                         <button
                           type="button"
-                          className="data-coverage-bars-btn"
+                          className={w9.dataCoverageBarsBtn}
                           onClick={() => onOpenBarsForSymbol(row.symbol, period)}
                           title={titleStr}
                           aria-label={`Show bars ${row.symbol} ${period}`}
@@ -297,7 +300,7 @@ export function DataCoveragePanel({
                             {renderBarsCell(row.stock_min['1 hour'] || emptyPeriod, min1hStatus.needBackfill, '1 hour', coverageCell(row.stock_min['1 hour'] || emptyPeriod))}
                           </td>
                           <td className="data-coverage-range">{coverageRange(row.stock_min['1 hour'] || emptyPeriod)}</td>
-                          <td className="data-coverage-actions data-coverage-actions-nowrap">
+                          <td className={cn(w9.dataCoverageActionsNowrap, 'data-coverage-actions')}>
                             {isIndex ? (
                               <>
                                 <Button

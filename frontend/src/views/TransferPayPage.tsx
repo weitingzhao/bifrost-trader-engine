@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useCallback, useEffect, useState } from 'react'
 import type { StatusResponse, AccountTransaction } from '../types'
 import { getTransactions, postTransactionsFetch } from '../api'
@@ -382,19 +385,19 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
       </div>
 
       {fetchMessage != null && (
-        <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0, color: (fetchMessage.startsWith('Fetched') || fetchMessage.includes('Upserted')) ? 'var(--color-success)' : 'var(--color-danger)' }}>
+        <p className={w9.sectionHint} style={{ marginTop: '0.25rem', marginBottom: 0, color: (fetchMessage.startsWith('Fetched') || fetchMessage.includes('Upserted')) ? 'var(--color-success)' : 'var(--color-danger)' }}>
           {fetchMessage}
         </p>
       )}
 
-      {error != null && <p className="section-hint error-hint" role="alert">{error}</p>}
+      {error != null && <p className={cn(w9.sectionHint, 'error-hint')} role="alert">{error}</p>}
 
-      <section className="replay-section" aria-label="Cash transactions">
+      <section className={rl.section} aria-label="Cash transactions">
         {loading ? (
-          <p className="section-hint">Loading…</p>
+          <p className={w9.sectionHint}>Loading…</p>
         ) : (
           <>
-            <div className="replay-toolbar" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <div className={rl.toolbar} style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', marginBottom: '0.5rem' }}>
               <div className="app-tabs" aria-label="Account tabs" role="tablist">
                 <button
                   type="button"
@@ -473,7 +476,7 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
                 </div>
               </fieldset>
               <div style={{ marginLeft: 'auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem' }}>
-                <label className="section-hint" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                <label className={w9.sectionHint} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
                   <span>Rows:</span>
                   <select
                     value={pageSize}
@@ -488,7 +491,7 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
                     <option value={100}>100</option>
                   </select>
                 </label>
-                <span className="section-hint">
+                <span className={w9.sectionHint}>
                   Net cash:{' '}
                   <span style={{ fontWeight: 600 }}>
                     {fmtUsd(totalAmount)}
@@ -546,7 +549,7 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
                         <td>{fmtDate(tx.ts, { locale: 'en-CA' })}</td>
                         <td>{tx.account_id ?? '—'}</td>
                         <td>{tx.type ?? '—'}</td>
-                        <td className={tx.amount >= 0 ? 'replay-pnl-detail-positive' : 'replay-pnl-detail-negative'}>
+                        <td className={tx.amount >= 0 ? 'rl.pnlDetailPositive' : 'rl.pnlDetailNegative'}>
                           {fmtUsd(tx.amount)}
                         </td>
                         <td>{tx.currency ?? '—'}</td>
@@ -561,14 +564,14 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
         )}
       </section>
 
-      <section className="replay-section" aria-label="Cash flow summary">
+      <section className={rl.section} aria-label="Cash flow summary">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.75rem', marginBottom: '0.25rem' }}>
           <h3 style={{ margin: 0, fontSize: '0.95rem' }} className={SECTION_TITLE_CLASS}>
             Summary by period
             <InfoTooltip text="Net cash flow per account and in total, grouped by year / quarter / month for the loaded range (last 365 days or current fetch window)." />
           </h3>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span className="section-hint" style={{ fontSize: '0.8rem' }}>View:</span>
+            <span className={w9.sectionHint} style={{ fontSize: '0.8rem' }}>View:</span>
             <div className="app-tabs" role="tablist" aria-label="Summary period">
               {(['year', 'quarter', 'month'] as SummaryMode[]).map((mode) => (
                 <button
@@ -586,9 +589,9 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
           </div>
         </div>
         {transactions.length === 0 ? (
-          <p className="section-hint">No transactions yet. Fetch from IB to see summary.</p>
+          <p className={w9.sectionHint}>No transactions yet. Fetch from IB to see summary.</p>
         ) : periodKeys.length === 0 ? (
-          <p className="section-hint">No summary available for the selected period.</p>
+          <p className={w9.sectionHint}>No summary available for the selected period.</p>
         ) : (
           <div className="table-wrap">
             <table className="system-table" aria-label="Cash flow summary">
@@ -625,15 +628,15 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
                       {allSummaryAccounts.map((id) => {
                         const v = row[id] ?? 0
                         return (
-                          <td key={id} className={v >= 0 ? 'replay-pnl-detail-positive' : 'replay-pnl-detail-negative'}>
+                          <td key={id} className={v >= 0 ? 'rl.pnlDetailPositive' : 'rl.pnlDetailNegative'}>
                             {fmtUsd(v)}
                           </td>
                         )
                       })}
-                      <td className={total >= 0 ? 'replay-pnl-detail-positive' : 'replay-pnl-detail-negative'}>
+                      <td className={total >= 0 ? 'rl.pnlDetailPositive' : 'rl.pnlDetailNegative'}>
                         <span>{fmtUsd0(total)}</span>
                         <br />
-                        <span className="section-hint">
+                        <span className={w9.sectionHint}>
                           {changeVsPrevTotal != null && Number.isFinite(changeVsPrevTotal) ? (
                             <>
                               {changeVsPrevTotal >= 0 ? '+' : ''}
@@ -644,10 +647,10 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
                           )}
                         </span>
                       </td>
-                      <td className={dep >= 0 ? 'replay-pnl-detail-positive' : 'replay-pnl-detail-negative'}>
+                      <td className={dep >= 0 ? 'rl.pnlDetailPositive' : 'rl.pnlDetailNegative'}>
                         <span>{fmtUsd0(dep)}</span>
                         <br />
-                        <span className="section-hint">
+                        <span className={w9.sectionHint}>
                           {changeVsPrevDep != null && Number.isFinite(changeVsPrevDep) ? (
                             <>
                               {changeVsPrevDep >= 0 ? '+' : ''}
@@ -658,10 +661,10 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
                           )}
                         </span>
                       </td>
-                      <td className={wdr >= 0 ? 'replay-pnl-detail-positive' : 'replay-pnl-detail-negative'}>
+                      <td className={wdr >= 0 ? 'rl.pnlDetailPositive' : 'rl.pnlDetailNegative'}>
                         <span>{fmtUsd0(wdr)}</span>
                         <br />
-                        <span className="section-hint">
+                        <span className={w9.sectionHint}>
                           {changeVsPrevWdr != null && Number.isFinite(changeVsPrevWdr) ? (
                             <>
                               {changeVsPrevWdr >= 0 ? '+' : ''}
@@ -672,10 +675,10 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
                           )}
                         </span>
                       </td>
-                      <td className={div >= 0 ? 'replay-pnl-detail-positive' : 'replay-pnl-detail-negative'}>
+                      <td className={div >= 0 ? 'rl.pnlDetailPositive' : 'rl.pnlDetailNegative'}>
                         <span>{fmtUsd0(div)}</span>
                         <br />
-                        <span className="section-hint">
+                        <span className={w9.sectionHint}>
                           {changeVsPrevDiv != null && Number.isFinite(changeVsPrevDiv) ? (
                             <>
                               {changeVsPrevDiv >= 0 ? '+' : ''}
@@ -686,10 +689,10 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
                           )}
                         </span>
                       </td>
-                      <td className={oth >= 0 ? 'replay-pnl-detail-positive' : 'replay-pnl-detail-negative'}>
+                      <td className={oth >= 0 ? 'rl.pnlDetailPositive' : 'rl.pnlDetailNegative'}>
                         <span>{fmtUsd0(oth)}</span>
                         <br />
-                        <span className="section-hint">
+                        <span className={w9.sectionHint}>
                           {changeVsPrevOth != null && Number.isFinite(changeVsPrevOth) ? (
                             <>
                               {changeVsPrevOth >= 0 ? '+' : ''}

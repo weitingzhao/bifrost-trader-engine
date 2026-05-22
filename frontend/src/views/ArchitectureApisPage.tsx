@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { DraggableModal } from '../components/DraggableModal'
 import {
   fetchDocsApiHealth,
@@ -473,7 +475,7 @@ export function ArchitectureApisPage({ embeddedInSettings }: ArchitectureApisPag
       <SettingsPageGroups className="server-groups">
         <SettingsSection aria-labelledby="arch-page-head">
           <div className="architecture-page-intro">
-            <h2 id="arch-page-head" className="daemon-card-title inline-flex flex-wrap items-center gap-2 architecture-page-title">
+            <h2 id="arch-page-head" className={cn(w9.daemonCardTitle, 'inline-flex', 'flex-wrap', 'items-center', 'gap-2', 'architecture-page-title')}>
               <SettingsTitleLamp
                 lamp={architectureTitleLamp as LampTone}
                 title="Combined Monitor, Ops, and Docs API reachability"

@@ -1,3 +1,5 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
 import type { Execution } from '../../types'
 import { fmtUsd, fmtUsd0 } from '../../utils/format'
 import { stkNotionalAbsUsd, stkNotionalSideColorClass, ledgerUrPnlLineClass } from './ledgerViewUtils'
@@ -16,7 +18,7 @@ export function LedgerStkRowRealizedPnlCell({ realized }: { realized: number }) 
   return (
     <td className="ledger-stk-row-realized-td">
       {isZero ? (
-        <span className="ledger-stk-row-realized-value replay-ledger-summary-realized-zero">-</span>
+        <span className={rl.ledgerSummaryRealizedZero}>-</span>
       ) : (
         <span className={`ledger-stk-row-realized-value ${ledgerUrPnlLineClass(realized)}`}>
           {fmtUsd0(realized)}
@@ -36,21 +38,21 @@ export function LedgerStkUrPnlGroupInline({
 }) {
   const uFinite = unrealized != null && Number.isFinite(unrealized)
   return (
-    <span className="replay-stock-group-total-pnl ledger-stk-ur-pnl-group-inline">
-      <span className="replay-stock-group-total-pnl-label">Group U/R PnL</span>
-      <span className="ledger-stk-ur-pnl-group-inline-metrics">
+    <span className={rl.stockGroupTotalPnl}>
+      <span className={rl.stockGroupTotalPnlLabel}>Group U/R PnL</span>
+      <span className={w9.ledgerStkUrPnlGroupInlineMetrics}>
         <span className={`ledger-stk-ur-pnl-inline-seg ${ledgerUrPnlLineClass(realized)}`}>
-          <span className="ledger-stk-ur-pnl-prefix">R</span> {fmtUsd0(realized)}
+          <span className={w9.ledgerStkUrPnlPrefix}>R</span> {fmtUsd0(realized)}
         </span>
-        <span className="ledger-stk-ur-pnl-group-metric-sep" aria-hidden>
+        <span className={w9.ledgerStkUrPnlGroupMetricSep} aria-hidden>
           ·
         </span>
         <span
           className={`ledger-stk-ur-pnl-inline-seg ${
-            uFinite ? 'ledger-stk-ur-pnl-unrealized' : 'replay-ledger-summary-realized-zero'
+            uFinite ? 'ledger-stk-ur-pnl-unrealized' : 'rl.ledgerSummaryRealizedZero'
           }`}
         >
-          <span className="ledger-stk-ur-pnl-prefix">U</span> {uFinite ? fmtUsd0(unrealized as number) : '—'}
+          <span className={w9.ledgerStkUrPnlPrefix}>U</span> {uFinite ? fmtUsd0(unrealized as number) : '—'}
         </span>
       </span>
     </span>

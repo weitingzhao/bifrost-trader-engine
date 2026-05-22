@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
+import { w9 } from '@/styles/wave9Classes'
 import { fetchPutCallRatioHistory } from '../../api'
 import type { PutCallRatioHistoryPoint } from '../../api'
 import { OdChartExpandOnHover } from './OdChartExpandOnHover'
@@ -288,7 +289,7 @@ export function OptionDiscoveryPutCallRatioPanel({ symbol }: { symbol: string })
     <div className="od-max-pain-panel">
       <div className="od-max-pain-header">
         <h4 className="od-max-pain-title">Put/Call Ratio</h4>
-        <span className="section-hint" style={{ marginLeft: '0.5rem', fontSize: '0.78rem' }}>
+        <span className={w9.sectionHint} style={{ marginLeft: '0.5rem', fontSize: '0.78rem' }}>
           OI-based &amp; Volume-based · all expirations combined
         </span>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -308,11 +309,11 @@ export function OptionDiscoveryPutCallRatioPanel({ symbol }: { symbol: string })
         </div>
       </div>
 
-      {loading && <p className="section-hint" style={{ padding: '1rem 0' }}>Loading PCR data…</p>}
-      {error && <p className="section-hint" style={{ color: 'var(--color-lamp-red)', padding: '0.5rem 0' }}>{error}</p>}
+      {loading && <p className={w9.sectionHint} style={{ padding: '1rem 0' }}>Loading PCR data…</p>}
+      {error && <p className={w9.sectionHint} style={{ color: 'var(--color-lamp-red)', padding: '0.5rem 0' }}>{error}</p>}
 
       {!loading && !error && !hasSeries && (
-        <p className="section-hint" style={{ padding: '1rem 0' }}>
+        <p className={w9.sectionHint} style={{ padding: '1rem 0' }}>
           No PCR data available. Run EOD pipeline or trigger{' '}
           <code style={{ fontSize: '0.75rem' }}>kind=report_option_put_call_ratio</code>.
         </p>

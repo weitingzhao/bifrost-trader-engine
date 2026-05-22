@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { Execution, OptionStockLinkRow } from '../../types'
@@ -161,14 +164,14 @@ export function LinkOptionStockModal({ open, context, onClose, onSuccess }: Link
         onClose()
       }}
     >
-      <div className="modal-panel replay-exec-modal" style={{ maxWidth: 720 }} onClick={e => e.stopPropagation()}>
+      <div className={rl.execModal} style={{ maxWidth: 720 }} onClick={e => e.stopPropagation()}>
         <h3 id="link-opt-stock-title" className="section-subtitle" style={{ marginTop: 0 }}>
           Link stock fills
         </h3>
-        <p className="section-hint" style={{ marginBottom: 'var(--space-3)' }}>
+        <p className={w9.sectionHint} style={{ marginBottom: 'var(--space-3)' }}>
           Option: <strong>{symLabel}</strong>
           {optId != null ? (
-            <span className="replay-contract-exec-id"> #{optId}</span>
+            <span className={rl.contractExecId}> #{optId}</span>
           ) : null}
           {underlyingHint ? (
             <>
@@ -178,13 +181,13 @@ export function LinkOptionStockModal({ open, context, onClose, onSuccess }: Link
           ) : null}
           {dateWindow ? <> · Date window: {dateWindow}</> : null}
         </p>
-        <p className="section-hint" style={{ marginBottom: 'var(--space-4)' }}>
+        <p className={w9.sectionHint} style={{ marginBottom: 'var(--space-4)' }}>
           Tie underlying stock execution rows (performance book) to this option fill for exercise or assignment. Slippage vs
           Flex close is signed quantity × (price − close).
         </p>
 
         {formError && (
-          <p className="section-hint replay-form-error" style={{ marginBottom: 'var(--space-2)' }}>
+          <p className={rl.formError} style={{ marginBottom: 'var(--space-2)' }}>
             {formError}
           </p>
         )}
@@ -198,12 +201,12 @@ export function LinkOptionStockModal({ open, context, onClose, onSuccess }: Link
           )}
         </div>
         {loading ? (
-          <p className="section-hint">Loading…</p>
+          <p className={w9.sectionHint}>Loading…</p>
         ) : links.length === 0 ? (
-          <p className="section-hint">No stock legs linked yet.</p>
+          <p className={w9.sectionHint}>No stock legs linked yet.</p>
         ) : (
-          <div className="replay-portfolio-table-wrap" style={{ marginBottom: 'var(--space-4)' }}>
-            <table className="table-operations table-compact">
+          <div className={rl.portfolioTableWrap} style={{ marginBottom: 'var(--space-4)' }}>
+            <table className={cn(w9.tableOperations, 'table-compact')}>
               <thead>
                 <tr>
                   <th>Stock id</th>
@@ -241,12 +244,12 @@ export function LinkOptionStockModal({ open, context, onClose, onSuccess }: Link
         )}
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
-          <label className="replay-form-label" htmlFor="link-opt-stock-role">
+          <label className={rl.formLabel} htmlFor="link-opt-stock-role">
             Role for new links
           </label>
           <select
             id="link-opt-stock-role"
-            className="replay-form-input"
+            className={rl.formInput}
             value={linkRole}
             onChange={e => setLinkRole(e.target.value as '' | 'exercise' | 'assignment')}
           >
@@ -258,13 +261,13 @@ export function LinkOptionStockModal({ open, context, onClose, onSuccess }: Link
 
         <strong style={{ display: 'block', marginBottom: 'var(--space-2)' }}>Candidates (not yet linked)</strong>
         {loading ? null : candidates.length === 0 ? (
-          <p className="section-hint">No matching STK rows in this window (check Flex sync).</p>
+          <p className={w9.sectionHint}>No matching STK rows in this window (check Flex sync).</p>
         ) : (
-          <div className="replay-portfolio-table-wrap" style={{ maxHeight: 280, overflow: 'auto' }}>
-            <table className="table-operations table-compact">
+          <div className={rl.portfolioTableWrap} style={{ maxHeight: 280, overflow: 'auto' }}>
+            <table className={cn(w9.tableOperations, 'table-compact')}>
               <thead>
                 <tr>
-                  <th className="replay-th-narrow" />
+                  <th className={rl.thNarrow} />
                   <th>Id</th>
                   <th>Symbol</th>
                   <th>Trade date</th>
@@ -330,14 +333,14 @@ export function LinkOptionStockModal({ open, context, onClose, onSuccess }: Link
           }}
         >
           <div
-            className="modal-panel replay-exec-modal"
+            className={rl.execModal}
             style={{ maxWidth: 400 }}
             onClick={e => e.stopPropagation()}
           >
             <h3 id="unlink-stock-link-title" className="section-subtitle" style={{ marginTop: 0 }}>
               Remove stock link
             </h3>
-            <p className="section-hint" style={{ marginTop: 'var(--space-2)', marginBottom: 'var(--space-4)' }}>
+            <p className={w9.sectionHint} style={{ marginTop: 'var(--space-2)', marginBottom: 'var(--space-4)' }}>
               This removes the association between this option fill and the selected stock execution. It does not delete any
               execution rows.
             </p>

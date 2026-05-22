@@ -1,4 +1,6 @@
 import { useState, type ReactNode } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { OdDataStatePanel } from './OdDataStatePanel'
 
 export function OdLayerSection({
@@ -35,7 +37,7 @@ export function OdLayerSection({
           <h3 id={titleId} className="od-layer-section-title">
             {title}
           </h3>
-          {subtitle ? <p className="section-hint od-layer-section-subtitle">{subtitle}</p> : null}
+          {subtitle ? <p className={cn(w9.sectionHint, 'od-layer-section-subtitle')}>{subtitle}</p> : null}
         </div>
         <button
           type="button"

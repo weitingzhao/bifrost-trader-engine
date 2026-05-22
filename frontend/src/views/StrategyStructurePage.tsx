@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { msgErrorClass, msgOkClass } from '@/components/shared/appUi'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { StatusResponse } from '../types'
 import {
   fetchStructures,
@@ -717,7 +720,7 @@ export function StrategyStructurePage({
         titleId="availability-error-modal-title"
         maxWidth="min(520px, calc(100vw - 24px))"
         footer={
-          <div className="data-reset-modal-actions">
+          <div className={w9.dataResetModalActions}>
             <Button type="button" onClick={() => setAvailabilityError(null)}>
               Close
             </Button>
@@ -737,7 +740,7 @@ export function StrategyStructurePage({
         titleId="name-confirm-modal-title"
         maxWidth="min(520px, calc(100vw - 24px))"
         footer={
-          <div className="data-reset-modal-actions" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+          <div className={w9.dataResetModalActions} style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
             <Button
               type="button"
               onClick={() =>
@@ -773,7 +776,7 @@ export function StrategyStructurePage({
               The suggested new name (based on type and parameters) is below. You can keep it, edit it, or abandon the
               name change and save with the current name.
             </p>
-            <div className="gates-form-row" style={{ marginBottom: 0 }}>
+            <div className={w9.gatesFormRow} style={{ marginBottom: 0 }}>
               <label htmlFor="name-confirm-new-name">New name</label>
               <input
                 id="name-confirm-new-name"
@@ -800,7 +803,7 @@ export function StrategyStructurePage({
         titleId="version-confirm-modal-title"
         maxWidth="min(520px, calc(100vw - 24px))"
         footer={
-          <div className="data-reset-modal-actions" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+          <div className={w9.dataResetModalActions} style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
             <Button
               type="button"
               onClick={() =>
@@ -836,7 +839,7 @@ export function StrategyStructurePage({
               version.
             </p>
             <div
-              className="gates-form-row"
+              className={w9.gatesFormRow}
               style={{
                 alignItems: 'center',
                 gap: 'var(--space-2)',
@@ -857,7 +860,7 @@ export function StrategyStructurePage({
                   }
                   aria-label="Use new version (Version + 1)"
                 />
-                <span className="toggle-switch-caption">Use new version (Version + 1)</span>
+                <span className={w9.toggleSwitchCaption}>Use new version (Version + 1)</span>
               </label>
             </div>
           </>
@@ -890,11 +893,11 @@ export function StrategyStructurePage({
             {status?.strategy?.active?.allocation?.id != null && ` (${status?.strategy?.active?.allocation?.id})`}
           </div>
         </div>
-        <p className="section-hint">Daemon uses these on next start.</p>
+        <p className={w9.sectionHint}>Daemon uses these on next start.</p>
       </section>
 
       {setActiveMsg.text && (
-        <p className={setActiveMsg.isErr ? 'msg-error' : 'msg-ok'} style={{ marginBottom: 'var(--space-2)' }}>
+        <p className={setActiveMsg.isErr ? msgErrorClass : msgOkClass} style={{ marginBottom: 'var(--space-2)' }}>
           {setActiveMsg.text}
         </p>
       )}
@@ -922,7 +925,7 @@ export function StrategyStructurePage({
         </div>
         {!structuresLoading && !structuresError && dimStructureTabs.length > 0 && (
           <div
-            className="system-tabs structure-sheet-type-tabs"
+            className={cn(w9.systemTabs, 'structure-sheet-type-tabs')}
             role="tablist"
             aria-label="Structure dimension"
           >
@@ -949,8 +952,8 @@ export function StrategyStructurePage({
             ))}
           </div>
         )}
-        {structuresLoading && <p className="section-hint">Loading…</p>}
-        {structuresError && <p className="msg-error">{structuresError}</p>}
+        {structuresLoading && <p className={w9.sectionHint}>Loading…</p>}
+        {structuresError && <p className={w9.msgError}>{structuresError}</p>}
         {!structuresLoading && !structuresError && (
           <div className="table-wrap">
             <table className="data-table">
@@ -1046,10 +1049,10 @@ export function StrategyStructurePage({
           </div>
         )}
         {!structuresLoading && !structuresError && structures.length === 0 && (
-          <p className="section-hint">No structure strategies in database.</p>
+          <p className={w9.sectionHint}>No structure strategies in database.</p>
         )}
         {!structuresLoading && !structuresError && structures.length > 0 && filteredStructures.length === 0 && (
-          <p className="section-hint">No structures match the current filter.</p>
+          <p className={w9.sectionHint}>No structures match the current filter.</p>
         )}
       </section>
 
@@ -1058,15 +1061,15 @@ export function StrategyStructurePage({
           <div className="structure-form-header">
             <h3>
               {formOpen === 'create' ? (formIsCopy ? 'New structure' : 'New structure') : 'Edit structure'}
-              {formOpen === 'create' && formIsCopy && <span className="structure-form-header-badge">Copy</span>}
-              {typeof formOpen === 'number' && <span className="structure-form-header-badge">ID {formOpen}</span>}
+              {formOpen === 'create' && formIsCopy && <span className={w9.structureFormHeaderBadge}>Copy</span>}
+              {typeof formOpen === 'number' && <span className={w9.structureFormHeaderBadge}>ID {formOpen}</span>}
             </h3>
-            <button type="button" className="structure-form-header-close" onClick={closeForm} aria-label="Close form">&times;</button>
+            <button type="button" className={w9.structureFormHeaderClose} onClick={closeForm} aria-label="Close form">&times;</button>
           </div>
-          <div className="structure-form-body">
-          {formLoading && !formPayload.name && <p className="section-hint">Loading…</p>}
+          <div className={w9.structureFormBody}>
+          {formLoading && !formPayload.name && <p className={w9.sectionHint}>Loading…</p>}
           {formError && (
-            <div className="msg-error" style={{ marginBottom: 'var(--space-3)' }}>
+            <div className={w9.msgError} style={{ marginBottom: 'var(--space-3)' }}>
               <p>{formError}</p>
               {formErrorIsSchemaMismatch && (
                 <p className="form-hint" style={{ marginTop: 'var(--space-1)' }}>
@@ -1076,7 +1079,7 @@ export function StrategyStructurePage({
             </div>
           )}
           {defaultLegsFallbackMsg && (
-            <p className="form-hint msg-warning" style={{ marginBottom: 'var(--space-3)' }} role="alert">
+            <p className={cn(w9.msgWarning, 'form-hint')} style={{ marginBottom: 'var(--space-3)' }} role="alert">
               {defaultLegsFallbackMsg}
             </p>
           )}
@@ -1091,17 +1094,17 @@ export function StrategyStructurePage({
                   onClick={wizardStep > 1 ? () => setWizardStep(1) : undefined}
                   style={wizardStep > 1 ? { cursor: 'pointer' } : undefined}
                 >
-                  <div className="structure-wizard-step-head">
-                    <div className="structure-wizard-step-circle">
+                  <div className={w9.structureWizardStepHead}>
+                    <div className={w9.structureWizardStepCircle}>
                       {wizardStep > 1 ? (
                         <span className="structure-wizard-step-check" aria-hidden>✓</span>
                       ) : (
                         <span>1</span>
                       )}
                     </div>
-                    <div className="structure-wizard-step-connector" aria-hidden />
+                    <div className={w9.structureWizardStepConnector} aria-hidden />
                   </div>
-                  <span className="structure-wizard-step-label">Template</span>
+                  <span className={w9.structureWizardStepLabel}>Template</span>
                 </div>
                 <div
                   className={`structure-wizard-step-item ${wizardStep > 2
@@ -1133,40 +1136,40 @@ export function StrategyStructurePage({
                       : undefined
                   }
                 >
-                  <div className="structure-wizard-step-head">
-                    <div className="structure-wizard-step-circle">
+                  <div className={w9.structureWizardStepHead}>
+                    <div className={w9.structureWizardStepCircle}>
                       {wizardStep > 2 ? (
                         <span className="structure-wizard-step-check" aria-hidden>✓</span>
                       ) : (
                         <span>2</span>
                       )}
                     </div>
-                    <div className="structure-wizard-step-connector" aria-hidden />
+                    <div className={w9.structureWizardStepConnector} aria-hidden />
                   </div>
-                  <span className="structure-wizard-step-label">Parameters</span>
+                  <span className={w9.structureWizardStepLabel}>Parameters</span>
                 </div>
                 <div
                   className={`structure-wizard-step-item structure-wizard-step-item-last ${wizardStep === 3 ? 'structure-wizard-step-active' : ''}`}
                   role="listitem"
                   aria-current={wizardStep === 3 ? 'step' : undefined}
                 >
-                  <div className="structure-wizard-step-head">
-                    <div className="structure-wizard-step-circle">
+                  <div className={w9.structureWizardStepHead}>
+                    <div className={w9.structureWizardStepCircle}>
                       <span>3</span>
                     </div>
                   </div>
-                  <span className="structure-wizard-step-label">Details</span>
+                  <span className={w9.structureWizardStepLabel}>Details</span>
                 </div>
               </div>
 
               {wizardStep === 1 && (
-                <div className="structure-wizard-step">
-                  <h4 className="gates-form-group-title">Choose template</h4>
+                <div className={w9.structureWizardStep}>
+                  <h4 className={w9.gatesFormGroupTitle}>Choose template</h4>
                   <div className="structure-template-filters" aria-label="Template filters">
-                    <div className="structure-template-filters-search-row">
+                    <div className={w9.structureTemplateFiltersSearchRow}>
                       <input
                         type="search"
-                        className="structure-template-filters-search structure-details-input"
+                        className={cn(w9.structureTemplateFiltersSearch, w9.structureDetailsInput)}
                         placeholder="Filter by name or code…"
                         value={tplFilterSearch}
                         onChange={(e) => setTplFilterSearch(e.target.value)}
@@ -1199,13 +1202,13 @@ export function StrategyStructurePage({
                       )}
                     </div>
                     {tplFiltersExpanded && (
-                      <div className="structure-template-filters-dims">
+                      <div className={w9.structureTemplateFiltersDims}>
                         {TEMPLATE_DIM_TYPES.map((dt) => (
-                          <label key={dt} className="structure-template-filter-dim">
-                            <span className="structure-template-filter-dim-label">{TEMPLATE_DIM_LABELS[dt]}</span>
+                          <label key={dt} className={w9.structureTemplateFilterDim}>
+                            <span className={w9.structureTemplateFilterDimLabel}>{TEMPLATE_DIM_LABELS[dt]}</span>
                             <AppSelect
                               id={`tpl-filter-${dt}`}
-                              className="structure-details-input structure-template-filter-select"
+                              className={cn(w9.structureDetailsInput, w9.structureTemplateFilterSelect)}
                               value={tplDimFilters[dt] ?? ''}
                               onChange={(v) => setTplDimFilters((prev) => ({ ...prev, [dt]: v }))}
                               aria-label={`Filter by ${TEMPLATE_DIM_LABELS[dt]}`}
@@ -1218,16 +1221,16 @@ export function StrategyStructurePage({
                         ))}
                       </div>
                     )}
-                    <p className="structure-template-filters-meta">
+                    <p className={w9.structureTemplateFiltersMeta}>
                       Showing {wizardTemplatesToShow.length} of {templates.length} templates
                       {activeTplFilterCount > 0 && wizardTemplatesToShow.length === 0 ? (
-                        <span className="structure-template-filters-empty-hint"> — No match. Adjust filters.</span>
+                        <span className={w9.structureTemplateFiltersEmptyHint}> — No match. Adjust filters.</span>
                       ) : null}
                     </p>
                   </div>
                   <div className="structure-template-grid" role="radiogroup" aria-label="Template">
                     {wizardTemplatesToShow.length === 0 ? (
-                      <p className="structure-template-grid-empty">
+                      <p className={w9.structureTemplateGridEmpty}>
                         No templates match the current filters. Clear filters or change criteria.
                       </p>
                     ) : (
@@ -1267,10 +1270,10 @@ export function StrategyStructurePage({
               )}
 
               {wizardStep === 2 && wizardTemplateDetail && (
-                <div className="structure-wizard-step">
-                  <h4 className="gates-form-group-title">Parameters</h4>
+                <div className={w9.structureWizardStep}>
+                  <h4 className={w9.gatesFormGroupTitle}>Parameters</h4>
                   {wizardTemplateDetail.example && (
-                    <p className="structure-param-example"><strong>Example:</strong> {wizardTemplateDetail.example}</p>
+                    <p className={w9.structureParamExample}><strong>Example:</strong> {wizardTemplateDetail.example}</p>
                   )}
                   {(wizardTemplateDetail.meta_params ?? []).filter((p: MetaParamItem) => p.param_kind !== 'fixed').length === 0 ? (
                     <p className="form-hint">No editable parameters. Click Next.</p>
@@ -1279,7 +1282,7 @@ export function StrategyStructurePage({
                       {(wizardTemplateDetail.meta_params ?? [])
                         .filter((p: MetaParamItem) => p.param_kind !== 'fixed')
                         .map((p: MetaParamItem) => (
-                          <div key={p.meta_key} className="gates-form-row">
+                          <div key={p.meta_key} className={w9.gatesFormRow}>
                             <label>{p.display_label ?? p.meta_key}</label>
                             <input
                               type="number"
@@ -1305,10 +1308,10 @@ export function StrategyStructurePage({
                 )
                 const showStep3Meta = metaNF.length > 0 && !wizardVisitedMetaStep
                 return (
-                  <div className="structure-wizard-step structure-details-step">
+                  <div className={cn(w9.structureWizardStep, 'structure-details-step')}>
                     <div className={`structure-details-panel${!showStep3Meta ? ' structure-details-panel--span-2' : ''}`}>
-                      <h4 className="structure-details-panel-title">Metadata</h4>
-                      <div className="structure-details-meta-grid">
+                      <h4 className={w9.structureDetailsPanelTitle}>Metadata</h4>
+                      <div className={w9.structureDetailsMetaGrid}>
                         <div className="structure-details-field structure-details-field--name">
                           <label className="structure-details-label">
                             Name <InfoTooltip text="Auto-filled from structure type and subtype; you can edit." />
@@ -1318,7 +1321,7 @@ export function StrategyStructurePage({
                             value={formPayload.name}
                             onChange={(e) => updateForm({ name: e.target.value })}
                             placeholder="Structure name"
-                            className="structure-details-input"
+                            className={w9.structureDetailsInput}
                             aria-label="Structure name"
                           />
                         </div>
@@ -1335,29 +1338,29 @@ export function StrategyStructurePage({
                             value={formPayload.version ?? 1}
                             onChange={(e) => updateForm({ version: parseInt(e.target.value, 10) || 1 })}
                             disabled={typeof formOpen === 'number'}
-                            className="structure-details-input structure-details-input--narrow"
+                            className={cn(w9.structureDetailsInput, 'structure-details-input--narrow')}
                             aria-label="Version"
                           />
                         </div>
                         <div className="structure-details-field structure-details-field--available">
-                          <label className="toggle-switch structure-details-toggle" style={{ cursor: 'pointer' }}>
+                          <label className={cn(w9.structureDetailsToggle, 'toggle-switch')} style={{ cursor: 'pointer' }}>
                             <input
                               type="checkbox"
                               checked={formPayload.is_active ?? true}
                               onChange={(e) => updateForm({ is_active: e.target.checked })}
                               aria-label="Available"
                             />
-                            <span className="toggle-switch-caption">Available</span>
+                            <span className={w9.toggleSwitchCaption}>Available</span>
                           </label>
                         </div>
                       </div>
                     </div>
                     {showStep3Meta && wizardTemplateDetail && (
-                      <div className="structure-details-panel">
-                        <h4 className="structure-details-panel-title">Parameters</h4>
-                        <div className="structure-details-params">
+                      <div className={w9.structureDetailsPanel}>
+                        <h4 className={w9.structureDetailsPanelTitle}>Parameters</h4>
+                        <div className={w9.structureDetailsParams}>
                           {metaNF.map((p: MetaParamItem) => (
-                            <div key={p.meta_key} className="structure-details-param-row">
+                            <div key={p.meta_key} className={w9.structureDetailsParamRow}>
                               <label className="structure-details-label">{p.display_label ?? p.meta_key}</label>
                               <input
                                 type="number"
@@ -1374,7 +1377,7 @@ export function StrategyStructurePage({
                                     [p.meta_key]: v as string | number,
                                   }))
                                 }}
-                                className="structure-details-input structure-details-input--narrow"
+                                className={cn(w9.structureDetailsInput, 'structure-details-input--narrow')}
                                 aria-label={p.display_label ?? p.meta_key}
                               />
                             </div>
@@ -1384,16 +1387,16 @@ export function StrategyStructurePage({
                     )}
 
                     {/* Row 2: Legs | Constraints */}
-                    <div className="structure-details-panel">
-                      <h4 className="structure-details-panel-title">Legs</h4>
-                      <p className="structure-details-hint structure-details-panel-desc">
+                    <div className={w9.structureDetailsPanel}>
+                      <h4 className={w9.structureDetailsPanelTitle}>Legs</h4>
+                      <p className={cn(w9.structureDetailsHint, w9.structureDetailsPanelDesc)}>
                         From template. Not editable here.
                       </p>
                       {defaultLegsLoading ? (
-                        <p className="structure-details-hint">Loading legs…</p>
+                        <p className={w9.structureDetailsHint}>Loading legs…</p>
                       ) : (
-                        <div className="structure-details-table-wrap">
-                          <table className="structure-details-table" aria-label="Structure legs">
+                        <div className={w9.structureDetailsTableWrap}>
+                          <table className={w9.structureDetailsTable} aria-label="Structure legs">
                             <thead>
                               <tr>
                                 <th>Role</th>
@@ -1416,17 +1419,17 @@ export function StrategyStructurePage({
                         </div>
                       )}
                     </div>
-                    <div className="structure-details-panel">
-                      <h4 className="structure-details-panel-title">Constraints</h4>
-                      <div className="structure-details-constraints">
+                    <div className={w9.structureDetailsPanel}>
+                      <h4 className={w9.structureDetailsPanelTitle}>Constraints</h4>
+                      <div className={w9.structureDetailsConstraints}>
                         {formConstraints.map((c, i) => (
-                          <div key={i} className="structure-details-constraint-row">
+                          <div key={i} className={w9.structureDetailsConstraintRow}>
                             <input
                               type="text"
                               value={c.constraint_type ?? ''}
                               onChange={(e) => updateConstraint(i, { constraint_type: e.target.value })}
                               placeholder="Type"
-                              className="structure-details-input structure-details-constraint-type"
+                              className={cn(w9.structureDetailsInput, w9.structureDetailsConstraintType)}
                               aria-label="Constraint type"
                             />
                             <input
@@ -1434,7 +1437,7 @@ export function StrategyStructurePage({
                               value={c.constraint_value_text ?? ''}
                               onChange={(e) => updateConstraint(i, { constraint_value_text: e.target.value })}
                               placeholder="Value (text)"
-                              className="structure-details-input structure-details-constraint-value"
+                              className={cn(w9.structureDetailsInput, w9.structureDetailsConstraintValue)}
                               aria-label="Value text"
                             />
                             <input
@@ -1442,14 +1445,14 @@ export function StrategyStructurePage({
                               value={c.constraint_value_int ?? ''}
                               onChange={(e) => updateConstraint(i, { constraint_value_int: e.target.value === '' ? undefined : parseInt(e.target.value, 10) })}
                               placeholder="Int"
-                              className="structure-details-input structure-details-constraint-int"
+                              className={cn(w9.structureDetailsInput, w9.structureDetailsConstraintInt)}
                               aria-label="Value int"
                             />
                             <Button
                               type="button"
                               variant="secondary"
                               size="sm"
-                              className="structure-details-constraint-remove"
+                              className={w9.structureDetailsConstraintRemove}
                               onClick={() => removeConstraint(i)}
                               aria-label="Remove constraint"
                             >
@@ -1457,7 +1460,7 @@ export function StrategyStructurePage({
                             </Button>
                           </div>
                         ))}
-                        <Button type="button" variant="secondary" className="structure-details-add-constraint" onClick={addConstraint}>
+                        <Button type="button" variant="secondary" className={w9.structureDetailsAddConstraint} onClick={addConstraint}>
                           Add constraint
                         </Button>
                       </div>
@@ -1469,9 +1472,9 @@ export function StrategyStructurePage({
             </>
           ) : (
             <div className="structure-copy-grid">
-              <div className="structure-details-panel structure-details-panel--span-2">
-                <h4 className="structure-details-panel-title">Metadata</h4>
-                <div className="structure-details-meta-grid">
+              <div className={cn(w9.structureDetailsPanel, 'structure-details-panel--span-2')}>
+                <h4 className={w9.structureDetailsPanelTitle}>Metadata</h4>
+                <div className={w9.structureDetailsMetaGrid}>
                   <div className="structure-details-field structure-details-field--name">
                     <label className="structure-details-label">Name</label>
                     <input
@@ -1479,7 +1482,7 @@ export function StrategyStructurePage({
                       value={formPayload.name}
                       onChange={(e) => updateForm({ name: e.target.value })}
                       placeholder="Structure name"
-                      className="structure-details-input"
+                      className={w9.structureDetailsInput}
                       aria-label="Structure name"
                     />
                   </div>
@@ -1491,29 +1494,29 @@ export function StrategyStructurePage({
                       value={formPayload.version ?? 1}
                       onChange={(e) => updateForm({ version: parseInt(e.target.value, 10) || 1 })}
                       disabled={typeof formOpen === 'number'}
-                      className="structure-details-input structure-details-input--narrow"
+                      className={cn(w9.structureDetailsInput, 'structure-details-input--narrow')}
                       aria-label="Version"
                     />
                   </div>
                   <div className="structure-details-field structure-details-field--available">
-                    <label className="toggle-switch structure-details-toggle" style={{ cursor: 'pointer' }}>
+                    <label className={cn(w9.structureDetailsToggle, 'toggle-switch')} style={{ cursor: 'pointer' }}>
                       <input
                         type="checkbox"
                         checked={formPayload.is_active ?? true}
                         onChange={(e) => updateForm({ is_active: e.target.checked })}
                         aria-label="Available"
                       />
-                      <span className="toggle-switch-caption">Available</span>
+                      <span className={w9.toggleSwitchCaption}>Available</span>
                     </label>
                   </div>
                 </div>
                 <div className="structure-copy-template-block" style={{ marginTop: 'var(--space-2)' }}>
                   <label className="structure-details-label">Template</label>
                   <div className="structure-template-filters structure-template-filters--compact" aria-label="Template filters">
-                    <div className="structure-template-filters-search-row">
+                    <div className={w9.structureTemplateFiltersSearchRow}>
                       <input
                         type="search"
-                        className="structure-template-filters-search structure-details-input"
+                        className={cn(w9.structureTemplateFiltersSearch, w9.structureDetailsInput)}
                         placeholder="Filter by name or code…"
                         value={tplFilterSearch}
                         onChange={(e) => setTplFilterSearch(e.target.value)}
@@ -1546,13 +1549,13 @@ export function StrategyStructurePage({
                       )}
                     </div>
                     {tplFiltersExpanded && (
-                      <div className="structure-template-filters-dims">
+                      <div className={w9.structureTemplateFiltersDims}>
                         {TEMPLATE_DIM_TYPES.map((dt) => (
-                          <label key={dt} className="structure-template-filter-dim">
-                            <span className="structure-template-filter-dim-label">{TEMPLATE_DIM_LABELS[dt]}</span>
+                          <label key={dt} className={w9.structureTemplateFilterDim}>
+                            <span className={w9.structureTemplateFilterDimLabel}>{TEMPLATE_DIM_LABELS[dt]}</span>
                             <AppSelect
                               id={`tpl-copy-filter-${dt}`}
-                              className="structure-details-input structure-template-filter-select"
+                              className={cn(w9.structureDetailsInput, w9.structureTemplateFilterSelect)}
                               value={tplDimFilters[dt] ?? ''}
                               onChange={(v) => setTplDimFilters((prev) => ({ ...prev, [dt]: v }))}
                               aria-label={`Filter by ${TEMPLATE_DIM_LABELS[dt]}`}
@@ -1565,7 +1568,7 @@ export function StrategyStructurePage({
                         ))}
                       </div>
                     )}
-                    <p className="structure-template-filters-meta">
+                    <p className={w9.structureTemplateFiltersMeta}>
                       {copyTemplateSelectOptions.length} template(s) in list
                     </p>
                   </div>
@@ -1576,7 +1579,7 @@ export function StrategyStructurePage({
                       if (n) handleTemplateSelect(n)
                     }}
                     aria-label="Template"
-                    className="structure-details-input structure-copy-template-select"
+                    className={cn(w9.structureDetailsInput, w9.structureCopyTemplateSelect)}
                     options={[
                       { value: '', label: '— Select —' },
                       ...copyTemplateSelectOptions.map((tpl) => ({
@@ -1591,16 +1594,16 @@ export function StrategyStructurePage({
                 </div>
               </div>
 
-              <div className="structure-details-panel">
-                <h4 className="structure-details-panel-title">Legs</h4>
-                <p className="structure-details-hint structure-details-panel-desc">
+              <div className={w9.structureDetailsPanel}>
+                <h4 className={w9.structureDetailsPanelTitle}>Legs</h4>
+                <p className={cn(w9.structureDetailsHint, w9.structureDetailsPanelDesc)}>
                   From template. Not editable here.
                 </p>
                 {defaultLegsLoading ? (
-                  <p className="structure-details-hint">Loading legs…</p>
+                  <p className={w9.structureDetailsHint}>Loading legs…</p>
                 ) : (
-                  <div className="structure-details-table-wrap">
-                    <table className="structure-details-table" aria-label="Structure legs">
+                  <div className={w9.structureDetailsTableWrap}>
+                    <table className={w9.structureDetailsTable} aria-label="Structure legs">
                       <thead>
                         <tr>
                           <th>Role</th>
@@ -1624,17 +1627,17 @@ export function StrategyStructurePage({
                 )}
               </div>
 
-              <div className="structure-details-panel">
-                <h4 className="structure-details-panel-title">Constraints</h4>
-                <div className="structure-details-constraints">
+              <div className={w9.structureDetailsPanel}>
+                <h4 className={w9.structureDetailsPanelTitle}>Constraints</h4>
+                <div className={w9.structureDetailsConstraints}>
                   {formConstraints.map((c, i) => (
-                    <div key={i} className="structure-details-constraint-row">
+                    <div key={i} className={w9.structureDetailsConstraintRow}>
                       <input
                         type="text"
                         value={c.constraint_type ?? ''}
                         onChange={(e) => updateConstraint(i, { constraint_type: e.target.value })}
                         placeholder="Type"
-                        className="structure-details-input structure-details-constraint-type"
+                        className={cn(w9.structureDetailsInput, w9.structureDetailsConstraintType)}
                         aria-label="Constraint type"
                       />
                       <input
@@ -1642,7 +1645,7 @@ export function StrategyStructurePage({
                         value={c.constraint_value_text ?? ''}
                         onChange={(e) => updateConstraint(i, { constraint_value_text: e.target.value })}
                         placeholder="Value (text)"
-                        className="structure-details-input structure-details-constraint-value"
+                        className={cn(w9.structureDetailsInput, w9.structureDetailsConstraintValue)}
                         aria-label="Value text"
                       />
                       <input
@@ -1650,14 +1653,14 @@ export function StrategyStructurePage({
                         value={c.constraint_value_int ?? ''}
                         onChange={(e) => updateConstraint(i, { constraint_value_int: e.target.value === '' ? undefined : parseInt(e.target.value, 10) })}
                         placeholder="Int"
-                        className="structure-details-input structure-details-constraint-int"
+                        className={cn(w9.structureDetailsInput, w9.structureDetailsConstraintInt)}
                         aria-label="Value int"
                       />
                       <Button
                         type="button"
                         variant="secondary"
                         size="sm"
-                        className="structure-details-constraint-remove"
+                        className={w9.structureDetailsConstraintRemove}
                         onClick={() => removeConstraint(i)}
                         aria-label="Remove constraint"
                       >
@@ -1665,35 +1668,35 @@ export function StrategyStructurePage({
                       </Button>
                     </div>
                   ))}
-                  <Button type="button" variant="secondary" className="structure-details-add-constraint" onClick={addConstraint}>
+                  <Button type="button" variant="secondary" className={w9.structureDetailsAddConstraint} onClick={addConstraint}>
                     Add constraint
                   </Button>
                 </div>
               </div>
 
-              <div className="structure-details-panel">
-                <h4 className="structure-details-panel-title">Notes</h4>
+              <div className={w9.structureDetailsPanel}>
+                <h4 className={w9.structureDetailsPanelTitle}>Notes</h4>
                 <textarea
                   value={formNotes}
                   onChange={(e) => setFormNotes(e.target.value)}
                   rows={3}
                   placeholder="Optional notes"
-                  className="structure-details-input"
+                  className={w9.structureDetailsInput}
                   style={{ width: '100%', resize: 'vertical' }}
                 />
               </div>
 
-              <div className="structure-details-panel">
-                <h4 className="structure-details-panel-title">Meta</h4>
-                <div className="structure-details-constraints">
+              <div className={w9.structureDetailsPanel}>
+                <h4 className={w9.structureDetailsPanelTitle}>Meta</h4>
+                <div className={w9.structureDetailsConstraints}>
                   {formMeta.map((m, i) => (
-                    <div key={i} className="structure-details-constraint-row">
+                    <div key={i} className={w9.structureDetailsConstraintRow}>
                       <input
                         type="text"
                         value={m.meta_key ?? ''}
                         onChange={(e) => updateMeta(i, { meta_key: e.target.value })}
                         placeholder="Key"
-                        className="structure-details-input structure-details-constraint-type"
+                        className={cn(w9.structureDetailsInput, w9.structureDetailsConstraintType)}
                         aria-label="Meta key"
                       />
                       <input
@@ -1701,14 +1704,14 @@ export function StrategyStructurePage({
                         value={m.meta_value_text ?? ''}
                         onChange={(e) => updateMeta(i, { meta_value_text: e.target.value })}
                         placeholder="Value"
-                        className="structure-details-input structure-details-constraint-value"
+                        className={cn(w9.structureDetailsInput, w9.structureDetailsConstraintValue)}
                         aria-label="Meta value"
                       />
                       <Button
                         type="button"
                         variant="secondary"
                         size="sm"
-                        className="structure-details-constraint-remove"
+                        className={w9.structureDetailsConstraintRemove}
                         onClick={() => removeMeta(i)}
                         aria-label="Remove meta"
                       >
@@ -1716,7 +1719,7 @@ export function StrategyStructurePage({
                       </Button>
                     </div>
                   ))}
-                  <Button type="button" variant="secondary" className="structure-details-add-constraint" onClick={addMeta}>
+                  <Button type="button" variant="secondary" className={w9.structureDetailsAddConstraint} onClick={addMeta}>
                     Add meta
                   </Button>
                 </div>
@@ -1724,7 +1727,7 @@ export function StrategyStructurePage({
             </div>
           )}
           </div>
-          <div className="structure-form-footer">
+          <div className={w9.structureFormFooter}>
             <Button type="button" variant="secondary" onClick={closeForm}>Cancel</Button>
             {isWizard ? (
               wizardStep < 3 ? (
@@ -1766,8 +1769,8 @@ export function StrategyStructurePage({
             ]}
           />
         </div>
-        {historyLoading && <p className="section-hint">Loading…</p>}
-        {historyError && <p className="msg-error">{historyError}</p>}
+        {historyLoading && <p className={w9.sectionHint}>Loading…</p>}
+        {historyError && <p className={w9.msgError}>{historyError}</p>}
         {!historyLoading && !historyError && (
           <div className="table-wrap">
             <table className="data-table">
@@ -1793,7 +1796,7 @@ export function StrategyStructurePage({
           </div>
         )}
         {!historyLoading && !historyError && history.length === 0 && (
-          <p className="section-hint">No strategy history.</p>
+          <p className={w9.sectionHint}>No strategy history.</p>
         )}
       </section>
     </PageSection>

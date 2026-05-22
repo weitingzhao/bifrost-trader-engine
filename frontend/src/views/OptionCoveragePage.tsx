@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useCallback, useEffect, useState } from 'react'
 import type { StatusResponse } from '../types'
 import {
@@ -343,7 +346,7 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
         infoText="Daily option pipeline status, then Greeks/IV and coverage metrics from Massive snapshot endpoints. Massive data is delayed (~15 minutes). Chain snapshots persist to PostgreSQL; contract and unified return data without writing."
       />
 
-      <section className="replay-section" aria-labelledby="option-coverage-pipeline-head">
+      <section className={rl.section} aria-labelledby="option-coverage-pipeline-head">
         <h3 id="option-coverage-pipeline-head" className={SECTION_TITLE_CLASS}>
           Research tables (PostgreSQL)
           <InfoTooltip text="Distinct symbol counts and freshness for option research and shared stock_day. Full table with domains is on Data Overview." />
@@ -365,7 +368,7 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
 
       <DailyDataChecklistSection configured={Boolean(configured)} onChecklistRefreshed={onDailyChecklistRefreshed} />
 
-      <section className="replay-section" aria-labelledby="option-coverage-greeks-head">
+      <section className={rl.section} aria-labelledby="option-coverage-greeks-head">
         <h3 id="option-coverage-greeks-head" className={SECTION_TITLE_CLASS}>
           Greeks / IV
           <InfoTooltip text="Implied volatility, delta, gamma, theta, vega, and open interest from Massive snapshot endpoints. Coverage and freshness metrics quantify data quality." />
@@ -424,7 +427,7 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
                     {gkCoverageBusy ? 'Loading\u2026' : 'Check Coverage'}
                   </Button>
                 </div>
-                {gkChainErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{gkChainErr}</p> : null}
+                {gkChainErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{gkChainErr}</p> : null}
                 {gkCoverageBusy ? <p style={{ marginTop: 'var(--space-3)', fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)' }}>Loading coverage stats…</p> : null}
                 {gkCoverage?.ok && gkCoverage.total != null && gkCoverage.total > 0 && (
                   <div className="gk-quality-summary" style={{ marginTop: 'var(--space-3)' }}>
@@ -467,7 +470,7 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
                     {gkContractBusy ? 'Running\u2026' : 'Enqueue Contract Snapshot'}
                   </Button>
                 </div>
-                {gkContractErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{gkContractErr}</p> : null}
+                {gkContractErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{gkContractErr}</p> : null}
                 {gkContractResult && (
                   <div style={{ marginTop: 'var(--space-3)' }}>
                     <div className="snap-wb-summary">
@@ -523,7 +526,7 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
                 {verifyUnderlying != null && (
                   <div className="feed-massive-verify-meta">Underlying (row / fallback): <strong>{verifyUnderlying.toFixed(2)}</strong></div>
                 )}
-                {verifyErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{verifyErr}</p>}
+                {verifyErr && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{verifyErr}</p>}
                 {greeksQuality && (
                   <div className="gk-quality-summary">
                     <div className="gk-quality-summary-grid">
@@ -591,7 +594,7 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
                     {gkUnifiedBusy ? 'Running\u2026' : 'Enqueue Unified Snapshot'}
                   </Button>
                 </div>
-                {gkUnifiedErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{gkUnifiedErr}</p> : null}
+                {gkUnifiedErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{gkUnifiedErr}</p> : null}
                 {gkUnifiedResult && (
                   <div style={{ marginTop: 'var(--space-3)' }}>
                     <details className="feed-massive-details-debug" open>

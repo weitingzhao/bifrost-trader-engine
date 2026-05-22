@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { pnlNegativeClass, pnlPositiveClass } from '@/components/shared/appUi'
+import { w9 } from '@/styles/wave9Classes'
 import type { ReactElement } from 'react'
 import { stockSymbolInspectorBtnClass } from '@/components/shared/exec-row-buttons'
 import type { LivePositionRow } from '../portfolio/types'
@@ -19,7 +22,7 @@ export function buildOpenStockPositionRows(
   const rows: ReactElement[] = []
   for (const accId of accountIds) {
     rows.push(
-      <tr key={`${rowKeyPrefix}-acc-${accId}`} className="replay-portfolio-group-header">
+      <tr key={`${rowKeyPrefix}-acc-${accId}`} className={rl.portfolioGroupHeader}>
         <td colSpan={9}>
           <strong>{accId}</strong>
         </td>
@@ -66,17 +69,17 @@ export function buildOpenStockPositionRows(
           <td>{fmtUsd(position.avgCost)}</td>
           <td>{fmtUsd(position.price)}</td>
           <td>{fmtLivePositionMarketValueQtyTimesLast(position)}</td>
-          <td className="coverage-pnl-stacked-cell">
-            <div className={(dailyPnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}>
+          <td className={w9.coveragePnlStackedCell}>
+            <div className={(dailyPnl ?? 0) >= 0 ? pnlPositiveClass : pnlNegativeClass}>
               {dailyPnl != null ? fmtUsd(dailyPnl) : '—'}
             </div>
-            <div className={`coverage-pnl-stacked-pct ${(dailyPct ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+            <div className={`coverage-pnl-stacked-pct ${(dailyPct ?? 0) >= 0 ? pnlPositiveClass : pnlNegativeClass}`}>
               {dailyPct != null ? fmtSignedPct(dailyPct) : '—'}
             </div>
           </td>
-          <td className="coverage-pnl-stacked-cell">
-            <div className={(pnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}>{pnl != null ? fmtUsd(pnl) : '—'}</div>
-            <div className={`coverage-pnl-stacked-pct ${(sincePct ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+          <td className={w9.coveragePnlStackedCell}>
+            <div className={(pnl ?? 0) >= 0 ? pnlPositiveClass : pnlNegativeClass}>{pnl != null ? fmtUsd(pnl) : '—'}</div>
+            <div className={`coverage-pnl-stacked-pct ${(sincePct ?? 0) >= 0 ? pnlPositiveClass : pnlNegativeClass}`}>
               {sincePct != null ? fmtSignedPct(sincePct) : '—'}
             </div>
           </td>
@@ -143,14 +146,14 @@ export function renderIndependentHoldingRow(
       <td>{fmtUsd(lastPrice)}</td>
       <td>{fmtLivePositionMarketValueQtyTimesLast(position)}</td>
       <td>
-        <span className={((dailyPnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>{fmtUsd(dailyPnl)}</span>
+        <span className={((dailyPnl ?? 0) >= 0) ? pnlPositiveClass : pnlNegativeClass}>{fmtUsd(dailyPnl)}</span>
         {' / '}
-        <span className={((dailyPct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>{fmtSignedPct(dailyPct)}</span>
+        <span className={((dailyPct ?? 0) >= 0) ? pnlPositiveClass : pnlNegativeClass}>{fmtSignedPct(dailyPct)}</span>
       </td>
       <td>
-        <span className={((totalPnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>{fmtUsd(totalPnl)}</span>
+        <span className={((totalPnl ?? 0) >= 0) ? pnlPositiveClass : pnlNegativeClass}>{fmtUsd(totalPnl)}</span>
         {' / '}
-        <span className={((totalPct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>{fmtSignedPct(totalPct)}</span>
+        <span className={((totalPct ?? 0) >= 0) ? pnlPositiveClass : pnlNegativeClass}>{fmtSignedPct(totalPct)}</span>
       </td>
     </tr>
   )
@@ -176,13 +179,13 @@ export function StockBucketPanel({
   onInspectStock,
 }: StockBucketPanelProps) {
   return (
-    <div id={panelId} role="tabpanel" aria-labelledby={tabButtonId} className="system-tab-panel">
-      <h5 className="replay-sub">{heading}</h5>
+    <div id={panelId} role="tabpanel" aria-labelledby={tabButtonId} className={w9.systemTabPanel}>
+      <h5 className={rl.sub}>{heading}</h5>
       {rows.length === 0 ? (
-        <p className="section-hint">{emptyHint}</p>
+        <p className={w9.sectionHint}>{emptyHint}</p>
       ) : (
-        <div className="replay-portfolio-table-wrap">
-          <table className="table-operations">
+        <div className={rl.portfolioTableWrap}>
+          <table className={w9.tableOperations}>
             <thead>
               <tr>
                 <th>Account</th>
@@ -192,8 +195,8 @@ export function StockBucketPanel({
                 <th>Avg Cost</th>
                 <th>Last</th>
                 <th>Market Value</th>
-                <th className="coverage-pnl-stacked-th">Daily $/&nbsp;%</th>
-                <th className="coverage-pnl-stacked-th">Since $/&nbsp;%</th>
+                <th className={w9.coveragePnlStackedTh}>Daily $/&nbsp;%</th>
+                <th className={w9.coveragePnlStackedTh}>Since $/&nbsp;%</th>
               </tr>
             </thead>
             <tbody>{buildOpenStockPositionRows(rows, rowKeyPrefix, onInspectStock)}</tbody>

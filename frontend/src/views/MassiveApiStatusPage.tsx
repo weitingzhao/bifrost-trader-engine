@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useEffect, useRef, useState } from 'react'
 import {
   fetchMassiveApiHealth,
@@ -127,10 +130,10 @@ export function MassiveApiStatusPage({ embeddedInSettings }: MassiveApiStatusPag
     >
       <SettingsPageGroups className="server-groups">
 
-        <section className="replay-section" aria-labelledby="massive-api-health-head">
-          <div className="system-tab-panel">
+        <section className={rl.section} aria-labelledby="massive-api-health-head">
+          <div className={w9.systemTabPanel}>
             <div className="daemon-header">
-              <div className="daemon-header-main daemon-header-with-lamp">
+              <div className={cn(w9.daemonHeaderMain, 'daemon-header-with-lamp')}>
                 <div>
                   <h2 id="massive-api-health-head" className={`daemon-card-title ${SECTION_TITLE_CLASS}`}>
                     <SettingsTitleLamp lamp={healthLamp} title="Massive API health">
@@ -149,7 +152,7 @@ export function MassiveApiStatusPage({ embeddedInSettings }: MassiveApiStatusPag
                   </div>
                 </div>
               </div>
-              <div className="monitor-header-actions">
+              <div className={w9.monitorHeaderActions}>
                 <button
                   type="button"
                   className="section-header-icon-btn"
@@ -213,7 +216,7 @@ export function MassiveApiStatusPage({ embeddedInSettings }: MassiveApiStatusPag
           </div>
         </section>
 
-        <section className="replay-section" aria-labelledby="massive-api-docs-head">
+        <section className={rl.section} aria-labelledby="massive-api-docs-head">
           <h3 id="massive-api-docs-head" className={SECTION_TITLE_CLASS}>
             Documentation
             <InfoTooltip text="Opens Swagger UI or ReDoc against the Massive process. Default: same hostname as this app and the listen port from health. Set NEXT_PUBLIC_MASSIVE_API_ORIGIN (or legacy VITE_MASSIVE_API_ORIGIN) in the frontend env to override (e.g. when nginx serves Massive on port 80 only)." />
@@ -250,7 +253,7 @@ export function MassiveApiStatusPage({ embeddedInSettings }: MassiveApiStatusPag
           </div>
         </section>
 
-        <section className="replay-section" aria-labelledby="massive-api-console-head">
+        <section className={rl.section} aria-labelledby="massive-api-console-head">
           <h3 id="massive-api-console-head" className={SECTION_TITLE_CLASS}>
             Application log
             <InfoTooltip text="Real-time log from run_server_massive.py (Redis stream bifrost:massive_console), same pattern as System → Server." />
@@ -266,7 +269,7 @@ export function MassiveApiStatusPage({ embeddedInSettings }: MassiveApiStatusPag
           />
         </section>
 
-        <section className="replay-section" aria-labelledby="massive-api-polygon-head">
+        <section className={rl.section} aria-labelledby="massive-api-polygon-head">
           <h3 id="massive-api-polygon-head" className={SECTION_TITLE_CLASS}>
             Polygon data source
             <InfoTooltip text="Configuration status of the Polygon.io market data provider." />

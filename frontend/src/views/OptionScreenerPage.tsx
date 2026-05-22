@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
 import type { StatusResponse } from '../types'
 import { PageSection } from '@/components/shared/page-section'
 import { Button } from '@/components/ui/button'
@@ -738,7 +739,7 @@ export function OptionScreenerPage({
           style={{ margin: 0 }}
         />
       </div>
-      <p className="section-hint" style={{ marginBottom: 'var(--space-3)' }}>
+      <p className={w9.sectionHint} style={{ marginBottom: 'var(--space-3)' }}>
         Screen option contracts by strategy structure and scoring criteria (V1: cash-secured puts).
       </p>
 

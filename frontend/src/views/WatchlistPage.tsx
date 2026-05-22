@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { w9 } from '@/styles/wave9Classes'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import type {
@@ -2374,11 +2375,11 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               </div>
 
               {sizeComputeError && (
-                <p className="msg-error mb-2 text-[0.75rem] text-amber-500" role="alert">
+                <p className={cn(w9.msgError, 'mb-2', 'text-[0.75rem]', 'text-amber-500')} role="alert">
                   {sizeComputeError}
                 </p>
               )}
-              {sizeComputeLoading && <p className="section-hint">Fetching bars and quote…</p>}
+              {sizeComputeLoading && <p className={w9.sectionHint}>Fetching bars and quote…</p>}
 
               {!sizeComputeLoading && sizeAtrResult && (
                 <>
@@ -2530,7 +2531,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                 </>
               )}
               {!sizeComputeLoading && sizeAtrResult && sizePosResult && !sizePosResult.is_valid && (
-                <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>
+                <p className={w9.sectionHint} style={{ marginTop: 'var(--space-2)' }}>
                   Sizing unavailable: requires valid Kelly (win_rate &gt; 0 &amp; profit_factor &gt; 0), ATR &gt; 0, and capital &gt; 0.
                 </p>
               )}

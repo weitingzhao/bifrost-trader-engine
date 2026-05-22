@@ -1,3 +1,7 @@
+import { rl, filterPill, pnlUnrealizedClass } from '@/lib/replayLayout'
+import { pnlNegativeClass, pnlPositiveClass } from '@/components/shared/appUi'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import type { Execution, OpenOrder, PositionCategory, RealtimeQuote, StatusResponse, WatchlistItem } from '../types'
@@ -408,10 +412,10 @@ function renderLastBidAskOption(q: RealtimeQuote | undefined): ReactNode {
     <>
       {ref != null ? fmtUsd(ref) : '—'}
       {bidDiff != null && (
-        <span className={`realtime-quote-spread ${bidDiff > 0 ? 'pnl-positive' : bidDiff < 0 ? 'pnl-negative' : ''}`} title="Bid vs Last"> {Math.abs(bidDiff).toFixed(2)}</span>
+        <span className={`realtime-quote-spread ${bidDiff > 0 ? pnlPositiveClass : bidDiff < 0 ? pnlNegativeClass : ''}`} title="Bid vs Last"> {Math.abs(bidDiff).toFixed(2)}</span>
       )}
       {askDiff != null && (
-        <span className={`realtime-quote-spread ${askDiff > 0 ? 'pnl-positive' : askDiff < 0 ? 'pnl-negative' : ''}`} title="Ask vs Last"> {Math.abs(askDiff).toFixed(2)}</span>
+        <span className={`realtime-quote-spread ${askDiff > 0 ? pnlPositiveClass : askDiff < 0 ? pnlNegativeClass : ''}`} title="Ask vs Last"> {Math.abs(askDiff).toFixed(2)}</span>
       )}
     </>
   )
@@ -1290,7 +1294,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
           >
             {dragEnabled ? (
               <span
-                className="realtime-quote-drag-handle"
+                className={w9.realtimeQuoteDragHandle}
                 draggable
                 onDragStart={(e) => {
                   e.dataTransfer.setData('application/x-market-streams-symbol', JSON.stringify({ category: categoryForDrag, symbol: row.symbol }))
@@ -1310,7 +1314,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
               <td className="realtime-quote-num">{hostAvgCost != null && Number.isFinite(hostAvgCost) ? fmtUsd(hostAvgCost) : '—'}</td>
               <td className="realtime-quote-num">
                 {hostPnlCost != null && Number.isFinite(hostPnlCost) ? (
-                  <span className={hostPnlCost > 0 ? 'pnl-positive' : hostPnlCost < 0 ? 'pnl-negative' : ''}>
+                  <span className={hostPnlCost > 0 ? pnlPositiveClass : hostPnlCost < 0 ? pnlNegativeClass : ''}>
                     {fmtUsdRound0(hostPnlCost)}
                   </span>
                 ) : (
@@ -1321,7 +1325,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
               <td className="realtime-quote-num">{secondaryAvgCost != null && Number.isFinite(secondaryAvgCost) ? fmtUsd(secondaryAvgCost) : '—'}</td>
               <td className="realtime-quote-num">
                 {secondaryPnlCost != null && Number.isFinite(secondaryPnlCost) ? (
-                  <span className={secondaryPnlCost > 0 ? 'pnl-positive' : secondaryPnlCost < 0 ? 'pnl-negative' : ''}>
+                  <span className={secondaryPnlCost > 0 ? pnlPositiveClass : secondaryPnlCost < 0 ? pnlNegativeClass : ''}>
                     {fmtUsdRound0(secondaryPnlCost)}
                   </span>
                 ) : (
@@ -1348,7 +1352,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                 ? bench.prev_close
                 : (bench && Number.isFinite(bench.close) ? bench.close : null)
               const lastVsPrev = displayLast != null && prevClose != null && prevClose > 0
-                ? (displayLast > prevClose ? 'pnl-positive' : displayLast < prevClose ? 'pnl-negative' : '')
+                ? (displayLast > prevClose ? pnlPositiveClass : displayLast < prevClose ? pnlNegativeClass : '')
                 : ''
               return (
                 <>
@@ -1356,10 +1360,10 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                     <span className={lastVsPrev}>{fmtUsd(displayLast)}</span>
                   ) : '—'}
                   {bidDiff != null && (
-                    <span className={`realtime-quote-spread ${bidDiff > 0 ? 'pnl-positive' : bidDiff < 0 ? 'pnl-negative' : ''}`} title="Bid vs Last"> {Math.abs(bidDiff).toFixed(2)}</span>
+                    <span className={`realtime-quote-spread ${bidDiff > 0 ? pnlPositiveClass : bidDiff < 0 ? pnlNegativeClass : ''}`} title="Bid vs Last"> {Math.abs(bidDiff).toFixed(2)}</span>
                   )}
                   {askDiff != null && (
-                    <span className={`realtime-quote-spread ${askDiff > 0 ? 'pnl-positive' : askDiff < 0 ? 'pnl-negative' : ''}`} title="Ask vs Last"> {Math.abs(askDiff).toFixed(2)}</span>
+                    <span className={`realtime-quote-spread ${askDiff > 0 ? pnlPositiveClass : askDiff < 0 ? pnlNegativeClass : ''}`} title="Ask vs Last"> {Math.abs(askDiff).toFixed(2)}</span>
                   )}
                 </>
               )
@@ -1368,7 +1372,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
           <td className="realtime-quote-num realtime-quote-pnl-stacked market-streams-daily-calc-cell">
             <span className="realtime-quote-pnl-stacked-line">
               {changePct != null && Number.isFinite(changePct) ? (
-                <span className={changePct > 0 ? 'pnl-positive' : changePct < 0 ? 'pnl-negative' : ''}>
+                <span className={changePct > 0 ? pnlPositiveClass : changePct < 0 ? pnlNegativeClass : ''}>
                   {Math.abs(changePct).toFixed(2)}%
                 </span>
               ) : (
@@ -1377,7 +1381,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
             </span>
             <span className="realtime-quote-pnl-stacked-line">
               {pnlVsBench != null && Number.isFinite(pnlVsBench) ? (
-                <span className={pnlVsBench > 0 ? 'pnl-positive' : pnlVsBench < 0 ? 'pnl-negative' : ''}>
+                <span className={pnlVsBench > 0 ? pnlPositiveClass : pnlVsBench < 0 ? pnlNegativeClass : ''}>
                   {fmtUsd(Math.abs(pnlVsBench))}
                 </span>
               ) : (
@@ -1401,7 +1405,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                 if (avgCost == null || !Number.isFinite(avgCost) || avgCost <= 0 || dl == null) return '—'
                 const sincePct = ((dl - avgCost) / avgCost) * 100
                 return (
-                  <span className={sincePct > 0 ? 'pnl-positive' : sincePct < 0 ? 'pnl-negative' : ''}>
+                  <span className={sincePct > 0 ? pnlPositiveClass : sincePct < 0 ? pnlNegativeClass : ''}>
                     {Math.abs(sincePct).toFixed(2)}%
                   </span>
                 )
@@ -1409,7 +1413,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
             </span>
             <span className="realtime-quote-pnl-stacked-line">
               {pnlCost != null && Number.isFinite(pnlCost) ? (
-                <span className={pnlCost > 0 ? 'pnl-positive' : pnlCost < 0 ? 'pnl-negative' : ''}>
+                <span className={pnlCost > 0 ? pnlPositiveClass : pnlCost < 0 ? pnlNegativeClass : ''}>
                   {fmtUsdRound0(pnlCost)}
                 </span>
               ) : (
@@ -1447,11 +1451,11 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
       const costCell = avgForPnl != null && Number.isFinite(avgForPnl) ? fmtUsd(avgForPnl) : '—'
       const pnlCell = livePnl != null
         ? (
-            <span className={`replay-pnl-unrealized ${livePnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`} title={mtmTooltip}>
+            <span className={pnlUnrealizedClass(livePnl)} title={mtmTooltip}>
               {fmtUsdRound0(livePnl)}
             </span>
           )
-        : <span className="replay-muted" title={mtmTooltip}>—</span>
+        : <span className={rl.muted} title={mtmTooltip}>—</span>
       const symbolFreshness = getQuoteFreshness(q?.ts)
       const freshnessTitle = q?.ts != null
         ? `Last update ${symbolFreshness === 'fresh' ? '<3s ago' : symbolFreshness === 'stale' ? '3–10s ago' : '>10s ago'}`
@@ -1483,7 +1487,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
           >
             {dragEnabled ? (
               <span
-                className="realtime-quote-drag-handle"
+                className={w9.realtimeQuoteDragHandle}
                 draggable
                 onDragStart={(e) => {
                   e.dataTransfer.setData('application/x-market-streams-opt', JSON.stringify({ basisKey }))
@@ -1500,13 +1504,13 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
           {hasStreamAccounts && (
             <>
               {/* Host columns */}
-              <td className="realtime-quote-num">{isHost ? qtyCell : <span className="replay-muted">—</span>}</td>
-              <td className="realtime-quote-num">{isHost ? costCell : <span className="replay-muted">—</span>}</td>
-              <td className="realtime-quote-num">{isHost ? pnlCell : <span className="replay-muted">—</span>}</td>
+              <td className="realtime-quote-num">{isHost ? qtyCell : <span className={rl.muted}>—</span>}</td>
+              <td className="realtime-quote-num">{isHost ? costCell : <span className={rl.muted}>—</span>}</td>
+              <td className="realtime-quote-num">{isHost ? pnlCell : <span className={rl.muted}>—</span>}</td>
               {/* Secondary columns */}
-              <td className="realtime-quote-num">{isSecondary ? qtyCell : <span className="replay-muted">—</span>}</td>
-              <td className="realtime-quote-num">{isSecondary ? costCell : <span className="replay-muted">—</span>}</td>
-              <td className="realtime-quote-num">{isSecondary ? pnlCell : <span className="replay-muted">—</span>}</td>
+              <td className="realtime-quote-num">{isSecondary ? qtyCell : <span className={rl.muted}>—</span>}</td>
+              <td className="realtime-quote-num">{isSecondary ? costCell : <span className={rl.muted}>—</span>}</td>
+              <td className="realtime-quote-num">{isSecondary ? pnlCell : <span className={rl.muted}>—</span>}</td>
             </>
           )}
           {/* Combined columns */}
@@ -1514,20 +1518,20 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
           <td className="realtime-quote-num">{costCell}</td>
           <td className="positions-opt-live-quote">
             {q == null ? (
-              <span className="replay-muted">—</span>
+              <span className={rl.muted}>—</span>
             ) : (
               <>
-                {q.bid != null ? <span className="positions-opt-quote-bid">{q.bid.toFixed(2)}</span> : <span className="replay-muted">—</span>}
+                {q.bid != null ? <span className="positions-opt-quote-bid">{q.bid.toFixed(2)}</span> : <span className={rl.muted}>—</span>}
                 {' · '}
                 <strong>{mid != null ? mid.toFixed(2) : '—'}</strong>
                 {' · '}
-                {q.ask != null ? <span className="positions-opt-quote-ask">{q.ask.toFixed(2)}</span> : <span className="replay-muted">—</span>}
+                {q.ask != null ? <span className="positions-opt-quote-ask">{q.ask.toFixed(2)}</span> : <span className={rl.muted}>—</span>}
               </>
             )}
           </td>
-          <td className="realtime-quote-num replay-muted">—</td>
+          <td className={rl.muted}>—</td>
           <td className="realtime-quote-num realtime-quote-pnl-stacked">
-            <span className="realtime-quote-pnl-stacked-line replay-muted" style={{ fontSize: '0.7em' }}>Live PNL</span>
+            <span className={rl.muted} style={{ fontSize: '0.7em' }}>Live PNL</span>
             <span className="realtime-quote-pnl-stacked-line">{pnlCell}</span>
           </td>
         </tr>
@@ -1537,20 +1541,20 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
   )
 
   return (
-    <div className="app-page-stack">
+    <div className={w9.appPageStack}>
       {filteredRows.length > 0 && (
         <div className="live-streams-summary-bar">
           <span className="live-streams-summary-label">STK Streams</span>
           <span className="live-streams-summary-seg">
             <span className="live-streams-summary-key">SINCE $</span>
-            <span className={`live-streams-summary-val ${streamsSummary.totalCostPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+            <span className={`live-streams-summary-val ${streamsSummary.totalCostPnl >= 0 ? pnlPositiveClass : pnlNegativeClass}`}>
               {fmtUsdRound0(streamsSummary.totalCostPnl)}
             </span>
           </span>
           {streamsSummary.sincePct != null && Number.isFinite(streamsSummary.sincePct) && (
             <span className="live-streams-summary-seg">
               <span className="live-streams-summary-key">SINCE %</span>
-              <span className={`live-streams-summary-val ${streamsSummary.sincePct >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+              <span className={`live-streams-summary-val ${streamsSummary.sincePct >= 0 ? pnlPositiveClass : pnlNegativeClass}`}>
                 {streamsSummary.sincePct >= 0 ? '+' : ''}{streamsSummary.sincePct.toFixed(2)}%
               </span>
             </span>
@@ -1560,14 +1564,14 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
               <span className="live-streams-summary-divider" aria-hidden>|</span>
               <span className="live-streams-summary-seg">
                 <span className="live-streams-summary-key">DAILY $</span>
-                <span className={`live-streams-summary-val ${streamsSummary.totalDailyDollar >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                <span className={`live-streams-summary-val ${streamsSummary.totalDailyDollar >= 0 ? pnlPositiveClass : pnlNegativeClass}`}>
                   {fmtUsdRound0(streamsSummary.totalDailyDollar)}
                 </span>
               </span>
               {streamsSummary.totalDailyPct != null && Number.isFinite(streamsSummary.totalDailyPct) && (
                 <span className="live-streams-summary-seg">
                   <span className="live-streams-summary-key">DAILY %</span>
-                  <span className={`live-streams-summary-val ${streamsSummary.totalDailyPct >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                  <span className={`live-streams-summary-val ${streamsSummary.totalDailyPct >= 0 ? pnlPositiveClass : pnlNegativeClass}`}>
                     {streamsSummary.totalDailyPct >= 0 ? '+' : ''}{streamsSummary.totalDailyPct.toFixed(2)}%
                   </span>
                 </span>
@@ -1576,7 +1580,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
           )}
         </div>
       )}
-      <PageSection className="card-operations realtime-quotes-card gap-3">
+      <PageSection className={cn(w9.cardOperations, 'realtime-quotes-card', 'gap-3')}>
         <div className="realtime-quotes-card-header-row">
           <div className="daemon-header-with-lamp realtime-quotes-card-header-title">
             <h2 className={`daemon-card-title ${SECTION_TITLE_CLASS}`}>
@@ -1598,16 +1602,16 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
               />
             </h2>
           </div>
-          <div className="realtime-stream-filters-inline" role="toolbar" aria-label="Market Streams filters">
+          <div className={w9.realtimeStreamFiltersInline} role="toolbar" aria-label="Market Streams filters">
             {hasStreamAccounts && (
-              <div className="realtime-stream-filter">
-                <span className="section-hint">Account:</span>
-                <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by stream account (multi-select; none selected = all)">
+              <div className={w9.realtimeStreamFilter}>
+                <span className={w9.sectionHint}>Account:</span>
+                <div className={w9.realtimeStreamFilterPills} role="group" aria-label="Filter by stream account (multi-select; none selected = all)">
                   {(['host', 'secondary'] as const).map((key) => (
                     <button
                       key={key}
                       type="button"
-                      className={`replay-filter-pill ${streamAccountFilters.has(key) ? 'active' : ''}`}
+                      className={filterPill(streamAccountFilters.has(key), { draggable: true })}
                       onClick={() => toggleStreamAccountFilter(key)}
                       aria-pressed={streamAccountFilters.has(key)}
                       title={streamAccountFilters.size === 0 ? 'No filter — showing all rows. Click to narrow.' : 'Toggle; Host and Secondary combine with OR.'}
@@ -1618,14 +1622,14 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                 </div>
               </div>
             )}
-            <div className="realtime-stream-filter">
-              <span className="section-hint">Category:</span>
-              <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by position category (multi-select; none selected = all)">
+            <div className={w9.realtimeStreamFilter}>
+              <span className={w9.sectionHint}>Category:</span>
+              <div className={w9.realtimeStreamFilterPills} role="group" aria-label="Filter by position category (multi-select; none selected = all)">
                 {streamCategoryOrder.map((cat) => (
                   <button
                     key={cat}
                     type="button"
-                    className={`replay-filter-pill replay-filter-pill-draggable ${positionCategoryFilters.has(cat) ? 'active' : ''}`}
+                    className={filterPill(positionCategoryFilters.has(cat), { draggable: true })}
                     onClick={() => togglePositionCategoryFilter(cat)}
                     aria-pressed={positionCategoryFilters.has(cat)}
                     draggable
@@ -1634,15 +1638,15 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                     onDrop={(e) => handleCategoryDrop(e, cat)}
                     title="Click to toggle filter; drag to reorder. No pills active = all categories."
                   >
-                    <span className="replay-filter-pill-grip" aria-hidden>⋮⋮</span>
+                    <span className={rl.filterPillGrip} aria-hidden>⋮⋮</span>
                     {cat}
                   </button>
                 ))}
               </div>
-              {categoryOrderSaving && <span className="section-hint" style={{ marginLeft: '0.5rem' }}>Saving order…</span>}
+              {categoryOrderSaving && <span className={w9.sectionHint} style={{ marginLeft: '0.5rem' }}>Saving order…</span>}
             </div>
           </div>
-          <div className="realtime-quotes-card-header-actions">
+          <div className={w9.realtimeQuotesCardHeaderActions}>
             {onNavigateToSubscribe && (
               <button
                 type="button"
@@ -1685,12 +1689,12 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
               </svg>
             </button>
             {streamSyncFeedback != null && (
-              <span className="section-hint" aria-live="polite">{streamSyncFeedback}</span>
+              <span className={w9.sectionHint} aria-live="polite">{streamSyncFeedback}</span>
             )}
           </div>
         </div>
         <div className="realtime-quotes-table-wrap">
-          <table className="table-operations realtime-quotes-table">
+          <table className={cn(w9.tableOperations, w9.realtimeQuotesTable)}>
             <colgroup>
               <col style={{ width: '5rem' }} />
               {hasStreamAccounts && <col style={{ width: '5.5rem' }} />}
@@ -1773,7 +1777,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                       <tr className="live-sort-group-header">
                         <td colSpan={msColSpan}>
                           <span className="live-sort-group-label">{g.label}</span>
-                          <span className={`live-sort-group-total ${g.totalPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                          <span className={`live-sort-group-total ${g.totalPnl >= 0 ? pnlPositiveClass : pnlNegativeClass}`}>
                             PNL Σ {fmtUsdRound0(g.totalPnl)}
                           </span>
                         </td>
@@ -1834,14 +1838,14 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                         <td className="realtime-quote-num">—</td>
                         <td className="realtime-quote-num">{hostCostSum !== 0 ? fmtUsdRound0(hostCostSum) : '—'}</td>
                         <td className="realtime-quote-num">
-                          <span className={hostPnlSum > 0 ? 'pnl-positive' : hostPnlSum < 0 ? 'pnl-negative' : ''}>
+                          <span className={hostPnlSum > 0 ? pnlPositiveClass : hostPnlSum < 0 ? pnlNegativeClass : ''}>
                             {hostPnlSum !== 0 ? fmtUsdRound0(hostPnlSum) : '—'}
                           </span>
                         </td>
                         <td className="realtime-quote-num">—</td>
                         <td className="realtime-quote-num">{secondaryCostSum !== 0 ? fmtUsdRound0(secondaryCostSum) : '—'}</td>
                         <td className="realtime-quote-num">
-                          <span className={secondaryPnlSum > 0 ? 'pnl-positive' : secondaryPnlSum < 0 ? 'pnl-negative' : ''}>
+                          <span className={secondaryPnlSum > 0 ? pnlPositiveClass : secondaryPnlSum < 0 ? pnlNegativeClass : ''}>
                             {secondaryPnlSum !== 0 ? fmtUsdRound0(secondaryPnlSum) : '—'}
                           </span>
                         </td>
@@ -1853,7 +1857,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                     <td className="realtime-quote-num realtime-quote-pnl-stacked">
                       <span className="realtime-quote-pnl-stacked-line">
                         {totalDailyPct != null && Number.isFinite(totalDailyPct) ? (
-                          <span className={totalDailyPct > 0 ? 'pnl-positive' : totalDailyPct < 0 ? 'pnl-negative' : ''}>
+                          <span className={totalDailyPct > 0 ? pnlPositiveClass : totalDailyPct < 0 ? pnlNegativeClass : ''}>
                             {Math.abs(totalDailyPct).toFixed(2)}%
                           </span>
                         ) : (
@@ -1861,7 +1865,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                         )}
                       </span>
                       <span className="realtime-quote-pnl-stacked-line">
-                        <span className={totalDailyDollar > 0 ? 'pnl-positive' : totalDailyDollar < 0 ? 'pnl-negative' : ''}>
+                        <span className={totalDailyDollar > 0 ? pnlPositiveClass : totalDailyDollar < 0 ? pnlNegativeClass : ''}>
                           {totalDailyPct != null || totalDailyDollar !== 0 ? fmtUsdRound0(totalDailyDollar) : '—'}
                         </span>
                       </span>
@@ -1869,7 +1873,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                     <td className="realtime-quote-num realtime-quote-pnl-stacked">
                       <span className="realtime-quote-pnl-stacked-line">
                         {totalPct != null && Number.isFinite(totalPct) ? (
-                          <span className={totalPct > 0 ? 'pnl-positive' : totalPct < 0 ? 'pnl-negative' : ''}>
+                          <span className={totalPct > 0 ? pnlPositiveClass : totalPct < 0 ? pnlNegativeClass : ''}>
                             {Math.abs(totalPct).toFixed(2)}%
                           </span>
                         ) : (
@@ -1877,7 +1881,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                         )}
                       </span>
                       <span className="realtime-quote-pnl-stacked-line">
-                        <span className={totalCostPnl > 0 ? 'pnl-positive' : totalCostPnl < 0 ? 'pnl-negative' : ''}>
+                        <span className={totalCostPnl > 0 ? pnlPositiveClass : totalCostPnl < 0 ? pnlNegativeClass : ''}>
                           {totalCostPnl !== 0 ? fmtUsdRound0(totalCostPnl) : '—'}
                         </span>
                       </span>
@@ -1890,7 +1894,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
         </div>
       </PageSection>
 
-      <PageSection className="card-operations live-open-watchlist-split gap-3">
+      <PageSection className={cn(w9.cardOperations, 'live-open-watchlist-split', 'gap-3')}>
         <div className="live-open-watchlist-split-grid" role="group" aria-label="Watching stocks, Watching options, and open orders">
           <div className="live-watching-stocks-column">
             <div className="live-watching-stocks-pane">
@@ -1910,9 +1914,9 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
               </div>
               <div className="realtime-quotes-table-wrap live-watching-stocks-table-wrap">
                 {watchingTickerRows.length === 0 ? (
-                  <p className="section-hint">No STK symbols with Watchlist category Watching</p>
+                  <p className={w9.sectionHint}>No STK symbols with Watchlist category Watching</p>
                 ) : (
-                  <table className="table-operations realtime-quotes-table" aria-label="Watching stocks quotes">
+                  <table className={cn(w9.tableOperations, w9.realtimeQuotesTable)} aria-label="Watching stocks quotes">
                     <colgroup>
                       <col style={{ width: '5.5rem' }} />
                       <col style={{ width: '9rem' }} />
@@ -1960,9 +1964,9 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
               </div>
               <div className="realtime-quotes-table-wrap">
                 {watchlistOptionItems.length === 0 ? (
-                  <p className="section-hint">No option contracts on Watchlist</p>
+                  <p className={w9.sectionHint}>No option contracts on Watchlist</p>
                 ) : (
-                  <table className="table-operations realtime-quotes-table" aria-label="Watching option quotes">
+                  <table className={cn(w9.tableOperations, w9.realtimeQuotesTable)} aria-label="Watching option quotes">
                     <thead>
                       <tr>
                         <th>Symbol</th>
@@ -2018,7 +2022,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                         <circle cx="12" cy="12" r="10" />
                         <path d="M12 6v6l4 2" />
                       </svg>
-                      <span className="open-orders-freshness-age">{fmtSince(openOrdersUpdatedAt)} ago</span>
+                      <span className={w9.openOrdersFreshnessAge}>{fmtSince(openOrdersUpdatedAt)} ago</span>
                     </span>
                   )}
                   {onNavigateToSubscribe && (
@@ -2035,11 +2039,11 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                     </button>
                   )}
                 </div>
-                <span className="section-hint" style={{ marginLeft: 8 }}>Source: DB table daemon_open_orders</span>
+                <span className={w9.sectionHint} style={{ marginLeft: 8 }}>Source: DB table daemon_open_orders</span>
               </div>
               <div className="open-orders-table-wrap">
                 {openOrders.length === 0 ? (
-                  <p className="section-hint">No open orders</p>
+                  <p className={w9.sectionHint}>No open orders</p>
                 ) : (
                   <>
                     {(() => {
@@ -2050,7 +2054,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                           {optionOrders.length > 0 && (
                             <div className="open-orders-section" style={{ marginBottom: 'var(--space-3)' }}>
                               <h3 className="open-orders-subtitle" style={{ fontSize: 'var(--text-caption)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Option (OPT)</h3>
-                              <table className="open-orders-table table-operations" role="grid" aria-label="Open orders Option">
+                              <table className={cn(w9.tableOperations, 'open-orders-table')} role="grid" aria-label="Open orders Option">
                                 <thead>
                                   <tr>
                                     <th scope="col">Account ID</th>
@@ -2101,7 +2105,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                           {stockOrders.length > 0 && (
                             <div className="open-orders-section">
                               <h3 className="open-orders-subtitle" style={{ fontSize: 'var(--text-caption)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Stock (STK)</h3>
-                              <table className="open-orders-table table-operations" role="grid" aria-label="Open orders Stock">
+                              <table className={cn(w9.tableOperations, 'open-orders-table')} role="grid" aria-label="Open orders Stock">
                                 <thead>
                                   <tr>
                                     <th scope="col">Account ID</th>
@@ -2143,7 +2147,7 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                             </div>
                           )}
                           {optionOrders.length === 0 && stockOrders.length === 0 && (
-                            <p className="section-hint">No OPT or STK open orders (other sec types filtered)</p>
+                            <p className={w9.sectionHint}>No OPT or STK open orders (other sec types filtered)</p>
                           )}
                         </>
                       )
@@ -2153,23 +2157,23 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
               </div>
             </div>
 
-            <div className="live-strategy-inline-bar" style={{ marginTop: 'var(--space-3)' }}>
-              <span className="live-strategy-inline-title">
+            <div className={w9.liveStrategyInlineBar} style={{ marginTop: 'var(--space-3)' }}>
+              <span className={w9.liveStrategyInlineTitle}>
                 Strategy Active
                 <InfoTooltip text="Current active structure, gate safety set, and allocation. Daemon uses these on next start. To change them, click Manage to open Strategy → Structure." />
               </span>
-              <span className="live-strategy-inline-pills">
-                <span className="live-strategy-pill" title="Structure">
-                  <span className="live-strategy-pill-key">S</span>
-                  <span className="live-strategy-pill-val">{j?.strategy?.active?.structure?.name ?? '—'}</span>
+              <span className={w9.liveStrategyInlinePills}>
+                <span className={w9.liveStrategyPill} title="Structure">
+                  <span className={w9.liveStrategyPillKey}>S</span>
+                  <span className={w9.liveStrategyPillVal}>{j?.strategy?.active?.structure?.name ?? '—'}</span>
                 </span>
-                <span className="live-strategy-pill" title="Gate safety">
-                  <span className="live-strategy-pill-key">G</span>
-                  <span className="live-strategy-pill-val">{j?.strategy?.active?.gate_safety?.name ?? '—'}</span>
+                <span className={w9.liveStrategyPill} title="Gate safety">
+                  <span className={w9.liveStrategyPillKey}>G</span>
+                  <span className={w9.liveStrategyPillVal}>{j?.strategy?.active?.gate_safety?.name ?? '—'}</span>
                 </span>
-                <span className="live-strategy-pill" title="Allocation">
-                  <span className="live-strategy-pill-key">A</span>
-                  <span className="live-strategy-pill-val">{j?.strategy?.active?.allocation?.name ?? '—'}</span>
+                <span className={w9.liveStrategyPill} title="Allocation">
+                  <span className={w9.liveStrategyPillKey}>A</span>
+                  <span className={w9.liveStrategyPillVal}>{j?.strategy?.active?.allocation?.name ?? '—'}</span>
                 </span>
               </span>
               {onNavigateToStrategy && (

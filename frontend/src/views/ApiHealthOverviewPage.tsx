@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import {
   fetchDocsApiHealthAtOrigin,
   fetchHealth,
@@ -624,11 +626,11 @@ export function ApiHealthOverviewPage({ embeddedInSettings }: ApiHealthOverviewP
     <SettingsPageCard embedded={embeddedInSettings} className="massive-api-status-page api-health-overview">
       <SettingsPageGroups className="server-groups">
         <SettingsSection aria-labelledby="services-overview-head">
-          <div className="system-tab-panel">
+          <div className={w9.systemTabPanel}>
             <div className="daemon-header">
-              <div className="daemon-header-main daemon-header-with-lamp">
+              <div className={cn(w9.daemonHeaderMain, 'daemon-header-with-lamp')}>
                 <div>
-                  <h2 id="services-overview-head" className="daemon-card-title inline-flex flex-wrap items-center gap-2">
+                  <h2 id="services-overview-head" className={cn(w9.daemonCardTitle, 'inline-flex', 'flex-wrap', 'items-center', 'gap-2')}>
                     Services Overview
                     <InfoTooltip text="Configured routes from YAML utilized.services (GET /health), and live probes for Dev vs Prod. The app uses the same routing rules so a dead dev stack does not break the UI when services are declared prod. Requests time out per probe. Override bases with VITE_DEV_API_ORIGIN and VITE_PROD_API_ORIGIN." />
                   </h2>

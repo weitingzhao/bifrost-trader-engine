@@ -1,4 +1,5 @@
 import type { StatusResponse } from '../types'
+import { w9 } from '@/styles/wave9Classes'
 import { PageSection } from '@/components/shared/page-section'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 
@@ -22,7 +23,7 @@ export function BacktestPage({ status: _status, onGoToScreener, breadcrumbLabel 
           style={{ margin: 0 }}
         />
       </div>
-      <p className="section-hint">
+      <p className={w9.sectionHint}>
         Backtest and strategy validation will be available in a later release.
       </p>
     </PageSection>

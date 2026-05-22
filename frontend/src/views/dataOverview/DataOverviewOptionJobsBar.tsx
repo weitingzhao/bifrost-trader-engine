@@ -1,3 +1,5 @@
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import {
   forwardRef,
   useCallback,
@@ -3201,17 +3203,17 @@ export const DataOverviewOptionJobsBar = forwardRef<
             </p>
           ) : null}
           {isContractsFocus && refGapError ? (
-            <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-2)' }}>
+            <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-2)' }}>
               {refGapError}
             </p>
           ) : null}
           {isSnapshotsFocus && snapshotGapError ? (
-            <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-2)' }}>
+            <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-2)' }}>
               {snapshotGapError}
             </p>
           ) : null}
           {isBarsFocus && barsGapError ? (
-            <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-2)' }}>
+            <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-2)' }}>
               {barsGapError}
             </p>
           ) : null}
@@ -3219,7 +3221,7 @@ export const DataOverviewOptionJobsBar = forwardRef<
       ) : null}
 
       {enqueueErr ? (
-        <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-2)' }}>
+        <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-2)' }}>
           {enqueueErr}
         </p>
       ) : null}

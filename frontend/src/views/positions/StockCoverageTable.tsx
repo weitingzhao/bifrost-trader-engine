@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { pnlNegativeClass, pnlPositiveClass } from '@/components/shared/appUi'
+import { w9 } from '@/styles/wave9Classes'
 import { Fragment, type ReactNode } from 'react'
 import { fmtUsd } from '../../utils/format'
 import {
@@ -79,7 +82,7 @@ export function StockCoverageTable({
     const active = poolSort.column === col
     return (
       <th
-        className="replay-th-sortable coverage-pool-sort-th"
+        className={rl.thSortable}
         title={title}
         role="button"
         tabIndex={0}
@@ -135,7 +138,7 @@ export function StockCoverageTable({
             <strong>{ci.symbol}</strong>
           )}
         </td>
-        {!poolGroupByAccount && <td className="replay-muted">{acc}</td>}
+        {!poolGroupByAccount && <td className={rl.muted}>{acc}</td>}
         {!hideBacked && (
           <td title={backedOpps.join(', ') || undefined}>
             {backedOpps.length > 0 ? backedOpps.join(', ') : '—'}
@@ -166,16 +169,16 @@ export function StockCoverageTable({
                   : Math.floor(Math.max(0, ci.held_shares) / 100)}
               </span>
               {backingLayout && ci.instances_needing > 1 && (
-                <span className="coverage-shared-hint"> ({ci.instances_needing} strat.)</span>
+                <span className={w9.coverageSharedHint}> ({ci.instances_needing} strat.)</span>
               )}
             </td>
           ) : (
-            <td className="coverage-available-held-amt-cell">
-              <div className="coverage-available-contracts" title={`${ci.held_shares} sh ÷ 100`}>
+            <td className={w9.coverageAvailableHeldAmtCell}>
+              <div className={w9.coverageAvailableContracts} title={`${ci.held_shares} sh ÷ 100`}>
                 {availContracts}
               </div>
-              <div className="coverage-available-contracts-label">contracts</div>
-              <div className="coverage-available-shares-line" title="Share qty (100 sh per contract)">
+              <div className={w9.coverageAvailableContractsLabel}>contracts</div>
+              <div className={w9.coverageAvailableSharesLine} title="Share qty (100 sh per contract)">
                 {ci.held_shares} sh
               </div>
             </td>
@@ -184,22 +187,22 @@ export function StockCoverageTable({
           <td>
             {ci.required_shares}
             {ci.instances_needing > 1 && (
-              <span className="coverage-shared-hint"> ({ci.instances_needing} strat.)</span>
+              <span className={w9.coverageSharedHint}> ({ci.instances_needing} strat.)</span>
             )}
           </td>
         )}
         {!slim && !backingSlim && (
           <td>
-            <span className={ci.surplus_or_gap >= 0 ? 'pnl-positive' : 'pnl-negative'}>
+            <span className={ci.surplus_or_gap >= 0 ? pnlPositiveClass : pnlNegativeClass}>
               {fmtSurplusShares(ci.surplus_or_gap)}
             </span>
           </td>
         )}
         {!slim && !backingSlim && <td>{optionSupportLabel}</td>}
         {slim || backingLayout ? (
-          <td className="coverage-cost-avg-cell" title="Cost basis (total) / avg cost per share">
-            <div className="coverage-cost-avg-basis">{fmtUsd(ci.cost_basis_total)}</div>
-            <div className="coverage-cost-avg-per-share">{fmtUsd(ci.avg_cost_per_share)}</div>
+          <td className={w9.coverageCostAvgCell} title="Cost basis (total) / avg cost per share">
+            <div className={w9.coverageCostAvgBasis}>{fmtUsd(ci.cost_basis_total)}</div>
+            <div className={w9.coverageCostAvgPerShare}>{fmtUsd(ci.avg_cost_per_share)}</div>
           </td>
         ) : (
           <>
@@ -209,51 +212,51 @@ export function StockCoverageTable({
         )}
         {slim || backingLayout ? (
           <td
-            className="coverage-mkt-value-price-cell"
+            className={w9.coverageMktValuePriceCell}
             title="Position market value (held × last) / price per share"
           >
-            <div className="coverage-mkt-value-total">{fmtUsd(coverageRowMarketValueTotal(ci))}</div>
-            <div className="coverage-mkt-value-per-share">{fmtUsd(ci.live_last_price)}</div>
+            <div className={w9.coverageMktValueTotal}>{fmtUsd(coverageRowMarketValueTotal(ci))}</div>
+            <div className={w9.coverageMktValuePerShare}>{fmtUsd(ci.live_last_price)}</div>
           </td>
         ) : (
           <td>{fmtUsd(ci.live_last_price)}</td>
         )}
         {slim || backingLayout ? (
-          <td className="coverage-pnl-stacked-cell">
-            <div className={((ci.daily_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+          <td className={w9.coveragePnlStackedCell}>
+            <div className={((ci.daily_pnl ?? 0) >= 0) ? pnlPositiveClass : pnlNegativeClass}>
               {fmtUsd(ci.daily_pnl)}
             </div>
-            <div className={`coverage-pnl-stacked-pct ${((ci.daily_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}`}>
+            <div className={`coverage-pnl-stacked-pct ${((ci.daily_pct ?? 0) >= 0) ? pnlPositiveClass : pnlNegativeClass}`}>
               {fmtSignedPct(ci.daily_pct)}
             </div>
           </td>
         ) : (
           <td>
-            <span className={((ci.daily_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+            <span className={((ci.daily_pnl ?? 0) >= 0) ? pnlPositiveClass : pnlNegativeClass}>
               {fmtUsd(ci.daily_pnl)}
             </span>
             {' / '}
-            <span className={((ci.daily_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+            <span className={((ci.daily_pct ?? 0) >= 0) ? pnlPositiveClass : pnlNegativeClass}>
               {fmtSignedPct(ci.daily_pct)}
             </span>
           </td>
         )}
         {slim || backingLayout ? (
-          <td className="coverage-pnl-stacked-cell">
-            <div className={((ci.total_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+          <td className={w9.coveragePnlStackedCell}>
+            <div className={((ci.total_pnl ?? 0) >= 0) ? pnlPositiveClass : pnlNegativeClass}>
               {fmtUsd(ci.total_pnl)}
             </div>
-            <div className={`coverage-pnl-stacked-pct ${((ci.total_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}`}>
+            <div className={`coverage-pnl-stacked-pct ${((ci.total_pct ?? 0) >= 0) ? pnlPositiveClass : pnlNegativeClass}`}>
               {fmtSignedPct(ci.total_pct)}
             </div>
           </td>
         ) : (
           <td>
-            <span className={((ci.total_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+            <span className={((ci.total_pnl ?? 0) >= 0) ? pnlPositiveClass : pnlNegativeClass}>
               {fmtUsd(ci.total_pnl)}
             </span>
             {' / '}
-            <span className={((ci.total_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+            <span className={((ci.total_pct ?? 0) >= 0) ? pnlPositiveClass : pnlNegativeClass}>
               {fmtSignedPct(ci.total_pct)}
             </span>
           </td>
@@ -267,7 +270,7 @@ export function StockCoverageTable({
     )
   }
   return (
-  <div className="replay-portfolio-table-wrap">
+  <div className={rl.portfolioTableWrap}>
     <table
       className={`table-operations instance-sheet-sub-table coverage-summary-table${poolSortOn ? ' coverage-underlying-pool-sortable' : ''}`}
     >
@@ -281,7 +284,7 @@ export function StockCoverageTable({
           {showHeldAmtColumn &&
             (backingLayout ? (
               sortTh(
-                <span className="coverage-pool-th-backed-amt">
+                <span className={w9.coveragePoolThBackedAmt}>
                   Backed
                   <br />
                   Amt
@@ -291,7 +294,7 @@ export function StockCoverageTable({
               )
             ) : slim && poolSortOn ? (
               sortTh(
-                <span className="coverage-pool-th-held-amt">
+                <span className={w9.coveragePoolThHeldAmt}>
                   Held
                   <br />
                   Amt
@@ -301,7 +304,7 @@ export function StockCoverageTable({
               )
             ) : slim ? (
               <th title="Contracts ≈ max(0, long shares) ÷ 100.">
-                <span className="coverage-pool-th-held-amt">Held<br />Amt</span>
+                <span className={w9.coveragePoolThHeldAmt}>Held<br />Amt</span>
               </th>
             ) : (
               <th title="Option contracts ≈ max(0, long shares) ÷ 100.">Available Held Amt</th>
@@ -336,8 +339,8 @@ export function StockCoverageTable({
           ) : (
             <th>Live last</th>
           )}
-          {slim || backingLayout ? <th className="coverage-pnl-stacked-th">Daily</th> : <th>Daily ($ / %)</th>}
-          {slim || backingLayout ? <th className="coverage-pnl-stacked-th">Total</th> : <th>Total ($ / %)</th>}
+          {slim || backingLayout ? <th className={w9.coveragePnlStackedTh}>Daily</th> : <th>Daily ($ / %)</th>}
+          {slim || backingLayout ? <th className={w9.coveragePnlStackedTh}>Total</th> : <th>Total ($ / %)</th>}
           {!slim && !backingSlim && <th>Status</th>}
         </tr>
       </thead>

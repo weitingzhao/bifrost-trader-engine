@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { OptionBarsContractsGapResult } from '../../api'
 import type { DataOverviewOptionJobsBarHandle } from './DataOverviewOptionJobsBar'
 import { DataOverviewBarsGapQueriesSheet } from './DataOverviewBarsGapQueriesSheet'
@@ -174,7 +176,7 @@ export function DataOverviewBarsAllGapsSheet({
         </p>
 
         {localErr ? (
-          <p className="status-page-msg err" role="alert" style={{ margin: 'var(--space-2)' }}>
+          <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ margin: 'var(--space-2)' }}>
             {localErr}
           </p>
         ) : null}

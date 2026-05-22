@@ -1,3 +1,5 @@
+import { rl, expandIcon } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
 import { useState, useEffect, type Dispatch, type SetStateAction } from 'react'
 import type { Execution, OptExecutionGroup, OptionStockLinkRow, OptionStockLinkSummary } from '../../types'
 import {
@@ -47,7 +49,7 @@ function PaginationBar({
     <div className="ledger-pagination-bar" role="navigation" aria-label="Table pagination">
       <button
         type="button"
-        className="ledger-pagination-btn"
+        className={w9.ledgerPaginationBtn}
         onClick={() => onPage(1)}
         disabled={page === 1}
         aria-label="First page"
@@ -56,20 +58,20 @@ function PaginationBar({
       </button>
       <button
         type="button"
-        className="ledger-pagination-btn"
+        className={w9.ledgerPaginationBtn}
         onClick={() => onPage(page - 1)}
         disabled={page === 1}
         aria-label="Previous page"
       >
         ‹
       </button>
-      <span className="ledger-pagination-info">
+      <span className={w9.ledgerPaginationInfo}>
         {page} / {totalPages}
-        <span className="ledger-pagination-total"> ({total})</span>
+        <span className={w9.ledgerPaginationTotal}> ({total})</span>
       </span>
       <button
         type="button"
-        className="ledger-pagination-btn"
+        className={w9.ledgerPaginationBtn}
         onClick={() => onPage(page + 1)}
         disabled={page === totalPages}
         aria-label="Next page"
@@ -78,7 +80,7 @@ function PaginationBar({
       </button>
       <button
         type="button"
-        className="ledger-pagination-btn"
+        className={w9.ledgerPaginationBtn}
         onClick={() => onPage(totalPages)}
         disabled={page === totalPages}
         aria-label="Last page"
@@ -182,15 +184,15 @@ export function LedgerClosedOptionContractsSection({
 
   return (
     <section aria-label={sectionAriaLabel}>
-      <div className="replay-portfolio-table-wrap">
-        <table className="table-operations replay-opt-groups">
+      <div className={rl.portfolioTableWrap}>
+        <table className={rl.optGroups}>
           <thead>
             <tr>
-              <th rowSpan={2} className="replay-opt-expand-col"></th>
+              <th rowSpan={2} className={rl.optExpandCol}></th>
               <th rowSpan={2}>Contract</th>
               <th
                 rowSpan={2}
-                className="replay-th-sortable"
+                className={rl.thSortable}
                 onClick={e => {
                   e.stopPropagation()
                   setLedgerOptSort(prev =>
@@ -228,7 +230,7 @@ export function LedgerClosedOptionContractsSection({
               <th rowSpan={2}>Account</th>
               <th
                 rowSpan={2}
-                className="replay-th-sortable"
+                className={rl.thSortable}
                 onClick={e => {
                   e.stopPropagation()
                   setLedgerOptSort(prev =>
@@ -261,12 +263,12 @@ export function LedgerClosedOptionContractsSection({
               </th>
             </tr>
             <tr>
-              <th className="replay-th-sub">Size</th>
-              <th className="replay-th-sub">@</th>
-              <th className="replay-th-sub">Cost</th>
-              <th className="replay-th-sub">Size</th>
-              <th className="replay-th-sub">@</th>
-              <th className="replay-th-sub">Premium</th>
+              <th className={rl.thSub}>Size</th>
+              <th className={rl.thSub}>@</th>
+              <th className={rl.thSub}>Cost</th>
+              <th className={rl.thSub}>Size</th>
+              <th className={rl.thSub}>@</th>
+              <th className={rl.thSub}>Premium</th>
             </tr>
           </thead>
           <tbody>
@@ -313,7 +315,7 @@ export function LedgerClosedOptionContractsSection({
               return (
                 <tr
                   key={groupKey}
-                  className="replay-opt-group-row"
+                  className={rl.optGroupRow}
                   onClick={() => toggleDetailExpand(groupKey)}
                   role="button"
                   tabIndex={0}
@@ -326,15 +328,15 @@ export function LedgerClosedOptionContractsSection({
                   aria-expanded={isExpanded}
                   aria-label={isExpanded ? 'Collapse group details' : 'Expand group details'}
                 >
-                  <td className="replay-opt-expand-col">
+                  <td className={rl.optExpandCol}>
                     <span
-                      className={`replay-opt-expand-icon ${isExpanded ? 'expanded' : ''}`}
+                      className={expandIcon(isExpanded)}
                       aria-hidden
                     >
                       {isExpanded ? '▼' : '▶'}
                     </span>
                   </td>
-                  <td className="replay-opt-contract">
+                  <td className={rl.optContract}>
                     {(() => {
                       const trades = g.trades ?? []
                       const resolvedState = getInstanceConsistencyState(trades)
@@ -448,17 +450,17 @@ export function LedgerClosedOptionContractsSection({
                   <td>{g.buy_volume}</td>
                   <td>{fmtUsd(g.buy_avg_price)}</td>
                   <td>
-                    <span className="replay-cost">{fmtUsd(g.buy_cost)}</span>
+                    <span className={rl.cost}>{fmtUsd(g.buy_cost)}</span>
                   </td>
                   <td>{g.sell_volume}</td>
                   <td>{fmtUsd(g.sell_avg_price)}</td>
                   <td>
-                    <span className="replay-premium">{fmtUsd(g.sell_premium)}</span>
+                    <span className={rl.premium}>{fmtUsd(g.sell_premium)}</span>
                   </td>
                   <td>
                     <span
                       className={
-                        displayGroupPnl >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'
+                        displayGroupPnl >= 0 ? 'rl.pnlRealized' : 'rl.pnlDetailNegative'
                       }
                       title={
                         linkIds.length > 0
@@ -485,12 +487,12 @@ export function LedgerClosedOptionContractsSection({
             })}
           </tbody>
           <tfoot>
-            <tr className="replay-opt-summary-row">
+            <tr className={rl.optSummaryRow}>
               <td colSpan={10}>Total</td>
               <td>
                 <strong
                   className={
-                    closedPnlSum >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'
+                    closedPnlSum >= 0 ? 'rl.pnlRealized' : 'rl.pnlDetailNegative'
                   }
                 >
                   {fmtUsd0(closedPnlSum)}
@@ -508,11 +510,11 @@ export function LedgerClosedOptionContractsSection({
         />
       </div>
 
-      <h5 className={`replay-sub replay-opt-detail-title ${sectionHeadingWithTooltipClass}`}>
+      <h5 className={`rl.sub rl.optDetailTitle ${sectionHeadingWithTooltipClass}`}>
         Details (per trade)
         <InfoTooltip text="Click a closed trade row above to load its execution details." />
       </h5>
-      <table className="table-operations">
+      <table className={w9.tableOperations}>
         <thead>
           <tr>
             <th>Contract</th>
@@ -533,7 +535,7 @@ export function LedgerClosedOptionContractsSection({
         <tbody>
           {closedExpandedGroups.length === 0 ? (
             <tr>
-              <td colSpan={13} className="replay-detail-placeholder">
+              <td colSpan={13} className={rl.detailPlaceholder}>
                 {detailPlaceholder}
               </td>
             </tr>
@@ -599,14 +601,14 @@ export function LedgerClosedOptionContractsSection({
                                 <strong>{p_.symbol}</strong> {p_.rightLabel}
                                 {strikeStr_}
                                 {ex.account_executions_id != null && (
-                                  <span className="replay-contract-exec-id">#{ex.account_executions_id}</span>
+                                  <span className={rl.contractExecId}>#{ex.account_executions_id}</span>
                                 )}
                               </>
                             ) : (
                               <>
                                 {g.contract_key}
                                 {ex.account_executions_id != null && (
-                                  <span className="replay-contract-exec-id">#{ex.account_executions_id}</span>
+                                  <span className={rl.contractExecId}>#{ex.account_executions_id}</span>
                                 )}
                               </>
                             )}
@@ -624,7 +626,7 @@ export function LedgerClosedOptionContractsSection({
                                     ? `${pL.symbol} ${pL.rightLabel}${strikeStrL}`
                                     : (g.contract_key ?? '')
                                   return (
-                                    <span className="ledger-opt-link-stock-badges">
+                                    <span className={w9.ledgerOptLinkStockBadges}>
                                       {detailLinkIds.map(lid => (
                                         <button
                                           key={lid}
@@ -694,7 +696,7 @@ export function LedgerClosedOptionContractsSection({
                     </td>
                     <td>
                       {ex.account_executions_id != null ? (
-                        <span className="replay-exec-row-actions">
+                        <span className={rl.execRowActions}>
                           <ExecRowIconButton
                             onClick={() => onEditExecution(ex)}
                             title="Edit"
@@ -741,15 +743,15 @@ export function LedgerClosedOptionContractsSection({
         </tbody>
         <tfoot>
           <tr>
-            <td colSpan={9} className="replay-detail-total-label">
+            <td colSpan={9} className={rl.detailTotalLabel}>
               Total PNL
             </td>
             <td
               className={
                 detailsTotalPnl < 0
-                  ? 'replay-pnl-detail-negative'
+                  ? 'rl.pnlDetailNegative'
                   : detailsTotalPnl > 0
-                    ? 'replay-pnl-detail-positive'
+                    ? 'rl.pnlDetailPositive'
                     : ''
               }
             >

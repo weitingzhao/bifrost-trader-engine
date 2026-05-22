@@ -1,4 +1,6 @@
 import { InfoTooltip } from './InfoTooltip'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { parseConsoleLogLine } from './LogConsolePanel'
 import type { UnifiedAggregatedLogConsoleController, UnifiedLogSourceDefinition } from './unifiedLogConsoleTypes'
 
@@ -176,7 +178,7 @@ export function AggregatedLogConsolePanel({
         onMouseDown={onResizeStart}
         title="Drag to resize height"
       />
-      <div className="section-hint celery-console-status-line architecture-console-status-line">
+      <div className={cn(w9.sectionHint, 'celery-console-status-line', 'architecture-console-status-line')}>
         <div className="celery-console-status-indicator architecture-console-status-messages">
           {status !== 'idle' && status !== 'connecting' ? (
             <span

@@ -1,3 +1,5 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
 import type { Bar } from '../../../types'
 import { Button } from '@/components/ui/button'
 import { SECTION_TITLE_CLASS } from '../../../components/SectionPageTitle'
@@ -34,26 +36,26 @@ export function DataBarsPreviewPanel({
   onBarsTimeSortToggle,
 }: DataBarsPreviewPanelProps) {
   return (
-    <section className="replay-section" aria-labelledby="data-bars-head">
+    <section className={rl.section} aria-labelledby="data-bars-head">
       <h3 id="data-bars-head" className={SECTION_TITLE_CLASS}>
         Bars Preview
         <InfoTooltip text="Load and display stored bars for a single symbol and period. Candlestick chart and table with the most recent bars, sorted by time." />
       </h3>
-      <div className="replay-bar-symbol-row" style={{ flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
-        <label htmlFor="data-bar-symbol" className="replay-bar-symbol-label">
+      <div className={rl.barSymbolRow} style={{ flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
+        <label htmlFor="data-bar-symbol" className={rl.barSymbolLabel}>
           Symbol
         </label>
         <input
           id="data-bar-symbol"
           type="text"
-          className="replay-bar-symbol-input"
+          className={rl.barSymbolInput}
           placeholder="Symbol, e.g. NVDA"
           value={barSymbol}
           onChange={(e) => onSymbolChange((e.target.value || '').trim().toUpperCase())}
           aria-label="Symbol for bars"
         />
-        <span className="replay-bar-symbol-label">Period</span>
-        <div className="replay-bar-period-radios" role="group" aria-label="Bar period">
+        <span className={rl.barSymbolLabel}>Period</span>
+        <div className={rl.barPeriodRadios} role="group" aria-label="Bar period">
           {BAR_PERIODS.map((p) => (
             <label key={p.value} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer', marginRight: '1rem' }}>
               <input type="radio" name="bar-period" value={p.value} checked={barPeriod === p.value} onChange={() => onPeriodChange(p.value)} aria-label={p.label} />
@@ -65,13 +67,13 @@ export function DataBarsPreviewPanel({
           {barsLoading ? 'Loading…' : 'Load'}
         </Button>
       </div>
-      <p className="replay-sync-hint" style={{ marginTop: '0.5rem', fontSize: '0.9em' }}>
+      <p className={rl.syncHint} style={{ marginTop: '0.5rem', fontSize: '0.9em' }}>
         Backfill runs in Celery Worker (config default ranges per period). See System → Recent operations for job status.
       </p>
       {bars.length > 0 && (
         <div className="data-bars-chart-container">
-          <div className="data-bars-chart-header">
-            <span className="data-bars-chart-title">
+          <div className={w9.dataBarsChartHeader}>
+            <span className={w9.dataBarsChartTitle}>
               {barSymbol || '—'} {barPeriod} · {chartBars.length} bars
             </span>
           </div>
@@ -79,10 +81,10 @@ export function DataBarsPreviewPanel({
         </div>
       )}
       {bars.length === 0 ? (
-        <div className="replay-placeholder">No bars. Enter symbol, click Load, or run Backfill for a symbol above.</div>
+        <div className={rl.placeholder}>No bars. Enter symbol, click Load, or run Backfill for a symbol above.</div>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border min-w-0">
-          <table className="table-operations">
+          <table className={w9.tableOperations}>
           <thead>
             <tr>
               <th>

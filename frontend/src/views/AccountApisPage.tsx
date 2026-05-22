@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { DraggableModal } from '../components/DraggableModal'
 import {
   fetchHealth,
@@ -476,7 +478,7 @@ export function AccountApisPage({ embeddedInSettings }: AccountApisPageProps) {
       <SettingsPageGroups className="server-groups">
         <SettingsSection aria-labelledby="account-page-head">
           <div className="architecture-page-intro">
-            <h2 id="account-page-head" className="daemon-card-title inline-flex flex-wrap items-center gap-2 architecture-page-title">
+            <h2 id="account-page-head" className={cn(w9.daemonCardTitle, 'inline-flex', 'flex-wrap', 'items-center', 'gap-2', 'architecture-page-title')}>
               <SettingsTitleLamp
                 lamp={accountTitleLamp as LampTone}
                 title="Combined Trading and Portfolio API reachability"

@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import {
   deleteAllBarsJobs,
@@ -578,7 +581,7 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
   const err = activeTab?.pipeline === 'massive_async' ? massiveError : barsError
 
   return (
-    <section className="replay-section dashboard-section dashboard-celery-queues" aria-labelledby="celery-queues-head">
+    <section className={rl.section} aria-labelledby="celery-queues-head">
       <div className="celery-queues-header">
         <h3 id="celery-queues-head" className={CELERY_SECTION_TITLE}>
           Queues
@@ -743,7 +746,7 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
         </div>
       </div>
 
-      <p className="section-hint celery-queue-hint">
+      <p className={cn(w9.sectionHint, 'celery-queue-hint')}>
         <code className="dashboard-queue-name">{activeTab?.celeryQueue ?? '—'}</code>
         {' — '}
         {activeTab?.pipeline === 'massive_async' ? (
@@ -768,7 +771,7 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
       ) : null}
 
       {err ? (
-        <p className="status-page-msg err" role="alert">
+        <p className={cn(w9.statusPageMsg, 'err')} role="alert">
           {err}
         </p>
       ) : null}

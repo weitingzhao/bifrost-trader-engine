@@ -1,4 +1,6 @@
 import { InfoTooltip } from '../../components/InfoTooltip'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { celeryQueueHash } from '../../utils/celeryQueueDeepLink'
 import { feedMassiveStockTickersSubHash } from './feedMassiveStockTabUtils'
@@ -274,17 +276,17 @@ export function RefJobDetailPanel({
           {isFeedStocksTickersReferenceUniverseRefKind(kind) ? (
             <div>
               <p className="ref-jobs-md-enqueue-hint">Full pagination sync (1000 rows/page) until cursor ends. No extra fields.</p>
-              <div className="ref-overview-coverage-strip" style={{ marginTop: 'var(--space-2)' }} aria-live="polite">
+              <div className={w9.refOverviewCoverageStrip} style={{ marginTop: 'var(--space-2)' }} aria-live="polite">
                 {universeRowCountLoading ? (
-                  <span className="ref-overview-coverage-muted">Loading row count…</span>
+                  <span className={w9.refOverviewCoverageMuted}>Loading row count…</span>
                 ) : universeRowCount != null ? (
                   <span className="ref-refdb-stat-highlight" title="Rows in public.tickers">
                     <strong>{universeRowCount.toLocaleString()}</strong>
-                    <span className="ref-overview-coverage-total"> tickers in </span>
+                    <span className={w9.refOverviewCoverageTotal}> tickers in </span>
                     <code>tickers</code>
                   </span>
                 ) : (
-                  <span className="ref-overview-coverage-muted">Row count unavailable</span>
+                  <span className={w9.refOverviewCoverageMuted}>Row count unavailable</span>
                 )}
               </div>
             </div>
@@ -292,17 +294,17 @@ export function RefJobDetailPanel({
           {isFeedStocksTickersTypesRefKind(kind) ? (
             <div>
               <p className="ref-jobs-md-enqueue-hint">Replaces all rows in ticker_types from the API. No extra fields.</p>
-              <div className="ref-overview-coverage-strip" style={{ marginTop: 'var(--space-2)' }} aria-live="polite">
+              <div className={w9.refOverviewCoverageStrip} style={{ marginTop: 'var(--space-2)' }} aria-live="polite">
                 {tickerTypesRowCountLoading ? (
-                  <span className="ref-overview-coverage-muted">Loading row count…</span>
+                  <span className={w9.refOverviewCoverageMuted}>Loading row count…</span>
                 ) : tickerTypesRowCount != null ? (
                   <span className="ref-refdb-stat-highlight" title="Rows in public.ticker_types">
                     <strong>{tickerTypesRowCount.toLocaleString()}</strong>
-                    <span className="ref-overview-coverage-total"> instrument types in </span>
+                    <span className={w9.refOverviewCoverageTotal}> instrument types in </span>
                     <code>ticker_types</code>
                   </span>
                 ) : (
-                  <span className="ref-overview-coverage-muted">Row count unavailable</span>
+                  <span className={w9.refOverviewCoverageMuted}>Row count unavailable</span>
                 )}
               </div>
             </div>
@@ -344,29 +346,29 @@ export function RefJobDetailPanel({
               <p id="ref-overview-scope-hint-panel" className="feed-massive-agg-sub-doc" style={{ marginTop: 'var(--space-1)', marginBottom: 0 }}>
                 Compares <code>public.tickers</code> to <code>public.ticker_overview</code>.
               </p>
-              <div className="ref-overview-coverage-strip" aria-live="polite">
+              <div className={w9.refOverviewCoverageStrip} aria-live="polite">
                 {overviewCoverageLoading ? (
-                  <span className="ref-overview-coverage-muted">Loading coverage counts…</span>
+                  <span className={w9.refOverviewCoverageMuted}>Loading coverage counts…</span>
                 ) : overviewCoverage ? (
                   <>
                     <span className="ref-overview-coverage-missing" title="Tickers with no row in ticker_overview">
                       <strong>{overviewCoverage.missing.toLocaleString()}</strong> missing
                     </span>
-                    <span className="ref-overview-coverage-sep" aria-hidden>
+                    <span className={w9.refOverviewCoverageSep} aria-hidden>
                       ·
                     </span>
                     <span className="ref-overview-coverage-filled" title="Tickers with a ticker_overview row">
                       <strong>{overviewCoverage.filled.toLocaleString()}</strong> filled
                     </span>
-                    <span className="ref-overview-coverage-sep" aria-hidden>
+                    <span className={w9.refOverviewCoverageSep} aria-hidden>
                       ·
                     </span>
-                    <span className="ref-overview-coverage-total">
+                    <span className={w9.refOverviewCoverageTotal}>
                       {overviewCoverage.total_tickers.toLocaleString()} in <code>tickers</code>
                     </span>
                   </>
                 ) : (
-                  <span className="ref-overview-coverage-muted">Coverage counts unavailable</span>
+                  <span className={w9.refOverviewCoverageMuted}>Coverage counts unavailable</span>
                 )}
               </div>
               {overviewEnqueueMode === 'stale' ? (
@@ -428,29 +430,29 @@ export function RefJobDetailPanel({
                 Compares <code>public.tickers</code> to <code>public.ticker_related_tickers</code> (
                 <code>from_tickers_id</code>). Stale uses <code>MAX(fetched_at)</code> per ticker.
               </p>
-              <div className="ref-overview-coverage-strip" aria-live="polite">
+              <div className={w9.refOverviewCoverageStrip} aria-live="polite">
                 {relatedCoverageLoading ? (
-                  <span className="ref-overview-coverage-muted">Loading coverage counts…</span>
+                  <span className={w9.refOverviewCoverageMuted}>Loading coverage counts…</span>
                 ) : relatedCoverage ? (
                   <>
                     <span className="ref-overview-coverage-missing" title="No related rows stored for this ticker">
                       <strong>{relatedCoverage.missing.toLocaleString()}</strong> missing
                     </span>
-                    <span className="ref-overview-coverage-sep" aria-hidden>
+                    <span className={w9.refOverviewCoverageSep} aria-hidden>
                       ·
                     </span>
                     <span className="ref-overview-coverage-filled" title="At least one related peer row stored">
                       <strong>{relatedCoverage.filled.toLocaleString()}</strong> filled
                     </span>
-                    <span className="ref-overview-coverage-sep" aria-hidden>
+                    <span className={w9.refOverviewCoverageSep} aria-hidden>
                       ·
                     </span>
-                    <span className="ref-overview-coverage-total">
+                    <span className={w9.refOverviewCoverageTotal}>
                       {relatedCoverage.total_tickers.toLocaleString()} in <code>tickers</code>
                     </span>
                   </>
                 ) : (
-                  <span className="ref-overview-coverage-muted">Coverage counts unavailable</span>
+                  <span className={w9.refOverviewCoverageMuted}>Coverage counts unavailable</span>
                 )}
               </div>
               {relatedEnqueueMode === 'stale' ? (
@@ -499,7 +501,7 @@ export function RefJobDetailPanel({
                 aria-describedby={refJobSymbolsErr ? 'ref-job-symbols-err-panel' : undefined}
               />
               {refJobSymbolsErr ? (
-                <p id="ref-job-symbols-err-panel" className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-1)' }}>
+                <p id="ref-job-symbols-err-panel" className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-1)' }}>
                   {refJobSymbolsErr}
                 </p>
               ) : null}

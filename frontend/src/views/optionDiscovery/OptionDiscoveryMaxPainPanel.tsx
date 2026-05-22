@@ -1,3 +1,5 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
 import { fetchMaxPainCompute, fetchMaxPainComputeHistory, pollMassiveJobUntilDone, postMassiveSync } from '../../api'
 import type { MaxPainComputeResponse, MaxPainHistoryPoint, MaxPainStrikePoint } from '../../api'
@@ -329,7 +331,7 @@ function TrendSvg({ series }: { series: MaxPainHistoryPoint[] }) {
   const innerW = w - pad.l - pad.r
   const innerH = h - pad.t - pad.b
   if (series.length < 2) {
-    return <p className="section-hint">Not enough history for trend (need at least 2 days with OI).</p>
+    return <p className={w9.sectionHint}>Not enough history for trend (need at least 2 days with OI).</p>
   }
   const mp = series.map(s => s.max_pain_strike)
   const closes = series.map(s => s.underlying_close).filter((x): x is number => x != null && Number.isFinite(x))
@@ -534,7 +536,7 @@ export function OptionDiscoveryMaxPainPanel({
 
   if (!massiveConfigured) {
     return (
-      <section className="replay-section od-max-pain-section" aria-label="Max Pain">
+      <section className={rl.section} aria-label="Max Pain">
         <h3 className="od-max-pain-title">
           Max Pain Analysis
           {expiration.trim() ? (
@@ -544,7 +546,7 @@ export function OptionDiscoveryMaxPainPanel({
           ) : null}
           <InfoTooltip text="Requires Massive API key and EOD open interest in PostgreSQL." />
         </h3>
-        <p className="section-hint">Configure Massive under Settings → Feed → Massive Option to enable Max Pain.</p>
+        <p className={w9.sectionHint}>Configure Massive under Settings → Feed → Massive Option to enable Max Pain.</p>
       </section>
     )
   }
@@ -554,7 +556,7 @@ export function OptionDiscoveryMaxPainPanel({
   }
 
   return (
-    <section className="replay-section od-max-pain-section" aria-labelledby="od-max-pain-head">
+    <section className={rl.section} aria-labelledby="od-max-pain-head">
       <div className="mp-header-row">
         <h3 id="od-max-pain-head" className="od-max-pain-title">
           Max Pain Analysis
@@ -621,11 +623,11 @@ export function OptionDiscoveryMaxPainPanel({
 
       {!collapsed && (
         <>
-          {oiBackfillMsg ? <p className="section-hint" role="status">{oiBackfillMsg}</p> : null}
-          {loading && !live ? <p className="section-hint">Loading Max Pain…</p> : null}
-          {err ? <p className="msg-error" role="alert">{err}</p> : null}
+          {oiBackfillMsg ? <p className={w9.sectionHint} role="status">{oiBackfillMsg}</p> : null}
+          {loading && !live ? <p className={w9.sectionHint}>Loading Max Pain…</p> : null}
+          {err ? <p className={w9.msgError} role="alert">{err}</p> : null}
           {live?.ok && live.oi_basis === 'chain_snapshot' ? (
-            <p className="section-hint" role="status">
+            <p className={w9.sectionHint} role="status">
               Open interest is taken from the latest chain snapshots in PostgreSQL (same data as loaded quotes). EOD
               daily OI was not available for this expiry; run watchlist EOD OI sync for classic end-of-day OI.
             </p>

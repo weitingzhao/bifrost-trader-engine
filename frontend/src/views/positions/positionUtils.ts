@@ -1,4 +1,5 @@
 import type { Execution, IbAccountSnapshot, IbPositionRow } from '../../types'
+import { pnlNegativeClass, pnlPositiveClass } from '@/components/shared/appUi'
 import { fmtUsd, getContractLabelParts } from '../../utils/format'
 import type { LivePositionRow, StockCoverageItem } from '../portfolio/types'
 
@@ -155,11 +156,11 @@ export function optionLastStrikePctClass(right: string, side: 'Buy' | 'Sell', pc
   if (pct === 0 || (right !== 'C' && right !== 'P')) return ''
   const positive = pct > 0
   if (right === 'C') {
-    if (side === 'Sell') return positive ? 'pnl-negative' : 'pnl-positive'
-    return positive ? 'pnl-positive' : 'pnl-negative'
+    if (side === 'Sell') return positive ? pnlNegativeClass : pnlPositiveClass
+    return positive ? pnlPositiveClass : pnlNegativeClass
   }
-  if (side === 'Sell') return positive ? 'pnl-positive' : 'pnl-negative'
-  return positive ? 'pnl-negative' : 'pnl-positive'
+  if (side === 'Sell') return positive ? pnlPositiveClass : pnlNegativeClass
+  return positive ? pnlNegativeClass : pnlPositiveClass
 }
 
 export function fmtSignedPct(value: number | null | undefined): string {
@@ -556,8 +557,8 @@ export function pnlToneFromSigned(v: number | null): 'profit' | 'loss' | 'flat' 
 }
 
 export function pnlClassForTone(tone: 'profit' | 'loss' | 'flat'): string {
-  if (tone === 'profit') return 'pnl-positive'
-  if (tone === 'loss') return 'pnl-negative'
+  if (tone === 'profit') return pnlPositiveClass
+  if (tone === 'loss') return pnlNegativeClass
   return ''
 }
 

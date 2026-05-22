@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState, type KeyboardEvent } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import {
   fetchTickerReferenceDetail,
   fetchTickerReferenceFilledRelated,
@@ -755,18 +757,18 @@ export function MassiveTickerReferenceDbSection({
       ) : null}
 
       {jobMsg ? (
-        <p className="status-page-msg ok" role="status" style={{ marginTop: 'var(--space-2)' }}>
+        <p className={cn(w9.statusPageMsg, 'ok')} role="status" style={{ marginTop: 'var(--space-2)' }}>
           {jobMsg}
         </p>
       ) : null}
 
       {enqueueErr ? (
-        <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-2)' }}>
+        <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-2)' }}>
           {enqueueErr}
         </p>
       ) : null}
       {verifyErr ? (
-        <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-2)' }}>
+        <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-2)' }}>
           {verifyErr}
         </p>
       ) : null}

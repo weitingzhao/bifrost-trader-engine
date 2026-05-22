@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useCallback, useMemo, useState } from 'react'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import {
@@ -203,19 +206,19 @@ export function OptionDiscoveryIvTermSection({
   }, [termRows, coneRows])
 
   return (
-    <div className="replay-section od-iv-term-section" aria-label="IV term structure">
+    <div className={rl.section} aria-label="IV term structure">
       {expirationsLoading && (
-        <p className="section-hint od-iv-term-exp-list-status" role="status">
+        <p className={cn(w9.sectionHint, 'od-iv-term-exp-list-status')} role="status">
           Loading expirations…
         </p>
       )}
       {expirationsError && !expirationsLoading && (
-        <p className="section-hint od-iv-term-error" role="alert">
+        <p className={cn(w9.sectionHint, 'od-iv-term-error')} role="alert">
           {expirationsError}
         </p>
       )}
       {!canLoad && !expirationsLoading && (
-        <p className="section-hint" role="status">
+        <p className={w9.sectionHint} role="status">
           {!sym
             ? 'Select an underlying to load expirations.'
             : filteredExpirations.length === 0
@@ -373,7 +376,7 @@ export function OptionDiscoveryIvTermSection({
               </ul>
             </div>
             {massiveBackfillAvailable && (
-              <p className="section-hint od-iv-term-backfill-hint">
+              <p className={cn(w9.sectionHint, 'od-iv-term-backfill-hint')}>
                 Backfill runs the same Massive chain snapshot jobs as “Load quotes” (section 4), once per checked expiration.
                 Strike window from section 3 is applied when set; otherwise a broad chain (limit 250) is requested.
               </p>
@@ -381,17 +384,17 @@ export function OptionDiscoveryIvTermSection({
           </div>
 
           {termError && (
-            <p className="section-hint od-iv-term-error" role="alert">
+            <p className={cn(w9.sectionHint, 'od-iv-term-error')} role="alert">
               {termError}
             </p>
           )}
           {snapshotSyncLoading && snapshotSyncStatus && (
-            <p className="section-hint od-iv-term-sync-status" role="status">
+            <p className={cn(w9.sectionHint, 'od-iv-term-sync-status')} role="status">
               {snapshotSyncStatus}
             </p>
           )}
           {!snapshotSyncLoading && (termLoading || busy) && (
-            <p className="section-hint">Loading term structure…</p>
+            <p className={w9.sectionHint}>Loading term structure…</p>
           )}
           {!snapshotSyncLoading && !(termLoading || busy) && (
             <div className="od-analytics-term-actions">
@@ -456,7 +459,7 @@ export function OptionDiscoveryIvTermSection({
                     <InfoTooltip text="Per calendar expiration: p10–p90 band of daily ATM IV from PostgreSQL option_snapshots (up to 90 calendar days). DTE on the x-axis is today’s days to expiration; past samples had different DTE for the same expiry. Orange line: current ATM IV (same definition as IV term structure)." />
                   </h4>
                   {coneError && (
-                    <p className="section-hint od-iv-term-error" role="alert">
+                    <p className={cn(w9.sectionHint, 'od-iv-term-error')} role="alert">
                       {coneError}
                     </p>
                   )}
@@ -468,7 +471,7 @@ export function OptionDiscoveryIvTermSection({
                     </div>
                   )}
                   {!coneError && conePoints.length > 0 && conePoints.length < 2 && (
-                    <p className="section-hint">Not enough cone points (need at least 2 expirations).</p>
+                    <p className={w9.sectionHint}>Not enough cone points (need at least 2 expirations).</p>
                   )}
                 </div>
 
@@ -492,7 +495,7 @@ export function OptionDiscoveryIvTermSection({
                   <span className="od-iv-combined-summary-text">IV term &amp; cone — combined values</span>
                 </summary>
                 <div className="od-iv-data-table-sheet od-iv-data-table-sheet--in-details">
-                  <p className="section-hint od-iv-data-source">
+                  <p className={cn(w9.sectionHint, 'od-iv-data-source')}>
                     <strong>Term (latest):</strong> PostgreSQL <code className="od-iv-data-code">option_snapshots_latest</code>{' '}
                     (same pipeline as quotes: Massive or IB).{' '}
                     <strong>Cone (historical bands):</strong> <code className="od-iv-data-code">option_snapshots</code>, one row per
@@ -599,7 +602,7 @@ export function OptionDiscoveryIvTermSection({
                 </div>
               </details>
 
-              <p className="section-hint od-iv-term-chart-caption" role="status">
+              <p className={cn(w9.sectionHint, 'od-iv-term-chart-caption')} role="status">
                 Plotted expirations (term structure):{' '}
                 {termPoints
                   .filter(p => p.atm_iv != null && Number.isFinite(p.atm_iv) && p.dte_days >= 0)

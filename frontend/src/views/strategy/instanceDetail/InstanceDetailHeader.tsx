@@ -1,4 +1,5 @@
 import type { StrategyInstance } from '../../../types'
+import { w9 } from '@/styles/wave9Classes'
 
 export function InstanceDetailHeader({
   strategyInstanceId,
@@ -20,7 +21,7 @@ export function InstanceDetailHeader({
         {instance.strategy_opportunity_id != null && Number.isFinite(Number(instance.strategy_opportunity_id)) ? (
           <a
             href={`#/strategies/opportunities/${instance.strategy_opportunity_id}`}
-            className="instance-sheet-inst-link"
+            className={w9.instanceSheetInstLink}
           >
             {instance.strategy_opportunity_name ?? `Opportunity #${instance.strategy_opportunity_id}`}
           </a>

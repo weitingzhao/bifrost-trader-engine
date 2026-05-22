@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
 import type { MouseEvent } from 'react'
 import { PageSection } from '@/components/shared/page-section'
 import { SectionPageTitle } from '../components/SectionPageTitle'
@@ -2431,7 +2432,7 @@ function StockDataReadinessPageInner({
             )}
 
             {/* Info note */}
-            <p className="section-hint" style={{ marginTop: 'var(--space-2)', fontSize: 'var(--text-caption)' }}>
+            <p className={w9.sectionHint} style={{ marginTop: 'var(--space-2)', fontSize: 'var(--text-caption)' }}>
               EOD pipeline skips automatically on non-US trading days.
               OI source: Massive chain snapshots · requires Massive API configured.
             </p>

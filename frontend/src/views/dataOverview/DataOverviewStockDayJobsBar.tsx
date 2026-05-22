@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import {
   fetchStockDayQualityDetail,
   postMassiveSync,
@@ -947,12 +949,12 @@ export function DataOverviewStockDayJobsBar({
         </details>
 
         {gapError && (
-          <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-2)' }}>{gapError}</p>
+          <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-2)' }}>{gapError}</p>
         )}
       </section>
 
       {enqueueErr && (
-        <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-2)' }}>{enqueueErr}</p>
+        <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-2)' }}>{enqueueErr}</p>
       )}
 
       <AllGapsSheet

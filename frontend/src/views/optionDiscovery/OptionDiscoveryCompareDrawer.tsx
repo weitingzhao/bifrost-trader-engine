@@ -1,4 +1,6 @@
 import type { OptionSnapshotRow } from '../../api'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { fmtUsd } from '../../utils/format'
 
 const MAX_SLOTS = 4
@@ -45,12 +47,12 @@ export function OptionDiscoveryCompareDrawer({
             Close
           </button>
         </div>
-        <p className="section-hint od-compare-drawer-meta">
+        <p className={cn(w9.sectionHint, 'od-compare-drawer-meta')}>
           {symbol.trim().toUpperCase()} · {expiration || '—'}
           {dteLabel && dteLabel !== '—' ? ` · ${dteLabel}` : ''} · max {MAX_SLOTS} legs
         </p>
         {rows.length === 0 ? (
-          <p className="section-hint">Add contracts from the chain or contract header (Add to compare).</p>
+          <p className={w9.sectionHint}>Add contracts from the chain or contract header (Add to compare).</p>
         ) : (
           <>
             <div className="table-wrapper od-compare-table-wrap">

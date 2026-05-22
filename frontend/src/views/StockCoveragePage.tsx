@@ -1,3 +1,5 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
 import type { StatusResponse } from '../types'
 import { PageSection } from '@/components/shared/page-section'
 import { Button } from '@/components/ui/button'
@@ -68,7 +70,7 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
         maxWidth="min(1100px, 92vw)"
         panelStyle={{ width: '92vw', maxHeight: '85vh' }}
         footer={
-          <div className="data-reset-modal-actions">
+          <div className={w9.dataResetModalActions}>
             <Button
               type="button"
               variant="secondary"
@@ -96,22 +98,22 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
         {cov.watchlistRefreshPreview != null && (
           <>
             <p>Review overwrite records, gap range, and IB request chunks before queueing worker jobs.</p>
-            <div className="replay-placeholder" role="status" style={{ marginBottom: '0.75rem' }}>
+            <div className={rl.placeholder} role="status" style={{ marginBottom: '0.75rem' }}>
               {(cov.watchlistRefreshPreview.message || 'Dry run ready') +
                 ` Symbols: ${cov.watchlistRefreshPreview.symbols_count ?? 0}, jobs if confirmed: ${cov.watchlistRefreshPreview.queued_jobs_if_confirmed ?? 0}, override_days: ${cov.watchlistRefreshPreview.override_days ?? 1}, API interval: ${cov.watchlistRefreshPreview.api_interval_sec ?? cov.backfillApiIntervalSec}s, mode: ${cov.backfillIsTest ? 'test' : 'live'}.`}
             </div>
             {cov.watchlistRefreshPreview.ready_to_enqueue === false && (
-              <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.75rem' }}>
+              <div className={rl.placeholder} role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.75rem' }}>
                 Monitor is currently stopped, so this preview cannot be confirmed into worker jobs until monitor is available again.
               </div>
             )}
             {(cov.watchlistRefreshPreview.failures || []).length > 0 && (
-              <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.75rem' }}>
+              <div className={rl.placeholder} role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.75rem' }}>
                 Preview failures: {(cov.watchlistRefreshPreview.failures || []).map(f => `${f.symbol} ${f.period}: ${f.error}`).join(' | ')}
               </div>
             )}
             {(cov.watchlistRefreshPreview.items || []).length === 0 ? (
-              <div className="replay-placeholder">No preview items.</div>
+              <div className={rl.placeholder}>No preview items.</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {(cov.watchlistRefreshPreview.items || []).map((item: WatchlistEodRefreshPreviewItem, index) => (
@@ -134,14 +136,14 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
                           ))}
                         </div>
                       ) : (
-                        <div className="replay-sync-hint" style={{ marginTop: '0.4rem' }}>No existing bars in the override window.</div>
+                        <div className={rl.syncHint} style={{ marginTop: '0.4rem' }}>No existing bars in the override window.</div>
                       )}
                     </div>
                     <div style={{ marginTop: '0.75rem' }}>
                       <strong>IB request plan</strong>
                       {item.ib_request_plan && item.ib_request_plan.length > 0 ? (
                         <div style={{ overflowX: 'auto', marginTop: '0.4rem' }}>
-                          <table className="table-operations">
+                          <table className={w9.tableOperations}>
                             <thead><tr><th>#</th><th>barSizeSetting</th><th>durationStr</th><th>endDateTime</th><th>Segment</th></tr></thead>
                             <tbody>
                               {item.ib_request_plan.map((req, reqIndex) => (
@@ -151,7 +153,7 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
                           </table>
                         </div>
                       ) : (
-                        <div className="replay-sync-hint" style={{ marginTop: '0.4rem' }}>No IB request would be needed for this item.</div>
+                        <div className={rl.syncHint} style={{ marginTop: '0.4rem' }}>No IB request would be needed for this item.</div>
                       )}
                     </div>
                   </details>
@@ -172,7 +174,7 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
         title={cov.resetConfirmIsIndex ? 'Reset index data' : 'Reset data'}
         titleId="reset-modal-title"
         footer={
-          <div className="data-reset-modal-actions">
+          <div className={w9.dataResetModalActions}>
             <Button
               type="button"
               variant="secondary"
@@ -201,9 +203,9 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
         ) : (
           <>
             <p>Select periods to clear (cannot be undone):</p>
-            <div className="data-reset-periods">
+            <div className={w9.dataResetPeriods}>
               {BAR_PERIODS.map(({ value, label }) => (
-                <label key={value} className="data-reset-period-check">
+                <label key={value} className={w9.dataResetPeriodCheck}>
                   <input
                     type="checkbox"
                     checked={cov.resetPeriods.includes(value)}
@@ -232,7 +234,7 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
         panelClassName="data-pull-range-modal"
         maxWidth="min(420px, calc(100vw - 24px))"
         footer={
-          <div className="data-reset-modal-actions">
+          <div className={w9.dataResetModalActions}>
             <Button
               type="button"
               variant="secondary"
@@ -257,12 +259,12 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
       >
         {cov.pullModalSymbol != null && (
           <>
-            <p className="data-pull-range-desc">
+            <p className={w9.dataPullRangeDesc}>
               {cov.pullModalIsIndex
                 ? `Choose how many days to fetch for ${cov.pullModalSymbol}. Index data is daily only (Massive/Polygon).`
                 : `Choose how much history to fetch for ${cov.pullModalSymbol}.`}
             </p>
-            <div className="data-pull-range-options">
+            <div className={w9.dataPullRangeOptions}>
               {(['max', 'min', 'custom'] as const).map(mode => {
                 const labels = {
                   max: 'Maximum — use history_backfill config',
@@ -270,7 +272,7 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
                   custom: 'Custom — set your own span',
                 }
                 return (
-                  <label key={mode} className="data-pull-range-option">
+                  <label key={mode} className={w9.dataPullRangeOption}>
                     <input type="radio" name="pullRange" checked={cov.pullRangeMode === mode} onChange={() => cov.setPullRangeMode(mode)} />
                     <span>
                       <strong>{mode.charAt(0).toUpperCase() + mode.slice(1)}</strong> — {labels[mode].split(' — ')[1]}
@@ -280,8 +282,8 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
               })}
             </div>
             {cov.pullRangeMode === 'custom' && (
-              <div className="data-pull-range-custom">
-                <label className="data-pull-range-custom-row">
+              <div className={w9.dataPullRangeCustom}>
+                <label className={w9.dataPullRangeCustomRow}>
                   <span>Daily (days):</span>
                   <input
                     type="number"
@@ -293,7 +295,7 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
                 </label>
                 {!cov.pullModalIsIndex && (
                   <>
-                    <label className="data-pull-range-custom-row">
+                    <label className={w9.dataPullRangeCustomRow}>
                       <span>1 min (hours):</span>
                       <input
                         type="number"
@@ -303,7 +305,7 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
                         onChange={e => cov.setPullCustom1minHours(Math.max(1, Number(e.target.value) || 1))}
                       />
                     </label>
-                    <label className="data-pull-range-custom-row">
+                    <label className={w9.dataPullRangeCustomRow}>
                       <span>5 mins (days):</span>
                       <input
                         type="number"
@@ -313,7 +315,7 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
                         onChange={e => cov.setPullCustom5minDays(Math.max(1, Number(e.target.value) || 1))}
                       />
                     </label>
-                    <label className="data-pull-range-custom-row">
+                    <label className={w9.dataPullRangeCustomRow}>
                       <span>1 hour (days):</span>
                       <input
                         type="number"
@@ -328,9 +330,9 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
               </div>
             )}
             {!cov.pullModalIsIndex && (
-              <div className="data-pull-range-periods">
-                <span className="data-pull-range-periods-label">Periods to pull:</span>
-                <label className="data-pull-range-period-check">
+              <div className={w9.dataPullRangePeriods}>
+                <span className={w9.dataPullRangePeriodsLabel}>Periods to pull:</span>
+                <label className={w9.dataPullRangePeriodCheck}>
                   <input
                     type="checkbox"
                     checked={cov.pullSelectedPeriods.length === 4}
@@ -339,7 +341,7 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
                   <span>All</span>
                 </label>
                 {ALL_BAR_PERIOD_VALUES.map(period => (
-                  <label key={period} className="data-pull-range-period-check">
+                  <label key={period} className={w9.dataPullRangePeriodCheck}>
                     <input
                       type="checkbox"
                       checked={cov.pullSelectedPeriods.includes(period)}

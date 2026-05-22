@@ -1,3 +1,6 @@
+import { rl, expandIcon } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { Execution, OptExecutionGroup, OptionStockLinkSummary } from '../../types'
 import {
   ExecRowIconButton,
@@ -44,15 +47,15 @@ export function LedgerOrphanOpenOptionSection({
   return (
     <>
       {sortedOpenUnrealized.length > 0 && (
-        <div className="replay-portfolio-table-wrap replay-portfolio-table-wrap--no-scroll">
-          <h5 className={`replay-sub replay-opt-detail-title ${sectionHeadingWithTooltipClass}`}>
+        <div className={cn(rl.portfolioTableWrap, rl.portfolioTableWrapNoScroll)}>
+          <h5 className={`rl.sub rl.optDetailTitle ${sectionHeadingWithTooltipClass}`}>
             Open Option
             <InfoTooltip text="Option positions with non-zero net quantity and future expiry. They are excluded from the Summary (fully closed trades only) and the Closed Option table above." />
           </h5>
-          <table className="table-operations replay-opt-groups">
+          <table className={rl.optGroups}>
             <thead>
               <tr>
-                <th className="replay-opt-expand-col"></th>
+                <th className={rl.optExpandCol}></th>
                 <th>Contract</th>
                 <th>Account</th>
                 <th>Expiry</th>
@@ -101,7 +104,7 @@ export function LedgerOrphanOpenOptionSection({
                 return (
                   <tr
                     key={`open-orphan-${groupKey}`}
-                    className="replay-opt-group-row"
+                    className={rl.optGroupRow}
                     onClick={() => toggleDetailExpand(groupKey)}
                     role="button"
                     tabIndex={0}
@@ -118,9 +121,9 @@ export function LedgerOrphanOpenOptionSection({
                         : 'Expand group details'
                     }
                   >
-                    <td className="replay-opt-expand-col">
+                    <td className={rl.optExpandCol}>
                       <span
-                        className={`replay-opt-expand-icon ${expandedDetailKeys.includes(groupKey) ? 'expanded' : ''}`}
+                        className={expandIcon(expandedDetailKeys.includes(groupKey))}
                         aria-hidden
                       >
                         {expandedDetailKeys.includes(groupKey) ? '▼' : '▶'}
@@ -157,15 +160,15 @@ export function LedgerOrphanOpenOptionSection({
       )}
 
       {expiredUnrealized.length > 0 && (
-        <div className="replay-portfolio-table-wrap replay-portfolio-table-wrap--no-scroll">
-          <h5 className={`replay-sub replay-opt-detail-title ${sectionHeadingWithTooltipClass}`}>
+        <div className={cn(rl.portfolioTableWrap, rl.portfolioTableWrapNoScroll)}>
+          <h5 className={`rl.sub rl.optDetailTitle ${sectionHeadingWithTooltipClass}`}>
             Expired but not closed
             <InfoTooltip text="These option contracts have expired but net quantity is not zero. Some executions may be missing in the trade ledger; add the missing trades to close the position." />
           </h5>
-          <table className="table-operations replay-opt-groups">
+          <table className={rl.optGroups}>
             <thead>
               <tr>
-                <th className="replay-opt-expand-col"></th>
+                <th className={rl.optExpandCol}></th>
                 <th>Contract</th>
                 <th>Account</th>
                 <th>Expiry</th>
@@ -215,7 +218,7 @@ export function LedgerOrphanOpenOptionSection({
                 return (
                   <tr
                     key={`expired-${groupKey}`}
-                    className="replay-opt-group-row"
+                    className={rl.optGroupRow}
                     onClick={() => toggleDetailExpand(groupKey)}
                     role="button"
                     tabIndex={0}
@@ -232,9 +235,9 @@ export function LedgerOrphanOpenOptionSection({
                         : 'Expand group details'
                     }
                   >
-                    <td className="replay-opt-expand-col">
+                    <td className={rl.optExpandCol}>
                       <span
-                        className={`replay-opt-expand-icon ${expandedDetailKeys.includes(groupKey) ? 'expanded' : ''}`}
+                        className={expandIcon(expandedDetailKeys.includes(groupKey))}
                         aria-hidden
                       >
                         {expandedDetailKeys.includes(groupKey) ? '▼' : '▶'}
@@ -262,7 +265,7 @@ export function LedgerOrphanOpenOptionSection({
                         ? uniqueSources.map(s => <ExecSourceBadge key={s} source={s} />)
                         : '—'}
                     </td>
-                    <td className="replay-opt-actions-cell">
+                    <td className={rl.optActionsCell}>
                       <ExecRowIconButton
                         onClick={e => {
                           e.stopPropagation()
@@ -295,11 +298,11 @@ export function LedgerOrphanOpenOptionSection({
         </div>
       )}
 
-      <h5 className={`replay-sub replay-opt-detail-title ${sectionHeadingWithTooltipClass}`}>
+      <h5 className={`rl.sub rl.optDetailTitle ${sectionHeadingWithTooltipClass}`}>
         Details (per trade)
         <InfoTooltip text="Click an orphan option row above to load its execution details." />
       </h5>
-      <table className="table-operations">
+      <table className={w9.tableOperations}>
         <thead>
           <tr>
             <th>Contract</th>
@@ -320,7 +323,7 @@ export function LedgerOrphanOpenOptionSection({
         <tbody>
           {orphanExpandedGroups.length === 0 ? (
             <tr>
-              <td colSpan={13} className="replay-detail-placeholder">
+              <td colSpan={13} className={rl.detailPlaceholder}>
                 {detailPlaceholder}
               </td>
             </tr>
@@ -356,14 +359,14 @@ export function LedgerOrphanOpenOptionSection({
                             <strong>{p_.symbol}</strong> {p_.rightLabel}
                             {strikeStr_}
                             {ex.account_executions_id != null && (
-                              <span className="replay-contract-exec-id">#{ex.account_executions_id}</span>
+                              <span className={rl.contractExecId}>#{ex.account_executions_id}</span>
                             )}
                           </>
                         ) : (
                           <>
                             {g.contract_key}
                             {ex.account_executions_id != null && (
-                              <span className="replay-contract-exec-id">#{ex.account_executions_id}</span>
+                              <span className={rl.contractExecId}>#{ex.account_executions_id}</span>
                             )}
                           </>
                         )
@@ -406,7 +409,7 @@ export function LedgerOrphanOpenOptionSection({
                     </td>
                     <td>
                       {ex.account_executions_id != null ? (
-                        <span className="replay-exec-row-actions">
+                        <span className={rl.execRowActions}>
                           <ExecRowIconButton
                             onClick={() => onEditExecution(ex)}
                             title="Edit"

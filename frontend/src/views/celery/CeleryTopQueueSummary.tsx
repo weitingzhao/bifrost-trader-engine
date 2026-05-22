@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useMemo, useState } from 'react'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import type { AggregatedJobQueueSummaryRow } from '../../api'
@@ -173,7 +176,7 @@ export function CeleryTopQueueSummary({
 
   return (
     <section
-      className="replay-section dashboard-section dashboard-queue-summary dashboard-celery-top-queue-summary"
+      className={rl.section}
       aria-labelledby="dashboard-celery-top-queue-summary-head"
     >
       <h3 id="dashboard-celery-top-queue-summary-head" className={CELERY_SECTION_TITLE}>
@@ -189,7 +192,7 @@ export function CeleryTopQueueSummary({
         </div>
       ) : (
         <div className="dashboard-queue-summary-table-wrap">
-          <table className="table-operations dashboard-queue-summary-table dashboard-celery-top-queue-summary-table">
+          <table className={cn(w9.tableOperations, 'dashboard-queue-summary-table', 'dashboard-celery-top-queue-summary-table')}>
             <thead>
               <tr>
                 <th

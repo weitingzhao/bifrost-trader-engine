@@ -1,3 +1,6 @@
+import { rl, bubbleSwitchBtn, periodSummaryTab } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import {
   Fragment,
   useCallback,
@@ -1520,24 +1523,24 @@ export function LedgerView({
   return (
     <>
       <section
-        className="replay-section replay-section-trade-records"
+        className={cn(rl.section, rl.sectionTradeRecords)}
         aria-label="Trade ledger"
       >
-        <div className="replay-portfolio-block">
+        <div className={rl.portfolioBlock}>
           <div
-            className="replay-filters replay-filters--bar ledger-top-quick-filters"
+            className={cn(rl.filters, rl.filtersBar)}
             aria-label="Trade ledger quick filters"
           >
             <div className="ledger-top-quick-filters-rows">
-              <div className="replay-filters--bar-row ledger-top-quick-filters-row ledger-top-quick-filters-row--primary">
+              <div className={rl.filtersBarRow}>
                 <div
                   className="ledger-filter-account-bubble-group ledger-since-bubble-group"
                   role="group"
                   aria-label="Since (rolling trade date window)"
                 >
-                  <span className="ledger-trade-period-label">Since</span>
+                  <span className={w9.ledgerTradePeriodLabel}>Since</span>
                   <InfoTooltip text="Include executions whose trade date falls in a rolling window ending today: 1 month, 1 quarter, half-year, or 1 year back from today’s date, or year-to-date from Jan 1. YTD uses Jan 1 through today. trade_date is used when set; otherwise execution time (local date). Mutually exclusive with expiry year/month." />
-                  <div className="ledger-filter-account-bubbles">
+                  <div className={w9.ledgerFilterAccountBubbles}>
                     <button
                       type="button"
                       className={`ledger-account-bubble ${
@@ -1569,7 +1572,7 @@ export function LedgerView({
                   </div>
                 </div>
                 <div className="ledger-filter-account-bubble-group">
-                  <div className="ledger-filter-account-bubbles" role="group" aria-label="Account filter">
+                  <div className={w9.ledgerFilterAccountBubbles} role="group" aria-label="Account filter">
                     <button
                       type="button"
                       className={`ledger-account-bubble ${
@@ -1613,12 +1616,12 @@ export function LedgerView({
                   </span>
                 ) : null}
               </div>
-              <div className="replay-filters--bar-row ledger-top-quick-filters-row ledger-top-quick-filters-row--secondary">
+              <div className={rl.filtersBarRow}>
               <label
-                className="ledger-strategy-filter-label ledger-strategy-filter-label--symbol"
+                className={cn(w9.ledgerStrategyFilterLabel, 'ledger-strategy-filter-label--symbol')}
                 title="Underlying symbol"
               >
-                <span className="replay-filter-label">Symbol</span>
+                <span className={rl.filterLabel}>Symbol</span>
                 <LedgerSymbolCombobox
                   value={ledgerFilterSymbol}
                   onChange={setLedgerFilterSymbol}
@@ -1627,12 +1630,12 @@ export function LedgerView({
                   inputClassName="ledger-symbol-combobox__input--toolbar"
                 />
               </label>
-              <label className="ledger-strategy-filter-label" title="Structure">
-                <span className="replay-filter-label">Structure</span>
+              <label className={w9.ledgerStrategyFilterLabel} title="Structure">
+                <span className={rl.filterLabel}>Structure</span>
                 <AppSelect
                   value={ledgerFilterStructure}
                   onChange={setLedgerFilterStructure}
-                  className="replay-filter-input replay-filter-select"
+                  className={cn(rl.filterInput, rl.filterSelect)}
                   aria-label="Structure filter"
                   options={[{ value: '', label: 'All structures' }, ...structureNameOptions.map(s => ({ value: s, label: s }))]}
                 />
@@ -1650,7 +1653,7 @@ export function LedgerView({
                     setExpiryFilterMonth('')
                     setLedgerTradeDatePreset(null)
                   }}
-                  className="replay-filter-input replay-filter-select ledger-expiry-year-select"
+                  className={cn(rl.filterInput, rl.filterSelect)}
                   aria-label="Expiry year"
                   disabled={ledgerTradeDatePreset != null}
                   options={[{ value: '', label: 'All years' }, ...expiryYearOptions.map(y => ({ value: String(y), label: String(y) }))]}
@@ -1661,7 +1664,7 @@ export function LedgerView({
                     setExpiryFilterMonth(v)
                     setLedgerTradeDatePreset(null)
                   }}
-                  className="replay-filter-input replay-filter-select ledger-expiry-month-select"
+                  className={cn(rl.filterInput, rl.filterSelect)}
                   aria-label="Expiry month"
                   disabled={ledgerTradeDatePreset != null || !expiryFilterYear.trim()}
                   options={[
@@ -1673,12 +1676,12 @@ export function LedgerView({
                   ]}
                 />
               </div>
-              <label className="ledger-strategy-filter-label" title="Wishlist symbol">
-                <span className="replay-filter-label">Wishlist</span>
+              <label className={w9.ledgerStrategyFilterLabel} title="Wishlist symbol">
+                <span className={rl.filterLabel}>Wishlist</span>
                 <AppSelect
                   value={ledgerFilterWishlistSymbol}
                   onChange={setLedgerFilterWishlistSymbol}
-                  className="replay-filter-input replay-filter-select"
+                  className={cn(rl.filterInput, rl.filterSelect)}
                   aria-label="Wishlist symbol filter"
                   options={[{ value: '', label: 'All symbols' }, ...wishlistSymbolOptions.map(s => ({ value: s, label: s }))]}
                 />
@@ -1687,19 +1690,19 @@ export function LedgerView({
             </div>
           </div>
 
-          <div className="replay-ledger-toolbar">
-            <div className="replay-portfolio-tabs-wrap">
-              <div className="replay-ledger-tab-matrix replay-ledger-tab-matrix--aligned">
-                <div className="replay-ledger-tab-matrix-labels" aria-hidden="true">
-                  <span className="replay-ledger-tab-group-caption replay-ledger-tab-group-caption--attr">
+          <div className={rl.ledgerToolbar}>
+            <div className={rl.portfolioTabsWrap}>
+              <div className={cn(rl.ledgerTabMatrix, rl.ledgerTabMatrixAligned)}>
+                <div className={rl.ledgerTabMatrixLabels} aria-hidden="true">
+                  <span className={cn(rl.ledgerTabGroupCaption, rl.ledgerTabGroupCaptionAttr)}>
                     Attribution
                   </span>
-                  <span className="replay-ledger-tab-group-caption replay-ledger-tab-group-caption--inst">
+                  <span className={cn(rl.ledgerTabGroupCaption, rl.ledgerTabGroupCaptionInst)}>
                     Instruments
                   </span>
                 </div>
                 <div
-                  className="system-tabs replay-portfolio-tabs replay-ledger-tab-button-row"
+                  className={cn(rl.portfolioTabs, rl.ledgerTabButtonRow)}
                   role="tablist"
                   aria-label="Trade ledger: attribution and instruments (options, equities, fixed income, cash-like)"
                 >
@@ -1733,8 +1736,8 @@ export function LedgerView({
                     id="replay-tab-options"
                     aria-selected={ledgerTab === 'options'}
                     aria-controls="replay-panel-options"
-                    className={`system-tab replay-ledger-tab-at-instruments ${
-                      ledgerTab === 'options' ? 'active' : ''
+                    className={`system-tab rl.ledgerTabAtInstruments ${
+                      ledgerTab === 'options' ? rl.bubbleSwitchBtnActive : ''
                     }`}
                     onClick={() => setLedgerTab('options')}
                     disabled={!hasOptionExecutions}
@@ -1781,14 +1784,14 @@ export function LedgerView({
               </div>
             </div>
             <div
-              className="replay-ledger-detail-view-toolbar"
+              className={rl.ledgerDetailViewToolbar}
               role="toolbar"
               aria-label="Detail view mode"
             >
-              <span className="replay-fetch-days-label">Detail view</span>
+              <span className={rl.fetchDaysLabel}>Detail view</span>
               <InfoTooltip text="Accordion keeps one expandable panel open (strategy group, instance card, option detail rows, or other sections on this tab). Multi allows several. Option rows use the same expand state as Strategy/Instance trees where applicable." />
-              <div className="replay-fetch-range-group replay-ledger-detail-view-radios" role="radiogroup">
-                <label className="replay-fetch-radio">
+              <div className={cn(rl.fetchRangeGroup, rl.ledgerDetailViewRadios)} role="radiogroup">
+                <label className={rl.fetchRadio}>
                   <input
                     type="radio"
                     name="replay-detail-view"
@@ -1798,7 +1801,7 @@ export function LedgerView({
                   />
                   <span>Accordion</span>
                 </label>
-                <label className="replay-fetch-radio">
+                <label className={rl.fetchRadio}>
                   <input
                     type="radio"
                     name="replay-detail-view"
@@ -1814,28 +1817,28 @@ export function LedgerView({
 
           <div className="ledger-tab-filters" aria-label="Tab filters">
               {ledgerTab === 'strategy' && hasOptionExecutions ? (
-                <div className="ledger-tab-filters-section" aria-label="Strategy tab filters">
-                  <div className="ledger-strategy-filter-row" role="group" aria-label="Group strategy rows">
-                    <span className="ledger-strategy-filter-label">Group</span>
+                <div className={w9.ledgerTabFiltersSection} aria-label="Strategy tab filters">
+                  <div className={w9.ledgerStrategyFilterRow} role="group" aria-label="Group strategy rows">
+                    <span className={w9.ledgerStrategyFilterLabel}>Group</span>
                     <InfoTooltip text="Group rows by opportunity (default), by strategy structure name, or by watchlist symbols on the opportunity." />
-                    <div className="replay-bubble-switch ledger-opt-section-group-bubbles">
+                    <div className={rl.bubbleSwitch}>
                       <button
                         type="button"
-                        className={`replay-bubble-switch-btn ${ledgerOptSectionGroupBy === 'opportunity' ? 'active' : ''}`}
+                        className={bubbleSwitchBtn(ledgerOptSectionGroupBy === 'opportunity')}
                         onClick={() => setLedgerOptSectionGroupBy('opportunity')}
                       >
                         Opportunity
                       </button>
                       <button
                         type="button"
-                        className={`replay-bubble-switch-btn ${ledgerOptSectionGroupBy === 'structure' ? 'active' : ''}`}
+                        className={bubbleSwitchBtn(ledgerOptSectionGroupBy === 'structure')}
                         onClick={() => setLedgerOptSectionGroupBy('structure')}
                       >
                         Structure
                       </button>
                       <button
                         type="button"
-                        className={`replay-bubble-switch-btn ${ledgerOptSectionGroupBy === 'watchlist_symbol' ? 'active' : ''}`}
+                        className={bubbleSwitchBtn(ledgerOptSectionGroupBy === 'watchlist_symbol')}
                         onClick={() => setLedgerOptSectionGroupBy('watchlist_symbol')}
                       >
                         Watchlist symbol
@@ -1845,12 +1848,12 @@ export function LedgerView({
                   {strategyOpportunityGroups.length > 0 &&
                     (strategyPanelOptionRights.length > 1 || ledgerOptionRightFilter) && (
                       <div className="ledger-strategy-tab-filters">
-                        <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by call or put">
-                          <span className="ledger-strategy-filter-label">Type</span>
-                          <div className="ledger-strategy-filter-bubbles">
+                        <div className={w9.ledgerStrategyFilterRow} role="group" aria-label="Filter by call or put">
+                          <span className={w9.ledgerStrategyFilterLabel}>Type</span>
+                          <div className={w9.ledgerStrategyFilterBubbles}>
                             <button
                               type="button"
-                              className={`replay-bubble-switch-btn ${ledgerOptionRightFilter === '' ? 'active' : ''}`}
+                              className={bubbleSwitchBtn(ledgerOptionRightFilter === '')}
                               onClick={() => setLedgerOptionRightFilter('')}
                             >
                               All
@@ -1858,7 +1861,7 @@ export function LedgerView({
                             {(strategyPanelOptionRights.includes('C') || ledgerOptionRightFilter === 'C') && (
                               <button
                                 type="button"
-                                className={`replay-bubble-switch-btn ${ledgerOptionRightFilter === 'C' ? 'active' : ''}`}
+                                className={bubbleSwitchBtn(ledgerOptionRightFilter === 'C')}
                                 onClick={() =>
                                   setLedgerOptionRightFilter(prev => (prev === 'C' ? '' : 'C'))
                                 }
@@ -1869,7 +1872,7 @@ export function LedgerView({
                             {(strategyPanelOptionRights.includes('P') || ledgerOptionRightFilter === 'P') && (
                               <button
                                 type="button"
-                                className={`replay-bubble-switch-btn ${ledgerOptionRightFilter === 'P' ? 'active' : ''}`}
+                                className={bubbleSwitchBtn(ledgerOptionRightFilter === 'P')}
                                 onClick={() =>
                                   setLedgerOptionRightFilter(prev => (prev === 'P' ? '' : 'P'))
                                 }
@@ -1880,14 +1883,14 @@ export function LedgerView({
                           </div>
                         </div>
                         {ledgerOptionRightFilter ? (
-                          <div className="ledger-strategy-filter-meta">
+                          <div className={w9.ledgerStrategyFilterMeta}>
                             <span>
                               Showing {filteredStrategyOpportunityGroups.length} of {strategyOpportunityGroups.length}{' '}
                               opportunities
                             </span>
                             <button
                               type="button"
-                              className="ledger-strategy-filter-clear"
+                              className={w9.ledgerStrategyFilterClear}
                               onClick={() => setLedgerOptionRightFilter('')}
                             >
                               Clear type filter
@@ -1900,10 +1903,10 @@ export function LedgerView({
               ) : null}
 
               {ledgerTab === 'instance' && hasOptionExecutions ? (
-                <div className="ledger-tab-filters-section" aria-label="Instance tab filters">
-                  <div className="ledger-instance-controls-row ledger-instance-toolbar-row">
+                <div className={w9.ledgerTabFiltersSection} aria-label="Instance tab filters">
+                  <div className={cn(w9.ledgerInstanceControlsRow, w9.ledgerInstanceToolbarRow)}>
                     <div
-                      className="replay-bubble-switch ledger-instance-scope-bubbles ledger-instance-toolbar-segment"
+                      className={rl.bubbleSwitch}
                       role="tablist"
                       aria-label="With instance and No instance"
                     >
@@ -1911,7 +1914,7 @@ export function LedgerView({
                         type="button"
                         role="tab"
                         aria-selected={ledgerInstanceSubTab === 'with_instance'}
-                        className={`replay-bubble-switch-btn ${ledgerInstanceSubTab === 'with_instance' ? 'active' : ''}`}
+                        className={bubbleSwitchBtn(ledgerInstanceSubTab === 'with_instance')}
                         onClick={() => setLedgerInstanceSubTab('with_instance')}
                         disabled={!hasWithInstance}
                       >
@@ -1921,29 +1924,29 @@ export function LedgerView({
                         type="button"
                         role="tab"
                         aria-selected={ledgerInstanceSubTab === 'no_instance'}
-                        className={`replay-bubble-switch-btn ${ledgerInstanceSubTab === 'no_instance' ? 'active' : ''}`}
+                        className={bubbleSwitchBtn(ledgerInstanceSubTab === 'no_instance')}
                         onClick={() => setLedgerInstanceSubTab('no_instance')}
                         disabled={!hasNoInstance}
                       >
                         No instance ({noInstanceOptGroups.length})
                       </button>
                     </div>
-                    <span className="ledger-instance-toolbar-sep" aria-hidden="true" />
+                    <span className={w9.ledgerInstanceToolbarSep} aria-hidden="true" />
                     <div
-                      className={`replay-instance-contain-filter ledger-instance-toolbar-segment ${ledgerInstanceSubTab === 'no_instance' ? 'replay-instance-contain-filter--disabled' : ''}`}
+                      className={cn('ledger-instance-toolbar-segment', rl.instanceContainFilter, ledgerInstanceSubTab === 'no_instance' && rl.instanceContainFilterDisabled)}
                       role="group"
                       aria-label="Filter instances by open positions"
                     >
-                      <span className="replay-instance-contain-filter-label">Contain open</span>
+                      <span className={rl.instanceContainFilterLabel}>Contain open</span>
                       <InfoTooltip text="Filters the With instance list: Yes = at least one open (unrealized) option contract; No = only closed legs; All = every instance." />
-                      <div className="replay-bubble-switch" role="radiogroup" aria-label="Contain open">
+                      <div className={rl.bubbleSwitch} role="radiogroup" aria-label="Contain open">
                         {(['all', 'yes', 'no'] as const).map(v => (
                           <button
                             key={v}
                             type="button"
                             role="radio"
                             aria-checked={instanceContainOpenFilter === v}
-                            className={`replay-bubble-switch-btn ${instanceContainOpenFilter === v ? 'active' : ''}`}
+                            className={bubbleSwitchBtn(instanceContainOpenFilter === v)}
                             disabled={ledgerInstanceSubTab === 'no_instance'}
                             onClick={() => setInstanceContainOpenFilter(v)}
                           >
@@ -1954,39 +1957,39 @@ export function LedgerView({
                       {ledgerInstanceSubTab === 'with_instance' &&
                         instanceContainOpenFilter !== 'all' &&
                         instanceGroups.length > 0 && (
-                          <span className="replay-instance-contain-filter-meta">
+                          <span className={rl.instanceContainFilterMeta}>
                             Showing {filteredInstanceGroups.length} of {instanceGroups.length}
                           </span>
                         )}
                     </div>
                     {ledgerInstanceSubTab === 'with_instance' ? (
                       <>
-                        <span className="ledger-instance-toolbar-sep" aria-hidden="true" />
+                        <span className={w9.ledgerInstanceToolbarSep} aria-hidden="true" />
                         <div
-                          className="ledger-instance-toolbar-segment"
+                          className={w9.ledgerInstanceToolbarSegment}
                           role="group"
                           aria-label="Group instance rows"
                         >
-                          <span className="ledger-strategy-filter-label">Group</span>
+                          <span className={w9.ledgerStrategyFilterLabel}>Group</span>
                           <InfoTooltip text="Group rows by opportunity (default), by strategy structure name, or by watchlist symbols on the opportunity." />
-                          <div className="replay-bubble-switch ledger-opt-section-group-bubbles">
+                          <div className={rl.bubbleSwitch}>
                             <button
                               type="button"
-                              className={`replay-bubble-switch-btn ${ledgerOptSectionGroupBy === 'opportunity' ? 'active' : ''}`}
+                              className={bubbleSwitchBtn(ledgerOptSectionGroupBy === 'opportunity')}
                               onClick={() => setLedgerOptSectionGroupBy('opportunity')}
                             >
                               Opportunity
                             </button>
                             <button
                               type="button"
-                              className={`replay-bubble-switch-btn ${ledgerOptSectionGroupBy === 'structure' ? 'active' : ''}`}
+                              className={bubbleSwitchBtn(ledgerOptSectionGroupBy === 'structure')}
                               onClick={() => setLedgerOptSectionGroupBy('structure')}
                             >
                               Structure
                             </button>
                             <button
                               type="button"
-                              className={`replay-bubble-switch-btn ${ledgerOptSectionGroupBy === 'watchlist_symbol' ? 'active' : ''}`}
+                              className={bubbleSwitchBtn(ledgerOptSectionGroupBy === 'watchlist_symbol')}
                               onClick={() => setLedgerOptSectionGroupBy('watchlist_symbol')}
                             >
                               Watchlist symbol
@@ -1999,17 +2002,17 @@ export function LedgerView({
                     filteredInstanceGroups.length > 0 &&
                     (instancePanelOptionRights.length > 1 || ledgerOptionRightFilter) ? (
                       <>
-                        <span className="ledger-instance-toolbar-sep" aria-hidden="true" />
+                        <span className={w9.ledgerInstanceToolbarSep} aria-hidden="true" />
                         <div
-                          className="ledger-instance-toolbar-segment"
+                          className={w9.ledgerInstanceToolbarSegment}
                           role="group"
                           aria-label="Filter by call or put"
                         >
-                          <span className="ledger-strategy-filter-label">Type</span>
-                          <div className="replay-bubble-switch ledger-instance-type-bubbles">
+                          <span className={w9.ledgerStrategyFilterLabel}>Type</span>
+                          <div className={rl.bubbleSwitch}>
                             <button
                               type="button"
-                              className={`replay-bubble-switch-btn ${ledgerOptionRightFilter === '' ? 'active' : ''}`}
+                              className={bubbleSwitchBtn(ledgerOptionRightFilter === '')}
                               onClick={() => setLedgerOptionRightFilter('')}
                             >
                               All
@@ -2017,7 +2020,7 @@ export function LedgerView({
                             {(instancePanelOptionRights.includes('C') || ledgerOptionRightFilter === 'C') && (
                               <button
                                 type="button"
-                                className={`replay-bubble-switch-btn ${ledgerOptionRightFilter === 'C' ? 'active' : ''}`}
+                                className={bubbleSwitchBtn(ledgerOptionRightFilter === 'C')}
                                 onClick={() =>
                                   setLedgerOptionRightFilter(prev => (prev === 'C' ? '' : 'C'))
                                 }
@@ -2028,7 +2031,7 @@ export function LedgerView({
                             {(instancePanelOptionRights.includes('P') || ledgerOptionRightFilter === 'P') && (
                               <button
                                 type="button"
-                                className={`replay-bubble-switch-btn ${ledgerOptionRightFilter === 'P' ? 'active' : ''}`}
+                                className={bubbleSwitchBtn(ledgerOptionRightFilter === 'P')}
                                 onClick={() =>
                                   setLedgerOptionRightFilter(prev => (prev === 'P' ? '' : 'P'))
                                 }
@@ -2044,13 +2047,13 @@ export function LedgerView({
                   {ledgerInstanceSubTab === 'with_instance' &&
                     ledgerOptionRightFilter &&
                     filteredInstanceGroups.length > 0 && (
-                      <div className="ledger-instance-filter-meta-row">
+                      <div className={w9.ledgerInstanceFilterMetaRow}>
                         <span>
                           Showing {instanceFinalFiltered.length} of {filteredInstanceGroups.length} instances
                         </span>
                         <button
                           type="button"
-                          className="ledger-strategy-filter-clear"
+                          className={w9.ledgerStrategyFilterClear}
                           onClick={() => setLedgerOptionRightFilter('')}
                         >
                           Clear type filter
@@ -2061,10 +2064,10 @@ export function LedgerView({
               ) : null}
 
               {ledgerTab === 'options' && hasOptionExecutions ? (
-                <div className="ledger-tab-filters-section" aria-label="Options tab filters">
+                <div className={w9.ledgerTabFiltersSection} aria-label="Options tab filters">
                   <div className="ledger-options-subtab-row ledger-options-subtab-row--in-sheet">
                     <div
-                      className="system-tabs replay-stock-group-tabs"
+                      className={rl.stockGroupTabs}
                       role="tablist"
                       aria-label="Closed Option and Open Option"
                     >
@@ -2094,7 +2097,7 @@ export function LedgerView({
                         role="radiogroup"
                         aria-label="Filter contracts by strategy instance status"
                       >
-                        <span className="ledger-opt-instance-filter-label">Instance</span>
+                        <span className={w9.ledgerOptInstanceFilterLabel}>Instance</span>
                         {(
                           [
                             { v: 'all', label: 'All' },
@@ -2108,14 +2111,14 @@ export function LedgerView({
                             type="button"
                             role="radio"
                             aria-checked={ledgerOptInstanceFilter === v}
-                            className={`replay-bubble-switch-btn ${ledgerOptInstanceFilter === v ? 'active' : ''}`}
+                            className={bubbleSwitchBtn(ledgerOptInstanceFilter === v)}
                             onClick={() => setLedgerOptInstanceFilter(v)}
                           >
                             {label}
                           </button>
                         ))}
                         {ledgerOptInstanceFilter !== 'all' && (
-                          <span className="ledger-opt-instance-filter-count">
+                          <span className={w9.ledgerOptInstanceFilterCount}>
                             {filteredClosedOptionGroupsByInstance.length} / {sortedClosedOptionGroups.length}
                           </span>
                         )}
@@ -2129,10 +2132,10 @@ export function LedgerView({
                 ledgerTab === 'fixed_income' ||
                 ledgerTab === 'cash_like') &&
               hasDataForCurrentInstrumentStkTab ? (
-                <div className="ledger-tab-filters-section" aria-label="Stock bucket tab filters">
-                  <div className="ledger-stock-bucket-filter-row">
+                <div className={w9.ledgerTabFiltersSection} aria-label="Stock bucket tab filters">
+                  <div className={w9.ledgerStockBucketFilterRow}>
                     <div
-                      className="replay-bubble-switch ledger-stock-view-bubbles"
+                      className={rl.bubbleSwitch}
                       role="tablist"
                       aria-label="Stock view mode"
                     >
@@ -2140,7 +2143,7 @@ export function LedgerView({
                         type="button"
                         role="tab"
                         aria-selected={!ledgerStockGroupByPosition}
-                        className={`replay-bubble-switch-btn ${!ledgerStockGroupByPosition ? 'active' : ''}`}
+                        className={bubbleSwitchBtn(!ledgerStockGroupByPosition)}
                         onClick={() => setLedgerStockGroupByPosition(false)}
                       >
                         Flat
@@ -2149,15 +2152,15 @@ export function LedgerView({
                         type="button"
                         role="tab"
                         aria-selected={ledgerStockGroupByPosition}
-                        className={`replay-bubble-switch-btn ${ledgerStockGroupByPosition ? 'active' : ''}`}
+                        className={bubbleSwitchBtn(ledgerStockGroupByPosition)}
                         onClick={() => setLedgerStockGroupByPosition(true)}
                       >
                         Position
                       </button>
                     </div>
-                    <span className="ledger-stock-bucket-filter-sep" aria-hidden="true" />
+                    <span className={w9.ledgerStockBucketFilterSep} aria-hidden="true" />
                     <div
-                      className="replay-bubble-switch ledger-stock-category-bubbles"
+                      className={rl.bubbleSwitch}
                       role="tablist"
                       aria-label="Position category filter"
                     >
@@ -2167,7 +2170,7 @@ export function LedgerView({
                           type="button"
                           role="tab"
                           aria-selected={ledgerStockCategoryTab === cat}
-                          className={`replay-bubble-switch-btn ${ledgerStockCategoryTab === cat ? 'active' : ''}`}
+                          className={bubbleSwitchBtn(ledgerStockCategoryTab === cat)}
                           onClick={() => setLedgerStockCategoryTab(cat)}
                         >
                           {cat}
@@ -2185,7 +2188,7 @@ export function LedgerView({
             </p>
           ) : null}
           {filteredExecutions.length === 0 && filteredExecutionsBook.length === 0 ? (
-            <p className="section-hint">
+            <p className={w9.sectionHint}>
               No execution data. Use Overview to fetch from IB (Refresh), or Trade ledger to add a manual journal
               entry (Add journal).
               {ledgerActiveFilterSummary.length > 0 ? ' Filters applied.' : ''}
@@ -2193,13 +2196,13 @@ export function LedgerView({
           ) : (
             <>
               <section
-                className="replay-ledger-summary replay-ledger-summary--period"
+                className={cn(rl.ledgerSummary, rl.ledgerSummaryPeriod)}
                 aria-label="Summary by period"
               >
-                <div className="replay-ledger-summary-period-head">
-                  <span className="replay-ledger-summary-label">Summary</span>
+                <div className={rl.ledgerSummaryPeriodHead}>
+                  <span className={rl.ledgerSummaryLabel}>Summary</span>
                   <div
-                    className="replay-ledger-summary-period-tabs"
+                    className={rl.ledgerSummaryPeriodTabs}
                     role="tablist"
                     aria-label="Summary aggregation period"
                   >
@@ -2209,7 +2212,7 @@ export function LedgerView({
                         type="button"
                         role="tab"
                         aria-selected={ledgerSummaryPeriod === id}
-                        className={`replay-ledger-summary-period-tab ${ledgerSummaryPeriod === id ? 'active' : ''}`}
+                        className={periodSummaryTab(ledgerSummaryPeriod === id)}
                         onClick={() => setLedgerSummaryPeriod(id)}
                       >
                         {label}
@@ -2218,30 +2221,30 @@ export function LedgerView({
                   </div>
                 </div>
                 {ledgerTab === 'options' || ledgerTab === 'strategy' || ledgerTab === 'instance' ? (
-                  <div className="replay-ledger-summary-period-body">
+                  <div className={rl.ledgerSummaryPeriodBody}>
                     <ul
-                      className="replay-ledger-summary-calendar-grid"
+                      className={rl.ledgerSummaryCalendarGrid}
                       aria-label="Option closed groups by period"
                     >
                       {ledgerOptionsSummaryByPeriod.map(([key, { count, realizedPnl }]) => (
-                        <li key={key} className="replay-ledger-summary-period-cell">
-                          <span className="replay-ledger-summary-period-cell-label">
+                        <li key={key} className={rl.ledgerSummaryPeriodCell}>
+                          <span className={rl.ledgerSummaryPeriodCellLabel}>
                             {formatPeriodLabel(key, ledgerSummaryPeriod)}
                           </span>
-                          <span className="replay-ledger-summary-period-cell-metrics">
+                          <span className={rl.ledgerSummaryPeriodCellMetrics}>
                             <span>{count} groups</span>
-                            <span className="replay-ledger-summary-stocks-metric-sep" aria-hidden>
+                            <span className={rl.ledgerSummaryStocksMetricSep} aria-hidden>
                               ·
                             </span>
                             <span
                               role="button"
                               tabIndex={0}
-                              className={`replay-ledger-metric-explain-trigger ${
+                              className={`rl.ledgerMetricExplainTrigger ${
                                 realizedPnl > 0
-                                  ? 'replay-pnl-realized'
+                                  ? 'rl.pnlRealized'
                                   : realizedPnl < 0
-                                    ? 'replay-pnl-detail-negative'
-                                    : 'replay-ledger-summary-realized-zero'
+                                    ? 'rl.pnlDetailNegative'
+                                    : 'rl.ledgerSummaryRealizedZero'
                               }`}
                               aria-label="Open calculation details for this period realized PnL"
                               onMouseEnter={e =>
@@ -2268,26 +2271,26 @@ export function LedgerView({
                       ))}
                     </ul>
                     <div
-                      className="replay-ledger-summary-stocks-total"
+                      className={rl.ledgerSummaryStocksTotal}
                       aria-label="Option summary totals"
                     >
-                      <span className="replay-ledger-summary-stocks-total-label">Total</span>
-                      <span className="replay-ledger-summary-stocks-total-metrics">
+                      <span className={rl.ledgerSummaryStocksTotalLabel}>Total</span>
+                      <span className={rl.ledgerSummaryStocksTotalMetrics}>
                         <span>
                           {ledgerOptionsSummaryByMonth.reduce((s, [, d]) => s + d.count, 0)} groups
                         </span>
-                        <span className="replay-ledger-summary-stocks-metric-sep" aria-hidden>
+                        <span className={rl.ledgerSummaryStocksMetricSep} aria-hidden>
                           ·
                         </span>
                         <span
                           role="button"
                           tabIndex={0}
-                          className={`replay-ledger-metric-explain-trigger ${
+                          className={`rl.ledgerMetricExplainTrigger ${
                             closedOptGroupsPnlSum > 0
-                              ? 'replay-pnl-realized'
+                              ? 'rl.pnlRealized'
                               : closedOptGroupsPnlSum < 0
-                                ? 'replay-pnl-detail-negative'
-                                : 'replay-ledger-summary-realized-zero'
+                                ? 'rl.pnlDetailNegative'
+                                : 'rl.ledgerSummaryRealizedZero'
                           }`}
                           aria-label="Open calculation details for total option realized PnL"
                           onMouseEnter={e =>
@@ -2305,30 +2308,30 @@ export function LedgerView({
                     </div>
                   </div>
                 ) : (
-                  <div className="replay-ledger-summary-period-body">
+                  <div className={rl.ledgerSummaryPeriodBody}>
                     <ul
-                      className="replay-ledger-summary-calendar-grid"
+                      className={rl.ledgerSummaryCalendarGrid}
                       aria-label="Stock trades by period"
                     >
                       {ledgerStocksSummaryByPeriod.map(([key, { count, notional, realizedPnl }]) => (
-                        <li key={key} className="replay-ledger-summary-period-cell">
-                          <span className="replay-ledger-summary-period-cell-label">
+                        <li key={key} className={rl.ledgerSummaryPeriodCell}>
+                          <span className={rl.ledgerSummaryPeriodCellLabel}>
                             {formatPeriodLabel(key, ledgerSummaryPeriod)}
                           </span>
-                          <span className="replay-ledger-summary-period-cell-metrics">
+                          <span className={rl.ledgerSummaryPeriodCellMetrics}>
                             <span>{count} trades</span>
-                            <span className="replay-ledger-summary-stocks-metric-sep" aria-hidden>
+                            <span className={rl.ledgerSummaryStocksMetricSep} aria-hidden>
                               ·
                             </span>
                             <span
                               role="button"
                               tabIndex={0}
-                              className={`replay-ledger-metric-explain-trigger ${
+                              className={`rl.ledgerMetricExplainTrigger ${
                                 realizedPnl > 0
-                                  ? 'replay-pnl-realized'
+                                  ? 'rl.pnlRealized'
                                   : realizedPnl < 0
-                                    ? 'replay-pnl-detail-negative'
-                                    : 'replay-ledger-summary-realized-zero'
+                                    ? 'rl.pnlDetailNegative'
+                                    : 'rl.ledgerSummaryRealizedZero'
                               }`}
                               aria-label="Open calculation details for this period stock realized PnL"
                               onMouseEnter={e =>
@@ -2354,7 +2357,7 @@ export function LedgerView({
                           <span
                             role="button"
                             tabIndex={0}
-                            className="replay-ledger-summary-stocks-notional-line replay-ledger-metric-explain-trigger"
+                            className={cn(rl.ledgerSummaryStocksNotionalLine, rl.ledgerMetricExplainTrigger)}
                             aria-label="Open calculation details for notional in this period"
                             onMouseEnter={e =>
                               handleMetricHoverEnter('stocks_period_notional', `stk-nv-${key}`, e)
@@ -2371,24 +2374,24 @@ export function LedgerView({
                       ))}
                     </ul>
                     <div
-                      className="replay-ledger-summary-stocks-total"
+                      className={rl.ledgerSummaryStocksTotal}
                       aria-label="Stock summary totals"
                     >
-                      <span className="replay-ledger-summary-stocks-total-label">Total</span>
-                      <span className="replay-ledger-summary-stocks-total-metrics">
+                      <span className={rl.ledgerSummaryStocksTotalLabel}>Total</span>
+                      <span className={rl.ledgerSummaryStocksTotalMetrics}>
                         <span>{ledgerStocksSummaryTotals.trades} trades</span>
-                        <span className="replay-ledger-summary-stocks-metric-sep" aria-hidden>
+                        <span className={rl.ledgerSummaryStocksMetricSep} aria-hidden>
                           ·
                         </span>
                         <span
                           role="button"
                           tabIndex={0}
-                          className={`replay-ledger-metric-explain-trigger ${
+                          className={`rl.ledgerMetricExplainTrigger ${
                             ledgerStocksSummaryTotals.realizedPnl > 0
-                              ? 'replay-pnl-realized'
+                              ? 'rl.pnlRealized'
                               : ledgerStocksSummaryTotals.realizedPnl < 0
-                                ? 'replay-pnl-detail-negative'
-                                : 'replay-ledger-summary-realized-zero'
+                                ? 'rl.pnlDetailNegative'
+                                : 'rl.ledgerSummaryRealizedZero'
                           }`}
                           aria-label="Open calculation details for total stock realized PnL"
                           onMouseEnter={e =>
@@ -2402,16 +2405,16 @@ export function LedgerView({
                         >
                           {fmtUsd0(ledgerStocksSummaryTotals.realizedPnl)}
                         </span>
-                        <span className="replay-ledger-summary-stocks-metric-sep" aria-hidden>
+                        <span className={rl.ledgerSummaryStocksMetricSep} aria-hidden>
                           ·
                         </span>
                         <span
                           role="button"
                           tabIndex={0}
-                          className={`replay-ledger-metric-explain-trigger replay-ledger-summary-stocks-total-u ${
+                          className={`rl.ledgerMetricExplainTrigger rl.ledgerSummaryStocksTotalU ${
                             ledgerStocksSummaryTotals.totalUnrealized != null
                               ? 'ledger-stk-ur-pnl-unrealized'
-                              : 'replay-ledger-summary-realized-zero'
+                              : 'rl.ledgerSummaryRealizedZero'
                           }`}
                           aria-label="Open calculation details for total stock unrealized PnL"
                           onMouseEnter={e =>
@@ -2428,13 +2431,13 @@ export function LedgerView({
                             ? fmtUsd0(ledgerStocksSummaryTotals.totalUnrealized)
                             : '—'}
                         </span>
-                        <span className="replay-ledger-summary-stocks-metric-sep" aria-hidden>
+                        <span className={rl.ledgerSummaryStocksMetricSep} aria-hidden>
                           ·
                         </span>
                         <span
                           role="button"
                           tabIndex={0}
-                          className="replay-ledger-summary-stocks-notional replay-ledger-metric-explain-trigger"
+                          className={cn(rl.ledgerSummaryStocksNotional, rl.ledgerMetricExplainTrigger)}
                           aria-label="Open calculation details for total stock notional"
                           onMouseEnter={e =>
                             handleMetricHoverEnter('stocks_total_notional', 'stk-total-nv', e)
@@ -2457,14 +2460,14 @@ export function LedgerView({
                   id="replay-panel-strategy"
                   role="tabpanel"
                   aria-labelledby="replay-tab-strategy"
-                  className="system-tab-panel"
+                  className={w9.systemTabPanel}
                 >
                   {hasOptionExecutions ? (
                     <>
                       {strategyOpportunityGroups.length === 0 ? (
-                        <p className="section-hint">No option trades under the current filters.</p>
+                        <p className={w9.sectionHint}>No option trades under the current filters.</p>
                       ) : filteredStrategyOpportunityGroups.length === 0 ? (
-                        <p className="section-hint">No opportunities match the current type filter.</p>
+                        <p className={w9.sectionHint}>No opportunities match the current type filter.</p>
                       ) : (
                         <div>
                           {ledgerStrategyDisplayBuckets.map(bucket => {
@@ -2481,10 +2484,10 @@ export function LedgerView({
                               og.opportunityId === 'none' ? 'none' : String(og.opportunityId)
                             const isExpanded = strategyOppExpandedKeys.has(expandKey)
                             return (
-                              <div key={expandKey} className="replay-instance-group">
+                              <div key={expandKey} className={rl.instanceGroup}>
                                 <button
                                   type="button"
-                                  className="replay-instance-group-header"
+                                  className={rl.instanceGroupHeader}
                                   onClick={() =>
                                     setStrategyOppExpandedKeys(prev => {
                                       if (prev.has(expandKey)) {
@@ -2501,18 +2504,18 @@ export function LedgerView({
                                   aria-expanded={isExpanded}
                                 >
                                   <span
-                                    className={`replay-instance-chevron ${isExpanded ? 'replay-instance-chevron--open' : ''}`}
+                                    className={`rl.instanceChevron ${isExpanded ? 'rl.instanceChevronOpen' : ''}`}
                                   >
                                     ▶
                                   </span>
-                                  <span className="replay-instance-group-title">{og.title}</span>
-                                  <span className="replay-instance-group-stats">
+                                  <span className={rl.instanceGroupTitle}>{og.title}</span>
+                                  <span className={rl.instanceGroupStats}>
                                     <span>Instances: {og.instanceSubgroups.length}</span>
                                     <span>Closed: {closedAll.length}</span>
                                     <span>Open: {openAll.length}</span>
                                     <span
                                       className={
-                                        pnl >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'
+                                        pnl >= 0 ? 'rl.pnlRealized' : 'rl.pnlDetailNegative'
                                       }
                                     >
                                       PnL: {fmtUsd0(pnl)}
@@ -2520,7 +2523,7 @@ export function LedgerView({
                                   </span>
                                 </button>
                                 {isExpanded && (
-                                  <div className="replay-instance-group-body">
+                                  <div className={rl.instanceGroupBody}>
                                     {og.instanceSubgroups.map(sg => {
                                       const closed = sg.groups.filter(g => g.status === 'realized')
                                       const open = sg.groups.filter(g => g.status === 'unrealized')
@@ -2538,12 +2541,12 @@ export function LedgerView({
                                       return (
                                         <div
                                           key={`${expandKey}-inst-${instKey}`}
-                                          className="replay-strategy-instance-nest"
+                                          className={rl.strategyInstanceNest}
                                         >
-                                          <div className="replay-strategy-instance-header-row">
+                                          <div className={rl.strategyInstanceHeaderRow}>
                                             <button
                                               type="button"
-                                              className="replay-strategy-instance-collapse-header"
+                                              className={rl.strategyInstanceCollapseHeader}
                                               onClick={() =>
                                                 setStrategyInstanceExpandedKeys(prev => {
                                                   if (prev.has(instanceCompositeKey)) {
@@ -2566,39 +2569,39 @@ export function LedgerView({
                                               aria-expanded={instExpanded}
                                             >
                                               <span
-                                                className={`replay-instance-chevron ${instExpanded ? 'replay-instance-chevron--open' : ''}`}
+                                                className={`rl.instanceChevron ${instExpanded ? 'rl.instanceChevronOpen' : ''}`}
                                                 aria-hidden
                                               >
                                                 ▶
                                               </span>
-                                              <span className="replay-strategy-instance-head-title">
+                                              <span className={rl.strategyInstanceHeadTitle}>
                                                 {sg.instanceId === 'none' ? (
                                                   'No instance'
                                                 ) : (
                                                   <>
                                                     {sg.label ? (
                                                       <span
-                                                        className="replay-strategy-instance-label"
+                                                        className={rl.strategyInstanceLabel}
                                                         title={sg.label}
                                                       >
                                                         {sg.label}
                                                       </span>
                                                     ) : null}
                                                     {sg.label ? ' ' : null}
-                                                    <span className="replay-strategy-instance-id-text">
+                                                    <span className={rl.strategyInstanceIdText}>
                                                       #{sg.instanceId}
                                                     </span>
                                                   </>
                                                 )}
                                               </span>
-                                              <span className="replay-strategy-instance-stats">
+                                              <span className={rl.strategyInstanceStats}>
                                                 <span>Closed: {closed.length}</span>
                                                 <span>Open: {open.length}</span>
                                                 <span
                                                   className={
                                                     sgPnl >= 0
-                                                      ? 'replay-pnl-realized'
-                                                      : 'replay-pnl-detail-negative'
+                                                      ? 'rl.pnlRealized'
+                                                      : 'rl.pnlDetailNegative'
                                                   }
                                                 >
                                                   PnL: {fmtUsd0(sgPnl)}
@@ -2608,7 +2611,7 @@ export function LedgerView({
                                             {sg.instanceId !== 'none' && (
                                               <a
                                                 href={`#/strategies/instances/${sg.instanceId}`}
-                                                className="replay-stg-ins-link replay-strategy-instance-open-link"
+                                                className={cn(rl.stgInsLink, rl.strategyInstanceOpenLink)}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
                                                 title={
@@ -2622,12 +2625,12 @@ export function LedgerView({
                                             )}
                                           </div>
                                           {instExpanded && (
-                                            <div className="replay-strategy-instance-collapse-body">
+                                            <div className={rl.strategyInstanceCollapseBody}>
                                               {closed.length > 0 && (
-                                                <div className="replay-instance-group-block">
-                                                  <h6 className="replay-instance-subheading">Closed Option</h6>
-                                                  <div className="replay-portfolio-table-wrap">
-                                                    <table className="table-operations replay-opt-groups">
+                                                <div className={rl.instanceGroupBlock}>
+                                                  <h6 className={rl.instanceSubheading}>Closed Option</h6>
+                                                  <div className={rl.portfolioTableWrap}>
+                                                    <table className={rl.optGroups}>
                                                       <thead>
                                                         <tr>
                                                           <th>Contract</th>
@@ -2656,8 +2659,8 @@ export function LedgerView({
                                                               <td
                                                                 className={
                                                                   Number(g.realized_pnl) >= 0
-                                                                    ? 'replay-pnl-realized'
-                                                                    : 'replay-pnl-detail-negative'
+                                                                    ? 'rl.pnlRealized'
+                                                                    : 'rl.pnlDetailNegative'
                                                                 }
                                                               >
                                                                 {fmtUsd0(Number(g.realized_pnl))}
@@ -2672,10 +2675,10 @@ export function LedgerView({
                                                 </div>
                                               )}
                                               {open.length > 0 && (
-                                                <div className="replay-instance-group-block">
-                                                  <h6 className="replay-instance-subheading">Open Option</h6>
-                                                  <div className="replay-portfolio-table-wrap">
-                                                    <table className="table-operations replay-opt-groups">
+                                                <div className={rl.instanceGroupBlock}>
+                                                  <h6 className={rl.instanceSubheading}>Open Option</h6>
+                                                  <div className={rl.portfolioTableWrap}>
+                                                    <table className={rl.optGroups}>
                                                       <thead>
                                                         <tr>
                                                           <th>Contract</th>
@@ -2708,7 +2711,7 @@ export function LedgerView({
                                                 </div>
                                               )}
                                               {closed.length === 0 && open.length === 0 && (
-                                                <p className="section-hint">No contracts for this instance.</p>
+                                                <p className={w9.sectionHint}>No contracts for this instance.</p>
                                               )}
                                             </div>
                                           )}
@@ -2716,7 +2719,7 @@ export function LedgerView({
                                       )
                                     })}
                                     {og.instanceSubgroups.length === 0 && (
-                                      <p className="section-hint">No grouped contract data for this strategy.</p>
+                                      <p className={w9.sectionHint}>No grouped contract data for this strategy.</p>
                                     )}
                                   </div>
                                 )}
@@ -2728,10 +2731,10 @@ export function LedgerView({
                               return <Fragment key={bucket.key}>{innerOpportunities}</Fragment>
                             }
                             return (
-                              <div key={bucket.key} className="replay-ledger-dimension-bundle">
+                              <div key={bucket.key} className={rl.ledgerDimensionBundle}>
                                 <button
                                   type="button"
-                                  className="replay-ledger-dimension-header"
+                                  className={rl.ledgerDimensionHeader}
                                   onClick={() =>
                                     setLedgerStrategyOuterExpandedKeys(prev => {
                                       if (prev.has(bucket.key)) {
@@ -2748,13 +2751,13 @@ export function LedgerView({
                                   aria-expanded={isDimExpanded}
                                 >
                                   <span
-                                    className={`replay-instance-chevron ${isDimExpanded ? 'replay-instance-chevron--open' : ''}`}
+                                    className={`rl.instanceChevron ${isDimExpanded ? 'rl.instanceChevronOpen' : ''}`}
                                     aria-hidden
                                   >
                                     ▶
                                   </span>
-                                  <span className="replay-instance-group-title">{bucket.label}</span>
-                                  <span className="replay-instance-group-stats">
+                                  <span className={rl.instanceGroupTitle}>{bucket.label}</span>
+                                  <span className={rl.instanceGroupStats}>
                                     <span>Opportunities: {bucket.groups.length}</span>
                                     <span>Instances: {outerStats.instances}</span>
                                     <span>Closed: {outerStats.closed}</span>
@@ -2762,8 +2765,8 @@ export function LedgerView({
                                     <span
                                       className={
                                         outerStats.pnl >= 0
-                                          ? 'replay-pnl-realized'
-                                          : 'replay-pnl-detail-negative'
+                                          ? 'rl.pnlRealized'
+                                          : 'rl.pnlDetailNegative'
                                       }
                                     >
                                       PnL: {fmtUsd0(outerStats.pnl)}
@@ -2771,7 +2774,7 @@ export function LedgerView({
                                   </span>
                                 </button>
                                 {isDimExpanded ? (
-                                  <div className="replay-ledger-dimension-body">{innerOpportunities}</div>
+                                  <div className={rl.ledgerDimensionBody}>{innerOpportunities}</div>
                                 ) : null}
                               </div>
                             )
@@ -2780,7 +2783,7 @@ export function LedgerView({
                       )}
                     </>
                   ) : (
-                    <p className="section-hint">No option trades under the current filters.</p>
+                    <p className={w9.sectionHint}>No option trades under the current filters.</p>
                   )}
                 </div>
               )}
@@ -2789,20 +2792,20 @@ export function LedgerView({
                   id="replay-panel-instance"
                   role="tabpanel"
                   aria-labelledby="replay-tab-instance"
-                  className="system-tab-panel"
+                  className={w9.systemTabPanel}
                 >
                   {hasOptionExecutions ? (
                     <>
                       {ledgerInstanceSubTab === 'with_instance' && (
                         <div>
                           {instanceGroups.length === 0 ? (
-                            <p className="section-hint">No option trades with a strategy instance under the current filters.</p>
+                            <p className={w9.sectionHint}>No option trades with a strategy instance under the current filters.</p>
                           ) : filteredInstanceGroups.length === 0 ? (
-                            <p className="section-hint">
+                            <p className={w9.sectionHint}>
                               No instances match Contain open = {instanceContainOpenFilter === 'yes' ? 'Yes' : 'No'}. Change the filter or clear it (All).
                             </p>
                           ) : instanceFinalFiltered.length === 0 ? (
-                            <p className="section-hint">No instances match the current type filter.</p>
+                            <p className={w9.sectionHint}>No instances match the current type filter.</p>
                           ) : (
                             <>
                             {ledgerInstanceDisplayBuckets.map(bucket => {
@@ -2813,11 +2816,11 @@ export function LedgerView({
                               const pnl = closed.reduce((s, g) => s + (Number(g.realized_pnl) || 0), 0)
                               const isExpanded = instanceExpandedIds.has(ig.instanceId)
                               return (
-                                <div key={ig.instanceId} className="replay-instance-group">
-                                  <div className="replay-instance-group-header-row">
+                                <div key={ig.instanceId} className={rl.instanceGroup}>
+                                  <div className={rl.instanceGroupHeaderRow}>
                                     <button
                                       type="button"
-                                      className="replay-instance-group-header"
+                                      className={rl.instanceGroupHeader}
                                       onClick={() =>
                                         setInstanceExpandedIds(prev => {
                                           if (prev.has(ig.instanceId)) {
@@ -2833,24 +2836,24 @@ export function LedgerView({
                                       }
                                       aria-expanded={isExpanded}
                                     >
-                                      <span className={`replay-instance-chevron ${isExpanded ? 'replay-instance-chevron--open' : ''}`}>▶</span>
-                                      <span className="replay-instance-group-title">
+                                      <span className={`rl.instanceChevron ${isExpanded ? 'rl.instanceChevronOpen' : ''}`}>▶</span>
+                                      <span className={rl.instanceGroupTitle}>
                                         {ig.label ?? `Instance #${ig.instanceId}`}
                                       </span>
                                       {ig.opportunityName && (
-                                        <span className="replay-instance-group-opp">({ig.opportunityName})</span>
+                                        <span className={rl.instanceGroupOpp}>({ig.opportunityName})</span>
                                       )}
-                                      <span className="replay-instance-group-stats">
+                                      <span className={rl.instanceGroupStats}>
                                         <span>Closed: {closed.length}</span>
                                         <span>Open: {open.length}</span>
-                                        <span className={pnl >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'}>
+                                        <span className={pnl >= 0 ? 'rl.pnlRealized' : 'rl.pnlDetailNegative'}>
                                           PnL: {fmtUsd0(pnl)}
                                         </span>
                                       </span>
                                     </button>
                                     <a
                                       href={`#/strategies/instances/${ig.instanceId}`}
-                                      className="replay-stg-ins-link replay-instance-detail-link"
+                                      className={cn(rl.stgInsLink, rl.instanceDetailLink)}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       title={
@@ -2868,12 +2871,12 @@ export function LedgerView({
                                     </a>
                                   </div>
                                   {isExpanded && (
-                                    <div className="replay-instance-group-body">
+                                    <div className={rl.instanceGroupBody}>
                                       {closed.length > 0 && (
-                                        <div className="replay-instance-group-block">
-                                          <h6 className="replay-instance-subheading">Closed Option</h6>
-                                          <div className="replay-portfolio-table-wrap">
-                                            <table className="table-operations replay-opt-groups">
+                                        <div className={rl.instanceGroupBlock}>
+                                          <h6 className={rl.instanceSubheading}>Closed Option</h6>
+                                          <div className={rl.portfolioTableWrap}>
+                                            <table className={rl.optGroups}>
                                               <thead>
                                                 <tr>
                                                   <th>Contract</th>
@@ -2897,7 +2900,7 @@ export function LedgerView({
                                                       <td>{parts.rightLabel || '—'}</td>
                                                       <td>{g.buy_volume}</td>
                                                       <td>{g.sell_volume}</td>
-                                                      <td className={Number(g.realized_pnl) >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'}>
+                                                      <td className={Number(g.realized_pnl) >= 0 ? 'rl.pnlRealized' : 'rl.pnlDetailNegative'}>
                                                         {fmtUsd0(Number(g.realized_pnl))}
                                                       </td>
                                                       <td>{g.trades?.length ?? 0}</td>
@@ -2910,10 +2913,10 @@ export function LedgerView({
                                         </div>
                                       )}
                                       {open.length > 0 && (
-                                        <div className="replay-instance-group-block">
-                                          <h6 className="replay-instance-subheading">Open Option</h6>
-                                          <div className="replay-portfolio-table-wrap">
-                                            <table className="table-operations replay-opt-groups">
+                                        <div className={rl.instanceGroupBlock}>
+                                          <h6 className={rl.instanceSubheading}>Open Option</h6>
+                                          <div className={rl.portfolioTableWrap}>
+                                            <table className={rl.optGroups}>
                                               <thead>
                                                 <tr>
                                                   <th>Contract</th>
@@ -2944,7 +2947,7 @@ export function LedgerView({
                                         </div>
                                       )}
                                       {closed.length === 0 && open.length === 0 && (
-                                        <p className="section-hint">No grouped contract data for this instance.</p>
+                                        <p className={w9.sectionHint}>No grouped contract data for this instance.</p>
                                       )}
                                     </div>
                                   )}
@@ -2956,10 +2959,10 @@ export function LedgerView({
                               return <Fragment key={bucket.key}>{innerInstances}</Fragment>
                             }
                             return (
-                              <div key={bucket.key} className="replay-ledger-dimension-bundle">
+                              <div key={bucket.key} className={rl.ledgerDimensionBundle}>
                                 <button
                                   type="button"
-                                  className="replay-ledger-dimension-header"
+                                  className={rl.ledgerDimensionHeader}
                                   onClick={() =>
                                     setLedgerInstanceOuterExpandedKeys(prev => {
                                       if (prev.has(bucket.key)) {
@@ -2976,21 +2979,21 @@ export function LedgerView({
                                   aria-expanded={isInstDimExpanded}
                                 >
                                   <span
-                                    className={`replay-instance-chevron ${isInstDimExpanded ? 'replay-instance-chevron--open' : ''}`}
+                                    className={`rl.instanceChevron ${isInstDimExpanded ? 'rl.instanceChevronOpen' : ''}`}
                                     aria-hidden
                                   >
                                     ▶
                                   </span>
-                                  <span className="replay-instance-group-title">{bucket.label}</span>
-                                  <span className="replay-instance-group-stats">
+                                  <span className={rl.instanceGroupTitle}>{bucket.label}</span>
+                                  <span className={rl.instanceGroupStats}>
                                     <span>Instances: {bucket.groups.length}</span>
                                     <span>Closed legs: {outerIgStats.closed}</span>
                                     <span>Open legs: {outerIgStats.open}</span>
                                     <span
                                       className={
                                         outerIgStats.pnl >= 0
-                                          ? 'replay-pnl-realized'
-                                          : 'replay-pnl-detail-negative'
+                                          ? 'rl.pnlRealized'
+                                          : 'rl.pnlDetailNegative'
                                       }
                                     >
                                       PnL: {fmtUsd0(outerIgStats.pnl)}
@@ -2998,7 +3001,7 @@ export function LedgerView({
                                   </span>
                                 </button>
                                 {isInstDimExpanded ? (
-                                  <div className="replay-ledger-dimension-body">{innerInstances}</div>
+                                  <div className={rl.ledgerDimensionBody}>{innerInstances}</div>
                                 ) : null}
                               </div>
                             )
@@ -3010,10 +3013,10 @@ export function LedgerView({
 
                       {ledgerInstanceSubTab === 'no_instance' && (
                         <div
-                          className="replay-instance-no-inst-sheet"
+                          className={rl.instanceNoInstSheet}
                           aria-label="Option trades without strategy instance"
                         >
-                          <p className="section-hint replay-instance-no-inst-sheet-intro">
+                          <p className={rl.instanceNoInstSheetIntro}>
                             All trades in this sheet have no strategy instance. Expand closed rows and use Link in Details (per trade) to assign an opportunity and instance.
                           </p>
                           <LedgerClosedOptionContractsSection
@@ -3054,7 +3057,7 @@ export function LedgerView({
                       )}
                     </>
                   ) : (
-                    <p className="section-hint">
+                    <p className={w9.sectionHint}>
                       No option trades under the current filters.
                     </p>
                   )}
@@ -3065,7 +3068,7 @@ export function LedgerView({
                   id="replay-panel-options"
                   role="tabpanel"
                   aria-labelledby="replay-tab-options"
-                  className="system-tab-panel"
+                  className={w9.systemTabPanel}
                 >
                   {hasOptionExecutions ? (
                     <>
@@ -3109,7 +3112,7 @@ export function LedgerView({
 
                     </>
                   ) : (
-                    <p className="section-hint">
+                    <p className={w9.sectionHint}>
                       No option trades under the current filters.
                     </p>
                   )}
@@ -3128,16 +3131,16 @@ export function LedgerView({
                         ? 'replay-tab-fixed-income'
                         : 'replay-tab-cash-like'
                   }
-                  className="system-tab-panel"
+                  className={w9.systemTabPanel}
                 >
                   {hasDataForCurrentInstrumentStkTab ? (
-                    <div className="replay-portfolio-table-wrap">
-                      <table className="table-operations">
+                    <div className={rl.portfolioTableWrap}>
+                      <table className={w9.tableOperations}>
                         <thead>
                           <tr>
                             <th>Time</th>
                             <th
-                              className="replay-th-sortable"
+                              className={rl.thSortable}
                               onClick={e => {
                                 e.stopPropagation()
                                 setLedgerStockSort(prev => {
@@ -3183,7 +3186,7 @@ export function LedgerView({
                             <th>Price</th>
                             <th>Notional</th>
                             <th
-                              className="replay-th-sortable"
+                              className={rl.thSortable}
                               onClick={e => {
                                 e.stopPropagation()
                                 setLedgerStockSort(prev => {
@@ -3255,7 +3258,7 @@ export function LedgerView({
                                     <td>{fmtTradeDate(ex.trade_date)}</td>
                                     <td>
                                       {ledgerTab === 'stocks' ? (
-                                        <span className="ledger-stk-cell-symbol">{ex.symbol ?? '—'}</span>
+                                        <span className={w9.ledgerStkCellSymbol}>{ex.symbol ?? '—'}</span>
                                       ) : (
                                         (ex.symbol ?? '—')
                                       )}
@@ -3263,7 +3266,7 @@ export function LedgerView({
                                     <td>{ex.account_id ?? '—'}</td>
                                     <td>
                                       {ledgerTab === 'stocks' ? (
-                                        <span className="ledger-stk-cell-category">{getStockExecCategory(ex)}</span>
+                                        <span className={w9.ledgerStkCellCategory}>{getStockExecCategory(ex)}</span>
                                       ) : (
                                         getStockExecCategory(ex)
                                       )}
@@ -3281,7 +3284,7 @@ export function LedgerView({
                                     <td><ExecSourceBadge source={ex.source} /></td>
                                     <td>
                                       {ex.account_executions_id != null ? (
-                                        <span className="replay-exec-row-actions">
+                                        <span className={rl.execRowActions}>
                                           <Button
                                             type="button"
                                             variant="outline"
@@ -3412,68 +3415,68 @@ export function LedgerView({
                               rows.push(
                                 <tr
                                   key={`h-${groupKey}`}
-                                  className="replay-stock-group-header"
+                                  className={rl.stockGroupHeader}
                                 >
                                   <td colSpan={12}>
-                                    <div className="replay-stock-group-header-inner">
+                                    <div className={rl.stockGroupHeaderInner}>
                                       <span
-                                        className={`replay-stock-group-symbol${ledgerTab === 'stocks' ? ' ledger-stk-pill ledger-stk-pill--symbol' : ''}`}
+                                        className={`rl.stockGroupSymbol${ledgerTab === 'stocks' ? ' ledger-stk-pill ledger-stk-pill--symbol' : ''}`}
                                       >
                                         {sym || '—'}
                                       </span>
-                                      <span className="replay-stock-group-account">
+                                      <span className={rl.stockGroupAccount}>
                                         {accId || '—'}
                                       </span>
                                       <span
-                                        className={`replay-stock-group-category${ledgerTab === 'stocks' ? ' ledger-stk-pill ledger-stk-pill--category' : ''}`}
+                                        className={`rl.stockGroupCategory${ledgerTab === 'stocks' ? ' ledger-stk-pill ledger-stk-pill--category' : ''}`}
                                       >
                                         {category}
                                       </span>
                                       <span
-                                        className="replay-stock-group-position-snapshot"
+                                        className={rl.stockGroupPositionSnapshot}
                                         title="Current position snapshot from GET /status (portfolio positions); same source as U."
                                       >
-                                        <span className="replay-stock-group-position-snapshot-label">Pos</span>{' '}
+                                        <span className={rl.stockGroupPositionSnapshotLabel}>Pos</span>{' '}
                                         {posSnapStr}
-                                        <span className="replay-stock-group-position-snapshot-sep" aria-hidden>
+                                        <span className={rl.stockGroupPositionSnapshotSep} aria-hidden>
                                           {' '}
                                           ·{' '}
                                         </span>
-                                        <span className="replay-stock-group-position-snapshot-label">Avg</span>{' '}
+                                        <span className={rl.stockGroupPositionSnapshotLabel}>Avg</span>{' '}
                                         {avgSnapStr}
-                                        <span className="replay-stock-group-position-snapshot-sep" aria-hidden>
+                                        <span className={rl.stockGroupPositionSnapshotSep} aria-hidden>
                                           {' '}
                                           ·{' '}
                                         </span>
-                                        <span className="replay-stock-group-position-snapshot-label">Mkt</span>{' '}
+                                        <span className={rl.stockGroupPositionSnapshotLabel}>Mkt</span>{' '}
                                         {mktSnapStr}
                                       </span>
                                       <span
-                                        className="replay-stock-group-basis-pct"
+                                        className={rl.stockGroupBasisPct}
                                         title="Cost basis = |position| × avg cost (from GET /status). R% and U% are realized and unrealized PnL as a percentage of that basis (not annualized)."
                                       >
-                                        <span className="replay-stock-group-position-snapshot-label">Basis</span>{' '}
+                                        <span className={rl.stockGroupPositionSnapshotLabel}>Basis</span>{' '}
                                         {costBaseStr}
-                                        <span className="replay-stock-group-position-snapshot-sep" aria-hidden>
+                                        <span className={rl.stockGroupPositionSnapshotSep} aria-hidden>
                                           {' '}
                                           ·{' '}
                                         </span>
-                                        <span className="replay-stock-group-position-snapshot-label">R%</span>{' '}
+                                        <span className={rl.stockGroupPositionSnapshotLabel}>R%</span>{' '}
                                         <span
                                           className={
-                                            rPct != null ? ledgerUrPnlLineClass(rPct) : 'replay-ledger-summary-realized-zero'
+                                            rPct != null ? ledgerUrPnlLineClass(rPct) : 'rl.ledgerSummaryRealizedZero'
                                           }
                                         >
                                           {rPctStr}
                                         </span>
-                                        <span className="replay-stock-group-position-snapshot-sep" aria-hidden>
+                                        <span className={rl.stockGroupPositionSnapshotSep} aria-hidden>
                                           {' '}
                                           ·{' '}
                                         </span>
-                                        <span className="replay-stock-group-position-snapshot-label">U%</span>{' '}
+                                        <span className={rl.stockGroupPositionSnapshotLabel}>U%</span>{' '}
                                         <span
                                           className={
-                                            uPct != null ? ledgerUrPnlLineClass(uPct) : 'replay-ledger-summary-realized-zero'
+                                            uPct != null ? ledgerUrPnlLineClass(uPct) : 'rl.ledgerSummaryRealizedZero'
                                           }
                                         >
                                           {uPctStr}
@@ -3488,7 +3491,7 @@ export function LedgerView({
                                           type="button"
                                           variant="outline"
                                           size="icon"
-                                          className="ledger-stock-quick-journal-btn h-8 w-8 min-w-8 shrink-0"
+                                          className={cn(w9.ledgerStockQuickJournalBtn, 'h-8', 'w-8', 'min-w-8', 'shrink-0')}
                                           onClick={() => openQuickStockJournal(accId, sym)}
                                           title="Add journal"
                                           aria-label="Add journal"
@@ -3537,7 +3540,7 @@ export function LedgerView({
                                     <td>{ex.account_id ?? '—'}</td>
                                     <td>
                                       {ledgerTab === 'stocks' ? (
-                                        <span className="ledger-stk-cell-category">{getStockExecCategory(ex)}</span>
+                                        <span className={w9.ledgerStkCellCategory}>{getStockExecCategory(ex)}</span>
                                       ) : (
                                         getStockExecCategory(ex)
                                       )}
@@ -3555,7 +3558,7 @@ export function LedgerView({
                                     <td><ExecSourceBadge source={ex.source} /></td>
                                     <td>
                                       {ex.account_executions_id != null ? (
-                                        <span className="replay-exec-row-actions">
+                                        <span className={rl.execRowActions}>
                                           <Button
                                             type="button"
                                             variant="outline"
@@ -3628,20 +3631,20 @@ export function LedgerView({
                         if (totalStockPages <= 1) return null
                         return (
                           <div className="ledger-pagination-bar" role="navigation" aria-label="Stocks pagination">
-                            <button type="button" className="ledger-pagination-btn" onClick={() => setStocksPage(1)} disabled={stocksPage === 1} aria-label="First page">«</button>
-                            <button type="button" className="ledger-pagination-btn" onClick={() => setStocksPage(p => Math.max(1, p - 1))} disabled={stocksPage === 1} aria-label="Previous page">‹</button>
-                            <span className="ledger-pagination-info">
+                            <button type="button" className={w9.ledgerPaginationBtn} onClick={() => setStocksPage(1)} disabled={stocksPage === 1} aria-label="First page">«</button>
+                            <button type="button" className={w9.ledgerPaginationBtn} onClick={() => setStocksPage(p => Math.max(1, p - 1))} disabled={stocksPage === 1} aria-label="Previous page">‹</button>
+                            <span className={w9.ledgerPaginationInfo}>
                               {stocksPage} / {totalStockPages}
-                              <span className="ledger-pagination-total"> ({totalItems})</span>
+                              <span className={w9.ledgerPaginationTotal}> ({totalItems})</span>
                             </span>
-                            <button type="button" className="ledger-pagination-btn" onClick={() => setStocksPage(p => Math.min(totalStockPages, p + 1))} disabled={stocksPage === totalStockPages} aria-label="Next page">›</button>
-                            <button type="button" className="ledger-pagination-btn" onClick={() => setStocksPage(totalStockPages)} disabled={stocksPage === totalStockPages} aria-label="Last page">»</button>
+                            <button type="button" className={w9.ledgerPaginationBtn} onClick={() => setStocksPage(p => Math.min(totalStockPages, p + 1))} disabled={stocksPage === totalStockPages} aria-label="Next page">›</button>
+                            <button type="button" className={w9.ledgerPaginationBtn} onClick={() => setStocksPage(totalStockPages)} disabled={stocksPage === totalStockPages} aria-label="Last page">»</button>
                           </div>
                         )
                       })()}
                     </div>
                   ) : (
-                    <p className="section-hint">
+                    <p className={w9.sectionHint}>
                       No stock executions under the current filters.
                     </p>
                   )}
@@ -3654,7 +3657,7 @@ export function LedgerView({
 
       {pageError && (
         <p
-          className="section-hint replay-form-error"
+          className={rl.formError}
           style={{ marginTop: '0.5rem' }}
         >
           {pageError}
@@ -3744,14 +3747,14 @@ export function LedgerView({
           }}
         >
           <div
-            className="modal-panel replay-exec-modal"
+            className={rl.execModal}
             style={{ maxWidth: 400 }}
             onClick={e => e.stopPropagation()}
           >
             <h3 id="delete-exec-confirm-title" className="section-subtitle" style={{ marginTop: 0 }}>
               {deleteConfirmState.title}
             </h3>
-            <p className="section-hint" style={{ marginTop: 'var(--space-2)', marginBottom: 'var(--space-4)' }}>
+            <p className={w9.sectionHint} style={{ marginTop: 'var(--space-2)', marginBottom: 'var(--space-4)' }}>
               {deleteConfirmState.message}
             </p>
             <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { MouseEvent, ReactNode, RefObject } from 'react'
 import { InfoTooltip } from './InfoTooltip'
 
@@ -282,7 +284,7 @@ export function LogConsolePanel({
         onMouseDown={onResizeStart}
         title="Drag to resize height"
       />
-      <div className="section-hint celery-console-status-line">
+      <div className={cn(w9.sectionHint, 'celery-console-status-line')}>
         <div className="celery-console-status-indicator">
           {status !== 'idle' && status !== 'connecting' ? (
             <span style={{ color: status === 'connected' ? 'var(--color-lamp-green)' : 'var(--color-lamp-red)', fontWeight: 600 }}>

@@ -1,3 +1,5 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
 import { useEffect, useMemo, useState } from 'react'
 import type { Bar, IbAccountSnapshot, RealtimeQuote, StatusResponse } from '../types'
 import { fetchBars, fetchQuotes } from '../api'
@@ -87,9 +89,9 @@ export function MarketDataPage({ status, onGoToScreener, breadcrumbLabel = 'Scre
       )}
 
       {quotes.length > 0 && (
-        <section className="replay-section realtime-quotes-wall" aria-labelledby="realtime-quotes-head">
+        <section className={rl.section} aria-labelledby="realtime-quotes-head">
           <h3 id="realtime-quotes-head">Realtime quotes</h3>
-          {quotesMessage && <p className="section-hint">{quotesMessage}</p>}
+          {quotesMessage && <p className={w9.sectionHint}>{quotesMessage}</p>}
           <div className="quotes-ticker" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', marginTop: '0.5rem' }}>
             {quotes.map(q => (
               <div
@@ -117,28 +119,28 @@ export function MarketDataPage({ status, onGoToScreener, breadcrumbLabel = 'Scre
         </section>
       )}
 
-      <section className="replay-section" aria-labelledby="bars-head">
+      <section className={rl.section} aria-labelledby="bars-head">
         <h3 id="bars-head" className={SECTION_TITLE_CLASS}>
           Bars
           <InfoTooltip text="View bars from DB by symbol and period. For fetching/backfill, use Settings → Status → Feed → Interactive Brokers." />
         </h3>
-        <div className="replay-bar-symbol-row">
-          <label htmlFor="market-bar-symbol" className="replay-bar-symbol-label">Symbol</label>
+        <div className={rl.barSymbolRow}>
+          <label htmlFor="market-bar-symbol" className={rl.barSymbolLabel}>Symbol</label>
           <input
             id="market-bar-symbol"
             type="text"
-            className="replay-bar-symbol-input"
+            className={rl.barSymbolInput}
             placeholder="Symbol, e.g. NVDA"
             value={barSymbol}
             onChange={e => setBarSymbol((e.target.value || '').trim().toUpperCase())}
             aria-label="Symbol for bars"
           />
           {candidateSymbols.length > 0 && (
-            <span className="replay-sync-hint">From positions: {candidateSymbols.join(', ')}</span>
+            <span className={rl.syncHint}>From positions: {candidateSymbols.join(', ')}</span>
           )}
         </div>
-        <div className="replay-bar-symbol-row">
-          <label className="replay-bar-symbol-label">Period</label>
+        <div className={rl.barSymbolRow}>
+          <label className={rl.barSymbolLabel}>Period</label>
           <select
             value={barPeriod}
             onChange={e => setBarPeriod(e.target.value)}
@@ -149,7 +151,7 @@ export function MarketDataPage({ status, onGoToScreener, breadcrumbLabel = 'Scre
             ))}
           </select>
         </div>
-        <div className="replay-toolbar">
+        <div className={rl.toolbar}>
           <Button
             type="button"
             variant="secondary"
@@ -173,9 +175,9 @@ export function MarketDataPage({ status, onGoToScreener, breadcrumbLabel = 'Scre
           </Button>
         </div>
         {bars.length === 0 ? (
-          <div className="replay-placeholder">No bars. Enter symbol and click "Fetch bars" or "Load from DB".</div>
+          <div className={rl.placeholder}>No bars. Enter symbol and click "Fetch bars" or "Load from DB".</div>
         ) : (
-          <table className="table-operations">
+          <table className={w9.tableOperations}>
             <thead>
               <tr>
                 <th>Time</th>

@@ -1,4 +1,5 @@
 import { PageSection } from '@/components/shared/page-section'
+import { w9 } from '@/styles/wave9Classes'
 import { LampGlyphSlot } from '@/components/shared/lamp-indicator'
 import { cn } from '@/lib/utils'
 
@@ -37,12 +38,12 @@ export function DashboardStrip({
         ]
 
   return (
-    <PageSection className="dashboard-strip gap-3 p-3 md:p-4" aria-label="Dashboard">
-      <div className="dashboard-strip-grid grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
-        <div className="dashboard-open-orders-cluster min-w-0" aria-label="Open orders summary">
+    <PageSection className={cn(w9.dashboardStrip, 'gap-3', 'p-3', 'md:p-4')} aria-label="Dashboard">
+      <div className={cn(w9.dashboardStripGrid, 'grid', 'min-w-0', 'grid-cols-1', 'gap-3', 'md:grid-cols-2')}>
+        <div className={cn(w9.dashboardOpenOrdersCluster, 'min-w-0')} aria-label="Open orders summary">
           <button
             type="button"
-            className="dashboard-open-orders-btn flex w-full min-w-0 items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-left transition-colors hover:bg-muted/50"
+            className={cn(w9.dashboardOpenOrdersBtn, 'flex', 'w-full', 'min-w-0', 'items-center', 'gap-2', 'rounded-lg', 'border', 'border-border', 'bg-muted/30', 'px-3', 'py-2', 'text-left', 'transition-colors', 'hover:bg-muted/50')}
             onClick={onOpenOrdersClick}
             aria-label="Open orders"
             title="View open orders on Live page"
@@ -64,14 +65,14 @@ export function DashboardStrip({
                 </svg>
               </LampGlyphSlot>
             )}
-            <span className="dashboard-open-orders-label text-sm font-medium text-foreground">Open orders</span>
-            <span className="dashboard-open-orders-value ml-auto text-sm font-bold tabular-nums text-foreground">{openOrderCount}</span>
+            <span className={cn(w9.dashboardOpenOrdersLabel, 'text-sm', 'font-medium', 'text-foreground')}>Open orders</span>
+            <span className={cn(w9.dashboardOpenOrdersValue, 'ml-auto', 'text-sm', 'font-bold', 'tabular-nums', 'text-foreground')}>{openOrderCount}</span>
           </button>
         </div>
-        <div className="dashboard-streams-cluster min-w-0" aria-label="Market streams summary">
+        <div className={cn(w9.dashboardStreamsCluster, 'min-w-0')} aria-label="Market streams summary">
           <button
             type="button"
-            className="dashboard-streams-inline dashboard-streams-btn flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-lg border border-border bg-muted/30 px-3 py-2 transition-colors hover:bg-muted/50"
+            className={cn(w9.dashboardStreamsInline, w9.dashboardStreamsBtn, 'flex', 'w-full', 'min-w-0', 'items-center', 'gap-2', 'overflow-hidden', 'rounded-lg', 'border', 'border-border', 'bg-muted/30', 'px-3', 'py-2', 'transition-colors', 'hover:bg-muted/50')}
             onClick={onStreamClick}
             aria-label="Go to Live page"
             title="Go to Live page"
@@ -81,11 +82,11 @@ export function DashboardStrip({
                 <path d="M22 12h-4l-3 9L9 3 6 12H2" />
               </svg>
             </LampGlyphSlot>
-            <div className="dashboard-streams-marquee min-w-0 flex-1 overflow-hidden">
-              <div className="dashboard-streams-track">
+            <div className={cn(w9.dashboardStreamsMarquee, 'min-w-0', 'flex-1', 'overflow-hidden')}>
+              <div className={w9.dashboardStreamsTrack}>
                 {tickerItems.map((item, index) => (
-                  <span key={`${item.label}-${item.value}-${index}`} className="dashboard-streams-item inline-flex gap-1.5 text-xs">
-                    <span className="dashboard-streams-item-label text-muted-foreground">{item.label}</span>
+                  <span key={`${item.label}-${item.value}-${index}`} className={cn(w9.dashboardStreamsItem, 'inline-flex', 'gap-1.5', 'text-xs')}>
+                    <span className={cn(w9.dashboardStreamsItemLabel, 'text-muted-foreground')}>{item.label}</span>
                     <span className={cn('dashboard-streams-item-value font-semibold tabular-nums', toneClass[item.tone])}>{item.value}</span>
                   </span>
                 ))}

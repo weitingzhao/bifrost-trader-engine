@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
 import type { RiskCalcContext, RiskProfile } from '../utils/riskProfile'
 import { payoffOptionsAtPrice, payoffStockAtPrice } from '../utils/riskProfile'
 
@@ -262,12 +263,12 @@ export function RiskProfilePayoffChart({
 
   return (
     <div className={rootClass} onClick={e => e.stopPropagation()}>
-      <div className="risk-payoff-chart-help-wrap" ref={helpWrapRef}>
-        <div className="risk-payoff-chart-head">
-          <span className="risk-payoff-chart-title">{chartTitle}</span>
+      <div className={w9.riskPayoffChartHelpWrap} ref={helpWrapRef}>
+        <div className={w9.riskPayoffChartHead}>
+          <span className={w9.riskPayoffChartTitle}>{chartTitle}</span>
           {opportunityDataLabel ? (
             <span
-              className="risk-payoff-chart-data"
+              className={w9.riskPayoffChartData}
               title={
                 isOptionsOnly
                   ? 'Option legs only; underlying stock coverage is not included in this chart'
@@ -278,9 +279,9 @@ export function RiskProfilePayoffChart({
             </span>
           ) : null}
           {!compact ? (
-            <span className="risk-payoff-chart-sub">Underlying (X) · P&amp;L (Y)</span>
+            <span className={w9.riskPayoffChartSub}>Underlying (X) · P&amp;L (Y)</span>
           ) : (
-            <span className="risk-payoff-chart-sub">X = spot · Y = $</span>
+            <span className={w9.riskPayoffChartSub}>X = spot · Y = $</span>
           )}
           <button
             type="button"
@@ -299,20 +300,20 @@ export function RiskProfilePayoffChart({
         {helpOpen ? (
           <div
             id={helpPanelId}
-            className="risk-payoff-chart-help-panel"
+            className={w9.riskPayoffChartHelpPanel}
             role="region"
             aria-label="Chart guide"
             onClick={e => e.stopPropagation()}
           >
-            <p className="risk-payoff-chart-help-panel-p">{helpMainText}</p>
+            <p className={w9.riskPayoffChartHelpPanelP}>{helpMainText}</p>
             {helpNakedShortText ? (
-              <p className="risk-payoff-chart-help-panel-p">{helpNakedShortText}</p>
+              <p className={w9.riskPayoffChartHelpPanelP}>{helpNakedShortText}</p>
             ) : null}
           </div>
         ) : null}
       </div>
       <svg
-        className="risk-payoff-chart-svg"
+        className={w9.riskPayoffChartSvg}
         viewBox={`0 0 ${W} ${H}`}
         width="100%"
         height={H}
@@ -424,7 +425,7 @@ export function RiskProfilePayoffChart({
           x={W / 2}
           y={H - 5}
           textAnchor="middle"
-          className="risk-payoff-chart-axis-label"
+          className={w9.riskPayoffChartAxisLabel}
         >
           {compact ? 'Underlying at expiry' : 'Underlying price at expiration'}
         </text>
@@ -432,7 +433,7 @@ export function RiskProfilePayoffChart({
           x={10}
           y={padT + ph / 2}
           textAnchor="middle"
-          className="risk-payoff-chart-axis-label"
+          className={w9.riskPayoffChartAxisLabel}
           transform={`rotate(-90, 10, ${padT + ph / 2})`}
         >
           P&amp;L ($)
@@ -447,7 +448,7 @@ export function RiskProfilePayoffChart({
               x={xx}
               y={H - 18}
               textAnchor="middle"
-              className="risk-payoff-chart-tick"
+              className={w9.riskPayoffChartTick}
             >
               {fmtAxisPrice(t)}
             </text>
@@ -463,7 +464,7 @@ export function RiskProfilePayoffChart({
               y={yy}
               textAnchor="end"
               dominantBaseline="middle"
-              className="risk-payoff-chart-tick"
+              className={w9.riskPayoffChartTick}
             >
               {Math.abs(t) < 1e-9 ? '0' : fmtAxisUsd(t)}
             </text>

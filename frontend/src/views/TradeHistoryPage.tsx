@@ -1,3 +1,4 @@
+import { rl } from '@/lib/replayLayout'
 import { useState } from 'react'
 import type { StatusResponse } from '../types'
 import { PageSection } from '@/components/shared/page-section'
@@ -22,7 +23,7 @@ export function TradeHistoryPage({
 }: TradeHistoryPageProps) {
   const [addJournalOpen, setAddJournalOpen] = useState(false)
   return (
-    <PageSection className="replay-page">
+    <PageSection className={rl.page}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
         <SectionPageTitle
           menu="Portfolio"

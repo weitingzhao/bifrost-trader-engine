@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
+import { msgErrorClass, msgOkClass } from '@/components/shared/appUi'
+import { w9 } from '@/styles/wave9Classes'
 import type { StatusResponse } from '../types'
 import {
   fetchOpportunities,
@@ -216,11 +218,11 @@ export function StrategyAllocationPage({
             {status?.strategy?.active?.allocation?.id != null && ` (${status?.strategy?.active?.allocation?.id})`}
           </div>
         </div>
-        <p className="section-hint">Daemon uses this on next start.</p>
+        <p className={w9.sectionHint}>Daemon uses this on next start.</p>
       </section>
 
       {setActiveMsg.text && (
-        <p className={setActiveMsg.isErr ? 'msg-error' : 'msg-ok'} style={{ marginBottom: 'var(--space-2)' }}>
+        <p className={setActiveMsg.isErr ? msgErrorClass : msgOkClass} style={{ marginBottom: 'var(--space-2)' }}>
           {setActiveMsg.text}
         </p>
       )}
@@ -232,8 +234,8 @@ export function StrategyAllocationPage({
             Create allocation
           </Button>
         </div>
-        {allocationsLoading && <p className="section-hint">Loading…</p>}
-        {allocationsError && <p className="msg-error">{allocationsError}</p>}
+        {allocationsLoading && <p className={w9.sectionHint}>Loading…</p>}
+        {allocationsError && <p className={w9.msgError}>{allocationsError}</p>}
         {!allocationsLoading && !allocationsError && (
           <div className="table-wrap">
             <table className="data-table">
@@ -285,7 +287,7 @@ export function StrategyAllocationPage({
           </div>
         )}
         {!allocationsLoading && !allocationsError && allocations.length === 0 && (
-          <p className="section-hint">No allocations in database.</p>
+          <p className={w9.sectionHint}>No allocations in database.</p>
         )}
       </section>
 
@@ -294,13 +296,13 @@ export function StrategyAllocationPage({
           <h3 className="section-subtitle">
             {allocationFormOpen === 'create' ? 'New allocation' : `Edit allocation ${allocationFormOpen}`}
           </h3>
-          {allocationFormLoading && !allocationFormName && <p className="section-hint">Loading…</p>}
-          {allocationFormError && <p className="msg-error">{allocationFormError}</p>}
+          {allocationFormLoading && !allocationFormName && <p className={w9.sectionHint}>Loading…</p>}
+          {allocationFormError && <p className={w9.msgError}>{allocationFormError}</p>}
 
           <div className="gates-form">
-            <div className="gates-form-group">
-              <h4 className="gates-form-group-title">Metadata</h4>
-              <div className="gates-form-row">
+            <div className={w9.gatesFormGroup}>
+              <h4 className={w9.gatesFormGroupTitle}>Metadata</h4>
+              <div className={w9.gatesFormRow}>
                 <label>Name</label>
                 <input
                   type="text"
@@ -309,7 +311,7 @@ export function StrategyAllocationPage({
                   placeholder="Allocation name"
                 />
               </div>
-              <div className="gates-form-row">
+              <div className={w9.gatesFormRow}>
                 <label>
                   <input
                     type="checkbox"
@@ -321,9 +323,9 @@ export function StrategyAllocationPage({
               </div>
             </div>
 
-            <div className="gates-form-group">
-              <h4 className="gates-form-group-title">Opportunities</h4>
-              <p className="section-hint">Select one or more opportunity strategies to include in this allocation.</p>
+            <div className={w9.gatesFormGroup}>
+              <h4 className={w9.gatesFormGroupTitle}>Opportunities</h4>
+              <p className={w9.sectionHint}>Select one or more opportunity strategies to include in this allocation.</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)', maxHeight: '200px', overflowY: 'auto' }}>
                 {opportunities.map((opp) => (
                   <label key={opp.strategy_opportunity_id} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
@@ -337,13 +339,13 @@ export function StrategyAllocationPage({
                 ))}
               </div>
               {opportunities.length === 0 && (
-                <p className="section-hint">No opportunity strategies. Create opportunities first.</p>
+                <p className={w9.sectionHint}>No opportunity strategies. Create opportunities first.</p>
               )}
             </div>
 
-            <div className="gates-form-group">
-              <h4 className="gates-form-group-title">Gate safety</h4>
-              <div className="gates-form-row">
+            <div className={w9.gatesFormGroup}>
+              <h4 className={w9.gatesFormGroupTitle}>Gate safety</h4>
+              <div className={w9.gatesFormRow}>
                 <label>Default gate safety set</label>
                 <AppSelect
                   value={allocationFormGateSafetyId === '' ? '' : String(allocationFormGateSafetyId)}
@@ -354,9 +356,9 @@ export function StrategyAllocationPage({
               </div>
             </div>
 
-            <div className="gates-form-group">
-              <h4 className="gates-form-group-title">Allocation limits (optional)</h4>
-              <div className="gates-form-row" style={{ flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center' }}>
+            <div className={w9.gatesFormGroup}>
+              <h4 className={w9.gatesFormGroupTitle}>Allocation limits (optional)</h4>
+              <div className={w9.gatesFormRow} style={{ flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center' }}>
                 <label>Max positions</label>
                 <input
                   type="number"
@@ -383,7 +385,7 @@ export function StrategyAllocationPage({
               </div>
             </div>
 
-            <div className="gates-form-actions">
+            <div className={w9.gatesFormActions}>
               <Button type="button" onClick={submitAllocationForm} disabled={allocationFormLoading}>
                 {allocationFormOpen === 'create' ? 'Create' : 'Save'}
               </Button>

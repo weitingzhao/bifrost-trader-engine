@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { postMassiveSync, fetchMarketTradingDay } from '../../api'
 import type { BarCoverageItem, StatusResponse } from '../../types'
@@ -398,22 +401,22 @@ export function MassiveStockOhlcDbEnqueueBlock({
       role="region"
       aria-label="Stock OHLC PostgreSQL sync"
     >
-      <div className="massive-delay-ohlc-queue-topline">
+      <div className={w9.massiveDelayOhlcQueueTopline}>
         <p className="feed-massive-agg-sub-doc massive-delay-ohlc-queue-topline-doc">
           Celery job <code>feed_stocks_aggregate</code> upserts into <code>stock_day</code> / <code>stock_min</code> (source &quot;massive&quot;). Modes align with Settings → Feed → Massive Stock → Aggregate Bars (OHLC). Enqueued jobs appear in the same <strong>Jobs</strong> sheet as ticker reference tasks.
         </p>
-        <div className="massive-delay-ohlc-queue-switch-wrap">
-          <span className="form-label massive-delay-ohlc-queue-label" id="massive-delay-ohlc-queue-label">
+        <div className={w9.massiveDelayOhlcQueueSwitchWrap}>
+          <span className={cn(w9.massiveDelayOhlcQueueLabel, 'form-label')} id="massive-delay-ohlc-queue-label">
             Queue
           </span>
           <div
-            className="replay-bubble-switch massive-delay-ohlc-queue-bubbles"
+            className={rl.bubbleSwitch}
             role="group"
             aria-labelledby="massive-delay-ohlc-queue-label"
           >
             <button
               type="button"
-              className={`replay-bubble-switch-btn${!priorityHigh ? ' active' : ''}`}
+              className={`rl.bubbleSwitchBtn${!priorityHigh ? ' active' : ''}`}
               disabled={disabled}
               onClick={() => setPriorityHigh(false)}
               aria-pressed={!priorityHigh}
@@ -422,7 +425,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
             </button>
             <button
               type="button"
-              className={`replay-bubble-switch-btn${priorityHigh ? ' active' : ''}`}
+              className={`rl.bubbleSwitchBtn${priorityHigh ? ' active' : ''}`}
               disabled={disabled}
               onClick={() => setPriorityHigh(true)}
               aria-pressed={priorityHigh}
@@ -493,7 +496,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
                 Indices: config maps symbols to Polygon tickers (e.g. <code>^GSPC</code> → <code>SPY</code>, <code>^DJI</code> → <code>DIA</code>, <code>^VIX</code> → <code>VIXY</code> on Stocks Basic; <code>I:VIX</code> needs Indices).
               </p>
               <div
-                className="replay-toolbar massive-delay-custom-bars-toolbar"
+                className={rl.toolbar}
                 style={{ flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-3)', alignItems: 'center' }}
               >
                 <Button
@@ -532,24 +535,24 @@ export function MassiveStockOhlcDbEnqueueBlock({
               </div>
 
               {coverageError ? (
-                <p className="status-page-msg err" role="alert" style={{ marginBottom: 'var(--space-2)' }}>
+                <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginBottom: 'var(--space-2)' }}>
                   {coverageError}
                 </p>
               ) : null}
 
               {coverageLoading && coverage == null ? (
-                <p className="replay-placeholder" role="status" style={{ marginBottom: 'var(--space-2)' }}>
+                <p className={rl.placeholder} role="status" style={{ marginBottom: 'var(--space-2)' }}>
                   Loading coverage…
                 </p>
               ) : null}
 
               {!coverageLoading && !hasCustomBarsTableRows ? (
-                <p className="replay-placeholder" role="status">No coverage rows (empty watchlist / indices). Configure reference indices or add watchlist symbols, then refresh.</p>
+                <p className={rl.placeholder} role="status">No coverage rows (empty watchlist / indices). Configure reference indices or add watchlist symbols, then refresh.</p>
               ) : null}
 
               {showCustomBarsTable ? (
                 <div className="data-coverage-table-wrap" style={{ marginBottom: 'var(--space-3)' }}>
-                  <table className="table-operations data-coverage-table">
+                  <table className={cn(w9.tableOperations, 'data-coverage-table')}>
                     <thead>
                       <tr>
                         <th>Symbol</th>
@@ -557,7 +560,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
                         <th colSpan={2}>1 min</th>
                         <th colSpan={2}>5 mins</th>
                         <th colSpan={2}>1 hour</th>
-                        <th colSpan={2} className="data-coverage-actions data-coverage-actions-sync-split">
+                        <th colSpan={2} className={cn(w9.dataCoverageActionsSyncSplit, 'data-coverage-actions')}>
                           PostgreSQL sync
                         </th>
                       </tr>
@@ -571,8 +574,8 @@ export function MassiveStockOhlcDbEnqueueBlock({
                         <th className="data-coverage-range">Range</th>
                         <th className="data-coverage-bars">Bars</th>
                         <th className="data-coverage-range">Range</th>
-                        <th className="data-coverage-actions-sub">1 D</th>
-                        <th className="data-coverage-actions-sub">Intraday</th>
+                        <th className={w9.dataCoverageActionsSub}>1 D</th>
+                        <th className={w9.dataCoverageActionsSub}>Intraday</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -602,7 +605,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
                             ) => (
                               <button
                                 type="button"
-                                className="data-coverage-bars-btn"
+                                className={w9.dataCoverageBarsBtn}
                                 onClick={() => {
                                   window.location.hash = '#coverage-stock'
                                 }}
@@ -662,7 +665,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
                                   colSpan={2}
                                   className="data-coverage-actions data-coverage-sync-cells-pair"
                                 >
-                                  <div className="data-coverage-sync-pair-row">
+                                  <div className={w9.dataCoverageSyncPairRow}>
                                     <Button
                                       type="button"
                                       variant="secondary"
@@ -697,7 +700,7 @@ export function MassiveStockOhlcDbEnqueueBlock({
                 </div>
               ) : null}
 
-              <details className="replay-section" style={{ marginTop: 'var(--space-3)' }}>
+              <details className={rl.section} style={{ marginTop: 'var(--space-3)' }}>
                 <summary className="form-label" style={{ cursor: 'pointer', marginBottom: 'var(--space-2)' }}>
                   Advanced — manual ticker and Unix ms
                 </summary>

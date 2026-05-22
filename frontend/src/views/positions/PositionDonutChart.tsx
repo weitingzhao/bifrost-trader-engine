@@ -1,4 +1,5 @@
 import { fmtMvAbbrev } from './positionUtils'
+import { w9 } from '@/styles/wave9Classes'
 import type { DonutSegment } from './positionUtils'
 
 export function PositionDonutChart({
@@ -75,8 +76,8 @@ export function PositionDonutChart({
       style={embedded ? { flex: '1 1 190px', minWidth: '180px' } : { flex: '1 1 270px', maxWidth: '480px' }}
     >
       {showTitle ? (
-        <div className="coverage-asset-pie-header">
-          <span className="coverage-asset-pie-title">{title}</span>
+        <div className={w9.coverageAssetPieHeader}>
+          <span className={w9.coverageAssetPieTitle}>{title}</span>
           {activeLabel && showActiveChip && (
           <button
             type="button"
@@ -95,13 +96,13 @@ export function PositionDonutChart({
         </div>
       ) : null}
       {active.length === 0 ? (
-        <p className="section-hint" style={{ margin: 0 }}>No position data</p>
+        <p className={w9.sectionHint} style={{ margin: 0 }}>No position data</p>
       ) : (
-        <div className="coverage-asset-pie-body">
-          <div className="coverage-asset-pie-chart-block">
+        <div className={w9.coverageAssetPieBody}>
+          <div className={w9.coverageAssetPieChartBlock}>
             <svg
               width={embedded ? 128 : 132} height={embedded ? 128 : 132} viewBox="0 0 132 132"
-              className="coverage-asset-pie-svg"
+              className={w9.coverageAssetPieSvg}
               role="img"
               aria-label={`${title} ring chart`}
             >
@@ -143,7 +144,7 @@ export function PositionDonutChart({
               <text
                 x={cx}
                 y={cy + 11}
-                className="coverage-asset-pie-center-sub"
+                className={w9.coverageAssetPieCenterSub}
                 textAnchor="middle"
                 dominantBaseline="auto"
                 style={embedded ? { fontSize: '0.74rem' } : undefined}
@@ -153,14 +154,14 @@ export function PositionDonutChart({
             </svg>
           </div>
           {showLegend && (
-            <div className="coverage-asset-pie-legend">
+            <div className={w9.coverageAssetPieLegend}>
               {arcs.map((arc, i) => {
                 const isActive = arc.label === activeLabel
                 const isDimmed = activeLabel != null && !isActive
                 return (
                   <div
                     key={i}
-                    className="coverage-asset-pie-legend-item"
+                    className={w9.coverageAssetPieLegendItem}
                     style={{
                       cursor: interactive ? 'pointer' : 'default',
                       opacity: isDimmed ? 0.38 : 1,
@@ -172,10 +173,10 @@ export function PositionDonutChart({
                     onClick={() => interactive && onSegmentClick(isActive ? null : arc.label)}
                     title={interactive ? `Click to filter: ${arc.label}` : arc.label}
                   >
-                    <span className="coverage-asset-pie-dot" style={{ background: arc.color }} />
-                    <span className="coverage-asset-pie-legend-label">{arc.label}</span>
-                    <span className="coverage-asset-pie-legend-pct">{arc.pct.toFixed(1)}%</span>
-                    <span className="coverage-asset-pie-legend-value">{fmtMvAbbrev(arc.value)}</span>
+                    <span className={w9.coverageAssetPieDot} style={{ background: arc.color }} />
+                    <span className={w9.coverageAssetPieLegendLabel}>{arc.label}</span>
+                    <span className={w9.coverageAssetPieLegendPct}>{arc.pct.toFixed(1)}%</span>
+                    <span className={w9.coverageAssetPieLegendValue}>{fmtMvAbbrev(arc.value)}</span>
                   </div>
                 )
               })}

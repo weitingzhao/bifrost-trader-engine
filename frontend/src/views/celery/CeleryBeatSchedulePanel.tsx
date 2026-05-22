@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import type { MassiveCeleryBeatEntry } from '../../api/research/research'
 
@@ -25,7 +28,7 @@ export function CeleryBeatSchedulePanel({ entries, timezone, loading, error }: C
 
   return (
     <section
-      className="replay-section dashboard-section dashboard-celery-beat-schedule-panel"
+      className={rl.section}
       aria-labelledby="dashboard-celery-beat-schedule-head"
     >
       <h3 id="dashboard-celery-beat-schedule-head" className={`${CELERY_SECTION_TITLE} dashboard-celery-beat-schedule-head`}>
@@ -47,7 +50,7 @@ export function CeleryBeatSchedulePanel({ entries, timezone, loading, error }: C
       {!error && entries.length > 0 ? (
         <>
           <div className="dashboard-celery-beat-schedule-table-wrap">
-            <table className="table-operations dashboard-celery-beat-schedule-table">
+            <table className={cn(w9.tableOperations, 'dashboard-celery-beat-schedule-table')}>
               <thead>
                 <tr>
                   <th scope="col">Label</th>

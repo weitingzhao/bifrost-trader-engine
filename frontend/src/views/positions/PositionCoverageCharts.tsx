@@ -1,4 +1,6 @@
 import { fmtUsd } from '../../utils/format'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import { fmtMvAbbrev } from './positionUtils'
 
@@ -134,11 +136,11 @@ export function PositionCoverageCharts({
   ].filter(Boolean)
 
   return (
-    <div className="coverage-charts-section pos-comp-coverage-charts">
-      <div className="coverage-charts-toolbar coverage-charts-toolbar--account-mix">
-        <span className="coverage-charts-toolbar-label">Account</span>
+    <div className={cn(w9.coverageChartsSection, w9.posCompCoverageCharts)}>
+      <div className={cn(w9.coverageChartsToolbar, 'coverage-charts-toolbar--account-mix')}>
+        <span className={w9.coverageChartsToolbarLabel}>Account</span>
         <div
-          className="coverage-section-account-filter"
+          className={w9.coverageSectionAccountFilter}
           role="group"
           aria-label="Account filter for asset mix chart"
         >
@@ -160,16 +162,16 @@ export function PositionCoverageCharts({
           ))}
         </div>
       </div>
-      <div className="coverage-charts-grid">
-        <div className="coverage-charts-cell coverage-asset-pie-section">
+      <div className={w9.coverageChartsGrid}>
+        <div className={cn(w9.coverageChartsCell, 'coverage-asset-pie-section')}>
           <div
-            className="coverage-asset-pie-header"
+            className={w9.coverageAssetPieHeader}
             style={{ flexWrap: 'wrap', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}
           >
-            <span className="coverage-asset-pie-title">Asset mix</span>
+            <span className={w9.coverageAssetPieTitle}>Asset mix</span>
             <InfoTooltip text="Stock = market value of non-option positions classified as core equities (same as Stocks tab; excludes ledger Fixed income and Cash-like). Fixed income / Cash-like use position category labels. Net cash = IB TotalCashValue. Buying power = IB BuyingPower. Include/Exclude changes the ring and chart basis (center main in $ mode). The sub line shows IB net liquidation for reference when known. % / $ toggles legend columns like Option charts." />
             <div
-              className="coverage-asset-pie-bubble-switch"
+              className={w9.coverageAssetPieBubbleSwitch}
               style={{ marginLeft: 'auto', flexShrink: 0 }}
               role="group"
               aria-label="Asset mix: percent of chart basis or dollars in legend; donut center follows mode when the ring uses full basis"
@@ -192,13 +194,13 @@ export function PositionCoverageCharts({
               </button>
             </div>
           </div>
-          <div className="coverage-asset-pie-body">
-            <div className="coverage-asset-pie-chart-block">
+          <div className={w9.coverageAssetPieBody}>
+            <div className={w9.coverageAssetPieChartBlock}>
               <svg
                 width={132}
                 height={132}
                 viewBox="0 0 132 132"
-                className="coverage-asset-pie-svg"
+                className={w9.coverageAssetPieSvg}
                 role="img"
                 aria-label={`Ring chart: ${ringAriaParts.join(', ')} as shares of their sum`}
               >
@@ -238,7 +240,7 @@ export function PositionCoverageCharts({
                 <text
                   x={cx}
                   y={cy + 11}
-                  className="coverage-asset-pie-center-sub"
+                  className={w9.coverageAssetPieCenterSub}
                   textAnchor="middle"
                   dominantBaseline="auto"
                   style={{ fontSize: '0.74rem', fill: 'var(--color-text-dim, #5c6572)' }}
@@ -246,11 +248,11 @@ export function PositionCoverageCharts({
                   {centerSub}
                 </text>
               </svg>
-              <div className="coverage-asset-pie-bp-side">
-                <div className="coverage-asset-pie-chart-toggle-row">
-                  <span className="coverage-asset-pie-bp-label">Fixed income in chart</span>
+              <div className={w9.coverageAssetPieBpSide}>
+                <div className={w9.coverageAssetPieChartToggleRow}>
+                  <span className={w9.coverageAssetPieBpLabel}>Fixed income in chart</span>
                   <div
-                    className="coverage-asset-pie-bubble-switch"
+                    className={w9.coverageAssetPieBubbleSwitch}
                     role="group"
                     aria-label="Include fixed income in ring denominator"
                   >
@@ -272,10 +274,10 @@ export function PositionCoverageCharts({
                     </button>
                   </div>
                 </div>
-                <div className="coverage-asset-pie-chart-toggle-row">
-                  <span className="coverage-asset-pie-bp-label">Cash-like in chart</span>
+                <div className={w9.coverageAssetPieChartToggleRow}>
+                  <span className={w9.coverageAssetPieBpLabel}>Cash-like in chart</span>
                   <div
-                    className="coverage-asset-pie-bubble-switch"
+                    className={w9.coverageAssetPieBubbleSwitch}
                     role="group"
                     aria-label="Include cash-like in ring denominator"
                   >
@@ -297,10 +299,10 @@ export function PositionCoverageCharts({
                     </button>
                   </div>
                 </div>
-                <div className="coverage-asset-pie-chart-toggle-row">
-                  <span className="coverage-asset-pie-bp-label">Buying power in chart</span>
+                <div className={w9.coverageAssetPieChartToggleRow}>
+                  <span className={w9.coverageAssetPieBpLabel}>Buying power in chart</span>
                   <div
-                    className="coverage-asset-pie-bubble-switch"
+                    className={w9.coverageAssetPieBubbleSwitch}
                     role="group"
                     aria-label="Include buying power in ring denominator"
                   >
@@ -324,15 +326,15 @@ export function PositionCoverageCharts({
                 </div>
               </div>
             </div>
-            <div className="coverage-asset-pie-legend coverage-asset-pie-legend--asset-mix-two-col">
-              <div className="coverage-asset-pie-legend-mix-col">
-                <div className="coverage-asset-pie-legend-item">
-                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--stock" />
-                  <span className="coverage-asset-pie-legend-label">Stock</span>
-                  <span className="coverage-asset-pie-legend-pct">
+            <div className={cn(w9.coverageAssetPieLegend, 'coverage-asset-pie-legend--asset-mix-two-col')}>
+              <div className={w9.coverageAssetPieLegendMixCol}>
+                <div className={w9.coverageAssetPieLegendItem}>
+                  <span className={cn(w9.coverageAssetPieDot, 'coverage-asset-pie-dot--stock')} />
+                  <span className={w9.coverageAssetPieLegendLabel}>Stock</span>
+                  <span className={w9.coverageAssetPieLegendPct}>
                     {legendMode === 'pct' ? (denom > 0 ? `${(pStock * 100).toFixed(1)}%` : '—') : '—'}
                   </span>
-                  <span className="coverage-asset-pie-legend-value" title={fmtUsd(coreStockMV)}>
+                  <span className={w9.coverageAssetPieLegendValue} title={fmtUsd(coreStockMV)}>
                     {legendMode === 'pct' ? fmtMvAbbrev(coreStockMV) : fmtUsd(coreStockMV)}
                   </span>
                 </div>
@@ -344,16 +346,16 @@ export function PositionCoverageCharts({
                       : undefined
                   }
                 >
-                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--fi" />
-                  <span className="coverage-asset-pie-legend-label">Fixed income</span>
-                  <span className="coverage-asset-pie-legend-pct">
+                  <span className={cn(w9.coverageAssetPieDot, 'coverage-asset-pie-dot--fi')} />
+                  <span className={w9.coverageAssetPieLegendLabel}>Fixed income</span>
+                  <span className={w9.coverageAssetPieLegendPct}>
                     {legendMode === 'pct'
                       ? includeFiInChart && denom > 0
                         ? `${(pFixedIncome * 100).toFixed(1)}%`
                         : '—'
                       : '—'}
                   </span>
-                  <span className="coverage-asset-pie-legend-value" title={fmtUsd(fixedIncomeMV)}>
+                  <span className={w9.coverageAssetPieLegendValue} title={fmtUsd(fixedIncomeMV)}>
                     {legendMode === 'pct' ? fmtMvAbbrev(fixedIncomeMV) : fmtUsd(fixedIncomeMV)}
                   </span>
                 </div>
@@ -365,9 +367,9 @@ export function PositionCoverageCharts({
                       : undefined
                   }
                 >
-                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--bp" />
-                  <span className="coverage-asset-pie-legend-label">Buying power</span>
-                  <span className="coverage-asset-pie-legend-pct">
+                  <span className={cn(w9.coverageAssetPieDot, 'coverage-asset-pie-dot--bp')} />
+                  <span className={w9.coverageAssetPieLegendLabel}>Buying power</span>
+                  <span className={w9.coverageAssetPieLegendPct}>
                     {legendMode === 'pct'
                       ? includeBpInChart && denom > 0
                         ? `${(pBp * 100).toFixed(1)}%`
@@ -375,14 +377,14 @@ export function PositionCoverageCharts({
                       : '—'}
                   </span>
                   <span
-                    className="coverage-asset-pie-legend-value"
+                    className={w9.coverageAssetPieLegendValue}
                     title={bp != null && Number.isFinite(bp) ? fmtUsd(bp) : undefined}
                   >
                     {bp != null && Number.isFinite(bp) ? fmtUsd(bp) : '—'}
                   </span>
                 </div>
               </div>
-              <div className="coverage-asset-pie-legend-mix-col">
+              <div className={w9.coverageAssetPieLegendMixCol}>
                 <div
                   className={`coverage-asset-pie-legend-item${!includeCashLikeInChart ? ' coverage-asset-pie-legend-item--ring-excluded' : ''}`}
                   title={
@@ -391,27 +393,27 @@ export function PositionCoverageCharts({
                       : undefined
                   }
                 >
-                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--cashlike" />
-                  <span className="coverage-asset-pie-legend-label">Cash-like</span>
-                  <span className="coverage-asset-pie-legend-pct">
+                  <span className={cn(w9.coverageAssetPieDot, 'coverage-asset-pie-dot--cashlike')} />
+                  <span className={w9.coverageAssetPieLegendLabel}>Cash-like</span>
+                  <span className={w9.coverageAssetPieLegendPct}>
                     {legendMode === 'pct'
                       ? includeCashLikeInChart && denom > 0
                         ? `${(pCashLike * 100).toFixed(1)}%`
                         : '—'
                       : '—'}
                   </span>
-                  <span className="coverage-asset-pie-legend-value" title={fmtUsd(cashLikeMV)}>
+                  <span className={w9.coverageAssetPieLegendValue} title={fmtUsd(cashLikeMV)}>
                     {legendMode === 'pct' ? fmtMvAbbrev(cashLikeMV) : fmtUsd(cashLikeMV)}
                   </span>
                 </div>
-                <div className="coverage-asset-pie-legend-item">
-                  <span className="coverage-asset-pie-dot coverage-asset-pie-dot--cash" />
-                  <span className="coverage-asset-pie-legend-label">Net cash</span>
-                  <span className="coverage-asset-pie-legend-pct">
+                <div className={w9.coverageAssetPieLegendItem}>
+                  <span className={cn(w9.coverageAssetPieDot, 'coverage-asset-pie-dot--cash')} />
+                  <span className={w9.coverageAssetPieLegendLabel}>Net cash</span>
+                  <span className={w9.coverageAssetPieLegendPct}>
                     {legendMode === 'pct' ? (denom > 0 ? `${(pCash * 100).toFixed(1)}%` : '—') : '—'}
                   </span>
                   <span
-                    className="coverage-asset-pie-legend-value"
+                    className={w9.coverageAssetPieLegendValue}
                     title={cash != null && Number.isFinite(cash) ? fmtUsd(cash) : undefined}
                   >
                     {cash != null && Number.isFinite(cash)
@@ -423,12 +425,12 @@ export function PositionCoverageCharts({
                 </div>
               </div>
               {denom > 0 && (
-                <div className="coverage-asset-pie-legend-divider coverage-asset-pie-legend-divider--mix-full" aria-hidden />
+                <div className={cn(w9.coverageAssetPieLegendDivider, 'coverage-asset-pie-legend-divider--mix-full')} aria-hidden />
               )}
               {denom > 0 && (
-                <div className="coverage-asset-pie-legend-item coverage-asset-pie-legend-sum coverage-asset-pie-legend-sum--mix-full">
-                  <span className="coverage-asset-pie-legend-label">Sum (chart basis)</span>
-                  <span className="coverage-asset-pie-legend-value" title={fmtUsd(denom)}>
+                <div className={cn(w9.coverageAssetPieLegendItem, 'coverage-asset-pie-legend-sum', 'coverage-asset-pie-legend-sum--mix-full')}>
+                  <span className={w9.coverageAssetPieLegendLabel}>Sum (chart basis)</span>
+                  <span className={w9.coverageAssetPieLegendValue} title={fmtUsd(denom)}>
                     {legendMode === 'pct' ? fmtMvAbbrev(denom) : fmtUsd(denom)}
                   </span>
                 </div>

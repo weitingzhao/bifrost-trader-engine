@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { StatusResponse } from '../types'
 import {
   fetchMassiveReferenceTickers,
@@ -1244,7 +1246,7 @@ export function FeedMassiveStockPage({
                     {tkAllBusy ? 'Loading\u2026' : 'Execute'}
                   </Button>
                 </div>
-                {tkAllErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tkAllErr}</p> : null}
+                {tkAllErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{tkAllErr}</p> : null}
                 {tkAllResult ? (
                   <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                     <summary>
@@ -1335,7 +1337,7 @@ export function FeedMassiveStockPage({
                     {tkOvBusy ? 'Loading\u2026' : 'Execute'}
                   </Button>
                 </div>
-                {tkOvErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tkOvErr}</p> : null}
+                {tkOvErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{tkOvErr}</p> : null}
                 {tkOvResult ? (
                   <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                     <summary>Result</summary>
@@ -1420,7 +1422,7 @@ export function FeedMassiveStockPage({
                     {tkTypesBusy ? 'Loading\u2026' : 'Execute'}
                   </Button>
                 </div>
-                {tkTypesErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tkTypesErr}</p> : null}
+                {tkTypesErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{tkTypesErr}</p> : null}
                 {tkTypesResult ? (
                   <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                     <summary>
@@ -1490,7 +1492,7 @@ export function FeedMassiveStockPage({
                     {tkRelBusy ? 'Loading\u2026' : 'Execute'}
                   </Button>
                 </div>
-                {tkRelErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tkRelErr}</p> : null}
+                {tkRelErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{tkRelErr}</p> : null}
                 {tkRelResult ? (
                   <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                     <summary>Result</summary>
@@ -1692,7 +1694,7 @@ export function FeedMassiveStockPage({
                     {aggStBusy ? 'Loading\u2026' : 'Execute'}
                   </Button>
                 </div>
-                {aggStErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{aggStErr}</p> : null}
+                {aggStErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{aggStErr}</p> : null}
                 {aggStResult ? (
                   <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                     <summary>Result</summary>
@@ -1746,7 +1748,7 @@ export function FeedMassiveStockPage({
                     {gdBusy ? 'Loading\u2026' : 'Execute'}
                   </Button>
                 </div>
-                {gdErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{gdErr}</p> : null}
+                {gdErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{gdErr}</p> : null}
                 {gdResult ? (
                   <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                     <summary>Result</summary>
@@ -1810,7 +1812,7 @@ export function FeedMassiveStockPage({
                     {ocBusy ? 'Loading\u2026' : 'Execute'}
                   </Button>
                 </div>
-                {ocErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ocErr}</p> : null}
+                {ocErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{ocErr}</p> : null}
                 {ocResult ? (
                   <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                     <summary>Result</summary>
@@ -1864,7 +1866,7 @@ export function FeedMassiveStockPage({
                     {prevBusy ? 'Loading\u2026' : 'Execute'}
                   </Button>
                 </div>
-                {prevErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{prevErr}</p> : null}
+                {prevErr ? <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{prevErr}</p> : null}
                 {prevResult ? (
                   <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                     <summary>Result</summary>
@@ -2015,7 +2017,7 @@ export function FeedMassiveStockPage({
                     {fundISBusy ? 'Loading…' : 'Execute'}
                   </Button>
                 </div>
-                {fundISErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundISErr}</p>}
+                {fundISErr && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundISErr}</p>}
                 {fundISResult && (
                   <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                     <summary>Result{Array.isArray((fundISResult as Record<string, unknown>).results) ? ` — ${((fundISResult as Record<string, unknown>).results as unknown[]).length} period(s)` : ''}</summary>
@@ -2045,7 +2047,7 @@ export function FeedMassiveStockPage({
                     {fundBSBusy ? 'Loading…' : 'Execute'}
                   </Button>
                 </div>
-                {fundBSErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundBSErr}</p>}
+                {fundBSErr && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundBSErr}</p>}
                 {fundBSResult && (
                   <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                     <summary>Result{Array.isArray((fundBSResult as Record<string, unknown>).results) ? ` — ${((fundBSResult as Record<string, unknown>).results as unknown[]).length} period(s)` : ''}</summary>
@@ -2075,7 +2077,7 @@ export function FeedMassiveStockPage({
                     {fundCFBusy ? 'Loading…' : 'Execute'}
                   </Button>
                 </div>
-                {fundCFErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundCFErr}</p>}
+                {fundCFErr && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundCFErr}</p>}
                 {fundCFResult && (
                   <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                     <summary>Result{Array.isArray((fundCFResult as Record<string, unknown>).results) ? ` — ${((fundCFResult as Record<string, unknown>).results as unknown[]).length} period(s)` : ''}</summary>
@@ -2116,7 +2118,7 @@ export function FeedMassiveStockPage({
                     {fundRatiosBusy ? 'Loading…' : 'Execute'}
                   </Button>
                 </div>
-                {fundRatiosErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundRatiosErr}</p>}
+                {fundRatiosErr && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundRatiosErr}</p>}
                 {fundRatiosResult && (
                   <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                     <summary>Result</summary>
@@ -2162,7 +2164,7 @@ export function FeedMassiveStockPage({
                     {fundSIBusy ? 'Loading…' : 'Execute'}
                   </Button>
                 </div>
-                {fundSIErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundSIErr}</p>}
+                {fundSIErr && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundSIErr}</p>}
                 {fundSIResult && (
                   <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                     <summary>Result{Array.isArray((fundSIResult as Record<string, unknown>).results) ? ` — ${((fundSIResult as Record<string, unknown>).results as unknown[]).length} record(s)` : ''}</summary>
@@ -2208,7 +2210,7 @@ export function FeedMassiveStockPage({
                     {fundSVBusy ? 'Loading…' : 'Execute'}
                   </Button>
                 </div>
-                {fundSVErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundSVErr}</p>}
+                {fundSVErr && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundSVErr}</p>}
                 {fundSVResult && (
                   <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                     <summary>Result{Array.isArray((fundSVResult as Record<string, unknown>).results) ? ` — ${((fundSVResult as Record<string, unknown>).results as unknown[]).length} record(s)` : ''}</summary>
@@ -2249,7 +2251,7 @@ export function FeedMassiveStockPage({
                     {fundFloatBusy ? 'Loading…' : 'Execute'}
                   </Button>
                 </div>
-                {fundFloatErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundFloatErr}</p>}
+                {fundFloatErr && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{fundFloatErr}</p>}
                 {fundFloatResult && (
                   <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
                     <summary>Result{Array.isArray((fundFloatResult as Record<string, unknown>).results) ? ` — ${((fundFloatResult as Record<string, unknown>).results as unknown[]).length} record(s)` : ''}</summary>
@@ -2379,7 +2381,7 @@ export function FeedMassiveStockPage({
                     {flEiBusy ? 'Loading…' : 'Execute'}
                   </Button>
                 </div>
-                {flEiErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{flEiErr}</p>}
+                {flEiErr && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{flEiErr}</p>}
                 {resultBlock(flEiResult)}
               </div>
             )}
@@ -2444,7 +2446,7 @@ export function FeedMassiveStockPage({
                     {fl10kBusy ? 'Loading…' : 'Execute'}
                   </Button>
                 </div>
-                {fl10kErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fl10kErr}</p>}
+                {fl10kErr && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{fl10kErr}</p>}
                 {resultBlock(fl10kResult)}
               </div>
             )}
@@ -2499,7 +2501,7 @@ export function FeedMassiveStockPage({
                     {fl8kBusy ? 'Loading…' : 'Execute'}
                   </Button>
                 </div>
-                {fl8kErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fl8kErr}</p>}
+                {fl8kErr && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{fl8kErr}</p>}
                 {resultBlock(fl8kResult)}
               </div>
             )}
@@ -2544,7 +2546,7 @@ export function FeedMassiveStockPage({
                     {fl13fBusy ? 'Loading…' : 'Execute'}
                   </Button>
                 </div>
-                {fl13fErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{fl13fErr}</p>}
+                {fl13fErr && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{fl13fErr}</p>}
                 {resultBlock(fl13fResult)}
               </div>
             )}
@@ -2594,7 +2596,7 @@ export function FeedMassiveStockPage({
                     {flRfBusy ? 'Loading…' : 'Execute'}
                   </Button>
                 </div>
-                {flRfErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{flRfErr}</p>}
+                {flRfErr && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{flRfErr}</p>}
                 {resultBlock(flRfResult)}
               </div>
             )}
@@ -2639,7 +2641,7 @@ export function FeedMassiveStockPage({
                     {flRcBusy ? 'Loading…' : 'Execute'}
                   </Button>
                 </div>
-                {flRcErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{flRcErr}</p>}
+                {flRcErr && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{flRcErr}</p>}
                 {resultBlock(flRcResult)}
               </div>
             )}
@@ -2694,7 +2696,7 @@ export function FeedMassiveStockPage({
                     {flF3Busy ? 'Loading…' : 'Execute'}
                   </Button>
                 </div>
-                {flF3Err && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{flF3Err}</p>}
+                {flF3Err && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{flF3Err}</p>}
                 {resultBlock(flF3Result)}
               </div>
             )}
@@ -2767,7 +2769,7 @@ export function FeedMassiveStockPage({
                     {flF4Busy ? 'Loading…' : 'Execute'}
                   </Button>
                 </div>
-                {flF4Err && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{flF4Err}</p>}
+                {flF4Err && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{flF4Err}</p>}
                 {resultBlock(flF4Result)}
               </div>
             )}
@@ -2851,7 +2853,7 @@ export function FeedMassiveStockPage({
             {newsBusy ? 'Loading…' : 'Execute'}
           </Button>
         </div>
-        {newsErr && <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{newsErr}</p>}
+        {newsErr && <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginTop: 'var(--space-3)' }}>{newsErr}</p>}
         {newsResult ? (
           <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
             <summary>Result{Array.isArray((newsResult).results) ? ` — ${((newsResult).results as unknown[]).length} record(s)` : ''}</summary>
@@ -3046,7 +3048,7 @@ export function FeedMassiveStockPage({
 
       {/* Not configured warning */}
       {!configured && (
-        <p className="status-page-msg err" role="alert">
+        <p className={cn(w9.statusPageMsg, 'err')} role="alert">
           Massive API key not configured. Set massive credentials in server config. Shared capabilities (Technical Indicators, Market Operations) are under Feed → Massive Common.
         </p>
       )}

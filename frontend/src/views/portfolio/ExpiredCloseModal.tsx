@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { OptExecutionGroup } from '../../types'
@@ -35,20 +38,20 @@ export function ExpiredCloseModal({ group, onClose, onSuccess }: ExpiredCloseMod
       aria-modal="true"
       aria-labelledby="expired-close-modal-title"
     >
-      <div className="modal-panel replay-exec-modal" onClick={e => e.stopPropagation()}>
+      <div className={rl.execModal} onClick={e => e.stopPropagation()}>
         <h3 id="expired-close-modal-title">Close expired option</h3>
-        {error && <p className="section-hint replay-form-error">{error}</p>}
-        <p className="section-hint execution-flex-manual-warning" role="alert">
+        {error && <p className={rl.formError}>{error}</p>}
+        <p className={cn(w9.sectionHint, 'execution-flex-manual-warning')} role="alert">
           <strong>Warning:</strong> If Flex sync is working normally, the missing closing fill will usually appear
           automatically after the next Flex refresh, which completes the position without a manual journal line.
           Only use this when you have confirmed Flex will not supply the trade and you need a manual{' '}
           <code className="performance-inline-code">journal_closed</code> entry to reconcile.
         </p>
-        <p className="section-hint">
+        <p className={w9.sectionHint}>
           This will add a closing execution with source <code className="performance-inline-code">journal_closed</code>{' '}
           (stored in the journal execution store) for this expired option group.
         </p>
-        <div className="replay-expired-close-summary">
+        <div className={rl.expiredCloseSummary}>
           <div>
             <strong>Contract:</strong>{' '}
             {(() => {
@@ -71,7 +74,7 @@ export function ExpiredCloseModal({ group, onClose, onSuccess }: ExpiredCloseMod
           </div>
         </div>
         <form
-          className="replay-expired-close-form"
+          className={rl.expiredCloseForm}
           onSubmit={async e => {
             e.preventDefault()
             setError(null)
@@ -123,7 +126,7 @@ export function ExpiredCloseModal({ group, onClose, onSuccess }: ExpiredCloseMod
             }
           }}
         >
-          <div className="replay-expired-close-row">
+          <div className={rl.expiredCloseRow}>
             <label>
               Qty
               <input type="number" step="1" min="0" value={form.quantity} onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))} required />
@@ -137,7 +140,7 @@ export function ExpiredCloseModal({ group, onClose, onSuccess }: ExpiredCloseMod
               <input type="number" step="any" value={form.commission} onChange={e => setForm(f => ({ ...f, commission: e.target.value }))} />
             </label>
           </div>
-          <div className="replay-expired-close-actions">
+          <div className={rl.expiredCloseActions}>
             <Button type="submit" size="sm" disabled={submitting}>
               {submitting ? 'Saving…' : 'Save'}
             </Button>

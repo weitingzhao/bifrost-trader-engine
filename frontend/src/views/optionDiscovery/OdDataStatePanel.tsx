@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 
 export type OdDataStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'error'
 
@@ -21,7 +23,7 @@ export function OdDataStatePanel({
       aria-live="polite"
     >
       {title ? <span className="od-data-state-title">{title}</span> : null}
-      <p className="section-hint od-data-state-hint">{hint}</p>
+      <p className={cn(w9.sectionHint, 'od-data-state-hint')}>{hint}</p>
       {action}
     </div>
   )

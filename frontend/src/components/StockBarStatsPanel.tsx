@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
 import type { Bar, BarStatsResponse } from '../types'
 import { fetchBarStats, fetchBars, postMassiveSync } from '../api'
 import { BarsCandlestickChart } from '../views/data/BarsCandlestickChart'
@@ -253,13 +254,13 @@ export function StockBarStatsPanel({
   const renderChartBody = () => (
     <>
       {chartError && (
-        <p className="msg-error mt-2" role="alert">{chartError}</p>
+        <p className={cn(w9.msgError, 'mt-2')} role="alert">{chartError}</p>
       )}
       {chartInfo && !chartError && (
-        <p className="section-hint mt-2" role="status">{chartInfo}</p>
+        <p className={cn(w9.sectionHint, 'mt-2')} role="status">{chartInfo}</p>
       )}
       {chartLoading && chartBarsSorted.length === 0 && (
-        <p className="section-hint mt-2">Loading chart from database…</p>
+        <p className={cn(w9.sectionHint, 'mt-2')}>Loading chart from database…</p>
       )}
       {chartBarsSorted.length > 0 ? (
         <div className="mt-3 min-w-0 overflow-x-auto rounded-lg border border-border bg-background p-2">
@@ -277,7 +278,7 @@ export function StockBarStatsPanel({
       ) : (
         !chartLoading &&
         !chartInfo && (
-          <p className="section-hint mt-2">
+          <p className={cn(w9.sectionHint, 'mt-2')}>
             No bars in the database for this symbol and period. Use <strong>Fetch from Massive</strong>, wait for jobs to finish, then reload the chart.
           </p>
         )
@@ -353,7 +354,7 @@ export function StockBarStatsPanel({
       </div>
 
       {fetchMarketDataError && (
-        <p className="msg-error mt-2" role="alert">{fetchMarketDataError}</p>
+        <p className={cn(w9.msgError, 'mt-2')} role="alert">{fetchMarketDataError}</p>
       )}
 
       {renderChartControls()}

@@ -1,3 +1,6 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useCallback, useEffect, useState } from 'react'
 import type { BarCoverageItem, StatusResponse } from '../types'
 import {
@@ -129,7 +132,7 @@ export function MassiveStockCoveragePage({ status }: MassiveStockCoveragePagePro
         )}
       </SettingsCoverageTitle>
 
-      <section className="replay-section" aria-label="Massive stocks overview">
+      <section className={rl.section} aria-label="Massive stocks overview">
         <div style={{ marginBottom: 'var(--space-4)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
           <Button type="button" variant="secondary" onClick={() => { window.location.hash = '#coverage-stock' }}>
             IB Live (Redis)
@@ -141,12 +144,12 @@ export function MassiveStockCoveragePage({ status }: MassiveStockCoveragePagePro
       </section>
 
       {!configured ? (
-        <p className="status-page-msg err" role="alert" style={{ marginBottom: 'var(--space-3)' }}>
+        <p className={cn(w9.statusPageMsg, 'err')} role="alert" style={{ marginBottom: 'var(--space-3)' }}>
           Massive API key not configured. Set massive credentials in server config. Celery enqueue and REST checklist require a configured key.
         </p>
       ) : null}
 
-      <section className="replay-section" aria-labelledby="massive-stock-coverage-refdb-title">
+      <section className={rl.section} aria-labelledby="massive-stock-coverage-refdb-title">
         <MassiveRefJobSessionProvider>
           <div className="massive-delay-ref-heading">
             <h3 id="massive-stock-coverage-refdb-title" className={`${SECTION_TITLE_CLASS} massive-delay-ref-heading-title`}>

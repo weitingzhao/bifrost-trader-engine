@@ -1,4 +1,6 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DraggableModal } from '../components/DraggableModal'
 import { fetchHealth } from '../api'
@@ -583,7 +585,7 @@ export function ResearchApisPage({ embeddedInSettings }: ResearchApisPageProps) 
       <SettingsPageGroups className="server-groups">
         <SettingsSection aria-labelledby="research-page-head">
           <div className="architecture-page-intro">
-            <h2 id="research-page-head" className="daemon-card-title inline-flex flex-wrap items-center gap-2 architecture-page-title">
+            <h2 id="research-page-head" className={cn(w9.daemonCardTitle, 'inline-flex', 'flex-wrap', 'items-center', 'gap-2', 'architecture-page-title')}>
               <SettingsTitleLamp
                 lamp={researchTitleLamp as LampTone}
                 title="Combined Research, Strategy, and Market API reachability"

@@ -1,3 +1,6 @@
+import { rl, bubbleSwitchBtn, expandIcon, pnlUnrealizedClass } from '@/lib/replayLayout'
+import { pnlNegativeClass, pnlPositiveClass } from '@/components/shared/appUi'
+import { w9 } from '@/styles/wave9Classes'
 import { Fragment } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -6,6 +9,7 @@ import {
   stockSymbolInspectorBtnCompactClass,
 } from '@/components/shared/exec-row-buttons'
 import { cn } from '@/lib/utils'
+import { risk } from '@/components/risk/riskScenarioUi'
 import type { Execution, RealtimeQuote } from '../../types'
 import type { InstanceAllGroup, LivePositionRow, OpenOptionPosition, StockCoverageItem } from '../portfolio/types'
 import type { StrategyOpportunity } from '../../api/strategy/strategies'
@@ -133,11 +137,11 @@ export function PositionInstanceTab({
     id="open-panel-strategy"
     role="tabpanel"
     aria-labelledby="open-tab-strategy"
-    className="system-tab-panel"
+    className={w9.systemTabPanel}
   >
     <div className="instance-sheet-filters">
       <select
-        className="replay-filter-select"
+        className={rl.filterSelect}
         value={filter.structureType}
         onChange={e => filter.onStructureTypeChange(e.target.value)}
         aria-label="Filter by contract type"
@@ -148,7 +152,7 @@ export function PositionInstanceTab({
         ))}
       </select>
       <select
-        className="replay-filter-select"
+        className={rl.filterSelect}
         value={filter.oppName}
         onChange={e => filter.onOppNameChange(e.target.value)}
         aria-label="Filter by opportunity"
@@ -158,12 +162,12 @@ export function PositionInstanceTab({
           <option key={n} value={n}>{n}</option>
         ))}
       </select>
-      <div className="instance-sheet-filter-bubble-row">
-        <span className="instance-sheet-filter-bubble-label" id="instance-filter-scope-label">
+      <div className={w9.instanceSheetFilterBubbleRow}>
+        <span className={w9.instanceSheetFilterBubbleLabel} id="instance-filter-scope-label">
           Symbol scope
         </span>
         <div
-          className="replay-bubble-switch instance-sheet-bubble-switch--wrap"
+          className={rl.bubbleSwitch}
           role="radiogroup"
           aria-labelledby="instance-filter-scope-label"
         >
@@ -171,7 +175,7 @@ export function PositionInstanceTab({
             type="button"
             role="radio"
             aria-checked={filter.scopeType === 'all'}
-            className={`replay-bubble-switch-btn ${filter.scopeType === 'all' ? 'active' : ''}`}
+            className={bubbleSwitchBtn(filter.scopeType === 'all')}
             onClick={() => filter.onScopeTypeChange('all')}
           >
             All
@@ -180,7 +184,7 @@ export function PositionInstanceTab({
             type="button"
             role="radio"
             aria-checked={filter.scopeType === '__none__'}
-            className={`replay-bubble-switch-btn ${filter.scopeType === '__none__' ? 'active' : ''}`}
+            className={bubbleSwitchBtn(filter.scopeType === '__none__')}
             onClick={() => filter.onScopeTypeChange('__none__')}
           >
             None
@@ -191,7 +195,7 @@ export function PositionInstanceTab({
               type="button"
               role="radio"
               aria-checked={filter.scopeType === s}
-              className={`replay-bubble-switch-btn ${filter.scopeType === s ? 'active' : ''}`}
+              className={bubbleSwitchBtn(filter.scopeType === s)}
               onClick={() => filter.onScopeTypeChange(s)}
             >
               {s === 'watchlist_stk' ? 'Watchlist (stocks)' : s === 'explicit_symbols' ? 'Explicit symbols' : s}
@@ -199,12 +203,12 @@ export function PositionInstanceTab({
           ))}
         </div>
       </div>
-      <div className="instance-sheet-filter-bubble-row">
-        <span className="instance-sheet-filter-bubble-label" id="instance-filter-attr-label">
+      <div className={w9.instanceSheetFilterBubbleRow}>
+        <span className={w9.instanceSheetFilterBubbleLabel} id="instance-filter-attr-label">
           Attribution
         </span>
         <div
-          className="replay-bubble-switch"
+          className={rl.bubbleSwitch}
           role="radiogroup"
           aria-labelledby="instance-filter-attr-label"
         >
@@ -214,7 +218,7 @@ export function PositionInstanceTab({
               type="button"
               role="radio"
               aria-checked={filter.attributionType === v}
-              className={`replay-bubble-switch-btn ${filter.attributionType === v ? 'active' : ''}`}
+              className={bubbleSwitchBtn(filter.attributionType === v)}
               onClick={() => filter.onAttributionTypeChange(v)}
             >
               {v === 'all' ? 'All' : v === 'single' ? 'Single' : v === 'mixed' ? 'Mixed' : 'Unassigned'}
@@ -234,13 +238,13 @@ export function PositionInstanceTab({
       )}
     </div>
     {sortedGroups.length === 0 ? (
-      <p className="section-hint">No strategies match the current filters.</p>
+      <p className={w9.sectionHint}>No strategies match the current filters.</p>
     ) : (
-      <div className="replay-portfolio-table-wrap">
-        <table className="table-operations instance-sheet-table">
+      <div className={rl.portfolioTableWrap}>
+        <table className={cn(w9.tableOperations, w9.instanceSheetTable)}>
           <thead>
             <tr>
-              <th className="replay-opt-expand-col" />
+              <th className={rl.optExpandCol} />
               <th title="Opportunity">Opp</th>
               <th>Contract Type</th>
               <th>Symbols</th>
@@ -277,15 +281,15 @@ export function PositionInstanceTab({
               const defaultAccForScope = actions.getDefaultAccount(allGroup)
               const symbolsCell =
                 scopeType === 'watchlist_stk' ? (
-                  <span className="instance-sheet-badge instance-sheet-badge-scope">Watchlist</span>
+                  <span className={cn(w9.instanceSheetBadge, 'instance-sheet-badge-scope')}>Watchlist</span>
                 ) : scopeSymbols.length > 0 ? (
-                  <span className="instance-sheet-symbols instance-sheet-symbols--buttons">
+                  <span className={cn(w9.instanceSheetSymbols, 'instance-sheet-symbols--buttons')}>
                     {scopeSymbols.map((symRaw, i) => {
                       const t = String(symRaw ?? '').trim()
                       if (!t) return null
                       return (
                         <Fragment key={`${instKey}-scope-sym-${i}-${t}`}>
-                          {i > 0 ? <span className="instance-sheet-symbols-sep" aria-hidden>, </span> : null}
+                          {i > 0 ? <span className={w9.instanceSheetSymbolsSep} aria-hidden>, </span> : null}
                           <button
                             type="button"
                             className={cn(stockSymbolInspectorBtnClass, stockSymbolInspectorBtnCompactClass)}
@@ -302,7 +306,7 @@ export function PositionInstanceTab({
                     })}
                   </span>
                 ) : (
-                  <span className="replay-muted">—</span>
+                  <span className={rl.muted}>—</span>
                 )
               return [
                 <tr
@@ -314,20 +318,20 @@ export function PositionInstanceTab({
                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); expand.toggleInstance(instKey) } }}
                   aria-expanded={isExpanded}
                 >
-                  <td className="replay-opt-expand-col">
-                    <span className={`replay-opt-expand-icon ${isExpanded ? 'expanded' : ''}`} aria-hidden>
+                  <td className={rl.optExpandCol}>
+                    <span className={expandIcon(isExpanded)} aria-hidden>
                       {isExpanded ? '▼' : '▶'}
                     </span>
                   </td>
-                  <td className="instance-sheet-opp-cell">
+                  <td className={w9.instanceSheetOppCell}>
                     {allGroup.strategy_instance_id != null ? (
                       <>
                         {oppName ? (
-                          <span className="instance-sheet-opp-name">{oppName}</span>
+                          <span className={w9.instanceSheetOppName}>{oppName}</span>
                         ) : null}
                         <button
                           type="button"
-                          className="instance-sheet-inst-link instance-sheet-inst-sublabel"
+                          className={cn(w9.instanceSheetInstLink, w9.instanceSheetInstSublabel)}
                           title={`View strategy: ${instLabel}`}
                           onClick={e => {
                             e.stopPropagation()
@@ -345,11 +349,11 @@ export function PositionInstanceTab({
                   <td>{symbolsCell}</td>
                   <td>
                     {openedAt != null && Number.isFinite(openedAt) ? (
-                      <>{fmtDate(openedAt)}{fmtDaysAgo(openedAt) ? <span className="replay-time-ago"> {fmtDaysAgo(openedAt)}</span> : null}</>
+                      <>{fmtDate(openedAt)}{fmtDaysAgo(openedAt) ? <span className={rl.timeAgo}> {fmtDaysAgo(openedAt)}</span> : null}</>
                     ) : '—'}
                   </td>
                   <td
-                    className="instance-sheet-exec-qty-cell"
+                    className={w9.instanceSheetExecQtyCell}
                     title="Per option: execution quantities (comma-separated). Final preferred over TWS when matching Finals exist. | separates option lines."
                   >
                     {optN > 0 ? optExecQtySummary : '—'}
@@ -376,27 +380,27 @@ export function PositionInstanceTab({
                           : 'coverage-status-partial'
                       const statusLabel = allCovered ? 'Covered' : anyNaked ? 'Naked' : 'Partial'
                       return <span className={`coverage-status-badge ${statusClass}`}>{statusLabel}</span>
-                    })() : <span className="replay-muted">—</span>}
+                    })() : <span className={rl.muted}>—</span>}
                   </td>
-                  <td>{optN > 0 ? <span className="replay-pnl-unrealized">{fmtUsd(allGroup.options_unrealized_pnl)}</span> : <span className="replay-muted">—</span>}</td>
+                  <td>{optN > 0 ? <span className={rl.pnlUnrealized}>{fmtUsd(allGroup.options_unrealized_pnl)}</span> : <span className={rl.muted}>—</span>}</td>
                   {(() => {
-                    if (!allGroup.risk_profile) return <><td className="replay-muted">—</td><td className="replay-muted">—</td><td className="replay-muted">—</td></>
-                    const rl = formatRiskLabel(allGroup.risk_profile)
+                    if (!allGroup.risk_profile) return <><td className={rl.muted}>—</td><td className={rl.muted}>—</td><td className={rl.muted}>—</td></>
+                    const riskLabels = formatRiskLabel(allGroup.risk_profile)
                     return <>
-                      <td><span className="risk-value-gain">{rl.gainLabel}</span></td>
-                      <td><span className={allGroup.risk_profile.max_loss == null ? 'risk-value-loss risk-value-unlimited' : 'risk-value-loss'}>{rl.lossLabel}</span></td>
-                      <td><span className={`coverage-status-badge ${allGroup.risk_profile.risk_type === 'defined' ? 'risk-badge-defined' : 'risk-badge-unlimited'}`}>{rl.riskBadge}</span></td>
+                      <td><span className={w9.riskValueGain}>{riskLabels.gainLabel}</span></td>
+                      <td><span className={cn(w9.riskValueLoss, allGroup.risk_profile.max_loss == null && w9.riskValueUnlimited)}>{riskLabels.lossLabel}</span></td>
+                      <td><span className={cn(w9.coverageStatusBadge, allGroup.risk_profile.risk_type === 'defined' ? risk.badgeDefined : risk.badgeUnlimited)}>{riskLabels.riskBadge}</span></td>
                     </>
                   })()}
                 </tr>,
                 ...(isExpanded ? [
-                  <tr key={`inst-detail-${instKey}`} className="instance-sheet-detail-row">
-                    <td colSpan={11} className="instance-sheet-detail-cell">
+                  <tr key={`inst-detail-${instKey}`} className={w9.instanceSheetDetailRow}>
+                    <td colSpan={11} className={w9.instanceSheetDetailCell}>
                       {optN > 0 && (
-                        <div className="instance-sheet-sub-section">
-                          <h6 className="replay-sub instance-sheet-sub-heading">Options ({optN})</h6>
-                          <div className="replay-portfolio-table-wrap">
-                            <table className="table-operations replay-opt-groups instance-sheet-sub-table positions-opt-instance-table">
+                        <div className={w9.instanceSheetSubSection}>
+                          <h6 className={rl.sub}>Options ({optN})</h6>
+                          <div className={rl.portfolioTableWrap}>
+                            <table className={rl.optGroups}>
                               <colgroup>
                                 <col className="poi-col-expand" />
                                 <col className="poi-col-contract" />
@@ -417,7 +421,7 @@ export function PositionInstanceTab({
                               </colgroup>
                               <thead>
                                 <tr>
-                                  <th className="replay-opt-expand-col" />
+                                  <th className={rl.optExpandCol} />
                                   <th>Contract</th>
                                   <th>Expiry</th>
                                   <th>Strike</th>
@@ -432,7 +436,7 @@ export function PositionInstanceTab({
                                   <th>Attr</th>
                                   <th>Account</th>
                                   <th title="Opportunity">Opp</th>
-                                  <th className="replay-opt-actions-cell">Actions</th>
+                                  <th className={rl.optActionsCell}>Actions</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -466,14 +470,14 @@ export function PositionInstanceTab({
                                       onKeyDown={hasExecutions ? e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); expand.togglePosition(posKey) } } : undefined}
                                       aria-expanded={hasExecutions ? isPosExpanded : undefined}
                                     >
-                                      <td className="replay-opt-expand-col">
+                                      <td className={rl.optExpandCol}>
                                         {hasExecutions ? (
-                                          <span className={`replay-opt-expand-icon ${isPosExpanded ? 'expanded' : ''}`} aria-hidden>
+                                          <span className={expandIcon(isPosExpanded)} aria-hidden>
                                             {isPosExpanded ? '▼' : '▶'}
                                           </span>
                                         ) : null}
                                       </td>
-                                      <td className="replay-opt-contract">
+                                      <td className={rl.optContract}>
                                         {(() => {
                                           const p = getContractLabelParts(pos.contract_key)
                                           const strikeStr = pos.strike != null ? ` ${pos.strike}` : ''
@@ -537,7 +541,7 @@ export function PositionInstanceTab({
                                               <div className="positions-opt-last-line1">{last != null ? fmtUsd(last) : '—'}</div>
                                               {pct != null ? (
                                                 <div className="positions-opt-last-line2">
-                                                  <span className={`replay-last-strike-pct ${pctClass}`.trim()} title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}>
+                                                  <span className={`rl.lastStrikePct ${pctClass}`.trim()} title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}>
                                                     {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
                                                   </span>
                                                 </div>
@@ -552,18 +556,18 @@ export function PositionInstanceTab({
                                       <td className="positions-opt-live-quote">
                                         {(() => {
                                           const liveQ = quotesMap[pos.contract_key]
-                                          if (!liveQ) return <span className="replay-muted">—</span>
+                                          if (!liveQ) return <span className={rl.muted}>—</span>
                                           const mid = liveQ.mid ?? (liveQ.bid != null && liveQ.ask != null ? (liveQ.bid + liveQ.ask) / 2 : null)
                                           return (
                                             <>
                                               <div className="positions-opt-quote-line positions-opt-quote-line--bid">
-                                                {liveQ.bid != null ? <span className="positions-opt-quote-bid">{liveQ.bid.toFixed(2)}</span> : <span className="replay-muted">—</span>}
+                                                {liveQ.bid != null ? <span className="positions-opt-quote-bid">{liveQ.bid.toFixed(2)}</span> : <span className={rl.muted}>—</span>}
                                               </div>
                                               <div className="positions-opt-quote-line positions-opt-quote-line--mid">
                                                 <strong>{mid != null ? mid.toFixed(2) : '—'}</strong>
                                               </div>
                                               <div className="positions-opt-quote-line positions-opt-quote-line--ask">
-                                                {liveQ.ask != null ? <span className="positions-opt-quote-ask">{liveQ.ask.toFixed(2)}</span> : <span className="replay-muted">—</span>}
+                                                {liveQ.ask != null ? <span className="positions-opt-quote-ask">{liveQ.ask.toFixed(2)}</span> : <span className={rl.muted}>—</span>}
                                               </div>
                                             </>
                                           )
@@ -573,7 +577,7 @@ export function PositionInstanceTab({
                                         {ts != null ? (
                                           <>
                                             <div className="positions-opt-time-line1">{fmtDate(ts)}</div>
-                                            {fmtDaysAgo(ts) ? <div className="positions-opt-time-line2"><span className="replay-time-ago">{fmtDaysAgo(ts)}</span></div> : null}
+                                            {fmtDaysAgo(ts) ? <div className="positions-opt-time-line2"><span className={rl.timeAgo}>{fmtDaysAgo(ts)}</span></div> : null}
                                           </>
                                         ) : '—'}
                                       </td>
@@ -587,39 +591,39 @@ export function PositionInstanceTab({
                                             <>
                                               {livePnl != null && (
                                                 <div>
-                                                  <span className={`replay-pnl-unrealized ${livePnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(livePnl)}</span>
-                                                  <span className="replay-muted" style={{fontSize:'0.7em'}}> live</span>
+                                                  <span className={pnlUnrealizedClass(livePnl)}>{fmtUsd(livePnl)}</span>
+                                                  <span className={rl.muted} style={{fontSize:'0.7em'}}> live</span>
                                                 </div>
                                               )}
-                                              <div className={livePnl != null ? 'replay-muted' : undefined} style={livePnl != null ? {fontSize:'0.75em'} : undefined}>
-                                                <span className={`replay-pnl-unrealized ${pos.unrealized_pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>{fmtUsd(pos.unrealized_pnl)}</span>
+                                              <div className={livePnl != null ? 'rl.muted' : undefined} style={livePnl != null ? {fontSize:'0.75em'} : undefined}>
+                                                <span className={pnlUnrealizedClass(pos.unrealized_pnl)}>{fmtUsd(pos.unrealized_pnl)}</span>
                                                 {livePnl != null && <span style={{fontSize:'0.7em'}}> snap</span>}
                                               </div>
                                             </>
                                           )
                                         })()}
                                       </td>
-                                      <td className="replay-muted">{pos.pool_label}</td>
+                                      <td className={rl.muted}>{pos.pool_label}</td>
                                       <td>
                                         {pos.filtered_exec_lists ? (
                                           <span
-                                            className="attr-badge attr-unassigned"
+                                            className={cn(w9.attrUnassigned, 'attr-badge')}
                                             title="Fills that do not match the instance row for this contract (Uncategorized)"
                                           >
                                             Uncategorized
                                           </span>
                                         ) : pos.attribution_type === 'mixed' ? (
-                                          <span className="attr-badge attr-mixed" title={`Estimated attribution (net): ${((pos.attribution_ratio ?? 0) * 100).toFixed(0)}%`}>Mixed</span>
+                                          <span className={cn(w9.attrMixed, 'attr-badge')} title={`Estimated attribution (net): ${((pos.attribution_ratio ?? 0) * 100).toFixed(0)}%`}>Mixed</span>
                                         ) : pos.attribution_type === 'single' ? (
-                                          <span className="attr-badge attr-single" title="Single instance attribution">Single</span>
+                                          <span className={cn(w9.attrSingle, 'attr-badge')} title="Single instance attribution">Single</span>
                                         ) : (
-                                          <span className="attr-badge attr-unassigned" title="No strategy attribution">—</span>
+                                          <span className={cn(w9.attrUnassigned, 'attr-badge')} title="No strategy attribution">—</span>
                                         )}
                                       </td>
                                       <td className="positions-opt-account-cell">{pos.account_id || '—'}</td>
-                                      <td className="replay-strategy-opp-cell positions-opt-opp-hint-cell">
+                                      <td className={rl.strategyOppCell}>
                                         {execCount === 0 ? '—' : (
-                                          <span className="replay-muted" title={`${execCount} execution${execCount > 1 ? 's' : ''} — expand row`}>
+                                          <span className={rl.muted} title={`${execCount} execution${execCount > 1 ? 's' : ''} — expand row`}>
                                             {pos.filtered_exec_lists ? (
                                               <abbr title="Uncategorized fills">Unct.</abbr>
                                             ) : null}
@@ -628,7 +632,7 @@ export function PositionInstanceTab({
                                           </span>
                                         )}
                                       </td>
-                                      <td className="replay-opt-actions-cell">—</td>
+                                      <td className={rl.optActionsCell}>—</td>
                                     </tr>,
                                     ...(isPosExpanded ? [
                                       ...scopedFinalExecs.map((ex, ei) => (
@@ -664,10 +668,10 @@ export function PositionInstanceTab({
                         </div>
                       )}
                       {covN > 0 && (
-                        <div className="instance-sheet-sub-section">
-                          <h6 className="replay-sub instance-sheet-sub-heading">Underlying Coverage</h6>
-                          <div className="replay-portfolio-table-wrap">
-                            <table className="table-operations instance-sheet-sub-table">
+                        <div className={w9.instanceSheetSubSection}>
+                          <h6 className={rl.sub}>Underlying Coverage</h6>
+                          <div className={rl.portfolioTableWrap}>
+                            <table className={cn(w9.tableOperations, w9.instanceSheetSubTable)}>
                               <thead>
                                 <tr>
                                   <th>Symbol</th>
@@ -716,7 +720,7 @@ export function PositionInstanceTab({
                                         </button>
                                       </td>
                                       <td>
-                                        <span className="underlying-coverage-account" title="Stock hedge must be in this account (same as options above)">
+                                        <span className={w9.underlyingCoverageAccount} title="Stock hedge must be in this account (same as options above)">
                                           {acct || '—'}
                                         </span>
                                       </td>
@@ -726,11 +730,11 @@ export function PositionInstanceTab({
                                       <td>
                                         {hasStock ? (
                                           <>
-                                            <span className={((m.daily_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                                            <span className={((m.daily_pnl ?? 0) >= 0) ? pnlPositiveClass : pnlNegativeClass}>
                                               {fmtUsd(m.daily_pnl)}
                                             </span>
                                             {' / '}
-                                            <span className={((m.daily_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                                            <span className={((m.daily_pct ?? 0) >= 0) ? pnlPositiveClass : pnlNegativeClass}>
                                               {fmtSignedPct(m.daily_pct)}
                                             </span>
                                           </>
@@ -741,11 +745,11 @@ export function PositionInstanceTab({
                                       <td>
                                         {hasStock ? (
                                           <>
-                                            <span className={((m.total_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                                            <span className={((m.total_pnl ?? 0) >= 0) ? pnlPositiveClass : pnlNegativeClass}>
                                               {fmtUsd(m.total_pnl)}
                                             </span>
                                             {' / '}
-                                            <span className={((m.total_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                                            <span className={((m.total_pct ?? 0) >= 0) ? pnlPositiveClass : pnlNegativeClass}>
                                               {fmtSignedPct(m.total_pct)}
                                             </span>
                                           </>
@@ -759,7 +763,7 @@ export function PositionInstanceTab({
                                       <td>
                                         <span className={`coverage-status-badge ${statusClass}`}>{statusLabel}</span>
                                       </td>
-                                      <td><span className={gap >= 0 ? 'pnl-positive' : 'pnl-negative'}>{fmtSurplusShares(gap)}</span></td>
+                                      <td><span className={gap >= 0 ? pnlPositiveClass : pnlNegativeClass}>{fmtSurplusShares(gap)}</span></td>
                                     </tr>
                                   )
                                 })}
@@ -769,8 +773,8 @@ export function PositionInstanceTab({
                         </div>
                       )}
                       {allGroup.risk_profile && (
-                        <div className="instance-sheet-sub-section risk-profile-section">
-                          <h6 className="replay-sub instance-sheet-sub-heading">Risk Profile</h6>
+                        <div className={cn(w9.instanceSheetSubSection, w9.riskProfileSection)}>
+                          <h6 className={rl.sub}>Risk Profile</h6>
                           <RiskProfileDl profile={allGroup.risk_profile} fmtUsd={fmtUsd} />
                           {allGroup.risk_profile.naked_short_call_contracts > 0 && (
                             <ul className="risk-hedged-breakdown" style={{ margin: '0.5rem 0 0', paddingLeft: '1.25rem' }}>
@@ -788,19 +792,19 @@ export function PositionInstanceTab({
             })}
           </tbody>
           <tfoot>
-            <tr className="replay-opt-tfoot-total">
-              <td colSpan={7} className="replay-opt-tfoot-label">
+            <tr className={rl.optTfootTotal}>
+              <td colSpan={7} className={rl.optTfootLabel}>
                 Total ({sortedGroups.length}{' '}
                 {sortedGroups.length !== 1 ? 'strategies' : 'strategy'})
               </td>
               <td>
                 <strong>
-                  <span className="replay-pnl-unrealized">
+                  <span className={rl.pnlUnrealized}>
                     {fmtUsd(sortedGroups.reduce((acc, g) => acc + g.options_unrealized_pnl, 0))}
                   </span>
                 </strong>
               </td>
-              <td colSpan={3} className="replay-muted">
+              <td colSpan={3} className={rl.muted}>
                 —
               </td>
             </tr>
@@ -809,45 +813,45 @@ export function PositionInstanceTab({
       </div>
     )}
     {sortedGroups.length > 0 ? (
-    <div className="coverage-summary-section">
-        <div className="coverage-summary-intro">
-          <h6 className="replay-sub instance-sheet-sub-heading coverage-summary-heading-row">
+    <div className={w9.coverageSummarySection}>
+        <div className={w9.coverageSummaryIntro}>
+          <h6 className={rl.sub}>
             Coverage summary
             <InfoTooltip text="The Account (asset mix) filter in the top composition row applies here too. Position pool tables below use the same filter. Optionable symbols only; Independent Holdings are not listed in pools. Underlying pool = stock left after opportunity hedges." />
           </h6>
         </div>
         <div className="coverage-pools-row">
-            <div className="coverage-pool-panel">
-              <p className="section-hint" style={{ margin: '0 0 0.35rem' }}>
+            <div className={w9.coveragePoolPanel}>
+              <p className={w9.sectionHint} style={{ margin: '0 0 0.35rem' }}>
                 Option underlying Pool
               </p>
-              <p className="section-hint" style={{ margin: '0 0 0.4rem', fontSize: '0.82em' }}>
+              <p className={w9.sectionHint} style={{ margin: '0 0 0.4rem', fontSize: '0.82em' }}>
                 Long shares not needed for existing opportunity hedges (all scopes); can back additional options.
               </p>
               {underlyingPoolItems.length === 0 && (
                 <p
-                  className="section-hint coverage-pool-empty-explanation"
+                  className={cn(w9.sectionHint, 'coverage-pool-empty-explanation')}
                   style={{ margin: '0 0 0.5rem', fontSize: '0.85em', lineHeight: 1.45 }}
                 >
                   No rows when every long share is already counted toward instance hedges, or when your instances do not require separate underlying stock backup. The table stays here so you can see the column layout when positions do create surplus.
                 </p>
               )}
-              <p className="option-underlying-pool-totals" style={{ margin: '0 0 0.45rem' }}>
+              <p className={w9.optionUnderlyingPoolTotals} style={{ margin: '0 0 0.45rem' }}>
                 <span className="option-underlying-pool-total-item">
-                  <span className="option-underlying-pool-total-label">Market Total</span>{' '}
+                  <span className={w9.optionUnderlyingPoolTotalLabel}>Market Total</span>{' '}
                   <strong>{fmtUsd(underlyingPoolMarketTotal)}</strong>
                 </span>
-                <span className="option-underlying-pool-total-sep" aria-hidden>
+                <span className={w9.optionUnderlyingPoolTotalSep} aria-hidden>
                   {' · '}
                 </span>
                 <span className="option-underlying-pool-total-item">
                   {streamHostAccountId ? (
                     <>
-                      <strong className="coverage-account-id coverage-account-host">
+                      <strong className={cn(w9.coverageAccountId, w9.coverageAccountHost)}>
                         {streamHostAccountId}
                       </strong>{' '}
                       <span
-                        className="option-underlying-pool-cash-bp"
+                        className={w9.optionUnderlyingPoolCashBp}
                         title="Total cash / buying power (account table)"
                       >
                         {fmtUsd(cashBp.host.cash)}
@@ -856,20 +860,20 @@ export function PositionInstanceTab({
                       </span>
                     </>
                   ) : (
-                    <strong className="replay-muted">—</strong>
+                    <strong className={rl.muted}>—</strong>
                   )}
                 </span>
-                <span className="option-underlying-pool-total-sep" aria-hidden>
+                <span className={w9.optionUnderlyingPoolTotalSep} aria-hidden>
                   {' · '}
                 </span>
                 <span className="option-underlying-pool-total-item">
                   {streamSecondaryAccountId ? (
                     <>
-                      <strong className="coverage-account-id coverage-account-secondary">
+                      <strong className={cn(w9.coverageAccountId, w9.coverageAccountSecondary)}>
                         {streamSecondaryAccountId}
                       </strong>{' '}
                       <span
-                        className="option-underlying-pool-cash-bp"
+                        className={w9.optionUnderlyingPoolCashBp}
                         title="Total cash / buying power (account table)"
                       >
                         {fmtUsd(cashBp.secondary.cash)}
@@ -878,7 +882,7 @@ export function PositionInstanceTab({
                       </span>
                     </>
                   ) : (
-                    <strong className="replay-muted">—</strong>
+                    <strong className={rl.muted}>—</strong>
                   )}
                 </span>
               </p>
@@ -897,11 +901,11 @@ export function PositionInstanceTab({
               />
             </div>
           {watchlistItems.length > 0 && (
-            <div className="coverage-pool-panel">
-              <p className="section-hint" style={{ margin: '0 0 0.35rem' }}>
+            <div className={w9.coveragePoolPanel}>
+              <p className={w9.sectionHint} style={{ margin: '0 0 0.35rem' }}>
                 Option backing Pool
               </p>
-              <p className="section-hint" style={{ margin: '0 0 0.45rem', fontSize: '0.82em' }}>
+              <p className={w9.sectionHint} style={{ margin: '0 0 0.45rem', fontSize: '0.82em' }}>
                 Watchlist-scoped opportunities: Required = hedge from those strategies only.
               </p>
               <StockCoverageTable
@@ -922,22 +926,22 @@ export function PositionInstanceTab({
         </div>
       </div>
     ) : (
-      <div className="coverage-summary-section coverage-summary-section--placeholder">
-        <h6 className="replay-sub instance-sheet-sub-heading coverage-summary-heading-row">
+      <div className={cn(w9.coverageSummarySection, 'coverage-summary-section--placeholder')}>
+        <h6 className={rl.sub}>
           Coverage summary
           <InfoTooltip text="Option underlying pool and backing pool tables appear when instances match filters. Underlying pool = stock left after opportunity hedges." />
         </h6>
-        <p className="section-hint coverage-summary-placeholder-text">
+        <p className={cn(w9.sectionHint, w9.coverageSummaryPlaceholderText)}>
           This section is computed from the instance table above. With no instances matching the current filters, there is nothing to show here—so the pools are hidden, not missing. Clear or widen filters to bring instances back and see Option underlying / backing pools.
         </p>
       </div>
     )}
     {independentSections.some(s => s.rows.length > 0) && (
-      <div className="instance-sheet-stock-section">
-        <h5 className="replay-sub instance-sheet-section-heading">Independent Holdings</h5>
-        <p className="section-hint">Positions without tradeable options (Index, ETF, etc.); not part of any option strategy. Grouped by position category (Stocks, Fixed income, Cash-like).</p>
-        <div className="replay-portfolio-table-wrap">
-          <table className="table-operations instance-sheet-sub-table">
+      <div className={w9.instanceSheetStockSection}>
+        <h5 className={rl.sub}>Independent Holdings</h5>
+        <p className={w9.sectionHint}>Positions without tradeable options (Index, ETF, etc.); not part of any option strategy. Grouped by position category (Stocks, Fixed income, Cash-like).</p>
+        <div className={rl.portfolioTableWrap}>
+          <table className={cn(w9.tableOperations, w9.instanceSheetSubTable)}>
             <thead>
               <tr>
                 <th>Account</th>
@@ -955,7 +959,7 @@ export function PositionInstanceTab({
               {independentSections
                 .filter(s => s.rows.length > 0)
                 .flatMap(section => [
-                  <tr key={`${section.key}-section`} className="replay-portfolio-group-header">
+                  <tr key={`${section.key}-section`} className={rl.portfolioGroupHeader}>
                     <td colSpan={9}>
                       <strong>{section.title}</strong>
                     </td>

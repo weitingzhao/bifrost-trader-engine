@@ -1,5 +1,61 @@
-@import './shadcn-tokens.css';
+/* Global base: box-sizing, document chrome, scrollbar (Phase 7) */
 
-/* @tailwind base intentionally omitted — preflight is disabled in tailwind.config.ts */
-@tailwind components;
-@tailwind utilities;
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+html::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+html::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+html::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+  border: 3px solid var(--scrollbar-track);
+}
+
+html::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  color: var(--color-text-main);
+  background: var(--color-bg);
+  margin: 0;
+  padding: var(--space-4);
+  -webkit-font-smoothing: antialiased;
+  transition: background var(--transition-normal), color var(--transition-normal);
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse 120% 80% at 50% -20%, rgba(26, 31, 38, 0.6), transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+[data-theme="light"] body::before {
+  background: radial-gradient(ellipse 100% 60% at 50% 0%, rgba(14, 165, 233, 0.04), transparent 50%);
+}
+
+@keyframes replay-fetch-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

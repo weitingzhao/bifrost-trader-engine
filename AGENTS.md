@@ -122,7 +122,7 @@ Each domain is an independent FastAPI app on its own port. Pattern:
 - **Routes**: `app/(trading)/**` thin pages wrapping `views/*` components
 - **API clients**: domain modules under `api/` (avoid new imports from deprecated `api/index.ts` barrel)
 - **Real-time**: SSE for quotes and system messages; React Query for global monitor polls only
-- **Styling**: `design-tokens.css` + `shadcn-tokens.css` + domain CSS (`app-surfaces.css`, `feed-massive.css`, satellites) — see `docs/plans/LEGACY_CSS_RETIREMENT.md`. New UI: Tailwind + `@/components/ui/*`; use `PageSection`, `SectionPageTitle`, `Button`. Run `npm run lint:legacy-classes` and `npm run css:metrics` from `frontend/`.
+- **Styling**: `design-tokens.css` + `shadcn-tokens.css` + `tailwind-base.css` + `message-center.css` — see `docs/plans/LEGACY_CSS_RETIREMENT.md` (CSS debt zero). Shared Tailwind modules: `appUi.ts`, `replayLayout.ts` (`rl`), `wave9Classes.ts` (`w9`), domain `*Ui.ts` / `*Classes.ts`. New UI: Tailwind + `@/components/ui/*`; use `PageSection`, `SectionPageTitle`, `Button`. Run `npm run lint:legacy-classes` and `npm run css:metrics` from `frontend/`.
 - **UI reference**: Skote Admin template (visual only; do not copy code/deps)
 
 ### Key Docs (authoritative references)

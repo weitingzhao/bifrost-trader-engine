@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { w9 } from '@/styles/wave9Classes'
 import { fmtDate } from '../../utils/format'
 import { INSPECT_BARS_LIMIT_BY_PERIOD } from './constants'
 
@@ -79,14 +80,14 @@ function toCoverageDate(ts: number): Date {
 function CoverageDateLine({ ts, highlightDay }: { ts: number; highlightDay: boolean }) {
   const d = toCoverageDate(ts)
   if (Number.isNaN(d.getTime())) {
-    return <span className="data-coverage-range-line">—</span>
+    return <span className={w9.dataCoverageRangeLine}>—</span>
   }
   if (!highlightDay) {
-    return <span className="data-coverage-range-line">{fmtDate(ts)}</span>
+    return <span className={w9.dataCoverageRangeLine}>{fmtDate(ts)}</span>
   }
   const parts = new Intl.DateTimeFormat(undefined, COVERAGE_DATE_FMT).formatToParts(d)
   return (
-    <span className="data-coverage-range-line">
+    <span className={w9.dataCoverageRangeLine}>
       {parts.map((part, i) =>
         part.type === 'day' ? (
           <span key={i} className="data-coverage-range-day-highlight">
@@ -104,21 +105,21 @@ function CoverageDateLine({ ts, highlightDay }: { ts: number; highlightDay: bool
 function CoverageCalendarDayLine({ iso, highlightDay }: { iso: string; highlightDay: boolean }) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim())
   if (!m) {
-    return <span className="data-coverage-range-line">{iso}</span>
+    return <span className={w9.dataCoverageRangeLine}>{iso}</span>
   }
   const y = parseInt(m[1], 10)
   const mo = parseInt(m[2], 10)
   const da = parseInt(m[3], 10)
   const d = new Date(y, mo - 1, da)
   if (Number.isNaN(d.getTime())) {
-    return <span className="data-coverage-range-line">—</span>
+    return <span className={w9.dataCoverageRangeLine}>—</span>
   }
   if (!highlightDay) {
-    return <span className="data-coverage-range-line">{formatCoverageCalendarDay(iso)}</span>
+    return <span className={w9.dataCoverageRangeLine}>{formatCoverageCalendarDay(iso)}</span>
   }
   const parts = new Intl.DateTimeFormat(undefined, COVERAGE_DATE_FMT).formatToParts(d)
   return (
-    <span className="data-coverage-range-line">
+    <span className={w9.dataCoverageRangeLine}>
       {parts.map((part, i) =>
         part.type === 'day' ? (
           <span key={i} className="data-coverage-range-day-highlight">
@@ -146,8 +147,8 @@ export function coverageRange(
   if (coverageCountNum(p) === 0) return '—'
   if (p.min_day && p.max_day) {
     return (
-      <span className="data-coverage-range-stack">
-        <span className="data-coverage-range-line">{formatCoverageCalendarDay(p.min_day)}</span>
+      <span className={w9.dataCoverageRangeStack}>
+        <span className={w9.dataCoverageRangeLine}>{formatCoverageCalendarDay(p.min_day)}</span>
         <CoverageCalendarDayLine iso={p.max_day} highlightDay />
       </span>
     )
@@ -159,14 +160,14 @@ export function coverageRange(
       const minIso = epochToUtcIsoDate(p.min_ts)
       const maxIso = epochToUtcIsoDate(p.max_ts)
       return (
-        <span className="data-coverage-range-stack">
-          <span className="data-coverage-range-line">{formatCoverageCalendarDay(minIso)}</span>
+        <span className={w9.dataCoverageRangeStack}>
+          <span className={w9.dataCoverageRangeLine}>{formatCoverageCalendarDay(minIso)}</span>
           <CoverageCalendarDayLine iso={maxIso} highlightDay />
         </span>
       )
     }
     return (
-      <span className="data-coverage-range-stack">
+      <span className={w9.dataCoverageRangeStack}>
         <CoverageDateLine ts={p.min_ts} highlightDay={false} />
         <CoverageDateLine ts={p.max_ts} highlightDay />
       </span>
@@ -176,31 +177,31 @@ export function coverageRange(
     if (useUtc) {
       const iso = epochToUtcIsoDate(p.min_ts)
       return (
-        <span className="data-coverage-range-stack">
+        <span className={w9.dataCoverageRangeStack}>
           <CoverageCalendarDayLine iso={iso} highlightDay />
-          <span className="data-coverage-range-line">—</span>
+          <span className={w9.dataCoverageRangeLine}>—</span>
         </span>
       )
     }
     return (
-      <span className="data-coverage-range-stack">
+      <span className={w9.dataCoverageRangeStack}>
         <CoverageDateLine ts={p.min_ts} highlightDay />
-        <span className="data-coverage-range-line">—</span>
+        <span className={w9.dataCoverageRangeLine}>—</span>
       </span>
     )
   }
   if (useUtc) {
     const iso = epochToUtcIsoDate(p.max_ts!)
     return (
-      <span className="data-coverage-range-stack">
-        <span className="data-coverage-range-line">—</span>
+      <span className={w9.dataCoverageRangeStack}>
+        <span className={w9.dataCoverageRangeLine}>—</span>
         <CoverageCalendarDayLine iso={iso} highlightDay />
       </span>
     )
   }
   return (
-    <span className="data-coverage-range-stack">
-      <span className="data-coverage-range-line">—</span>
+    <span className={w9.dataCoverageRangeStack}>
+      <span className={w9.dataCoverageRangeLine}>—</span>
       <CoverageDateLine ts={p.max_ts!} highlightDay />
     </span>
   )
@@ -219,7 +220,7 @@ export function coverageCompact(
   return (
     <>
       {cnt}{' '}
-      <span className="data-coverage-end-warning">(end)</span>
+      <span className={w9.dataCoverageEndWarning}>(end)</span>
     </>
   )
 }

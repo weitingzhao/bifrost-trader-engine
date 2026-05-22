@@ -1,3 +1,5 @@
+import { rl, bubbleSwitchBtn, expandIcon } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import type { Execution, PerformanceSummary, StrategyInstance, StatusResponse } from '../types'
 import type { StrategyOpportunity } from '../api'
@@ -1010,12 +1012,12 @@ export function StrategyInstancesPage({
                     cursor: 'pointer',
                   }}
                 >
-                  <span className={`replay-opt-expand-icon ${collapsed ? '' : 'expanded'}`} aria-hidden>
+                  <span className={expandIcon(!(collapsed))} aria-hidden>
                     {collapsed ? '▶' : '▼'}
                   </span>
                   <span>
                     Symbol group: {group.label}
-                    <span className="replay-muted" style={{ fontWeight: 400, marginLeft: '0.35rem' }}>
+                    <span className={rl.muted} style={{ fontWeight: 400, marginLeft: '0.35rem' }}>
                       ({group.rows.length} instance{group.rows.length !== 1 ? 's' : ''})
                     </span>
                   </span>
@@ -1313,12 +1315,12 @@ export function StrategyInstancesPage({
           />
         </div>
         {opportunityIdFilter !== '' && (
-          <label className="replay-filter-label-instance" title="Instance">
-            <span className="replay-filter-label">Instance</span>
+          <label className={rl.filterLabelInstance} title="Instance">
+            <span className={rl.filterLabel}>Instance</span>
             <select
               value={instanceIdFilter === '' ? '' : String(instanceIdFilter)}
               onChange={(e) => setInstanceIdFilter(e.target.value === '' ? '' : Number(e.target.value))}
-              className="replay-filter-input replay-filter-select"
+              className={cn(rl.filterInput, rl.filterSelect)}
               aria-label="Filter by instance"
             >
               <option value="">All</option>
@@ -1344,26 +1346,26 @@ export function StrategyInstancesPage({
             <div className="table-wrapper strategy-instances-table-wrap" style={{ overflowX: 'auto', marginTop: '1rem' }}>
           {items.length > 0 && (
             <div className="ledger-strategy-tab-filters" style={{ marginBottom: '0.75rem' }}>
-              <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by position status">
-                <span className="ledger-strategy-filter-label">Status</span>
-                <div className="ledger-strategy-filter-bubbles">
+              <div className={w9.ledgerStrategyFilterRow} role="group" aria-label="Filter by position status">
+                <span className={w9.ledgerStrategyFilterLabel}>Status</span>
+                <div className={w9.ledgerStrategyFilterBubbles}>
                   <button
                     type="button"
-                    className={`replay-bubble-switch-btn ${instStatusFilter === '' ? 'active' : ''}`}
+                    className={bubbleSwitchBtn(instStatusFilter === '')}
                     onClick={() => setInstStatusFilter('')}
                   >
                     All
                   </button>
                   <button
                     type="button"
-                    className={`replay-bubble-switch-btn ${instStatusFilter === 'open' ? 'active' : ''}`}
+                    className={bubbleSwitchBtn(instStatusFilter === 'open')}
                     onClick={() => setInstStatusFilter((prev) => (prev === 'open' ? '' : 'open'))}
                   >
                     Open
                   </button>
                   <button
                     type="button"
-                    className={`replay-bubble-switch-btn ${instStatusFilter === 'closed' ? 'active' : ''}`}
+                    className={bubbleSwitchBtn(instStatusFilter === 'closed')}
                     onClick={() => setInstStatusFilter((prev) => (prev === 'closed' ? '' : 'closed'))}
                   >
                     Closed
@@ -1371,12 +1373,12 @@ export function StrategyInstancesPage({
                 </div>
               </div>
               {instanceFilterOptions.structures.length > 0 && (
-                <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by structure">
-                  <span className="ledger-strategy-filter-label">Structure</span>
-                  <div className="ledger-strategy-filter-bubbles">
+                <div className={w9.ledgerStrategyFilterRow} role="group" aria-label="Filter by structure">
+                  <span className={w9.ledgerStrategyFilterLabel}>Structure</span>
+                  <div className={w9.ledgerStrategyFilterBubbles}>
                     <button
                       type="button"
-                      className={`replay-bubble-switch-btn ${instStructureFilter === '' ? 'active' : ''}`}
+                      className={bubbleSwitchBtn(instStructureFilter === '')}
                       onClick={() => setInstStructureFilter('')}
                     >
                       All
@@ -1385,7 +1387,7 @@ export function StrategyInstancesPage({
                       <button
                         key={s}
                         type="button"
-                        className={`replay-bubble-switch-btn ${instStructureFilter === s ? 'active' : ''}`}
+                        className={bubbleSwitchBtn(instStructureFilter === s)}
                         style={structureColorStyle(s, instStructureFilter === s)}
                         onClick={() => setInstStructureFilter(prev => prev === s ? '' : s)}
                       >
@@ -1396,12 +1398,12 @@ export function StrategyInstancesPage({
                 </div>
               )}
               {instanceFilterOptions.symbols.length > 0 && (
-                <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by symbol">
-                  <span className="ledger-strategy-filter-label">Symbol</span>
-                  <div className="ledger-strategy-filter-bubbles">
+                <div className={w9.ledgerStrategyFilterRow} role="group" aria-label="Filter by symbol">
+                  <span className={w9.ledgerStrategyFilterLabel}>Symbol</span>
+                  <div className={w9.ledgerStrategyFilterBubbles}>
                     <button
                       type="button"
-                      className={`replay-bubble-switch-btn ${instSymbolFilter === '' ? 'active' : ''}`}
+                      className={bubbleSwitchBtn(instSymbolFilter === '')}
                       onClick={() => setInstSymbolFilter('')}
                     >
                       All
@@ -1410,7 +1412,7 @@ export function StrategyInstancesPage({
                       <button
                         key={sym}
                         type="button"
-                        className={`replay-bubble-switch-btn ${instSymbolFilter === sym ? 'active' : ''}`}
+                        className={bubbleSwitchBtn(instSymbolFilter === sym)}
                         onClick={() => setInstSymbolFilter(prev => prev === sym ? '' : sym)}
                       >
                         {sym}
@@ -1420,26 +1422,26 @@ export function StrategyInstancesPage({
                 </div>
               )}
               {instanceFilterOptions.rights.length > 1 && (
-                <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by call or put">
-                  <span className="ledger-strategy-filter-label">Type</span>
-                  <div className="ledger-strategy-filter-bubbles">
+                <div className={w9.ledgerStrategyFilterRow} role="group" aria-label="Filter by call or put">
+                  <span className={w9.ledgerStrategyFilterLabel}>Type</span>
+                  <div className={w9.ledgerStrategyFilterBubbles}>
                     <button
                       type="button"
-                      className={`replay-bubble-switch-btn ${instRightFilter === '' ? 'active' : ''}`}
+                      className={bubbleSwitchBtn(instRightFilter === '')}
                       onClick={() => setInstRightFilter('')}
                     >
                       All
                     </button>
                     <button
                       type="button"
-                      className={`replay-bubble-switch-btn ${instRightFilter === 'C' ? 'active' : ''}`}
+                      className={bubbleSwitchBtn(instRightFilter === 'C')}
                       onClick={() => setInstRightFilter(prev => prev === 'C' ? '' : 'C')}
                     >
                       Call
                     </button>
                     <button
                       type="button"
-                      className={`replay-bubble-switch-btn ${instRightFilter === 'P' ? 'active' : ''}`}
+                      className={bubbleSwitchBtn(instRightFilter === 'P')}
                       onClick={() => setInstRightFilter(prev => prev === 'P' ? '' : 'P')}
                     >
                       Put
@@ -1447,65 +1449,65 @@ export function StrategyInstancesPage({
                   </div>
                 </div>
               )}
-              <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by period start date">
-                <span className="ledger-strategy-filter-label">Since</span>
-                <div className="ledger-strategy-filter-bubbles">
+              <div className={w9.ledgerStrategyFilterRow} role="group" aria-label="Filter by period start date">
+                <span className={w9.ledgerStrategyFilterLabel}>Since</span>
+                <div className={w9.ledgerStrategyFilterBubbles}>
                   <button
                     type="button"
-                    className={`replay-bubble-switch-btn ${instSinceFilter === '' ? 'active' : ''}`}
+                    className={bubbleSwitchBtn(instSinceFilter === '')}
                     onClick={() => setInstSinceFilter('')}
                   >
                     All
                   </button>
                   <button
                     type="button"
-                    className={`replay-bubble-switch-btn ${instSinceFilter === '1m' ? 'active' : ''}`}
+                    className={bubbleSwitchBtn(instSinceFilter === '1m')}
                     onClick={() => setInstSinceFilter(prev => prev === '1m' ? '' : '1m')}
                   >
                     1 month
                   </button>
                   <button
                     type="button"
-                    className={`replay-bubble-switch-btn ${instSinceFilter === 'q' ? 'active' : ''}`}
+                    className={bubbleSwitchBtn(instSinceFilter === 'q')}
                     onClick={() => setInstSinceFilter(prev => prev === 'q' ? '' : 'q')}
                   >
                     Quarter
                   </button>
                   <button
                     type="button"
-                    className={`replay-bubble-switch-btn ${instSinceFilter === 'half' ? 'active' : ''}`}
+                    className={bubbleSwitchBtn(instSinceFilter === 'half')}
                     onClick={() => setInstSinceFilter(prev => prev === 'half' ? '' : 'half')}
                   >
                     Half year
                   </button>
                   <button
                     type="button"
-                    className={`replay-bubble-switch-btn ${instSinceFilter === '1y' ? 'active' : ''}`}
+                    className={bubbleSwitchBtn(instSinceFilter === '1y')}
                     onClick={() => setInstSinceFilter(prev => prev === '1y' ? '' : '1y')}
                   >
                     1 year
                   </button>
                   <button
                     type="button"
-                    className={`replay-bubble-switch-btn ${instSinceFilter === 'ytd' ? 'active' : ''}`}
+                    className={bubbleSwitchBtn(instSinceFilter === 'ytd')}
                     onClick={() => setInstSinceFilter(prev => prev === 'ytd' ? '' : 'ytd')}
                   >
                     YTD
                   </button>
                 </div>
                 {sinceRangeText != null && (
-                  <span className="section-hint" style={{ marginLeft: '0.5rem' }}>
+                  <span className={w9.sectionHint} style={{ marginLeft: '0.5rem' }}>
                     {sinceRangeText}
                   </span>
                 )}
               </div>
               {instanceFilterOptions.expiryMonths.length > 1 && (
-                <div className="ledger-strategy-filter-row" role="group" aria-label="Filter by expiry month">
-                  <span className="ledger-strategy-filter-label">Expiry</span>
-                  <div className="ledger-strategy-filter-bubbles">
+                <div className={w9.ledgerStrategyFilterRow} role="group" aria-label="Filter by expiry month">
+                  <span className={w9.ledgerStrategyFilterLabel}>Expiry</span>
+                  <div className={w9.ledgerStrategyFilterBubbles}>
                     <button
                       type="button"
-                      className={`replay-bubble-switch-btn ${instExpiryFilter === '' ? 'active' : ''}`}
+                      className={bubbleSwitchBtn(instExpiryFilter === '')}
                       onClick={() => setInstExpiryFilter('')}
                     >
                       All
@@ -1514,7 +1516,7 @@ export function StrategyInstancesPage({
                       <button
                         key={m}
                         type="button"
-                        className={`replay-bubble-switch-btn ledger-expiry-month-btn ${instExpiryFilter === m ? 'active' : ''}`}
+                        className={`rl.bubbleSwitchBtn ledger-expiry-month-btn ${instExpiryFilter === m ? rl.bubbleSwitchBtnActive : ''}`}
                         onClick={() => setInstExpiryFilter(prev => prev === m ? '' : m)}
                         title={m}
                       >
@@ -1525,11 +1527,11 @@ export function StrategyInstancesPage({
                 </div>
               )}
               {(instStructureFilter || instSymbolFilter || instRightFilter || instSinceFilter || instExpiryFilter || instStatusFilter) && (
-                <div className="ledger-strategy-filter-meta">
+                <div className={w9.ledgerStrategyFilterMeta}>
                   <span>Showing {filteredItems.length} of {items.length} instances</span>
                   <button
                     type="button"
-                    className="ledger-strategy-filter-clear"
+                    className={w9.ledgerStrategyFilterClear}
                     onClick={() => {
                       setInstStructureFilter('')
                       setInstSymbolFilter('')
@@ -1547,12 +1549,12 @@ export function StrategyInstancesPage({
           )}
           {items.length > 0 && groupedItems.length > 0 && (
             <div className="instance-list-symbol-toolbar">
-              <div className="instance-sheet-filter-bubble-row">
-                <span className="instance-sheet-filter-bubble-label" id="instance-list-detail-view-label">
+              <div className={w9.instanceSheetFilterBubbleRow}>
+                <span className={w9.instanceSheetFilterBubbleLabel} id="instance-list-detail-view-label">
                   Detail view
                 </span>
                 <div
-                  className="replay-bubble-switch"
+                  className={rl.bubbleSwitch}
                   role="radiogroup"
                   aria-labelledby="instance-list-detail-view-label"
                 >
@@ -1560,7 +1562,7 @@ export function StrategyInstancesPage({
                     type="button"
                     role="radio"
                     aria-checked={symbolGroupAccordionMode}
-                    className={`replay-bubble-switch-btn ${symbolGroupAccordionMode ? 'active' : ''}`}
+                    className={bubbleSwitchBtn(symbolGroupAccordionMode)}
                     onClick={() => setSymbolGroupAccordionMode(true)}
                   >
                     Accordion
@@ -1569,25 +1571,25 @@ export function StrategyInstancesPage({
                     type="button"
                     role="radio"
                     aria-checked={!symbolGroupAccordionMode}
-                    className={`replay-bubble-switch-btn ${!symbolGroupAccordionMode ? 'active' : ''}`}
+                    className={bubbleSwitchBtn(!symbolGroupAccordionMode)}
                     onClick={() => setSymbolGroupAccordionMode(false)}
                   >
                     Multi
                   </button>
                 </div>
               </div>
-              <div className="instance-sheet-filter-bubble-row">
-                <span className="instance-sheet-filter-bubble-label" id="instance-list-symbol-groups-label">
+              <div className={w9.instanceSheetFilterBubbleRow}>
+                <span className={w9.instanceSheetFilterBubbleLabel} id="instance-list-symbol-groups-label">
                   Symbol groups
                 </span>
                 <div
-                  className="replay-bubble-switch"
+                  className={rl.bubbleSwitch}
                   role="group"
                   aria-labelledby="instance-list-symbol-groups-label"
                 >
                   <button
                     type="button"
-                    className="replay-bubble-switch-btn"
+                    className={rl.bubbleSwitchBtn}
                     onClick={expandAllSymbolGroups}
                     aria-label="Expand all symbol groups"
                   >
@@ -1595,7 +1597,7 @@ export function StrategyInstancesPage({
                   </button>
                   <button
                     type="button"
-                    className="replay-bubble-switch-btn"
+                    className={rl.bubbleSwitchBtn}
                     onClick={collapseAllSymbolGroups}
                     aria-label="Collapse all symbol groups"
                   >
@@ -1603,7 +1605,7 @@ export function StrategyInstancesPage({
                   </button>
                 </div>
               </div>
-              <p className="section-hint instance-list-symbol-toolbar-hint">
+              <p className={cn(w9.sectionHint, w9.instanceListSymbolToolbarHint)}>
                 {symbolGroupAccordionMode
                   ? 'Accordion: only one symbol group expanded at a time. Expand all keeps the first group open.'
                   : 'Multi: several symbol groups may stay expanded.'}
@@ -1771,9 +1773,9 @@ export function StrategyInstancesPage({
               It will fail if any executions are linked to this instance.
             </p>
             {confirmDelete.error != null && (
-              <p className="section-hint replay-form-error" style={{ marginBottom: '0.75rem' }}>{confirmDelete.error}</p>
+              <p className={rl.formError} style={{ marginBottom: '0.75rem' }}>{confirmDelete.error}</p>
             )}
-            <div className="replay-exec-form-actions" style={{ justifyContent: 'flex-end' }}>
+            <div className={rl.execFormActions} style={{ justifyContent: 'flex-end' }}>
               <Button
                 type="button"
                 variant="secondary"
@@ -1803,14 +1805,14 @@ export function StrategyInstancesPage({
           aria-modal="true"
           aria-labelledby="create-instance-modal-title"
         >
-          <div className="modal-panel replay-exec-modal create-instance-modal" onClick={e => e.stopPropagation()}>
+          <div className={rl.execModal} onClick={e => e.stopPropagation()}>
             <h3 id="create-instance-modal-title" className="create-instance-modal-title">Create strategy instance</h3>
             {createError != null && (
-              <p className="section-hint replay-form-error create-instance-modal-error">{createError}</p>
+              <p className={rl.formError}>{createError}</p>
             )}
-            <form className="replay-exec-form create-instance-form" onSubmit={handleCreateSubmit}>
+            <form className={rl.execForm} onSubmit={handleCreateSubmit}>
               <section className="create-instance-section">
-                <div className="replay-exec-form-row">
+                <div className={rl.execFormRow}>
                   <label>Opportunity</label>
                   <select
                     value={createOpportunityId === '' ? '' : String(createOpportunityId)}
@@ -1827,7 +1829,7 @@ export function StrategyInstancesPage({
                     ))}
                   </select>
                 </div>
-                <div className="replay-exec-form-row create-instance-account-row">
+                <div className={rl.execFormRow}>
                   <label>Account</label>
                   <div className="create-instance-account-wrap">
                     {eventAccounts.length === 0 ? (
@@ -1852,7 +1854,7 @@ export function StrategyInstancesPage({
                     )}
                   </div>
                 </div>
-                <div className="replay-exec-form-row">
+                <div className={rl.execFormRow}>
                   <label>Opened at</label>
                   <input
                     type="date"
@@ -1865,7 +1867,7 @@ export function StrategyInstancesPage({
                 </div>
               </section>
               <section className="create-instance-section create-instance-section-optional">
-                <div className="replay-exec-form-row">
+                <div className={rl.execFormRow}>
                   <label>Label (optional)</label>
                   <input
                     type="text"
@@ -1875,7 +1877,7 @@ export function StrategyInstancesPage({
                     className="create-instance-input"
                   />
                 </div>
-                <div className="replay-exec-form-row">
+                <div className={rl.execFormRow}>
                   <label>Notes (optional)</label>
                   <input
                     type="text"
@@ -1886,7 +1888,7 @@ export function StrategyInstancesPage({
                   />
                 </div>
               </section>
-              <div className="replay-exec-form-actions create-instance-actions">
+              <div className={rl.execFormActions}>
                 <Button
                   type="button"
                   variant="secondary"

@@ -1,3 +1,5 @@
+import { rl } from '@/lib/replayLayout'
+import { w9 } from '@/styles/wave9Classes'
 import type { StatusResponse } from '../types'
 import { IbEventSubscribePanel } from './status/panels/IbEventSubscribePanel'
 import { SettingsPageCard } from './settings/SettingsPageCard'
@@ -16,8 +18,8 @@ export function IbEventSubscribePage({ status, loadStatus, embeddedInSettings }:
       embedded={embeddedInSettings}
       className={embeddedInSettings ? 'daemon-status-page daemon-status-page--embedded' : 'daemon-status-page'}
     >
-      <SettingsPageGroups className="daemon-groups">
-        <section className="replay-section" aria-label="IB Event Subscribe">
+      <SettingsPageGroups className={w9.daemonGroups}>
+        <section className={rl.section} aria-label="IB Event Subscribe">
           <IbEventSubscribePanel status={status} loadStatus={loadStatus} />
         </section>
       </SettingsPageGroups>

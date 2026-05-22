@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { w9 } from '@/styles/wave9Classes'
+import { cn } from '@/lib/utils'
 import type { StrategyInstance, StatusResponse, Execution, PerformanceResponse, OptionStockLinkSummary } from '../types'
 import type { StrategyStructure } from '../api'
 import { fetchStrategyInstance, fetchPerformance, fetchExecutions, fetchStructure } from '../api'
@@ -327,7 +329,7 @@ export function StrategyInstanceDetailPage({
           )}
 
           {riskProfile && (
-            <section className="detail-block risk-profile-section instance-detail-risk">
+            <section className={cn(w9.riskProfileSection, 'detail-block', 'instance-detail-risk')}>
               <h3 className="instance-detail-section-title">Risk profile (at expiration)</h3>
               <RiskProfileDl profile={riskProfile} fmtUsd={fmtUsd} />
               {riskProfile.naked_short_call_contracts > 0 && (
