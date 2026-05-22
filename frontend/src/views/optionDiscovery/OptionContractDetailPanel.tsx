@@ -1,6 +1,16 @@
 import { bsComputeDetail } from '../../utils/bsCalc'
 import type { GreeksCoverageResponse, LiquiditySummaryResponse, RelativeValueResponse, OptionSnapshotRow } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
+import { Button } from '@/components/ui/button'
+
+const odPanelHeaderCls =
+  'flex flex-wrap items-center gap-2 border-b border-border bg-[var(--color-bg)] px-3 py-2'
+const odPanelTitleCls = 'm-0 min-w-0 flex-1 text-[0.95rem] font-bold text-[var(--color-text)]'
+const odPanelExpiryCls = 'text-[0.8rem] font-normal text-[var(--color-text-muted)]'
+const odPanelDelayedCls = 'text-[0.7rem] font-semibold whitespace-nowrap text-[#d29922]'
+const odPanelSectionCls = 'border-t border-border p-3'
+const odPanelSectionTitleCls =
+  'm-0 mb-[0.65rem] text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]'
 import { fmtUsd } from '../../utils/format'
 import { OptionDiscoveryContractChartPanel } from './OptionDiscoveryContractChartPanel'
 import { IvSmileChart, IvSmileLegend } from './OptionDiscoveryAnalytics'
@@ -70,11 +80,11 @@ export function OptionContractDetailPanel({
       )}
 
       <div className="od-contract-detail od-contract-detail--drawer" aria-label="Contract detail">
-        <div className="od-detail-header">
-          <h3 className="od-detail-title">
+        <div className={odPanelHeaderCls}>
+          <h3 className={odPanelTitleCls}>
             {symbol}{' '}
             {selectedRow.right === 'C' ? 'Call' : 'Put'} {selectedRow.strike.toFixed(2)}
-            <span className="od-detail-expiry">
+            <span className={odPanelExpiryCls}>
               {expiration} · {expirationDaysFromToday(expiration)} DTE
             </span>{' '}
             <span className={`od-moneyness-badge od-moneyness-badge--${selectedDerived.moneynessLabel.toLowerCase()}`}>
@@ -83,7 +93,7 @@ export function OptionContractDetailPanel({
           </h3>
           <button
             type="button"
-            className="section-header-icon-btn od-detail-action-icon-btn"
+            className="section-header-icon-btn"
             onClick={() => void onAddToWatchlist()}
             aria-label={`Add ${selectedRow.right === 'C' ? 'Call' : 'Put'} ${selectedRow.strike} to Watchlist`}
             title={`Add ${selectedRow.right === 'C' ? 'Call' : 'Put'} ${selectedRow.strike} to Watchlist`}
@@ -95,7 +105,7 @@ export function OptionContractDetailPanel({
           </button>
           <button
             type="button"
-            className="section-header-icon-btn od-detail-action-icon-btn"
+            className="section-header-icon-btn"
             onClick={onAddToCompare}
             aria-label="Add current contract to compare"
             title="Add current contract to compare"
@@ -108,15 +118,22 @@ export function OptionContractDetailPanel({
               <path d="M9 17h6" />
             </svg>
           </button>
-          <span className="od-detail-delayed">Massive · 15 min delayed</span>
-          <button type="button" className="od-detail-close" onClick={onClose} aria-label="Close contract detail">
+          <span className={odPanelDelayedCls}>Massive · 15 min delayed</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0 text-muted-foreground"
+            onClick={onClose}
+            aria-label="Close contract detail"
+          >
             ✕
-          </button>
+          </Button>
         </div>
 
-        <div className="od-contract-detail-stack">
-          <section className="od-detail-section" aria-labelledby="od-contract-sec-overview">
-            <h4 id="od-contract-sec-overview" className="od-detail-section-title">
+        <div className="od-contract-detail-stack [&>:first-child]:border-t-0">
+          <section className={odPanelSectionCls} aria-labelledby="od-contract-sec-overview">
+            <h4 id="od-contract-sec-overview" className={odPanelSectionTitleCls}>
               Overview
             </h4>
             <div>
@@ -345,8 +362,8 @@ export function OptionContractDetailPanel({
             else if (selectedRow.day_close != null) mktSrc = 'day_close'
 
             return (
-              <section className="od-detail-section od-bs-compare" aria-labelledby="od-contract-sec-bs">
-                <h4 id="od-contract-sec-bs" className="od-detail-section-title">
+              <section className={`${odPanelSectionCls} od-bs-compare`} aria-labelledby="od-contract-sec-bs">
+                <h4 id="od-contract-sec-bs" className={odPanelSectionTitleCls}>
                   BS vs Snapshot
                   <span className="od-bs-compare__note"> · Black-Scholes 欧式近似（美式期权，ATM 误差通常 &lt;3%）</span>
                 </h4>
@@ -421,11 +438,11 @@ export function OptionContractDetailPanel({
             )
           })()}
 
-          <section className="od-detail-section" aria-labelledby="od-contract-sec-chart">
-            <h4 id="od-contract-sec-chart" className="od-detail-section-title">
+          <section className={odPanelSectionCls} aria-labelledby="od-contract-sec-chart">
+            <h4 id="od-contract-sec-chart" className={odPanelSectionTitleCls}>
               Chart (K-line)
             </h4>
-            <p className="section-hint od-detail-chart-hint" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
+            <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
               OHLC below uses contract history. If the chart is empty, click Backfill from Massive (Celery worker on the massive queue required).
             </p>
             <OptionDiscoveryContractChartPanel
@@ -459,8 +476,8 @@ export function OptionContractDetailPanel({
               spreadPercentile = (rank / spreadRows.length) * 100
             }
             return (
-              <section className="od-detail-section" aria-labelledby="od-contract-sec-liquidity">
-                <h4 id="od-contract-sec-liquidity" className="od-detail-section-title">
+              <section className={odPanelSectionCls} aria-labelledby="od-contract-sec-liquidity">
+                <h4 id="od-contract-sec-liquidity" className={odPanelSectionTitleCls}>
                   Liquidity
                 </h4>
                 {liquidityLoading && <p className="section-hint">Loading liquidity data…</p>}
@@ -594,8 +611,8 @@ export function OptionContractDetailPanel({
             const scenarios = computeScenarios(selectedRow, underlyingPrice)
             const hasGreeks = selectedRow.delta != null && Number.isFinite(selectedRow.delta!)
             return (
-              <section className="od-detail-section" aria-labelledby="od-contract-sec-risk">
-                <h4 id="od-contract-sec-risk" className="od-detail-section-title">
+              <section className={odPanelSectionCls} aria-labelledby="od-contract-sec-risk">
+                <h4 id="od-contract-sec-risk" className={odPanelSectionTitleCls}>
                   Risk
                 </h4>
                 {!hasGreeks && (
@@ -671,8 +688,8 @@ export function OptionContractDetailPanel({
             const rvCount = hasServer ? serverRelativeValue!.contracts_compared : clientRv.neighborCount
             const sameRight = snapshotRows.filter(r => r.right === selectedRow.right && r.iv != null && Number.isFinite(r.iv!))
             return (
-              <section className="od-detail-section" aria-labelledby="od-contract-sec-relative">
-                <h4 id="od-contract-sec-relative" className="od-detail-section-title">
+              <section className={odPanelSectionCls} aria-labelledby="od-contract-sec-relative">
+                <h4 id="od-contract-sec-relative" className={odPanelSectionTitleCls}>
                   Relative Value
                 </h4>
                 <div className="od-card-grid">

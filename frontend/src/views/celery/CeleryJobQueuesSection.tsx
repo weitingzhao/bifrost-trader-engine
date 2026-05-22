@@ -32,6 +32,10 @@ import {
   CeleryQueueRefreshIcon,
   CeleryQueueTrashIcon,
 } from './celeryBulkDeleteIcons'
+import { Button } from '@/components/ui/button'
+
+const CELERY_SECTION_TITLE =
+  'm-0 inline-flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground'
 
 type StatusFilter = 'all' | 'pending' | 'running' | 'done' | 'failed'
 
@@ -576,7 +580,7 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
   return (
     <section className="replay-section dashboard-section dashboard-celery-queues" aria-labelledby="celery-queues-head">
       <div className="celery-queues-header">
-        <h3 id="celery-queues-head" className="page-title-with-tooltip" style={{ margin: 0 }}>
+        <h3 id="celery-queues-head" className={CELERY_SECTION_TITLE}>
           Queues
           <InfoTooltip text="Queue summary (above main tabs) shows all queues. Tabs follow ops.worker_profiles (GET /ops/workers/profiles). Each tab lists PostgreSQL jobs for that Celery queue: stocks_ib → job_bars_backfill; Polygon/Massive queues → job_massive_backfill filtered by routing. Bulk delete icons: pending (clock), running (worker), done (trash), failed (circle with X). With Failed filter, the circular-arrow icon resets up to 500 oldest failed rows to pending and re-queues Celery. Per-row Retry appears for failed jobs. When Status is not All, only the icon for the current filter is shown. Trim applies to row age by ID." />
         </h3>
@@ -819,15 +823,16 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
                     </td>
                     <td>
                       {(row.status || '').toLowerCase() === 'failed' ? (
-                        <button
+                        <Button
                           type="button"
-                          className="btn btn-secondary btn-sm"
+                          variant="secondary"
+                          size="sm"
                           disabled={retryingJobId !== null}
                           aria-label={`Retry job ${row.job_id}`}
                           onClick={() => void retryOneJob(row.job_id)}
                         >
                           {retryingJobId === row.job_id ? '…' : 'Retry'}
-                        </button>
+                        </Button>
                       ) : (
                         '—'
                       )}
@@ -880,15 +885,16 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
                     <td>{row.updated_ts != null ? fmtTs(row.updated_ts) : '—'}</td>
                     <td>
                       {(row.status || '').toLowerCase() === 'failed' ? (
-                        <button
+                        <Button
                           type="button"
-                          className="btn btn-secondary btn-sm"
+                          variant="secondary"
+                          size="sm"
                           disabled={retryingJobId !== null}
                           aria-label={`Retry job ${row.job_id}`}
                           onClick={() => void retryOneJob(String(row.job_id))}
                         >
                           {retryingJobId === String(row.job_id) ? '…' : 'Retry'}
-                        </button>
+                        </Button>
                       ) : (
                         '—'
                       )}
@@ -909,12 +915,12 @@ export const CeleryJobQueuesSection = forwardRef<CeleryJobQueuesSectionHandle, C
             </h4>
             <p className="celery-queue-confirm-message">{confirm.message}</p>
             <div className="celery-queue-confirm-actions">
-              <button type="button" className="btn btn-secondary" disabled={confirm.confirming} onClick={() => setConfirm(null)}>
+              <Button type="button" variant="secondary" disabled={confirm.confirming} onClick={() => setConfirm(null)}>
                 Cancel
-              </button>
-              <button type="button" className="btn btn-danger" disabled={confirm.confirming} onClick={() => void runConfirm()}>
+              </Button>
+              <Button type="button" variant="destructive" disabled={confirm.confirming} onClick={() => void runConfirm()}>
                 {confirm.confirming ? '…' : (confirm.confirmLabel ?? 'Confirm')}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

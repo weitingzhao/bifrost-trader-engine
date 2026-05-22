@@ -1,4 +1,11 @@
 import { Fragment } from 'react'
+import { Button } from '@/components/ui/button'
+import {
+  optContractInspectorBtnClass,
+  stockSymbolInspectorBtnClass,
+  stockSymbolInspectorBtnCompactClass,
+} from '@/components/shared/exec-row-buttons'
+import { cn } from '@/lib/utils'
 import type { Execution, RealtimeQuote } from '../../types'
 import type { InstanceAllGroup, LivePositionRow, OpenOptionPosition, StockCoverageItem } from '../portfolio/types'
 import type { StrategyOpportunity } from '../../api/strategy/strategies'
@@ -216,13 +223,14 @@ export function PositionInstanceTab({
         </div>
       </div>
       {(filter.structureType !== 'all' || filter.scopeType !== 'all' || filter.oppName !== 'all' || filter.attributionType !== 'all') && (
-        <button
+        <Button
           type="button"
-          className="btn btn-secondary btn-small"
+          variant="secondary"
+          size="sm"
           onClick={() => { filter.onStructureTypeChange('all'); filter.onScopeTypeChange('all'); filter.onOppNameChange('all'); filter.onAttributionTypeChange('all') }}
         >
           Clear Filters
-        </button>
+        </Button>
       )}
     </div>
     {sortedGroups.length === 0 ? (
@@ -280,7 +288,7 @@ export function PositionInstanceTab({
                           {i > 0 ? <span className="instance-sheet-symbols-sep" aria-hidden>, </span> : null}
                           <button
                             type="button"
-                            className="riv-stock-symbol-btn riv-stock-symbol-btn--compact"
+                            className={cn(stockSymbolInspectorBtnClass, stockSymbolInspectorBtnCompactClass)}
                             onClick={e => {
                               e.stopPropagation()
                               actions.tryOpenStock(t, defaultAccForScope)
@@ -475,7 +483,7 @@ export function PositionInstanceTab({
                                           return p.symbol ? (
                                             <button
                                               type="button"
-                                              className="riv-opt-contract-btn"
+                                              className={optContractInspectorBtnClass}
                                               onClick={e => {
                                                 e.stopPropagation()
                                                 actions.openOptionInspector(pos)
@@ -488,7 +496,7 @@ export function PositionInstanceTab({
                                           ) : (
                                             <button
                                               type="button"
-                                              className="riv-opt-contract-btn"
+                                              className={optContractInspectorBtnClass}
                                               onClick={e => {
                                                 e.stopPropagation()
                                                 actions.openOptionInspector(pos)
@@ -700,7 +708,7 @@ export function PositionInstanceTab({
                                       <td>
                                         <button
                                           type="button"
-                                          className="riv-stock-symbol-btn"
+                                          className={stockSymbolInspectorBtnClass}
                                           onClick={() => actions.tryOpenStock(sc.symbol, acct || '')}
                                           aria-label={`Stock details for ${sc.symbol} in account ${acct || '—'}`}
                                         >

@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button'
 import type { OptionStockLinkRow } from '../../types'
 import { fmtTradeDate, fmtUsd } from '../../utils/format'
 
@@ -81,9 +82,9 @@ export function ViewOptionStockLinksModal({
           </div>
         )}
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--space-4)' }}>
-          <button type="button" className="btn btn-secondary" onClick={onClose}>
+          <Button type="button" variant="secondary" onClick={onClose}>
             Close
-          </button>
+          </Button>
         </div>
       </div>
     </div>

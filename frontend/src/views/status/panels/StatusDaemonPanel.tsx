@@ -3,6 +3,8 @@ import type { DaemonHeartbeat, StatusResponse } from '../../../types'
 import { fmtTs } from '../../../utils/format'
 import { ingestRedisHealthLamp } from '../../../utils/socketIngestLamp'
 import { ingestLampToBrokerRowLamp } from '../daemonIbBrokerLamp'
+import type { LampTone } from '@/components/shared/lamp-indicator'
+import { SettingsTitleLamp } from '../../settings/SettingsTitleLamp'
 
 type Lamp = 'green' | 'yellow' | 'red' | 'none'
 
@@ -15,14 +17,9 @@ const ACTIVITY_LAMP_SVG = (
 
 export function IbBrokerServiceLamp({ lamp, title }: { lamp: Lamp; title: string }) {
   return (
-    <span
-      className={`title-inline-lamp lamp-icon ib-broker-service-lamp ${lamp}`}
-      title={title}
-      role="img"
-      aria-label={title}
-    >
-      {ACTIVITY_LAMP_SVG}
-    </span>
+    <SettingsTitleLamp lamp={lamp as LampTone} title={title}>
+      <span className="ib-broker-service-lamp">{ACTIVITY_LAMP_SVG}</span>
+    </SettingsTitleLamp>
   )
 }
 
@@ -71,10 +68,10 @@ export function StatusDaemonPanel({
       <div className="daemon-header">
         <div className="daemon-header-main daemon-header-with-lamp">
           <div>
-            <h3 id="daemon-panel-head" className="page-title-with-tooltip">
-              <span className={`title-inline-lamp lamp-icon ${daemonLamp}`} title="Daemon status lamp" aria-hidden>
+            <h3 id="daemon-panel-head" className="daemon-card-title inline-flex flex-wrap items-center gap-2 m-0">
+              <SettingsTitleLamp lamp={daemonLamp as LampTone} title="Daemon status lamp">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden><path d="M8 5v14l11-7L8 5z" /></svg>
-              </span>
+              </SettingsTitleLamp>
               Strategy Trading Daemon
             </h3>
             <div>
@@ -88,9 +85,9 @@ export function StatusDaemonPanel({
       <div className="daemon-groups daemon-groups-layout">
           <div className="daemon-group daemon-group-heartbeat">
           <div className="daemon-group-header">
-            <span className={`title-inline-lamp lamp-icon ${heartbeatGroupLamp}`} title="Heartbeat status" aria-hidden>
+            <SettingsTitleLamp lamp={heartbeatGroupLamp as LampTone} title="Heartbeat status">
               {ACTIVITY_LAMP_SVG}
-            </span>
+            </SettingsTitleLamp>
             <span className="daemon-group-title">Heartbeat</span>
           </div>
           <div className="daemon-group-body">
@@ -112,9 +109,9 @@ export function StatusDaemonPanel({
         </div>
         <div className="daemon-group daemon-group-ib">
           <div className="daemon-group-header">
-            <span className={`title-inline-lamp lamp-icon ${ibGroupLamp}`} title={ibGroupTitle} aria-hidden>
+            <SettingsTitleLamp lamp={ibGroupLamp as LampTone} title={ibGroupTitle}>
               {ACTIVITY_LAMP_SVG}
-            </span>
+            </SettingsTitleLamp>
             <span className="daemon-group-title">IB broker</span>
           </div>
           <div className="daemon-group-body">

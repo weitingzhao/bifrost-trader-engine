@@ -9,7 +9,11 @@ import {
   type MassiveStatusResponse,
   type MarketHolidayRow,
 } from '../api'
+import { PageSection } from '@/components/shared/page-section'
+import { Button } from '@/components/ui/button'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { SECTION_TITLE_CLASS } from '../components/SectionPageTitle'
+import { SettingsCoverageTitle } from './settings/SettingsCoverageTitle'
 import { MassiveDelayDbRefJobsBar } from './massive/MassiveDelayDbRefJobsBar'
 import { MassiveRefJobSessionProvider } from './massive/MassiveRefJobSessionContext'
 import { MassiveStockOhlcDbEnqueueBlock } from './massive/MassiveStockOhlcDbEnqueueBlock'
@@ -111,51 +115,28 @@ export function MassiveStockCoveragePage({ status }: MassiveStockCoveragePagePro
   const configured = Boolean(massiveStatus?.configured)
 
   return (
-    <div className="card process-section market-data-page market-data-page--settings-embed">
-      <h2 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-        <button
-          type="button"
-          className="page-title-breadcrumb-link"
-          onClick={() => { window.location.hash = '#settings-heartbeat' }}
-          aria-label="Go to Settings"
-        >
-          Settings
-        </button>
-        {' / '}
-        <button
-          type="button"
-          className="page-title-breadcrumb-link"
-          onClick={() => { window.location.hash = '#coverage-stock' }}
-          aria-label="Go to Stock coverage (IB Live)"
-        >
-          Stock
-        </button>
-        {' / '}
-        Massive Delay (DB)
-        <InfoTooltip text="Massive (Polygon) stocks: REST and synced reference data are delayed per vendor plan (~15 minutes). For realtime watchlist history and EOD bar pulls, use Data Coverage → Stock → IB Live (Redis)." />
+    <PageSection className="market-data-page market-data-page--settings-embed">
+      <SettingsCoverageTitle
+        groupLabel="Stock"
+        groupHash="#coverage-stock"
+        pageTitle="Massive Delay (DB)"
+        infoText="Massive (Polygon) stocks: REST and synced reference data are delayed per vendor plan (~15 minutes). For realtime watchlist history and EOD bar pulls, use Data Coverage → Stock → IB Live (Redis)."
+      >
         {configured && (
           <span className="feed-massive-delay-pill" title={massiveStatus?.delay_notice} style={{ marginLeft: 'var(--space-2)' }}>
             Delayed feed
           </span>
         )}
-      </h2>
+      </SettingsCoverageTitle>
 
       <section className="replay-section" aria-label="Massive stocks overview">
         <div style={{ marginBottom: 'var(--space-4)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => { window.location.hash = '#coverage-stock' }}
-          >
+          <Button type="button" variant="secondary" onClick={() => { window.location.hash = '#coverage-stock' }}>
             IB Live (Redis)
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => { window.location.hash = '#feed-massive-stock' }}
-          >
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => { window.location.hash = '#feed-massive-stock' }}>
             Massive Stock (API checklist)
-          </button>
+          </Button>
         </div>
       </section>
 
@@ -168,7 +149,7 @@ export function MassiveStockCoveragePage({ status }: MassiveStockCoveragePagePro
       <section className="replay-section" aria-labelledby="massive-stock-coverage-refdb-title">
         <MassiveRefJobSessionProvider>
           <div className="massive-delay-ref-heading">
-            <h3 id="massive-stock-coverage-refdb-title" className="page-title-with-tooltip massive-delay-ref-heading-title">
+            <h3 id="massive-stock-coverage-refdb-title" className={`${SECTION_TITLE_CLASS} massive-delay-ref-heading-title`}>
               Reference (PostgreSQL)
               <InfoTooltip text="All reference sync and verification is coordinated through Jobs: ticker_reference_* tasks and feed_stocks_aggregate on stocks_massive / stocks_massive_high." />
             </h3>
@@ -272,6 +253,6 @@ export function MassiveStockCoveragePage({ status }: MassiveStockCoveragePagePro
           </div>
         </MassiveRefJobSessionProvider>
       </section>
-    </div>
+    </PageSection>
   )
 }

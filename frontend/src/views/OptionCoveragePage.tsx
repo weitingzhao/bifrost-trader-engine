@@ -16,7 +16,11 @@ import type {
   OptionSnapshotRow,
   GreeksCoverageResponse,
 } from '../api'
+import { PageSection } from '@/components/shared/page-section'
+import { Button } from '@/components/ui/button'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { SECTION_TITLE_CLASS } from '../components/SectionPageTitle'
+import { SettingsCoverageTitle } from './settings/SettingsCoverageTitle'
 import { DailyDataChecklistSection } from './massive/DailyDataChecklistSection'
 import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
 import { COVERAGE_OVERVIEW_SUBSECTION } from './settings/settingsConstants'
@@ -333,23 +337,14 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
         : 'Loaded rows have no IV/greeks — provider may omit them for these contracts.'
 
   return (
-    <div className="card process-section market-data-page market-data-page--settings-embed">
-      <h2 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-        <button
-          type="button"
-          className="page-title-breadcrumb-link"
-          onClick={() => { window.location.hash = '#settings-heartbeat' }}
-          aria-label="Go to Settings"
-        >
-          Settings
-        </button>
-        {' / '}
-        Option Coverage
-        <InfoTooltip text="Daily option pipeline status, then Greeks/IV and coverage metrics from Massive snapshot endpoints. Massive data is delayed (~15 minutes). Chain snapshots persist to PostgreSQL; contract and unified return data without writing." />
-      </h2>
+    <PageSection className="market-data-page market-data-page--settings-embed">
+      <SettingsCoverageTitle
+        pageTitle="Option Coverage"
+        infoText="Daily option pipeline status, then Greeks/IV and coverage metrics from Massive snapshot endpoints. Massive data is delayed (~15 minutes). Chain snapshots persist to PostgreSQL; contract and unified return data without writing."
+      />
 
       <section className="replay-section" aria-labelledby="option-coverage-pipeline-head">
-        <h3 id="option-coverage-pipeline-head" className="page-title-with-tooltip">
+        <h3 id="option-coverage-pipeline-head" className={SECTION_TITLE_CLASS}>
           Research tables (PostgreSQL)
           <InfoTooltip text="Distinct symbol counts and freshness for option research and shared stock_day. Full table with domains is on Data Overview." />
         </h3>
@@ -357,27 +352,28 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
           Screener and Greeks tooling read option_contracts, option_snapshots, report_option_atm_iv_daily, and stock_day. Refresh Daily Data Status below to reload the snapshot line after sync jobs.
         </p>
         <OptionCoverageDbSummaryInline refreshKey={dbSummaryRefreshKey} />
-        <button
+        <Button
           type="button"
-          className="btn btn-secondary btn-sm"
+          variant="secondary"
+          size="sm"
           style={{ marginBottom: 'var(--space-3)' }}
           onClick={() => { window.location.hash = `#${COVERAGE_OVERVIEW_SUBSECTION.id}` }}
         >
           Open Data Overview
-        </button>
+        </Button>
       </section>
 
       <DailyDataChecklistSection configured={Boolean(configured)} onChecklistRefreshed={onDailyChecklistRefreshed} />
 
       <section className="replay-section" aria-labelledby="option-coverage-greeks-head">
-        <h3 id="option-coverage-greeks-head" className="page-title-with-tooltip">
+        <h3 id="option-coverage-greeks-head" className={SECTION_TITLE_CLASS}>
           Greeks / IV
           <InfoTooltip text="Implied volatility, delta, gamma, theta, vega, and open interest from Massive snapshot endpoints. Coverage and freshness metrics quantify data quality." />
         </h3>
         <div style={{ marginBottom: 'var(--space-3)' }}>
-          <button type="button" className="btn btn-secondary" disabled={verifyLoading} onClick={() => runGreeksSample()}>
+          <Button type="button" variant="secondary" disabled={verifyLoading} onClick={() => runGreeksSample()}>
             {verifyLoading ? 'Loading\u2026' : 'Load sample (NVDA)'}
-          </button>
+          </Button>
           {greeksQuality ? (
             <span style={{ marginLeft: 'var(--space-3)', fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)' }}>
               {greeksEvidence}
@@ -421,12 +417,12 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
                   </label>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-primary" disabled={gkChainBusy || !configured} onClick={() => runGkChainSnapshot()}>
+                  <Button type="button" disabled={gkChainBusy || !configured} onClick={() => runGkChainSnapshot()}>
                     {gkChainBusy ? 'Running\u2026' : 'Enqueue Chain Snapshot'}
-                  </button>
-                  <button type="button" className="btn btn-secondary" disabled={gkCoverageBusy || !gkChainSymbol.trim()} onClick={() => loadGkCoverage(gkChainSymbol)} style={{ marginLeft: 'var(--space-2)' }}>
+                  </Button>
+                  <Button type="button" variant="secondary" disabled={gkCoverageBusy || !gkChainSymbol.trim()} onClick={() => loadGkCoverage(gkChainSymbol)} style={{ marginLeft: 'var(--space-2)' }}>
                     {gkCoverageBusy ? 'Loading\u2026' : 'Check Coverage'}
-                  </button>
+                  </Button>
                 </div>
                 {gkChainErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{gkChainErr}</p> : null}
                 {gkCoverageBusy ? <p style={{ marginTop: 'var(--space-3)', fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)' }}>Loading coverage stats…</p> : null}
@@ -467,9 +463,9 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
                   </label>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-primary" disabled={gkContractBusy || !configured} onClick={() => runGkContractSnapshot()}>
+                  <Button type="button" disabled={gkContractBusy || !configured} onClick={() => runGkContractSnapshot()}>
                     {gkContractBusy ? 'Running\u2026' : 'Enqueue Contract Snapshot'}
-                  </button>
+                  </Button>
                 </div>
                 {gkContractErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{gkContractErr}</p> : null}
                 {gkContractResult && (
@@ -520,9 +516,9 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
                     <span className="form-label">Strikes (CSV)</span>
                     <input className="form-input" value={verifyStrikes} onChange={e => setVerifyStrikes(e.target.value)} disabled={verifyLoading} placeholder="Optional" />
                   </label>
-                  <button type="button" className="btn btn-primary" disabled={verifyLoading} onClick={() => runVerify()}>
+                  <Button type="button" disabled={verifyLoading} onClick={() => runVerify()}>
                     {verifyLoading ? 'Loading\u2026' : 'Load'}
-                  </button>
+                  </Button>
                 </div>
                 {verifyUnderlying != null && (
                   <div className="feed-massive-verify-meta">Underlying (row / fallback): <strong>{verifyUnderlying.toFixed(2)}</strong></div>
@@ -591,9 +587,9 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
                   </label>
                 </div>
                 <div style={{ marginTop: 'var(--space-3)' }}>
-                  <button type="button" className="btn btn-primary" disabled={gkUnifiedBusy || !configured} onClick={() => runGkUnifiedSnapshot()}>
+                  <Button type="button" disabled={gkUnifiedBusy || !configured} onClick={() => runGkUnifiedSnapshot()}>
                     {gkUnifiedBusy ? 'Running\u2026' : 'Enqueue Unified Snapshot'}
-                  </button>
+                  </Button>
                 </div>
                 {gkUnifiedErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{gkUnifiedErr}</p> : null}
                 {gkUnifiedResult && (
@@ -609,6 +605,6 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
           </div>
         </div>
       </section>
-    </div>
+    </PageSection>
   )
 }

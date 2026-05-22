@@ -2,7 +2,11 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import type { Execution, OpenOrder, PositionCategory, RealtimeQuote, StatusResponse, WatchlistItem } from '../types'
 import { fetchBarsBenchmark, fetchExecutions, fetchMarketStreamsSymbolOrder, fetchOpenOrders, fetchPositionCategories, fetchQuotes, fetchWatchlist, patchPositionCategory, putMarketStreamsSymbolOrder, subscribeQuotes } from '../api'
+import { PageSection } from '@/components/shared/page-section'
+import { Button } from '@/components/ui/button'
+import { BREADCRUMB_LINK_CLASS, SECTION_TITLE_CLASS } from '../components/SectionPageTitle'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { SettingsTitleLamp } from './settings/SettingsTitleLamp'
 import { fmtSince, fmtTs, fmtUsd, fmtUsdRound0, parseOptionContractKey } from '../utils/format'
 import {
   computeAccountSyncLamp,
@@ -1572,19 +1576,18 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
           )}
         </div>
       )}
-      <div className="card card-operations realtime-quotes-card">
+      <PageSection className="card-operations realtime-quotes-card gap-3">
         <div className="realtime-quotes-card-header-row">
           <div className="daemon-header-with-lamp realtime-quotes-card-header-title">
-            <h2 className="daemon-card-title page-title-with-tooltip">
-              <span
-                className={`title-inline-lamp lamp-icon ${marketStreamsOk ? 'green' : 'red'}`}
+            <h2 className={`daemon-card-title ${SECTION_TITLE_CLASS}`}>
+              <SettingsTitleLamp
+                lamp={marketStreamsOk ? 'green' : 'red'}
                 title="Market streams: green when Market API can read Redis quotes and IB ingestor is connected (socket)"
-                aria-hidden
               >
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <path d="M22 12h-4l-3 9L9 3 6 12H2" />
                 </svg>
-              </span>
+              </SettingsTitleLamp>
               Market Streams
               <InfoTooltip
                 text={
@@ -1885,23 +1888,22 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
             </tbody>
           </table>
         </div>
-      </div>
+      </PageSection>
 
-      <div className="card card-operations live-open-watchlist-split">
+      <PageSection className="card-operations live-open-watchlist-split gap-3">
         <div className="live-open-watchlist-split-grid" role="group" aria-label="Watching stocks, Watching options, and open orders">
           <div className="live-watching-stocks-column">
             <div className="live-watching-stocks-pane">
               <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
-                <h2 className="daemon-card-title page-title-with-tooltip">
-                  <span
-                    className={`title-inline-lamp lamp-icon ${marketStreamsOk ? 'green' : 'red'}`}
+                <h2 className={`daemon-card-title ${SECTION_TITLE_CLASS}`}>
+                  <SettingsTitleLamp
+                    lamp={marketStreamsOk ? 'green' : 'red'}
                     title="Quotes: green when Market API can read Redis quotes and IB ingestor is connected (same as Market Streams)."
-                    aria-hidden
                   >
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <path d="M22 12h-4l-3 9L9 3 6 12H2" />
                     </svg>
-                  </span>
+                  </SettingsTitleLamp>
                   Watching Stocks
                   <InfoTooltip text="STK symbols whose Watchlist category is Watching. Stock quotes and daily % match Market Streams; Host/Secondary and position qty/cost are omitted here." />
                 </h2>
@@ -1943,16 +1945,15 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
           <div className="live-watch-right-column">
             <div className="live-watching-options-pane">
               <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
-                <h2 className="daemon-card-title page-title-with-tooltip">
-                  <span
-                    className={`title-inline-lamp lamp-icon ${marketStreamsOk ? 'green' : 'red'}`}
+                <h2 className={`daemon-card-title ${SECTION_TITLE_CLASS}`}>
+                  <SettingsTitleLamp
+                    lamp={marketStreamsOk ? 'green' : 'red'}
                     title="Quotes: green when Market API can read Redis and IB ingestor is connected (OPT quotes via contract_quote_live)."
-                    aria-hidden
                   >
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <path d="M22 12h-4l-3 9L9 3 6 12H2" />
                     </svg>
-                  </span>
+                  </SettingsTitleLamp>
                   Watching Options
                   <InfoTooltip text="Option contracts from Watchlist; quotes from daemon (contract_quote_live). Same quote-path health as Market Streams." />
                 </h2>
@@ -1995,16 +1996,15 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
 
             <div className="live-open-orders-pane">
               <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem', marginTop: 'var(--space-2)' }}>
-                <h2 className="daemon-card-title page-title-with-tooltip">
-                  <span
-                    className={`title-inline-lamp lamp-icon ${openOrdersSectionOk ? 'green' : 'red'}`}
+                <h2 className={`daemon-card-title ${SECTION_TITLE_CLASS}`}>
+                  <SettingsTitleLamp
+                    lamp={openOrdersSectionOk ? 'green' : 'red'}
                     title={`Open orders lamp: green when Account Sync Daemon is healthy (GET /status account_sync_daemon) and heartbeat is fresh. ${accountSyncLamp.title}${openOrdersUpdatedAt != null ? ` · Last UI read (GET /open-orders): ${fmtSince(openOrdersUpdatedAt)} ago.` : ''}`}
-                    aria-hidden
                   >
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
                     </svg>
-                  </span>
+                  </SettingsTitleLamp>
                   Open Orders
                   <InfoTooltip text="Unfilled orders from PostgreSQL (daemon_open_orders). The Account Sync Daemon writes this table from the IB account stream. This page polls GET /open-orders every few seconds for UI updates. Account ID is the IB account that placed each order." />
                 </h2>
@@ -2173,20 +2173,22 @@ export function LivePage({ status, onNavigateToStrategy, onNavigateToSubscribe }
                 </span>
               </span>
               {onNavigateToStrategy && (
-                <button
+                <Button
                   type="button"
-                  className="btn-secondary page-title-breadcrumb-link"
+                  variant="link"
+                  size="sm"
+                  className={BREADCRUMB_LINK_CLASS}
                   onClick={onNavigateToStrategy}
                   aria-label="Manage strategy"
-                  style={{ marginLeft: 'auto', fontSize: '0.72rem', padding: '0.15rem 0.5rem' }}
+                  style={{ marginLeft: 'auto', fontSize: '0.72rem', padding: '0.15rem 0.5rem', height: 'auto' }}
                 >
                   Manage
-                </button>
+                </Button>
               )}
             </div>
           </div>
         </div>
-      </div>
+      </PageSection>
 
     </div>
   )

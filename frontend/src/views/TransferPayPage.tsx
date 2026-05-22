@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import type { StatusResponse, AccountTransaction } from '../types'
 import { getTransactions, postTransactionsFetch } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
-import { SectionPageTitle } from '../components/SectionPageTitle'
+import { PageSection } from '@/components/shared/page-section'
+import { Button } from '@/components/ui/button'
+import { SECTION_TITLE_CLASS, SectionPageTitle } from '../components/SectionPageTitle'
 import { fmtDate, fmtUsd, fmtUsd0 } from '../utils/format'
 
 interface TransferPayPageProps {
@@ -334,7 +336,7 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
   const periodKeys = [...chronologicalKeys].reverse()
 
   return (
-    <div className="card process-section transfer-pay-page">
+    <PageSection className="transfer-pay-page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
         <SectionPageTitle
           id="transfer-pay-head"
@@ -366,16 +368,16 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
               <option value="last_business_day">Last business day</option>
             </select>
           </fieldset>
-          <button
+          <Button
             type="button"
-            className="btn-resume"
+            variant="secondary"
             disabled={fetchLoading}
             onClick={handleFetchFromIb}
             aria-busy={fetchLoading}
             title="Pull cash transactions from IB Flex for selected range and write to account_transactions"
           >
             {fetchLoading ? 'Fetching…' : 'Fetch from IB'}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -494,25 +496,27 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
                 </span>
                 {visibleTransactions.length > 0 && (
                   <div className="table-pagination" aria-label="Transaction pages">
-                    <button
+                    <Button
                       type="button"
-                      className="btn btn-small btn-secondary"
+                      variant="secondary"
+                      size="sm"
                       disabled={safePage <= 1}
                       onClick={() => setPage((p) => Math.max(1, p - 1))}
                     >
                       Prev
-                    </button>
+                    </Button>
                     <span className="table-pagination-info" style={{ whiteSpace: 'nowrap' }}>
                       Page {safePage} of {totalPages}
                     </span>
-                    <button
+                    <Button
                       type="button"
-                      className="btn btn-small btn-secondary"
+                      variant="secondary"
+                      size="sm"
                       disabled={safePage >= totalPages}
                       onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                     >
                       Next
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>
@@ -559,7 +563,7 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
 
       <section className="replay-section" aria-label="Cash flow summary">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.75rem', marginBottom: '0.25rem' }}>
-          <h3 style={{ margin: 0, fontSize: '0.95rem' }} className="page-title-with-tooltip">
+          <h3 style={{ margin: 0, fontSize: '0.95rem' }} className={SECTION_TITLE_CLASS}>
             Summary by period
             <InfoTooltip text="Net cash flow per account and in total, grouped by year / quarter / month for the loaded range (last 365 days or current fetch window)." />
           </h3>
@@ -704,6 +708,6 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
           </div>
         )}
       </section>
-    </div>
+    </PageSection>
   )
 }

@@ -12,7 +12,11 @@ import {
   fetchMassiveLogs,
   subscribeMassiveLogs,
 } from '../api/monitor/logs'
+import { LampIndicator } from '@/components/shared/lamp-indicator'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { SECTION_TITLE_CLASS } from '../components/SectionPageTitle'
+import { SettingsPageGroups } from './settings/SettingsPageGroups'
+import { SettingsTitleLamp } from './settings/SettingsTitleLamp'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
 import { useDeferredStart } from '../hooks/useDeferredStart'
 import { useControlAction } from './status/useControlAction'
@@ -121,19 +125,19 @@ export function MassiveApiStatusPage({ embeddedInSettings }: MassiveApiStatusPag
       embedded={embeddedInSettings}
       className={embeddedInSettings ? 'massive-api-status-page massive-api-status-page--embedded' : 'massive-api-status-page'}
     >
-      <div className="server-groups settings-page-groups">
+      <SettingsPageGroups className="server-groups">
 
         <section className="replay-section" aria-labelledby="massive-api-health-head">
           <div className="system-tab-panel">
             <div className="daemon-header">
               <div className="daemon-header-main daemon-header-with-lamp">
                 <div>
-                  <h2 id="massive-api-health-head" className="daemon-card-title page-title-with-tooltip">
-                    <span className={`title-inline-lamp lamp-icon ${healthLamp}`} title="Massive API health" aria-hidden>
+                  <h2 id="massive-api-health-head" className={`daemon-card-title ${SECTION_TITLE_CLASS}`}>
+                    <SettingsTitleLamp lamp={healthLamp} title="Massive API health">
                       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="M22 12h-4l-3 9L9 3 6 12H2" />
                       </svg>
-                    </span>
+                    </SettingsTitleLamp>
                     Massive API
                     <InfoTooltip text="Health is GET /research/massive/health on the Massive FastAPI process. Environment is derived from the loaded YAML file name: config.dev.yaml → Development, config.prod.yaml → Production; other files → Custom." />
                   </h2>
@@ -175,7 +179,7 @@ export function MassiveApiStatusPage({ embeddedInSettings }: MassiveApiStatusPag
               <tr>
                 <td className="massive-api-kv-label">Health</td>
                 <td>
-                  <span className={`title-inline-lamp lamp-icon ${healthLamp}`} aria-hidden>●</span>
+                  <LampIndicator lamp={healthLamp} className="mr-1" />
                   {' '}
                   {healthOk === true ? 'Reachable' : healthOk === false ? 'Unreachable' : 'Checking…'}
                 </td>
@@ -210,7 +214,7 @@ export function MassiveApiStatusPage({ embeddedInSettings }: MassiveApiStatusPag
         </section>
 
         <section className="replay-section" aria-labelledby="massive-api-docs-head">
-          <h3 id="massive-api-docs-head" className="page-title-with-tooltip">
+          <h3 id="massive-api-docs-head" className={SECTION_TITLE_CLASS}>
             Documentation
             <InfoTooltip text="Opens Swagger UI or ReDoc against the Massive process. Default: same hostname as this app and the listen port from health. Set NEXT_PUBLIC_MASSIVE_API_ORIGIN (or legacy VITE_MASSIVE_API_ORIGIN) in the frontend env to override (e.g. when nginx serves Massive on port 80 only)." />
           </h3>
@@ -247,7 +251,7 @@ export function MassiveApiStatusPage({ embeddedInSettings }: MassiveApiStatusPag
         </section>
 
         <section className="replay-section" aria-labelledby="massive-api-console-head">
-          <h3 id="massive-api-console-head" className="page-title-with-tooltip">
+          <h3 id="massive-api-console-head" className={SECTION_TITLE_CLASS}>
             Application log
             <InfoTooltip text="Real-time log from run_server_massive.py (Redis stream bifrost:massive_console), same pattern as System → Server." />
           </h3>
@@ -263,7 +267,7 @@ export function MassiveApiStatusPage({ embeddedInSettings }: MassiveApiStatusPag
         </section>
 
         <section className="replay-section" aria-labelledby="massive-api-polygon-head">
-          <h3 id="massive-api-polygon-head" className="page-title-with-tooltip">
+          <h3 id="massive-api-polygon-head" className={SECTION_TITLE_CLASS}>
             Polygon data source
             <InfoTooltip text="Configuration status of the Polygon.io market data provider." />
           </h3>
@@ -291,7 +295,7 @@ export function MassiveApiStatusPage({ embeddedInSettings }: MassiveApiStatusPag
           </table>
         </section>
 
-      </div>
+      </SettingsPageGroups>
     </SettingsPageCard>
   )
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
 import type { Execution, OptionStockLinkRow } from '../../types'
 import {
   createOptionStockLink,
@@ -228,13 +229,9 @@ export function LinkOptionStockModal({ open, context, onClose, onSuccess }: Link
                     <td>{row.slippage_vs_close != null ? fmtUsd(row.slippage_vs_close) : '—'}</td>
                     <td>{row.role ?? '—'}</td>
                     <td>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-small"
-                        onClick={() => requestUnlink(row.link_id)}
-                      >
+                      <Button type="button" variant="secondary" size="sm" onClick={() => requestUnlink(row.link_id)}>
                         Remove
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -308,17 +305,16 @@ export function LinkOptionStockModal({ open, context, onClose, onSuccess }: Link
         )}
 
         <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end', marginTop: 'var(--space-4)' }}>
-          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={linking}>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={linking}>
             Close
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn"
             onClick={() => void handleLinkSelected()}
             disabled={linking || selectedStockIds.size === 0 || loading}
           >
             {linking ? 'Linking…' : 'Link selected'}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -346,17 +342,17 @@ export function LinkOptionStockModal({ open, context, onClose, onSuccess }: Link
               execution rows.
             </p>
             <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
-              <button
+              <Button
                 type="button"
-                className="btn btn-secondary"
+                variant="secondary"
                 onClick={() => setUnlinkConfirm({ open: false, linkId: null, confirming: false })}
                 disabled={unlinkConfirm.confirming}
               >
                 Cancel
-              </button>
-              <button type="button" className="btn-danger" onClick={() => void confirmUnlink()} disabled={unlinkConfirm.confirming}>
+              </Button>
+              <Button type="button" variant="destructive" onClick={() => void confirmUnlink()} disabled={unlinkConfirm.confirming}>
                 {unlinkConfirm.confirming ? 'Removing…' : 'Confirm delete'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

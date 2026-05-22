@@ -5,6 +5,8 @@ import { InfoTooltip } from '../../../components/InfoTooltip'
 import { ingestRedisHealthLamp, ingestRedisTruthyConnected } from '../../../utils/socketIngestLamp'
 import { ingestLampToBrokerRowLamp } from '../daemonIbBrokerLamp'
 import { scheduleMsgClear, setMsg } from '../messageUtils'
+import type { LampTone } from '@/components/shared/lamp-indicator'
+import { SettingsTitleLamp } from '../../settings/SettingsTitleLamp'
 
 export interface IbEventSubscribePanelProps {
   status: StatusResponse | null
@@ -40,14 +42,9 @@ const ACTIVITY_LAMP_SVG = (
 
 function StreamHealthLamp({ lamp, title }: { lamp: BrokerRowLamp; title: string }) {
   return (
-    <span
-      className={`title-inline-lamp lamp-icon ib-broker-service-lamp ${lamp}`}
-      title={title}
-      role="img"
-      aria-label={title}
-    >
-      {ACTIVITY_LAMP_SVG}
-    </span>
+    <SettingsTitleLamp lamp={lamp as LampTone} title={title}>
+      <span className="ib-broker-service-lamp">{ACTIVITY_LAMP_SVG}</span>
+    </SettingsTitleLamp>
   )
 }
 
@@ -305,10 +302,8 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
   return (
     <div className="status-panel-section card-event-subscribe event-subscribe-section">
       <div className="event-subscribe-header-row">
-        <h2 className="daemon-card-title page-title-with-tooltip" style={{ margin: 0 }}>
-          <span className={`title-inline-lamp lamp-icon ib-broker-service-lamp ${headerLamp}`} title={headerTitle} aria-hidden>
-            {ACTIVITY_LAMP_SVG}
-          </span>
+        <h2 className="daemon-card-title inline-flex flex-wrap items-center gap-2 m-0">
+          <StreamHealthLamp lamp={headerLamp} title={headerTitle} />
           IB Event Subscribe
           <InfoTooltip text="Market and account-domain data reach the stack via Redis: IB Ingestor (quotes notify + tick hashes) and IB Account Agent (snapshot + notify)." />
         </h2>
@@ -508,14 +503,14 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
                 <td className="event-subscribe-col-subscription">Open orders</td>
                 <td>
                   <div className="event-subscribe-status-cell">
-                    <span
-                      className={`title-inline-lamp lamp-icon ${!hb?.daemon_alive ? 'red' : hostOpenOrderCount > 0 ? 'green' : 'none'}`}
-                      aria-hidden
+                    <SettingsTitleLamp
+                      lamp={(!hb?.daemon_alive ? 'red' : hostOpenOrderCount > 0 ? 'green' : 'none') as LampTone}
+                      title="Host open orders"
                     >
                       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
                       </svg>
-                    </span>
+                    </SettingsTitleLamp>
                     <span className="event-subscribe-status-text">
                       {hb?.daemon_alive ? (
                         <>
@@ -532,14 +527,14 @@ export function IbEventSubscribePanel({ status: j, loadStatus }: IbEventSubscrib
                 {hasSecondaryIb && (
                   <td>
                     <div className="event-subscribe-status-cell">
-                      <span
-                        className={`title-inline-lamp lamp-icon ${!hb?.daemon_alive ? 'red' : secondaryOpenOrderCount > 0 ? 'green' : 'none'}`}
-                        aria-hidden
+                      <SettingsTitleLamp
+                        lamp={(!hb?.daemon_alive ? 'red' : secondaryOpenOrderCount > 0 ? 'green' : 'none') as LampTone}
+                        title="Secondary open orders"
                       >
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                           <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
                         </svg>
-                      </span>
+                      </SettingsTitleLamp>
                       <span className="event-subscribe-status-text">
                         {hb?.daemon_alive ? (
                           <>

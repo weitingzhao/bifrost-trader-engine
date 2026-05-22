@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { StatusResponse } from '../types'
 import { PageSection } from '@/components/shared/page-section'
 import { Button } from '@/components/ui/button'
-import { SectionPageTitle } from '../components/SectionPageTitle'
+import { BREADCRUMB_LINK_CLASS, SectionPageTitle } from '../components/SectionPageTitle'
 import type { ScreenerFilters, ScreenerContractRow, ScreenerSymbolGroup, ScreenerResponse } from '../api/research/screener'
 import { runScreener } from '../api/research/screener'
 import type { StrategyStructure, OpportunityPayload, EntryConditionItem } from '../api/strategy/strategies'
@@ -727,7 +727,7 @@ export function OptionScreenerPage({
   const minPremiumDisplay = filters.min_premium ?? 0
 
   return (
-    <PageSection className="watchlist-page option-screener-page wl2 w-full max-w-none">
+    <PageSection className="watchlist-page option-screener-page w-full max-w-none">
       <div className="research-page-head">
         <SectionPageTitle
           menu="Research"
@@ -921,20 +921,14 @@ export function OptionScreenerPage({
 
           <div style={{ flex: 1 }} />
 
-          <button
-            type="button"
-            className="wl2-btn wl2-btn--primary"
-            onClick={handleRun}
-            disabled={loading}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '0.4rem 1.25rem' }}
-          >
+          <Button type="button" onClick={handleRun} disabled={loading}>
             {loading ? (
               <>
                 <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
                 Scanning…
               </>
             ) : 'Run Screener'}
-          </button>
+          </Button>
         </div>
       </section>
 
@@ -942,7 +936,7 @@ export function OptionScreenerPage({
       {/* Error                                                              */}
       {/* ----------------------------------------------------------------- */}
       {error && (
-        <div className="wl2-error" role="alert" style={{ marginBottom: 'var(--space-3)' }}>
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert" style={{ marginBottom: 'var(--space-3)' }}>
           {error}
         </div>
       )}
@@ -970,7 +964,7 @@ export function OptionScreenerPage({
                 {onOpenOptionCoverage && failed > 0 ? (
                   <>
                     {' '}
-                    <button type="button" className="page-title-breadcrumb-link" style={{ fontSize: 12, padding: 0, verticalAlign: 'baseline' }} onClick={onOpenOptionCoverage}>
+                    <button type="button" className={BREADCRUMB_LINK_CLASS} style={{ fontSize: 12, padding: 0, verticalAlign: 'baseline' }} onClick={onOpenOptionCoverage}>
                       Check data coverage
                     </button>
                   </>

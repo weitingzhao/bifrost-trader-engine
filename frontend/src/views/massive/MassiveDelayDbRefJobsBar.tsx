@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button'
 import { useMassiveRefJobSession } from './MassiveRefJobSessionContext'
 
 /** Reference section header: open the shared Massive DB jobs sheet (ticker reference + stock OHLC). */
@@ -10,9 +11,9 @@ export function MassiveDelayDbRefJobsBar() {
           {refJobSession.activeJobCount} active
         </span>
       ) : null}
-      <button type="button" className="btn btn-secondary" onClick={() => refJobSession.openJobsSheet()}>
+      <Button type="button" variant="secondary" onClick={() => refJobSession.openJobsSheet()}>
         Jobs
-      </button>
+      </Button>
     </div>
   )
 }

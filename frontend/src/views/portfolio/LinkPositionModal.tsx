@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '@/components/ui/button'
 import type { StrategyOpportunity } from '../../api'
 import type { StrategyInstance } from '../../types'
 import { createStrategyInstance, fetchOpportunities, fetchStrategyInstances, patchExecutionStrategyAttribution } from '../../api'
@@ -312,18 +313,17 @@ export function LinkPositionModal({ open, context, onClose, onSuccess }: LinkPos
           ) : null}
 
           <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
-            <button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>
+            <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
-              className="btn"
               disabled={saving || !strategyOpportunityId || (instanceMode === 'new' && !executionAccountId)}
             >
               {saving
                 ? instanceMode === 'new' ? 'Creating…' : 'Saving…'
                 : instanceMode === 'new' ? 'Create & assign' : 'Save'}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

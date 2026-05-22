@@ -3,6 +3,16 @@ import { PageSection } from '@/components/shared/page-section'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import { RightInspectorDrawer } from '../components/RightInspectorDrawer'
 import { StockInspectorPanel } from '../components/StockInspectorPanel'
+import { Button } from '@/components/ui/button'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { cn } from '@/lib/utils'
 import {
   fetchSepaCriteriaStats,
   fetchFundamentalDistributionSymbols,
@@ -15,7 +25,6 @@ import {
   type SepaCriteriaStats,
   type ReadinessSnapshotRow,
 } from '../api/research/dataReadiness'
-import '../styles/stock-screener.css'
 
 interface StockScreenerPageProps {
   onBreadcrumbResearch?: () => void
@@ -553,7 +562,7 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
 
 
   return (
-    <PageSection className="stock-screener-page wl2 ssp-page w-full max-w-none">
+    <PageSection className="stock-screener-page ssp-page w-full max-w-none">
       <div className="research-page-head">
         <SectionPageTitle
           menu="Research"
@@ -965,13 +974,13 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
             {filterError && <span className="ssp-status-err ssp-filter-bar-status">{filterError}</span>}
           </div>
           {!filterPreview && (
-            <button type="button" className="ssp-btn ssp-btn--secondary" onClick={() => void previewFilter()} disabled={filterLoading}>
+            <Button type="button" variant="secondary" size="sm" onClick={() => void previewFilter()} disabled={filterLoading}>
               {filterLoading ? 'Searching…' : 'Search'}
-            </button>
+            </Button>
           )}
-          {filterPreview && <button type="button" className="ssp-btn ssp-btn--primary" onClick={applyFilter}>Apply ({filterPreview.symbols.length})</button>}
-          {filterPreview && <button type="button" className="ssp-btn ssp-btn--ghost" onClick={() => setFilterPreview(null)}>Retry</button>}
-          <button type="button" className="ssp-btn ssp-btn--ghost" onClick={clearAllFilters}>Clear</button>
+          {filterPreview && <Button type="button" size="sm" onClick={applyFilter}>Apply ({filterPreview.symbols.length})</Button>}
+          {filterPreview && <Button type="button" variant="ghost" size="sm" onClick={() => setFilterPreview(null)}>Retry</Button>}
+          <Button type="button" variant="ghost" size="sm" onClick={clearAllFilters}>Clear</Button>
         </div>
       )}
 
@@ -1015,43 +1024,51 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
           </h3>
         </header>
         <div className="ssp-table-wrap">
-          <table className="ssp-table">
-            <thead>
-              <tr>
-                <th style={{ width: 110 }}>Symbol</th>
-                <th className={`ssp-th-sortable${sortCol === 'tech' ? ' ssp-th-sortable--active' : ''}`} onClick={() => toggleSort('tech')} title="Sort by Technical pass count">
+          <Table className="ssp-table text-xs">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[110px]">Symbol</TableHead>
+                <TableHead
+                  className={cn('cursor-pointer select-none', sortCol === 'tech' && 'text-primary')}
+                  onClick={() => toggleSort('tech')}
+                  title="Sort by Technical pass count"
+                >
                   Technical {sortCol === 'tech' ? (sortDir === 'desc' ? '↓' : '↑') : '⇅'}
-                </th>
-                <th className={`ssp-th-sortable${sortCol === 'fund' ? ' ssp-th-sortable--active' : ''}`} onClick={() => toggleSort('fund')} title="Sort by Fundamental pass count">
+                </TableHead>
+                <TableHead
+                  className={cn('cursor-pointer select-none', sortCol === 'fund' && 'text-primary')}
+                  onClick={() => toggleSort('fund')}
+                  title="Sort by Fundamental pass count"
+                >
                   Fundamental {sortCol === 'fund' ? (sortDir === 'desc' ? '↓' : '↑') : '⇅'}
-                </th>
-                <th style={{ width: 70, textAlign: 'center' }}>Univ</th>
-                <th style={{ width: 100 }}>Price</th>
-                <th style={{ width: 150 }}>Statements</th>
-                <th style={{ width: 90 }}>Short</th>
-                <th style={{ width: 90 }}>As-of</th>
-              </tr>
-            </thead>
-            <tbody>
+                </TableHead>
+                <TableHead className="w-[70px] text-center">Univ</TableHead>
+                <TableHead className="w-[100px]">Price</TableHead>
+                <TableHead className="w-[150px]">Statements</TableHead>
+                <TableHead className="w-[90px]">Short</TableHead>
+                <TableHead className="w-[90px]">As-of</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {readinessRows.length === 0 && (
-                <tr className="ssp-table-empty">
-                  <td colSpan={8}>
+                <TableRow className="ssp-table-empty">
+                  <TableCell colSpan={8} className="py-6 text-center text-muted-foreground">
                     {readinessLoading ? 'Loading readiness…'
                       : symbols.length === 0 ? 'Select a distribution bucket, apply a condition filter, or type symbols below.'
                       : readinessError ? 'Failed to load readiness — see error above.'
                       : 'No readiness rows found.'}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               )}
               {sortedRows.map((r) => {
                 if (!r.found) {
                   return (
-                    <tr key={r.symbol} className="ssp-row-missing">
-                      <td>
-                        <button type="button" className="ssp-sym-open" onClick={() => openInspector(r.symbol)} title={`Open ${r.symbol} inspector`}>{r.symbol}</button>
-                      </td>
-                      <td colSpan={7} className="ssp-num--dim">No row in stock_readiness_daily — run the universe snapshot from Stock Data Readiness.</td>
-                    </tr>
+                    <TableRow key={r.symbol} className="ssp-row-missing">
+                      <TableCell>
+                        <Button type="button" variant="link" size="sm" className="h-auto p-0 font-semibold" onClick={() => openInspector(r.symbol)} title={`Open ${r.symbol} inspector`}>{r.symbol}</Button>
+                      </TableCell>
+                      <TableCell colSpan={7} className="ssp-num--dim text-muted-foreground">No row in stock_readiness_daily — run the universe snapshot from Stock Data Readiness.</TableCell>
+                    </TableRow>
                   )
                 }
                 const passed = new Set(r.passed_conditions ?? [])
@@ -1066,13 +1083,13 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
                 const isActive = inspector?.symbol === r.symbol
                 const seed: InspectorSeed = { passCount, passedConditions: Array.from(passed) }
                 return (
-                  <tr key={r.symbol} className={isActive ? 'ssp-row-active' : ''}>
-                    <td>
-                      <button type="button" className="ssp-sym-open" onClick={() => openInspector(r.symbol, seed)} title={isActive ? 'Close inspector' : `Open ${r.symbol} inspector`}>
-                        {r.symbol}<span className="ssp-sym-open-hint" aria-hidden>↗</span>
-                      </button>
-                    </td>
-                    <td>
+                  <TableRow key={r.symbol} className={isActive ? 'ssp-row-active bg-primary/5' : ''}>
+                    <TableCell>
+                      <Button type="button" variant="link" size="sm" className="h-auto gap-0.5 p-0 font-semibold" onClick={() => openInspector(r.symbol, seed)} title={isActive ? 'Close inspector' : `Open ${r.symbol} inspector`}>
+                        {r.symbol}<span className="ssp-sym-open-hint text-muted-foreground" aria-hidden>↗</span>
+                      </Button>
+                    </TableCell>
+                    <TableCell>
                       <div className="ssp-cond-col">
                         <span className={`ssp-fund-cell ${techCls}`} title={!techEvalPresent ? 'Not evaluated' : techInsuf ? 'Insufficient data' : `${techPassCount}/11 passed`}>
                           {!techEvalPresent ? '—' : techInsuf ? 'INS' : `${techPassCount}/11`}
@@ -1088,8 +1105,8 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
                           </div>
                         )}
                       </div>
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       <div className="ssp-cond-col">
                         <span className={`ssp-fund-cell ${fundCls}`} title={insuf ? 'Insufficient data' : `${passCount}/8 passed`}>{insuf ? 'INS' : `${passCount}/8`}</span>
                         <div className="ssp-cond-dots">
@@ -1101,31 +1118,31 @@ export function StockScreenerPage({ onBreadcrumbResearch, breadcrumbLabel = 'Sto
                           })}
                         </div>
                       </div>
-                    </td>
-                    <td style={{ textAlign: 'center' }}>{boolMark(r.included_in_universe)}</td>
-                    <td>
+                    </TableCell>
+                    <TableCell className="text-center">{boolMark(r.included_in_universe)}</TableCell>
+                    <TableCell>
                       <span className="ssp-data-pair">{boolMark(r.price_ready)}<span className="ssp-num--dim">{(r.bar_count_lookback ?? 0).toLocaleString()}b</span></span>
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       <div className="ssp-stmt-row">
                         <span className={`ssp-stmt-chip${r.income_stmt_ready ? ' ssp-stmt-chip--ok' : ''}`} title={`Income: ${r.income_stmt_q_count ?? 0}Q · ${r.income_stmt_a_count ?? 0}A`}>IS</span>
                         <span className={`ssp-stmt-chip${r.balance_sheet_present ? ' ssp-stmt-chip--ok' : ''}`} title="Balance Sheet">BS</span>
                         <span className={`ssp-stmt-chip${r.cash_flow_present ? ' ssp-stmt-chip--ok' : ''}`} title="Cash Flow">CF</span>
                         <span className={`ssp-stmt-chip${r.ratios_present ? ' ssp-stmt-chip--ok' : ''}`} title="Ratios">RT</span>
                       </div>
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       <div className="ssp-stmt-row">
                         <span className={`ssp-stmt-chip${r.short_interest_present ? ' ssp-stmt-chip--ok' : ''}`} title="Short Interest">SI</span>
                         <span className={`ssp-stmt-chip${r.short_volume_present ? ' ssp-stmt-chip--ok' : ''}`} title="Short Volume">SV</span>
                       </div>
-                    </td>
-                    <td className="ssp-num ssp-num--dim">{r.as_of_date ?? '—'}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell className="ssp-num ssp-num--dim tabular-nums text-muted-foreground">{r.as_of_date ?? '—'}</TableCell>
+                  </TableRow>
                 )
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       </section>
 

@@ -1,3 +1,5 @@
+import { Button } from '@/components/ui/button'
+import { SECTION_TITLE_CLASS } from '../../../components/SectionPageTitle'
 import { InfoTooltip } from '../../../components/InfoTooltip'
 import { fmtTs } from '../../../utils/format'
 import { barsJobResultTitle, formatBarsJobResult } from '../barsJobFormat'
@@ -62,7 +64,7 @@ export function DataJobsPanel({
 
   return (
     <section className="replay-section" aria-labelledby="data-jobs-head">
-      <h3 id="data-jobs-head" className="page-title-with-tooltip">
+      <h3 id="data-jobs-head" className={SECTION_TITLE_CLASS}>
         Job Queue
         <InfoTooltip text="View and manage Celery backfill job history. Filter by status, sort by job ID / status / created / updated. Failed jobs can be reset to pending and re-queued (requires Ops operator token). Each row is one symbol-period backfill task." />
       </h3>
@@ -75,25 +77,27 @@ export function DataJobsPanel({
               <span>{statusLabel(s)}</span>
             </label>
           ))}
-          <button
+          <Button
             type="button"
-            className="btn btn-reset btn-sm"
+            variant="destructive"
+            size="sm"
             disabled={barsJobsTotal === 0 || barsJobsLoading || barsJobsStatusSelected.size === 0}
             onClick={onDeleteAllClick}
             aria-label="Delete jobs with selected status(es)"
           >
             Delete all
-          </button>
+          </Button>
           <span className="data-jobs-retry-failed-wrap" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-            <button
+            <Button
               type="button"
-              className="btn btn-secondary btn-sm"
+              variant="secondary"
+              size="sm"
               disabled={barsJobsLoading || retryBatchBusy || deletingJobId !== null || retryingJobId !== null}
               onClick={onOpenRetryFailedModal}
               aria-label="Reset failed jobs to pending and re-queue"
             >
               {retryBatchBusy ? '…' : 'Reset failed'}
-            </button>
+            </Button>
             <InfoTooltip text="Batch-reset the oldest failed jobs to pending and submit them to Celery again. Same job IDs. Requires an Ops operator Bearer token (same as Delete all)." />
           </span>
         </div>
@@ -109,9 +113,9 @@ export function DataJobsPanel({
             <option value={500}>500</option>
           </select>
         </label>
-        <button type="button" className="btn btn-secondary btn-sm" disabled={barsJobsLoading} onClick={() => onRefreshJobs()} aria-label="Refresh backfill jobs">
+        <Button type="button" variant="secondary" size="sm" disabled={barsJobsLoading} onClick={() => onRefreshJobs()} aria-label="Refresh backfill jobs">
           {barsJobsLoading ? '…' : 'Refresh'}
-        </button>
+        </Button>
         <span className="replay-sync-hint" style={{ marginLeft: 'auto' }}>
           {barsJobsTotal > 0 ? `${sortedBarsJobs.length} shown (${barsJobsTotal} total)` : '0 jobs'}
         </span>
@@ -127,7 +131,7 @@ export function DataJobsPanel({
       {sortedBarsJobs.length === 0 && !barsJobsLoading ? (
         <div className="replay-placeholder">No pull jobs yet. Run Pull for a symbol above.</div>
       ) : (
-        <div className="data-table-scroll-wrap">
+        <div className="overflow-x-auto rounded-lg border border-border min-w-0">
           <table className="table-operations">
           <thead>
             <tr>
@@ -198,25 +202,27 @@ export function DataJobsPanel({
                 <td>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
                     {j.status === 'failed' && (
-                      <button
+                      <Button
                         type="button"
-                        className="btn btn-secondary btn-sm"
+                        variant="secondary"
+                        size="sm"
                         disabled={deletingJobId !== null || retryingJobId !== null || retryBatchBusy}
                         aria-label={`Retry job ${j.job_id}`}
                         onClick={() => onRetryJob(j.job_id)}
                       >
                         {retryingJobId === j.job_id ? '…' : 'Retry'}
-                      </button>
+                      </Button>
                     )}
-                    <button
+                    <Button
                       type="button"
-                      className="btn btn-reset btn-sm"
+                      variant="destructive"
+                      size="sm"
                       disabled={deletingJobId !== null || retryingJobId !== null || retryBatchBusy}
                       aria-label={`Delete job ${j.job_id}`}
                       onClick={() => onDeleteJob(j.job_id)}
                     >
                       {deletingJobId === j.job_id ? '…' : 'Delete'}
-                    </button>
+                    </Button>
                   </div>
                 </td>
               </tr>

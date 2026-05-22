@@ -1,5 +1,7 @@
 import { Fragment } from 'react'
 import type { BarCoverageItem, BarsCoverageResponse, StatusResponse } from '../../../types'
+import { Button } from '@/components/ui/button'
+import { SECTION_TITLE_CLASS } from '../../../components/SectionPageTitle'
 import { InfoTooltip } from '../../../components/InfoTooltip'
 import { coverageCell, coverageCompact, coverageRange, coverageStatusDisplay } from '../dataCoverageUtils'
 import { normCoverageSymbol } from '../coverageSymbolGroups'
@@ -68,7 +70,7 @@ export function DataCoveragePanel({
 }: DataCoveragePanelProps) {
   return (
     <section className="replay-section" aria-labelledby="data-coverage-head">
-      <h3 id="data-coverage-head" className="page-title-with-tooltip">
+      <h3 id="data-coverage-head" className={SECTION_TITLE_CLASS}>
         Coverage
         <InfoTooltip
           text={
@@ -131,13 +133,13 @@ export function DataCoveragePanel({
             aria-label="Seconds between each IB API request"
           />
           <InfoTooltip text="Wait this many seconds between each IB history request (chunk). Default 10." />
-          <button type="button" className="btn btn-secondary btn-sm" disabled={coverageLoading} onClick={() => onLoadCoverage()} aria-label="Refresh coverage">
+          <Button type="button" variant="secondary" size="sm" disabled={coverageLoading} onClick={() => onLoadCoverage()} aria-label="Refresh coverage">
             {coverageLoading ? '…' : 'Refresh coverage'}
-          </button>
+          </Button>
         </label>
-        <button
+        <Button
           type="button"
-          className="btn btn-primary btn-sm"
+          size="sm"
           disabled={watchlistPreviewLoading || watchlistRefreshRunning}
           onClick={() => {
             void onWatchlistEodRefresh()
@@ -150,7 +152,7 @@ export function DataCoveragePanel({
           }
         >
           {watchlistPreviewLoading ? 'Dry run…' : watchlistRefreshRunning ? 'Queuing…' : 'Pull EOD'}
-        </button>
+        </Button>
         <InfoTooltip
           text={
             needWatchlistDryRun
@@ -158,9 +160,10 @@ export function DataCoveragePanel({
               : 'Dry run is disabled. Clicking the button queues jobs immediately. EOD Pull runs once after market close: fills end gap and overrides latest bars with final close (override_days=1). A message like "Queued 48 EOD refresh job(s) for 12 watchlist symbol(s). override_days=1" means 48 worker jobs were enqueued (e.g. 4 periods × 12 symbols); only the latest bar per symbol/period is overwritten with end-of-day data.'
           }
         />
-        <button
+        <Button
           type="button"
-          className="btn btn-secondary btn-sm"
+          variant="secondary"
+          size="sm"
           disabled={indicesRefreshLoading || (status?.live_ui?.reference_indices?.length ?? 0) === 0}
           onClick={() => {
             void onRefreshIndices()
@@ -169,7 +172,7 @@ export function DataCoveragePanel({
           title="Pull daily bars for reference indices from Massive/Polygon into stock_day."
         >
           {indicesRefreshLoading ? 'Refreshing…' : 'Refresh Index'}
-        </button>
+        </Button>
         <InfoTooltip text="Refresh reference indices (^GSPC, ^DJI, ^IXIC, ^VIX, …) via Massive/Polygon daily aggs. Writes source=massive." />
       </div>
       {indicesRefreshMessage && (
@@ -297,50 +300,54 @@ export function DataCoveragePanel({
                           <td className="data-coverage-actions data-coverage-actions-nowrap">
                             {isIndex ? (
                               <>
-                                <button
+                                <Button
                                   type="button"
-                                  className="btn btn-reset btn-sm"
+                                  variant="destructive"
+                                  size="sm"
                                   disabled={isDeleting}
                                   onClick={() => onOpenReset(row.symbol, true)}
                                   title="Reset daily bars for this index"
                                   aria-label={`Reset ${row.symbol}`}
                                 >
                                   {isDeleting ? '…' : 'Reset'}
-                                </button>
-                                <button
+                                </Button>
+                                <Button
                                   type="button"
-                                  className="btn btn-secondary btn-sm"
+                                  variant="secondary"
+                                  size="sm"
                                   disabled={indicesRefreshLoading || backfillSymbol === row.symbol}
                                   title="Pull daily bars for this index from Massive/Polygon (same range modal as Watchlist)"
                                   aria-label={`Pull ${row.symbol}`}
                                   onClick={() => onOpenPull(row.symbol, true)}
                                 >
                                   {backfillSymbol === row.symbol ? (backfillMessage || 'Pulling…') : 'Pull'}
-                                </button>
+                                </Button>
                               </>
                             ) : (
                               <>
-                                <button
+                                <Button
                                   type="button"
-                                  className="btn btn-reset btn-sm"
+                                  variant="destructive"
+                                  size="sm"
                                   disabled={isDeleting}
                                   onClick={() => onOpenReset(row.symbol, false)}
                                   title="Reset all bars for this symbol (stock_day + stock_min); then you can Pull from scratch"
                                   aria-label={`Reset data for ${row.symbol}`}
                                 >
                                   {isDeleting ? '…' : 'Reset'}
-                                </button>
+                                </Button>
                                 {periodsNeedingBackfill.length > 0 && (
-                                  <button
+                                  <Button
                                     type="button"
-                                    className="btn btn-secondary btn-sm"
+                                    variant="secondary"
+                                    size="sm"
                                     disabled={!canBackfill}
                                     title={`Queue pull for ${periodsNeedingBackfill.join(', ')}`}
                                     aria-label={`Pull ${row.symbol}`}
                                     onClick={() => onOpenPull(row.symbol, false)}
                                   >
                                     {isBackfilling ? (backfillMessage || 'Queuing…') : 'Pull'}
-                                  </button>
+                                  </Button>
                                 )}
                               </>
                             )}

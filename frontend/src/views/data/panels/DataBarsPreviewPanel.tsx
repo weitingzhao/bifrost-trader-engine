@@ -1,4 +1,6 @@
 import type { Bar } from '../../../types'
+import { Button } from '@/components/ui/button'
+import { SECTION_TITLE_CLASS } from '../../../components/SectionPageTitle'
 import { InfoTooltip } from '../../../components/InfoTooltip'
 import { fmtTs, fmtUsd } from '../../../utils/format'
 import { BAR_PERIODS } from '../constants'
@@ -33,7 +35,7 @@ export function DataBarsPreviewPanel({
 }: DataBarsPreviewPanelProps) {
   return (
     <section className="replay-section" aria-labelledby="data-bars-head">
-      <h3 id="data-bars-head" className="page-title-with-tooltip">
+      <h3 id="data-bars-head" className={SECTION_TITLE_CLASS}>
         Bars Preview
         <InfoTooltip text="Load and display stored bars for a single symbol and period. Candlestick chart and table with the most recent bars, sorted by time." />
       </h3>
@@ -59,9 +61,9 @@ export function DataBarsPreviewPanel({
             </label>
           ))}
         </div>
-        <button type="button" className="btn btn-secondary" disabled={barsLoading || !barSymbol.trim()} onClick={() => onLoadBars()} aria-label="Load bars">
+        <Button type="button" variant="secondary" disabled={barsLoading || !barSymbol.trim()} onClick={() => onLoadBars()} aria-label="Load bars">
           {barsLoading ? 'Loading…' : 'Load'}
-        </button>
+        </Button>
       </div>
       <p className="replay-sync-hint" style={{ marginTop: '0.5rem', fontSize: '0.9em' }}>
         Backfill runs in Celery Worker (config default ranges per period). See System → Recent operations for job status.
@@ -79,7 +81,7 @@ export function DataBarsPreviewPanel({
       {bars.length === 0 ? (
         <div className="replay-placeholder">No bars. Enter symbol, click Load, or run Backfill for a symbol above.</div>
       ) : (
-        <div className="data-table-scroll-wrap">
+        <div className="overflow-x-auto rounded-lg border border-border min-w-0">
           <table className="table-operations">
           <thead>
             <tr>

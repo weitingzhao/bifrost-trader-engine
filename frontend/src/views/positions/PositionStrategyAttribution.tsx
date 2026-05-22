@@ -1,4 +1,7 @@
 import type { Execution } from '../../types'
+import { LinkStrategyIconButton } from '@/components/shared/exec-row-buttons'
+
+export { LinkStrategyIconButton }
 
 export function StrategyAttributionCells({
   ex,
@@ -32,16 +35,5 @@ export function StrategyAttributionCells({
         <span className="replay-strategy-opp-text">{oppName || '—'}</span>
       </span>
     </td>
-  )
-}
-
-export function LinkStrategyIconButton({ onClick, title }: { onClick: () => void; title: string }) {
-  return (
-    <button type="button" className="btn btn-icon-small" onClick={e => { e.stopPropagation(); onClick() }} title={title} aria-label={title}>
-      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-      </svg>
-    </button>
   )
 }

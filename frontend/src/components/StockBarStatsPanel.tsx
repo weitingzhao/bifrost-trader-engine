@@ -8,6 +8,19 @@ import {
   nyCalendarDateIso,
   presetNyRegularSessionForDate,
 } from '../views/massive/customBarsTimePresets'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+
+const chartTabClass = (active: boolean) =>
+  cn(
+    'cursor-pointer rounded-md border-0 bg-transparent px-3 py-1.5 text-[0.78rem] font-semibold text-muted-foreground transition-colors',
+    'hover:bg-white/5 hover:text-foreground',
+    active && 'bg-primary/15 text-foreground shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-accent)_50%,transparent)]',
+  )
+
+const layerToggleClass =
+  'inline-flex cursor-pointer select-none items-center gap-1 text-[0.62rem] font-semibold text-muted-foreground'
+
 export function StockBarStatsPanel({
   symbol,
   embedded = false,
@@ -176,108 +189,80 @@ export function StockBarStatsPanel({
     }
   }
 
-  if (!symU) return null
-
-  if (embedded) {
-    // ── Compact embedded layout ──────────────────────────────────────────────
-    return (
-      <section
-        className="wl2-analysis min-w-0 border-t border-border p-3"
-        aria-labelledby="riv-stock-bar-stats-head"
-      >
-        {/* Row 1: title · kpi pills · fetch button */}
-        <div className="flex min-h-6 flex-wrap items-center gap-1.5">
+  const renderKpiPills = () =>
+    stats != null ? (
+      <div className="flex flex-1 flex-wrap items-center gap-1">
+        <span className="inline-flex items-center gap-0.5 rounded-full border border-border bg-muted/30 px-1.5 py-px text-[0.62rem] whitespace-nowrap">
+          <span className="font-mono text-muted-foreground">Daily</span>
+          <span className="font-mono font-semibold text-foreground">{stats.stock_day.toLocaleString()}</span>
+        </span>
+        {stats.stock_min && Object.entries(stats.stock_min).map(([period, count]) => (
           <span
-            className="shrink-0 border-l-2 border-primary pl-1.5 text-[0.68rem] font-bold tracking-wider text-muted-foreground uppercase whitespace-nowrap"
-            id="riv-stock-bar-stats-head"
+            key={period}
+            className="inline-flex items-center gap-0.5 rounded-full border border-border bg-muted/30 px-1.5 py-px text-[0.62rem] whitespace-nowrap"
           >
-            Bar Data
+            <span className="font-mono text-muted-foreground">{period}</span>
+            <span className="font-mono font-semibold text-foreground">{(count as number).toLocaleString()}</span>
           </span>
-          {stats != null && (
-            <div className="flex flex-1 flex-wrap items-center gap-1">
-              <span className="inline-flex items-center gap-0.5 rounded-full border border-border bg-muted/30 px-1.5 py-px text-[0.62rem] whitespace-nowrap">
-                <span className="font-mono text-muted-foreground">Daily</span>
-                <span className="font-mono font-semibold text-foreground">{stats.stock_day.toLocaleString()}</span>
-              </span>
-              {stats.stock_min && Object.entries(stats.stock_min).map(([period, count]) => (
-                <span
-                  key={period}
-                  className="inline-flex items-center gap-0.5 rounded-full border border-border bg-muted/30 px-1.5 py-px text-[0.62rem] whitespace-nowrap"
-                >
-                  <span className="font-mono text-muted-foreground">{period}</span>
-                  <span className="font-mono font-semibold text-foreground">{(count as number).toLocaleString()}</span>
-                </span>
-              ))}
-            </div>
-          )}
-          <button
-            type="button"
-            className="wl2-btn wl2-btn--primary !h-[22px] shrink-0 !px-2 !py-0.5 !text-[0.65rem] whitespace-nowrap"
-            disabled={!!fetchMarketDataStep}
-            onClick={() => void handleFetchMarketData()}
-            title={fetchMarketDataStep ?? 'Fetch daily + intraday OHLC from Massive'}
-          >
-            {fetchMarketDataStep ? '…' : 'Fetch'}
-          </button>
-        </div>
+        ))}
+      </div>
+    ) : null
 
-        {fetchMarketDataError && (
-          <span className="wl2-error wl2-error--inline" style={{ fontSize: '0.72rem' }}>{fetchMarketDataError}</span>
-        )}
+  const renderChartControls = () => (
+    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+      <div
+        className="inline-flex gap-0.5 rounded-lg border border-border bg-background p-0.5"
+        role="tablist"
+        aria-label="Period"
+      >
+        <button type="button" role="tab" aria-selected={chartPeriod === '1 D'}
+          className={chartTabClass(chartPeriod === '1 D')}
+          onClick={() => setChartPeriod('1 D')}>Daily</button>
+        <button type="button" role="tab" aria-selected={chartPeriod === '1 min'}
+          className={chartTabClass(chartPeriod === '1 min')}
+          onClick={() => setChartPeriod('1 min')}>1 min</button>
+      </div>
+      <div className="flex flex-1 flex-wrap items-center gap-1.5" aria-label="Chart layers">
+        {[
+          { label: 'Vol', state: chartShowVolume, set: setChartShowVolume },
+          { label: 'VWAP', state: chartShowVwap, set: setChartShowVwap },
+          { label: 'MACD', state: chartShowMacd, set: setChartShowMacd },
+          { label: 'BB', state: chartShowBb, set: setChartShowBb },
+          { label: 'RSI', state: chartShowRsi, set: setChartShowRsi },
+          { label: 'S/R', state: chartShowSr, set: setChartShowSr },
+        ].map(({ label, state, set }) => (
+          <label key={label} className={layerToggleClass}>
+            <input type="checkbox" checked={state} onChange={e => set(e.target.checked)} className="accent-primary" />
+            {label}
+          </label>
+        ))}
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="h-[22px] shrink-0 px-1.5 py-0 text-[0.78rem] leading-none"
+        disabled={chartLoading || !!fetchMarketDataStep}
+        onClick={() => void loadChartFromDb(symU, chartPeriod)}
+      >
+        {chartLoading ? '…' : '↻'}
+      </Button>
+    </div>
+  )
 
-        {/* Row 2: period tabs · layer toggles · reload */}
-        <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          <div className="wl2-analysis__chart-tabs" role="tablist" aria-label="Period">
-            <button type="button" role="tab" aria-selected={chartPeriod === '1 D'}
-              className={`wl2-analysis__chart-tab${chartPeriod === '1 D' ? ' wl2-analysis__chart-tab--active' : ''}`}
-              onClick={() => setChartPeriod('1 D')}>Daily</button>
-            <button type="button" role="tab" aria-selected={chartPeriod === '1 min'}
-              className={`wl2-analysis__chart-tab${chartPeriod === '1 min' ? ' wl2-analysis__chart-tab--active' : ''}`}
-              onClick={() => setChartPeriod('1 min')}>1 min</button>
-          </div>
-          <div
-            className="flex flex-1 flex-wrap items-center gap-1.5 [&_.wl2-analysis__toggle]:gap-0.5 [&_.wl2-analysis__toggle]:text-[0.62rem]"
-            aria-label="Chart layers"
-          >
-            {[
-              { label: 'Vol', state: chartShowVolume, set: setChartShowVolume },
-              { label: 'VWAP', state: chartShowVwap, set: setChartShowVwap },
-              { label: 'MACD', state: chartShowMacd, set: setChartShowMacd },
-              { label: 'BB', state: chartShowBb, set: setChartShowBb },
-              { label: 'RSI', state: chartShowRsi, set: setChartShowRsi },
-              { label: 'S/R', state: chartShowSr, set: setChartShowSr },
-            ].map(({ label, state, set }) => (
-              <label key={label} className="wl2-analysis__toggle">
-                <input type="checkbox" checked={state} onChange={e => set(e.target.checked)} />
-                {label}
-              </label>
-            ))}
-          </div>
-          <button
-            type="button"
-            className="wl2-btn wl2-btn--ghost !h-[22px] shrink-0 !px-1.5 !py-px !text-[0.78rem] leading-none"
-            disabled={chartLoading || !!fetchMarketDataStep}
-            onClick={() => void loadChartFromDb(symU, chartPeriod)}>
-            {chartLoading ? '…' : '↻'}
-          </button>
-        </div>
+  const renderChartBody = () => (
+    <>
       {chartError && (
-        <p className="msg-error" role="alert" style={{ marginTop: 'var(--space-2)' }}>
-          {chartError}
-        </p>
+        <p className="msg-error mt-2" role="alert">{chartError}</p>
       )}
       {chartInfo && !chartError && (
-        <p className="section-hint" role="status" style={{ marginTop: 'var(--space-2)' }}>
-          {chartInfo}
-        </p>
+        <p className="section-hint mt-2" role="status">{chartInfo}</p>
       )}
       {chartLoading && chartBarsSorted.length === 0 && (
-        <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>
-          Loading chart from database…
-        </p>
+        <p className="section-hint mt-2">Loading chart from database…</p>
       )}
       {chartBarsSorted.length > 0 ? (
-        <div className="wl2-analysis__chart-wrap" style={{ minWidth: 0, overflowX: 'auto' }}>
+        <div className="mt-3 min-w-0 overflow-x-auto rounded-lg border border-border bg-background p-2">
           <BarsCandlestickChart
             bars={chartBarsSorted}
             period={chartPeriod}
@@ -292,126 +277,87 @@ export function StockBarStatsPanel({
       ) : (
         !chartLoading &&
         !chartInfo && (
-          <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>
+          <p className="section-hint mt-2">
             No bars in the database for this symbol and period. Use <strong>Fetch from Massive</strong>, wait for jobs to finish, then reload the chart.
           </p>
         )
       )}
-    </section>
+    </>
   )
+
+  if (!symU) return null
+
+  if (embedded) {
+    return (
+      <section
+        className="min-w-0 border-t border-border p-3"
+        aria-labelledby="stock-bar-stats-head"
+      >
+        <div className="flex min-h-6 flex-wrap items-center gap-1.5">
+          <span
+            className="shrink-0 border-l-2 border-primary pl-1.5 text-[0.68rem] font-bold tracking-wider text-muted-foreground uppercase whitespace-nowrap"
+            id="stock-bar-stats-head"
+          >
+            Bar Data
+          </span>
+          {renderKpiPills()}
+          <Button
+            type="button"
+            size="sm"
+            className="h-[22px] shrink-0 px-2 py-0.5 text-[0.65rem] whitespace-nowrap"
+            disabled={!!fetchMarketDataStep}
+            onClick={() => void handleFetchMarketData()}
+            title={fetchMarketDataStep ?? 'Fetch daily + intraday OHLC from Massive'}
+          >
+            {fetchMarketDataStep ? '…' : 'Fetch'}
+          </Button>
+        </div>
+
+        {fetchMarketDataError && (
+          <span className="text-[0.72rem] text-destructive">{fetchMarketDataError}</span>
+        )}
+
+        {renderChartControls()}
+        {renderChartBody()}
+      </section>
+    )
   }
 
-  // ── Full standalone layout ──────────────────────────────────────────────────
   return (
-    <section className="wl2-analysis" aria-labelledby="riv-stock-bar-stats-head">
+    <section
+      className="mt-3 rounded-lg border border-border bg-muted/30 p-2 px-3"
+      aria-labelledby="stock-bar-stats-head"
+    >
       <div className="flex min-h-6 flex-wrap items-center gap-1.5">
         <span
           className="shrink-0 border-l-2 border-primary pl-1.5 text-[0.68rem] font-bold tracking-wider text-muted-foreground uppercase whitespace-nowrap"
-          id="riv-stock-bar-stats-head"
+          id="stock-bar-stats-head"
         >
           Bar Data · {symU}
         </span>
-        {stats != null && (
-          <div className="flex flex-1 flex-wrap items-center gap-1">
-            <span className="inline-flex items-center gap-0.5 rounded-full border border-border bg-muted/30 px-1.5 py-px text-[0.62rem] whitespace-nowrap">
-              <span className="font-mono text-muted-foreground">Daily</span>
-              <span className="font-mono font-semibold text-foreground">{stats.stock_day.toLocaleString()}</span>
-            </span>
-            {stats.stock_min && Object.entries(stats.stock_min).map(([period, count]) => (
-              <span
-                key={period}
-                className="inline-flex items-center gap-0.5 rounded-full border border-border bg-muted/30 px-1.5 py-px text-[0.62rem] whitespace-nowrap"
-              >
-                <span className="font-mono text-muted-foreground">{period}</span>
-                <span className="font-mono font-semibold text-foreground">{(count as number).toLocaleString()}</span>
-              </span>
-            ))}
-          </div>
-        )}
+        {renderKpiPills()}
         <div className="flex-1" />
-        <button
+        <Button
           type="button"
-          className="wl2-btn wl2-btn--primary !h-[22px] shrink-0 !px-2 !py-0.5 !text-[0.65rem] whitespace-nowrap"
+          size="sm"
+          className="h-[22px] shrink-0 px-2 py-0.5 text-[0.65rem] whitespace-nowrap"
           disabled={!!fetchMarketDataStep}
           onClick={() => void handleFetchMarketData()}
           title={fetchMarketDataStep ?? 'Fetch daily + intraday OHLC from Massive'}
         >
           {fetchMarketDataStep ? '…' : 'Fetch'}
-        </button>
+        </Button>
         {onClose && (
-          <button type="button" className="wl2-btn wl2-btn--ghost" onClick={onClose} aria-label="Close">✕</button>
+          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={onClose} aria-label="Close">✕</Button>
         )}
       </div>
 
       {fetchMarketDataError && (
-        <p className="msg-error" role="alert" style={{ marginTop: 'var(--space-2)' }}>{fetchMarketDataError}</p>
+        <p className="msg-error mt-2" role="alert">{fetchMarketDataError}</p>
       )}
 
-      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-        <div className="wl2-analysis__chart-tabs" role="tablist" aria-label="Period">
-          <button type="button" role="tab" aria-selected={chartPeriod === '1 D'}
-            className={`wl2-analysis__chart-tab${chartPeriod === '1 D' ? ' wl2-analysis__chart-tab--active' : ''}`}
-            onClick={() => setChartPeriod('1 D')}>Daily</button>
-          <button type="button" role="tab" aria-selected={chartPeriod === '1 min'}
-            className={`wl2-analysis__chart-tab${chartPeriod === '1 min' ? ' wl2-analysis__chart-tab--active' : ''}`}
-            onClick={() => setChartPeriod('1 min')}>1 min</button>
-        </div>
-        <div
-          className="flex flex-1 flex-wrap items-center gap-1.5 [&_.wl2-analysis__toggle]:gap-0.5 [&_.wl2-analysis__toggle]:text-[0.62rem]"
-          aria-label="Chart layers"
-        >
-          {[
-            { label: 'Vol', state: chartShowVolume, set: setChartShowVolume },
-            { label: 'VWAP', state: chartShowVwap, set: setChartShowVwap },
-            { label: 'MACD', state: chartShowMacd, set: setChartShowMacd },
-            { label: 'BB', state: chartShowBb, set: setChartShowBb },
-            { label: 'RSI', state: chartShowRsi, set: setChartShowRsi },
-            { label: 'S/R', state: chartShowSr, set: setChartShowSr },
-          ].map(({ label, state, set }) => (
-            <label key={label} className="wl2-analysis__toggle">
-              <input type="checkbox" checked={state} onChange={e => set(e.target.checked)} />
-              {label}
-            </label>
-          ))}
-        </div>
-        <button
-          type="button"
-          className="wl2-btn wl2-btn--ghost !h-[22px] shrink-0 !px-1.5 !py-px !text-[0.78rem] leading-none"
-          disabled={chartLoading || !!fetchMarketDataStep}
-          onClick={() => void loadChartFromDb(symU, chartPeriod)}>
-          {chartLoading ? '…' : '↻'}
-        </button>
-      </div>
-
-      {chartError && (
-        <p className="msg-error" role="alert" style={{ marginTop: 'var(--space-2)' }}>{chartError}</p>
-      )}
-      {chartInfo && !chartError && (
-        <p className="section-hint" role="status" style={{ marginTop: 'var(--space-2)' }}>{chartInfo}</p>
-      )}
-      {chartLoading && chartBarsSorted.length === 0 && (
-        <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>Loading chart from database…</p>
-      )}
-      {chartBarsSorted.length > 0 ? (
-        <div className="wl2-analysis__chart-wrap">
-          <BarsCandlestickChart
-            bars={chartBarsSorted}
-            period={chartPeriod}
-            showVolume={chartShowVolume}
-            showVwap={chartShowVwap}
-            showMacd={chartShowMacd}
-            showBollinger={chartShowBb}
-            showRsi={chartShowRsi}
-            showSr={chartShowSr}
-          />
-        </div>
-      ) : (
-        !chartLoading && !chartInfo && (
-          <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>
-            No bars in the database for this symbol and period. Use <strong>Fetch from Massive</strong>, wait for jobs to finish, then reload the chart.
-          </p>
-        )
-      )}
+      {renderChartControls()}
+      {renderChartBody()}
     </section>
   )
 }

@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react'
+import { stockSymbolInspectorBtnClass } from '@/components/shared/exec-row-buttons'
 import type { LivePositionRow } from '../portfolio/types'
 import { fmtUsd } from '../../utils/format'
 import { fmtSignedPct, fmtLivePositionMarketValueQtyTimesLast } from './positionUtils'
@@ -50,7 +51,7 @@ export function buildOpenStockPositionRows(
             {onInspectStock ? (
               <button
                 type="button"
-                className="riv-stock-symbol-btn"
+                className={stockSymbolInspectorBtnClass}
                 onClick={() => onInspectStock(position)}
                 aria-label={`Open details for ${position.symbol ?? 'symbol'}`}
               >
@@ -126,7 +127,7 @@ export function renderIndependentHoldingRow(
         {onInspectStock ? (
           <button
             type="button"
-            className="riv-stock-symbol-btn"
+            className={stockSymbolInspectorBtnClass}
             onClick={() => onInspectStock(position)}
             aria-label={`Open details for ${position.symbol ?? 'symbol'}`}
           >

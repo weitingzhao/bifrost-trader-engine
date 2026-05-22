@@ -29,11 +29,21 @@ import { fmtPctCompact, fmtUsd } from '../utils/format'
 import { StockBarStatsPanel } from './StockBarStatsPanel'
 import { cn } from '@/lib/utils'
 
-/** Scoped compact layout inside the stock inspector sheet (replaces `.riv-stock-inspector`). */
+const SIP_SECTION = 'border-t border-border px-3 py-2 first:border-t-0'
+const SIP_SECTION_TITLE = 'mb-1.5 text-[0.68rem] font-bold uppercase tracking-wide text-muted-foreground'
+const SIP_HEADER = 'flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2'
+const SIP_TITLE = 'm-0 min-w-0 flex-1 text-[0.95rem] font-bold text-foreground'
+const SIP_EXPIRY = 'text-[0.8rem] font-normal text-muted-foreground'
+const SIP_CLOSE =
+  'cursor-pointer rounded border-0 bg-transparent px-1.5 py-0.5 text-[1.1rem] leading-none text-muted-foreground hover:bg-muted hover:text-foreground'
+const SIP_STACK = 'flex flex-col'
+const SIP_KV_GRID = 'grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs tabular-nums'
+const SIP_KV_K = 'font-medium text-muted-foreground whitespace-nowrap'
+const SIP_KV_V = 'font-semibold text-foreground'
+
+/** Scoped compact layout inside the stock inspector sheet. */
 const STOCK_INSPECTOR_PANEL_CLASS = cn(
   'stock-inspector-panel min-w-0',
-  '[&_.od-detail-section]:px-3 [&_.od-detail-section]:py-2',
-  '[&_.od-detail-section-title]:mb-1.5 [&_.od-detail-section-title]:text-[0.68rem]',
   '[&_.sip-cond-row]:py-[3px] [&_.sip-cond-row]:text-xs',
   '[&_.sip-fund-summary]:mt-1.5 [&_.sip-fund-summary]:px-2 [&_.sip-fund-summary]:py-1',
   '[&_.sip-stmts-block]:mb-2',
@@ -898,10 +908,10 @@ export function StockInspectorPanel({
 
   return (
     <div className={STOCK_INSPECTOR_PANEL_CLASS} aria-label="Stock position detail">
-      <div className="od-detail-header">
-        <h3 className="od-detail-title">
+      <div className={SIP_HEADER}>
+        <h3 className={SIP_TITLE}>
           {symU}
-          {accountId && <span className="od-detail-expiry"> · {accountId}</span>}
+          {accountId && <span className={SIP_EXPIRY}> · {accountId}</span>}
           {resolvedPassCount != null && (
             <span className={`sip-pass-badge ${passBadgeTone(resolvedPassCount)}`}>
               F {resolvedPassCount}/8
@@ -913,12 +923,12 @@ export function StockInspectorPanel({
             </span>
           )}
         </h3>
-        <button type="button" className="od-detail-close" onClick={onClose} aria-label="Close stock inspector">
+        <button type="button" className={SIP_CLOSE} onClick={onClose} aria-label="Close stock inspector">
           ✕
         </button>
       </div>
 
-      <div className="od-contract-detail-stack">
+      <div className={SIP_STACK}>
 
         {/* Ticker Overview — company name, sector/industry, market cap, description, related */}
         {overview?.found && (
@@ -996,35 +1006,35 @@ export function StockInspectorPanel({
         )}
 
         {position && (
-          <section className="od-detail-section" aria-labelledby="riv-stock-sec-position">
-            <h4 id="riv-stock-sec-position" className="od-detail-section-title">
+          <section className={SIP_SECTION} aria-labelledby="stock-sec-position">
+            <h4 id="stock-sec-position" className={SIP_SECTION_TITLE}>
               Position
             </h4>
-            <div className="od-kv-grid">
-              <span className="od-kv-k">Side</span>
-              <span className="od-kv-v">{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</span>
-              <span className="od-kv-k">Qty</span>
-              <span className="od-kv-v">{Number.isFinite(qty) ? String(qty) : '—'}</span>
-              <span className="od-kv-k">Avg cost</span>
-              <span className="od-kv-v">{fmtUsd(position.avgCost)}</span>
-              <span className="od-kv-k">Last</span>
-              <span className="od-kv-v">{fmtUsd(position.price)}</span>
-              <span className="od-kv-k">Market value</span>
-              <span className="od-kv-v">{fmtMarketValue(position)}</span>
-              <span className="od-kv-k">Daily $</span>
-              <span className={`od-kv-v ${(dailyPnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+            <div className={SIP_KV_GRID}>
+              <span className={SIP_KV_K}>Side</span>
+              <span className={SIP_KV_V}>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</span>
+              <span className={SIP_KV_K}>Qty</span>
+              <span className={SIP_KV_V}>{Number.isFinite(qty) ? String(qty) : '—'}</span>
+              <span className={SIP_KV_K}>Avg cost</span>
+              <span className={SIP_KV_V}>{fmtUsd(position.avgCost)}</span>
+              <span className={SIP_KV_K}>Last</span>
+              <span className={SIP_KV_V}>{fmtUsd(position.price)}</span>
+              <span className={SIP_KV_K}>Market value</span>
+              <span className={SIP_KV_V}>{fmtMarketValue(position)}</span>
+              <span className={SIP_KV_K}>Daily $</span>
+              <span className={cn(SIP_KV_V, (dailyPnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative')}>
                 {dailyPnl != null ? fmtUsd(dailyPnl) : '—'}
               </span>
-              <span className="od-kv-k">Daily %</span>
-              <span className={`od-kv-v ${(dailyPct ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+              <span className={SIP_KV_K}>Daily %</span>
+              <span className={cn(SIP_KV_V, (dailyPct ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative')}>
                 {dailyPct != null ? fmtPctCompact(dailyPct) : '—'}
               </span>
-              <span className="od-kv-k">Since $</span>
-              <span className={`od-kv-v ${(pnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+              <span className={SIP_KV_K}>Since $</span>
+              <span className={cn(SIP_KV_V, (pnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative')}>
                 {pnl != null ? fmtUsd(pnl) : '—'}
               </span>
-              <span className="od-kv-k">Since %</span>
-              <span className={`od-kv-v ${(sincePct ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+              <span className={SIP_KV_K}>Since %</span>
+              <span className={cn(SIP_KV_V, (sincePct ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative')}>
                 {sincePct != null ? fmtPctCompact(sincePct) : '—'}
               </span>
             </div>
@@ -1032,15 +1042,15 @@ export function StockInspectorPanel({
         )}
 
         {position && (
-          <section className="od-detail-section" aria-labelledby="riv-stock-sec-benchmark">
-            <h4 id="riv-stock-sec-benchmark" className="od-detail-section-title">
+          <section className={SIP_SECTION} aria-labelledby="stock-sec-benchmark">
+            <h4 id="stock-sec-benchmark" className={SIP_SECTION_TITLE}>
               Daily benchmark
             </h4>
             {benchLoading && <p className="section-hint">Loading stock_day close…</p>}
             {!benchLoading && benchClose != null && (
-              <div className="od-kv-grid">
-                <span className="od-kv-k">stock_day close</span>
-                <span className="od-kv-v">{fmtUsd(benchClose)}</span>
+              <div className={SIP_KV_GRID}>
+                <span className={SIP_KV_K}>stock_day close</span>
+                <span className={SIP_KV_V}>{fmtUsd(benchClose)}</span>
               </div>
             )}
             {!benchLoading && benchClose == null && <p className="section-hint">No benchmark bar for this symbol.</p>}
@@ -1051,8 +1061,8 @@ export function StockInspectorPanel({
         <div className="sip-conditions-grid">
 
         {/* SEPA Fundamental Conditions */}
-        <section className="od-detail-section sip-fund-section" aria-labelledby="riv-stock-sec-fund">
-          <h4 id="riv-stock-sec-fund" className="od-detail-section-title sip-fund-title">
+        <section className={cn(SIP_SECTION, 'sip-fund-section')} aria-labelledby="stock-sec-fund">
+          <h4 id="stock-sec-fund" className={cn(SIP_SECTION_TITLE, 'sip-fund-title')}>
             <span>SEPA Fundamental Conditions</span>
             {fund?.as_of_date && (
               <span className="sip-fund-asof" title="as_of_date">
@@ -1182,8 +1192,8 @@ export function StockInspectorPanel({
         </section>
 
         {/* SEPA Technical Conditions */}
-        <section className="od-detail-section sip-fund-section" aria-labelledby="riv-stock-sec-tech">
-          <h4 id="riv-stock-sec-tech" className="od-detail-section-title sip-fund-title">
+        <section className={cn(SIP_SECTION, 'sip-fund-section')} aria-labelledby="stock-sec-tech">
+          <h4 id="stock-sec-tech" className={cn(SIP_SECTION_TITLE, 'sip-fund-title')}>
             <span>SEPA Technical Conditions</span>
             {tech?.as_of_date && (
               <span className="sip-fund-asof" title="as_of_date">{tech.as_of_date}</span>
@@ -1351,8 +1361,8 @@ export function StockInspectorPanel({
 
         {/* Raw income statement data — highlighted by active condition */}
         {(rawData || rawLoading) && (
-          <section className="od-detail-section sip-raw-section" aria-labelledby="riv-stock-sec-raw">
-            <h4 id="riv-stock-sec-raw" className="od-detail-section-title sip-raw-title">
+          <section className={cn(SIP_SECTION, 'sip-raw-section')} aria-labelledby="stock-sec-raw">
+            <h4 id="stock-sec-raw" className={cn(SIP_SECTION_TITLE, 'sip-raw-title')}>
               Source Data
               {activeCond && highlight.col && (
                 <span className="sip-raw-active-label">
@@ -1449,10 +1459,10 @@ export function StockInspectorPanel({
 
         {/* Put/Call Ratio section */}
         {symU && (
-          <section className="od-detail-section sip-stmts-section" aria-labelledby="riv-stock-sec-pcr">
+          <section className={cn(SIP_SECTION, 'sip-stmts-section')} aria-labelledby="stock-sec-pcr">
             <h4
-              id="riv-stock-sec-pcr"
-              className="od-detail-section-title sip-stmts-toggle sip-pcr-section-head"
+              id="stock-sec-pcr"
+              className={cn(SIP_SECTION_TITLE, 'sip-stmts-toggle sip-pcr-section-head')}
               onClick={() => setPcrExpanded((v) => !v)}
               role="button"
               tabIndex={0}
@@ -1815,10 +1825,10 @@ export function StockInspectorPanel({
         )}
 
         {/* Statements section (balance sheet, cash flow, ratios, short interest/volume) */}
-        <section className="od-detail-section sip-stmts-section" aria-labelledby="riv-stock-sec-stmts">
+        <section className={cn(SIP_SECTION, 'sip-stmts-section')} aria-labelledby="stock-sec-stmts">
           <h4
-            id="riv-stock-sec-stmts"
-            className="od-detail-section-title sip-stmts-toggle"
+            id="stock-sec-stmts"
+            className={cn(SIP_SECTION_TITLE, 'sip-stmts-toggle')}
             onClick={() => setStmtsExpanded((v) => !v)}
             role="button"
             tabIndex={0}

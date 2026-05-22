@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DraggableModal } from '../components/DraggableModal'
+import { PageSection } from '@/components/shared/page-section'
 import { SectionPageTitle } from '../components/SectionPageTitle'
+import { Button } from '@/components/ui/button'
 import type { Bar, StatusResponse } from '../types'
 import { fetchBars, fetchBarsJobs, deleteBarsJob, deleteAllBarsJobs, postRetryBarsJob, postRetryFailedBarsJobs } from '../api'
 import { inspectBarsLimitForPeriod } from './data/dataCoverageUtils'
@@ -150,7 +152,7 @@ export function DataPage({
   }, [loadBarsJobs])
 
   return (
-    <div className={`card process-section market-data-page${embeddedInSettings ? ' market-data-page--settings-embed' : ''}`}>
+    <PageSection className={`market-data-page${embeddedInSettings ? ' market-data-page--settings-embed' : ''}`}>
       {(onGoToScreener || onBreadcrumbParent) && (
         <SectionPageTitle
           menu={breadcrumbParentLabel}
@@ -209,12 +211,12 @@ export function DataPage({
         titleId="delete-all-jobs-title"
         footer={
           <div className="data-reset-modal-actions">
-            <button type="button" className="btn btn-secondary" onClick={() => setConfirmDeleteAll(false)}>
+            <Button type="button" variant="secondary" onClick={() => setConfirmDeleteAll(false)}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="btn btn-reset"
+              variant="destructive"
               disabled={barsJobsStatusSelected.size === 0}
               onClick={async () => {
                 setConfirmDeleteAll(false)
@@ -227,7 +229,7 @@ export function DataPage({
               }}
             >
               Delete all
-            </button>
+            </Button>
           </div>
         }
       >
@@ -247,12 +249,11 @@ export function DataPage({
         titleId="retry-failed-jobs-title"
         footer={
           <div className="data-reset-modal-actions">
-            <button type="button" className="btn btn-secondary" disabled={retryBatchBusy} onClick={() => setConfirmRetryFailed(false)}>
+            <Button type="button" variant="secondary" disabled={retryBatchBusy} onClick={() => setConfirmRetryFailed(false)}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="btn btn-primary"
               disabled={retryBatchBusy}
               onClick={async () => {
                 setRetryBatchBusy(true)
@@ -283,7 +284,7 @@ export function DataPage({
               }}
             >
               {retryBatchBusy ? 'Working…' : 'Confirm'}
-            </button>
+            </Button>
           </div>
         }
       >
@@ -303,6 +304,6 @@ export function DataPage({
           </select>
         </label>
       </DraggableModal>
-    </div>
+    </PageSection>
   )
 }

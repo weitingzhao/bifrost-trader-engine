@@ -14,6 +14,7 @@ import {
   getMessageLifeCompactAria,
   needsLifecycleCountdownTick,
 } from '../utils/systemMessageLifecycle'
+import { cn } from '@/lib/utils'
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
@@ -46,12 +47,21 @@ function statusLabel(s?: string) {
   if (!s) return ''
   return STATUS_LABELS[s.toLowerCase()] ?? s
 }
+
 function lampClass(level?: string) {
-  if (level === 'success') return 'msc-lamp-green'
-  if (level === 'warning') return 'msc-lamp-yellow'
-  if (level === 'error') return 'msc-lamp-red'
-  return 'msc-lamp-gray'
+  if (level === 'success') return 'bg-[var(--color-lamp-green)] shadow-[0_0_5px_var(--color-lamp-green)]'
+  if (level === 'warning') return 'bg-[var(--color-lamp-yellow)] shadow-[0_0_5px_var(--color-lamp-yellow)]'
+  if (level === 'error') return 'bg-[var(--color-lamp-red)] shadow-[0_0_5px_var(--color-lamp-red)]'
+  return 'bg-[var(--color-lamp-gray)]'
 }
+
+function levelStatusClass(level?: string) {
+  if (level === 'success') return 'text-[var(--color-lamp-green)]'
+  if (level === 'warning') return 'text-[var(--color-lamp-yellow)]'
+  if (level === 'error') return 'text-[var(--color-lamp-red)]'
+  return ''
+}
+
 function relTime(occurred_at: number) {
   const sec = Math.floor(Date.now() / 1000 - occurred_at)
   if (sec < 5) return 'just now'
@@ -80,21 +90,42 @@ function Toast({ msg, nowMs, onClose }: ToastProps) {
     Boolean(msg.message && msg.message.trim()) && msg.topic && msg.topic !== 'ib.connection'
   const life = getMessageLifeCompact(msg, nowMs)
   return (
-    <div className={`msc-toast level-${msg.level}`} role="alert">
-      <span className={`msc-lamp ${lampClass(msg.level)}`} aria-hidden />
-      <span className="msc-toast-content">
-        <span className="msc-toast-svc">{svcLabel(msg.service)}</span>
-        {slotText && <span className="msc-toast-slot">· {slotText}</span>}
-        <span className="msc-toast-arrow" aria-hidden>→</span>
-        <span className={`msc-toast-status level-${msg.level}`}>{statusText}</span>
-        {showDetail && (
-          <span className="msc-toast-detail">{truncateDetail(msg.message, 140)}</span>
+    <div className={cn('msc-toast', `level-${msg.level}`)} role="alert">
+      <span
+        className={cn('inline-block h-[7px] w-[7px] shrink-0 rounded-full', lampClass(msg.level))}
+        aria-hidden
+      />
+      <span className="flex min-w-0 flex-1 flex-wrap content-start items-center gap-[5px] overflow-hidden text-xs font-medium">
+        <span className="shrink-0 font-bold whitespace-nowrap text-[var(--color-text-main)]">
+          {svcLabel(msg.service)}
+        </span>
+        {slotText && (
+          <span className="shrink-0 whitespace-nowrap text-[var(--color-text-muted)]">· {slotText}</span>
         )}
-        <span className="msc-message-life" aria-label={getMessageLifeCompactAria(life)}>
+        <span className="shrink-0 text-[10px] text-[var(--color-text-dim)]" aria-hidden>
+          →
+        </span>
+        <span className={cn('shrink-0 font-semibold whitespace-nowrap', levelStatusClass(msg.level))}>
+          {statusText}
+        </span>
+        {showDetail && (
+          <span className="max-h-[3.2em] flex-[1_1_100%] overflow-hidden text-[10.5px] leading-[1.35] font-normal text-[var(--color-text-dim)]">
+            {truncateDetail(msg.message, 140)}
+          </span>
+        )}
+        <span
+          className="mt-1 flex-[1_1_100%] border-t border-white/[0.06] pt-[5px] text-[10px] leading-[1.2] font-semibold tracking-wide text-[var(--color-text-muted)] tabular-nums"
+          aria-label={getMessageLifeCompactAria(life)}
+        >
           {life}
         </span>
       </span>
-      <button type="button" className="msc-close-btn" onClick={onClose} aria-label="Dismiss notification">
+      <button
+        type="button"
+        className="flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded border-0 bg-transparent p-0 text-[17px] leading-none text-[var(--color-text-dim)] transition-[color,background] duration-[120ms] hover:bg-white/[0.09] hover:text-[var(--color-text-main)]"
+        onClick={onClose}
+        aria-label="Dismiss notification"
+      >
         ×
       </button>
     </div>
@@ -112,25 +143,46 @@ function DrawerItem({ msg, nowMs, onDismiss }: DrawerItemProps) {
   const detail = msg.message && msg.message.trim() ? msg.message.trim() : ''
   const life = getMessageLifeCompact(msg, nowMs)
   return (
-    <div className={`msc-drawer-item level-${msg.level}`}>
-      <span className={`msc-lamp ${lampClass(msg.level)}`} aria-hidden />
-      <div className="msc-drawer-item-body">
-        <div className="msc-drawer-item-main">
-          <span className="msc-drawer-item-svc">{svcLabel(msg.service)}</span>
-          {slotText && <span className="msc-drawer-item-slot">· {slotText}</span>}
-          <span className="msc-drawer-item-arrow" aria-hidden>→</span>
-          <span className={`msc-drawer-item-status level-${msg.level}`}>{statusText}</span>
+    <div className="group flex items-start gap-2.5 border-b border-white/[0.035] px-3.5 py-2.25 transition-colors duration-[120ms] last:border-b-0 hover:bg-white/[0.025]">
+      <span
+        className={cn('mt-[3px] inline-block h-[7px] w-[7px] shrink-0 rounded-full', lampClass(msg.level))}
+        aria-hidden
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1 text-xs">
+          <span className="font-bold text-[var(--color-text-main)]">{svcLabel(msg.service)}</span>
+          {slotText && <span className="text-[var(--color-text-muted)]">· {slotText}</span>}
+          <span className="text-[10px] text-[var(--color-text-dim)]" aria-hidden>
+            →
+          </span>
+          <span className={cn('font-semibold', levelStatusClass(msg.level))}>{statusText}</span>
         </div>
-        {detail && <div className="msc-drawer-item-detail">{detail}</div>}
-        {msg.reason && <div className="msc-drawer-item-reason">{msg.reason}</div>}
-        <div className="msc-drawer-item-time-row">
-          <span className="msc-drawer-item-time">{relTime(Number(msg.occurred_at))}</span>
-          <span className="msc-message-life" aria-label={getMessageLifeCompactAria(life)}>
+        {detail && (
+          <div className="mt-1 text-[11px] leading-[1.4] whitespace-pre-wrap text-[var(--color-text-muted)] break-words">
+            {detail}
+          </div>
+        )}
+        {msg.reason && (
+          <div className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-dim)]">{msg.reason}</div>
+        )}
+        <div className="mt-[3px] flex items-baseline justify-between gap-2">
+          <span className="min-w-0 text-[10px] text-[var(--color-text-dim)] tabular-nums">
+            {relTime(Number(msg.occurred_at))}
+          </span>
+          <span
+            className="shrink-0 text-[10px] leading-[1.2] font-semibold tracking-wide text-[var(--color-text-muted)] tabular-nums"
+            aria-label={getMessageLifeCompactAria(life)}
+          >
             {life}
           </span>
         </div>
       </div>
-      <button type="button" className="msc-close-btn msc-drawer-item-dismiss" onClick={onDismiss} aria-label="Dismiss">
+      <button
+        type="button"
+        className="mt-px flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded border-0 bg-transparent p-0 text-[17px] leading-none text-[var(--color-text-dim)] opacity-0 transition-[opacity,color,background] duration-[120ms] group-hover:opacity-100 hover:bg-white/[0.09] hover:text-[var(--color-text-main)]"
+        onClick={onDismiss}
+        aria-label="Dismiss"
+      >
         ×
       </button>
     </div>
@@ -220,7 +272,13 @@ export const MessageCenter = forwardRef<MessageCenterHandle, MessageCenterProps>
       <>
         {/* ── Toast stack (position: fixed, top-right) ── */}
         {toastMessages.length > 0 && (
-          <div className="msc-toast-stack" aria-live="polite" aria-atomic="false" role="region" aria-label="System notifications">
+          <div
+            className="pointer-events-none fixed top-[58px] right-3.5 z-[9000] flex flex-col gap-[7px]"
+            aria-live="polite"
+            aria-atomic="false"
+            role="region"
+            aria-label="System notifications"
+          >
             {toastMessages.map((msg) => (
               <Toast key={msg.message_id} msg={msg} nowMs={now} onClose={() => onDismiss(msg.message_id)} />
             ))}
@@ -232,16 +290,20 @@ export const MessageCenter = forwardRef<MessageCenterHandle, MessageCenterProps>
           <>
             <div className="msc-backdrop" onClick={closeDrawer} aria-hidden />
             <div className="msc-drawer" role="dialog" aria-label="Message center" aria-modal>
-              <div className="msc-drawer-header">
-                <span className="msc-drawer-title">Messages</span>
+              <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.065] px-3.5 pt-[13px] pb-[11px]">
+                <span className="text-[13px] font-bold tracking-wide text-[var(--color-text-main)]">
+                  Messages
+                </span>
                 {drawerMessages.length > 0 && (
-                  <span className="msc-drawer-badge">{drawerMessages.length}</span>
+                  <span className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-1.5 py-px text-[10px] leading-[1.5] font-bold text-[var(--color-text-muted)]">
+                    {drawerMessages.length}
+                  </span>
                 )}
-                <div className="msc-drawer-header-actions">
+                <div className="ml-auto flex items-center gap-[5px]">
                   {drawerMessages.length > 0 && (
                     <button
                       type="button"
-                      className="msc-drawer-action-btn msc-drawer-action-btn--danger"
+                      className="msc-drawer-danger-action"
                       onClick={onDismissAll}
                       title="Dismiss all messages"
                     >
@@ -250,7 +312,7 @@ export const MessageCenter = forwardRef<MessageCenterHandle, MessageCenterProps>
                   )}
                   <button
                     type="button"
-                    className="msc-drawer-close"
+                    className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-[var(--color-text-dim)] transition-[color,background] duration-[130ms] hover:bg-white/[0.08] hover:text-[var(--color-text-main)]"
                     onClick={closeDrawer}
                     aria-label="Close message center"
                   >
@@ -261,9 +323,9 @@ export const MessageCenter = forwardRef<MessageCenterHandle, MessageCenterProps>
                 </div>
               </div>
 
-              <div className="msc-drawer-body">
+              <div className="flex-1 overflow-y-auto py-1.5 pb-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-sm [&::-webkit-scrollbar-thumb]:bg-[var(--color-border)] [&::-webkit-scrollbar-track]:bg-transparent">
                 {drawerMessages.length === 0 ? (
-                  <div className="msc-drawer-empty">
+                  <div className="flex flex-col items-center justify-center gap-2.5 px-5 py-12 text-xs text-[var(--color-text-dim)]">
                     <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.3" aria-hidden>
                       <path strokeLinecap="round" d="M15 17H20L18.595 15.595A1 1 0 0118 14.812V11a6 6 0 00-9.33-4.993M9 9v5.818a1 1 0 01-.293.707L7 17h5m3 0v1a3 3 0 01-6 0v-1m6 0H9" />
                     </svg>

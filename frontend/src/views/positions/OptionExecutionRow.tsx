@@ -1,3 +1,5 @@
+import { Button } from '@/components/ui/button'
+import { ExecRowIconButton } from '@/components/shared/exec-row-buttons'
 import type { Execution } from '../../types'
 import { fmtDate, fmtDaysAgo, fmtUsd } from '../../utils/format'
 import ExecSourceBadge from '../../components/ExecSourceBadge'
@@ -109,9 +111,8 @@ export function OptionExecutionRow({
           </div>
           {showSyncTws && crossBookMatch != null ? (
             <div className="detail-exec-line-sync">
-              <button
-                type="button"
-                className="btn btn-icon-small detail-exec-sync-btn"
+              <ExecRowIconButton
+                className="detail-exec-sync-btn"
                 title="Apply opportunity and strategy from the final book row"
                 aria-label="Sync strategy attribution from final book"
                 disabled={syncBusyTws}
@@ -123,14 +124,13 @@ export function OptionExecutionRow({
                 <svg viewBox="0 0 24 24" width={14} height={14} fill="currentColor" aria-hidden>
                   <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 9.02 4 10.48 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
                 </svg>
-              </button>
+              </ExecRowIconButton>
             </div>
           ) : null}
           {showSyncFinal && crossBookMatch != null ? (
             <div className="detail-exec-line-sync">
-              <button
-                type="button"
-                className="btn btn-icon-small detail-exec-sync-btn"
+              <ExecRowIconButton
+                className="detail-exec-sync-btn"
                 title="Apply opportunity and strategy from the TWS client row"
                 aria-label="Sync strategy attribution from TWS client book"
                 disabled={syncBusyFinal}
@@ -142,7 +142,7 @@ export function OptionExecutionRow({
                 <svg viewBox="0 0 24 24" width={14} height={14} fill="currentColor" aria-hidden>
                   <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 9.02 4 10.48 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
                 </svg>
-              </button>
+              </ExecRowIconButton>
             </div>
           ) : null}
         </div>
@@ -173,9 +173,7 @@ export function OptionExecutionRow({
       <StrategyAttributionCells ex={ex} onOpenStrategyInstance={actions.onOpenStrategyInspector} />
       <td className="replay-opt-actions-cell">
         <span className="replay-exec-row-actions">
-          <button
-            type="button"
-            className="btn btn-icon-small"
+          <ExecRowIconButton
             onClick={e => {
               e.stopPropagation()
               actions.onEdit(ex)
@@ -187,7 +185,7 @@ export function OptionExecutionRow({
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
-          </button>
+          </ExecRowIconButton>
           {ex.account_executions_id != null ? (
             <LinkStrategyIconButton
               title="Assign opportunity and strategy"
@@ -195,20 +193,19 @@ export function OptionExecutionRow({
             />
           ) : null}
           {isOffTrack ? (
-            <button
+            <Button
               type="button"
-              className="btn btn-small"
+              size="sm"
               onClick={e => {
                 e.stopPropagation()
                 actions.onCloseAgainst(ex)
               }}
             >
               Close
-            </button>
+            </Button>
           ) : null}
-          <button
-            type="button"
-            className="btn btn-icon-small btn-icon-danger"
+          <ExecRowIconButton
+            variant="danger"
             onClick={e => {
               e.stopPropagation()
               actions.onDelete(ex)
@@ -222,7 +219,7 @@ export function OptionExecutionRow({
               <line x1="10" y1="11" x2="10" y2="17" />
               <line x1="14" y1="11" x2="14" y2="17" />
             </svg>
-          </button>
+          </ExecRowIconButton>
         </span>
       </td>
     </tr>

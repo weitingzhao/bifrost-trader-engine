@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { Button } from '@/components/ui/button'
 import type { RefJobTrackItem } from './stockReferenceJobHelpers'
 import {
   countActiveRefJobs,
@@ -83,25 +84,26 @@ export function TickerReferenceJobsSheet({
           <h3 id="ref-jobs-sheet-title" className="ref-jobs-sheet-title">
             PostgreSQL sync jobs
           </h3>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Close">
+          <Button type="button" variant="secondary" size="sm" onClick={onClose} aria-label="Close">
             Close
-          </button>
+          </Button>
         </div>
 
         <p className="ref-jobs-sheet-meta">Session-only tracking. Updates via job stream.</p>
 
         <div className="ref-jobs-sheet-toolbar">
-          <button
+          <Button
             type="button"
-            className="btn btn-secondary btn-sm"
+            variant="secondary"
+            size="sm"
             onClick={onClearCompleted}
             disabled={!hasCompleted}
           >
             Clear completed
-          </button>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClearAll} disabled={items.length === 0}>
+          </Button>
+          <Button type="button" variant="secondary" size="sm" onClick={onClearAll} disabled={items.length === 0}>
             Clear all
-          </button>
+          </Button>
         </div>
 
         <div className="ref-jobs-sheet-table-wrap">
@@ -146,15 +148,17 @@ export function TickerReferenceJobsSheet({
                         <code className="ref-jobs-table-job-id" title={item.jobId}>
                           {formatRefJobIdShort(item.jobId)}
                         </code>
-                        <button
+                        <Button
                           type="button"
-                          className="btn btn-secondary btn-sm ref-jobs-table-copy"
+                          variant="secondary"
+                          size="sm"
+                          className="ref-jobs-table-copy"
                           onClick={() => {
                             void navigator.clipboard?.writeText(item.jobId).catch(() => {})
                           }}
                         >
                           Copy
-                        </button>
+                        </Button>
                       </td>
                       <td className="ref-jobs-table-summary">{summarizeRefJobResult(item.job)}</td>
                       <td className="ref-jobs-table-details-cell">

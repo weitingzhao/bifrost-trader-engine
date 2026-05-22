@@ -1,4 +1,5 @@
 import { InfoTooltip } from '../../components/InfoTooltip'
+import { Button } from '@/components/ui/button'
 import { celeryQueueHash } from '../../utils/celeryQueueDeepLink'
 import { feedMassiveStockTickersSubHash } from './feedMassiveStockTabUtils'
 import {
@@ -506,16 +507,17 @@ export function RefJobDetailPanel({
           ) : null}
         </div>
         <div className="ref-jobs-md-enqueue-actions">
-          <button
+          <Button
             type="button"
-            className="btn btn-primary btn-sm ref-jobs-md-enqueue-btn"
+            size="sm"
+            className="ref-jobs-md-enqueue-btn"
             disabled={disabledEnqueue}
             aria-busy={enqueueBusy}
             onClick={onEnqueue}
           >
             <CatalogEnqueueIcon busy={enqueueBusy} />
             <span>{enqueueBusy ? 'Enqueueing…' : `Enqueue ${jobLabel}`}</span>
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -555,18 +557,18 @@ export function RefJobDetailPanel({
             />
           </label>
           <div className="ref-jobs-md-actions">
-            <button type="button" className="btn btn-secondary" disabled={busyVerify} onClick={onVerifySearch}>
+            <Button type="button" variant="secondary" disabled={busyVerify} onClick={onVerifySearch}>
               {busyVerify ? 'Loading…' : 'Search (DB)'}
-            </button>
+            </Button>
           </div>
         </>
       ) : null}
 
       {isFeedStocksTickersTypesRefKind(kind) ? (
         <div className="ref-jobs-md-actions">
-          <button type="button" className="btn btn-secondary" disabled={busyVerify} onClick={onVerifyInstrumentTypes}>
+          <Button type="button" variant="secondary" disabled={busyVerify} onClick={onVerifyInstrumentTypes}>
             {busyVerify ? 'Loading…' : 'Instrument types (DB)'}
-          </button>
+          </Button>
         </div>
       ) : null}
 
@@ -584,15 +586,15 @@ export function RefJobDetailPanel({
             />
           </label>
           <div className="ref-jobs-md-actions">
-            <button
+            <Button
               type="button"
-              className="btn btn-secondary"
+              variant="secondary"
               disabled={busyVerify}
               aria-busy={busyVerify && overviewVerifyKind === 'merged'}
               onClick={onVerifyOverviewMerged}
             >
               {busyVerify && overviewVerifyKind === 'merged' ? 'Loading…' : 'Load merged row (DB)'}
-            </button>
+            </Button>
           </div>
 
           <label className="feed-massive-field" style={{ display: 'block', marginTop: 'var(--space-3)' }}>
@@ -618,9 +620,9 @@ export function RefJobDetailPanel({
             page size {DEFAULT_TICKER_REF_MISSING_LIMIT}.
           </p>
           <div className="ref-jobs-md-actions" style={{ marginTop: 'var(--space-2)' }}>
-            <button
+            <Button
               type="button"
-              className="btn btn-secondary"
+              variant="secondary"
               disabled={busyVerify}
               aria-busy={busyVerify && overviewVerifyKind === 'missing' && !overviewMissingVerifyAppend}
               onClick={onVerifyOverviewMissingFirst}
@@ -628,11 +630,11 @@ export function RefJobDetailPanel({
               {busyVerify && overviewVerifyKind === 'missing' && !overviewMissingVerifyAppend
                 ? 'Loading…'
                 : 'Load missing tickers (DB)'}
-            </button>
+            </Button>
             {missingOverviewHasMore && missingOverviewLoadedCount > 0 ? (
-              <button
+              <Button
                 type="button"
-                className="btn btn-secondary"
+                variant="secondary"
                 disabled={busyVerify}
                 aria-busy={busyVerify && overviewVerifyKind === 'missing' && overviewMissingVerifyAppend}
                 onClick={onVerifyOverviewMissingMore}
@@ -640,7 +642,7 @@ export function RefJobDetailPanel({
                 {busyVerify && overviewVerifyKind === 'missing' && overviewMissingVerifyAppend
                   ? 'Loading…'
                   : 'Load more'}
-              </button>
+              </Button>
             ) : null}
           </div>
         </>
@@ -660,15 +662,15 @@ export function RefJobDetailPanel({
             />
           </label>
           <div className="ref-jobs-md-actions">
-            <button
+            <Button
               type="button"
-              className="btn btn-secondary"
+              variant="secondary"
               disabled={busyVerify}
               aria-busy={busyVerify && relatedVerifyKind === 'symbol'}
               onClick={onVerifyRelatedDb}
             >
               {busyVerify && relatedVerifyKind === 'symbol' ? 'Loading…' : 'Load related (DB)'}
-            </button>
+            </Button>
           </div>
 
           <label className="feed-massive-field" style={{ display: 'block', marginTop: 'var(--space-3)' }}>
@@ -690,9 +692,9 @@ export function RefJobDetailPanel({
             />
           </label>
           <div className="ref-jobs-md-actions" style={{ marginTop: 'var(--space-2)' }}>
-            <button
+            <Button
               type="button"
-              className="btn btn-secondary"
+              variant="secondary"
               disabled={busyVerify}
               aria-busy={busyVerify && relatedVerifyKind === 'missing' && !relatedMissingVerifyAppend}
               onClick={onVerifyRelatedMissingFirst}
@@ -700,11 +702,11 @@ export function RefJobDetailPanel({
               {busyVerify && relatedVerifyKind === 'missing' && !relatedMissingVerifyAppend
                 ? 'Loading…'
                 : 'Load missing tickers (DB)'}
-            </button>
+            </Button>
             {missingRelatedHasMore && missingRelatedLoadedCount > 0 ? (
-              <button
+              <Button
                 type="button"
-                className="btn btn-secondary"
+                variant="secondary"
                 disabled={busyVerify}
                 aria-busy={busyVerify && relatedVerifyKind === 'missing' && relatedMissingVerifyAppend}
                 onClick={onVerifyRelatedMissingMore}
@@ -712,13 +714,13 @@ export function RefJobDetailPanel({
                 {busyVerify && relatedVerifyKind === 'missing' && relatedMissingVerifyAppend
                   ? 'Loading…'
                   : 'Load more (missing)'}
-              </button>
+              </Button>
             ) : null}
           </div>
           <div className="ref-jobs-md-actions" style={{ marginTop: 'var(--space-2)' }}>
-            <button
+            <Button
               type="button"
-              className="btn btn-secondary"
+              variant="secondary"
               disabled={busyVerify}
               aria-busy={busyVerify && relatedVerifyKind === 'filled' && !relatedFilledVerifyAppend}
               onClick={onVerifyRelatedFilledFirst}
@@ -726,11 +728,11 @@ export function RefJobDetailPanel({
               {busyVerify && relatedVerifyKind === 'filled' && !relatedFilledVerifyAppend
                 ? 'Loading…'
                 : 'Load filled tickers (DB)'}
-            </button>
+            </Button>
             {filledRelatedHasMore && filledRelatedLoadedCount > 0 ? (
-              <button
+              <Button
                 type="button"
-                className="btn btn-secondary"
+                variant="secondary"
                 disabled={busyVerify}
                 aria-busy={busyVerify && relatedVerifyKind === 'filled' && relatedFilledVerifyAppend}
                 onClick={onVerifyRelatedFilledMore}
@@ -738,7 +740,7 @@ export function RefJobDetailPanel({
                 {busyVerify && relatedVerifyKind === 'filled' && relatedFilledVerifyAppend
                   ? 'Loading…'
                   : 'Load more (filled)'}
-              </button>
+              </Button>
             ) : null}
           </div>
         </>

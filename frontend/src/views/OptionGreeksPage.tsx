@@ -337,7 +337,7 @@ export default function OptionGreeksPage({ onBreadcrumbResearch, breadcrumbLabel
       </div>
 
       {/* Controls */}
-      <div className="option-greeks-page__controls card">
+      <div className="option-greeks-page__controls rounded-lg border border-border bg-card p-4">
         <div className="option-greeks-page__controls-inner">
           {/* Symbol */}
           <form onSubmit={handleSymbolSubmit} style={{ display: 'contents' }}>

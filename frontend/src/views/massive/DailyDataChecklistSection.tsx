@@ -9,6 +9,7 @@ import {
 } from '../../api'
 import type { MassiveDailyChecklistDims, MassiveDailyDimBlock, MassiveJobApiRow } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
+import { Button } from '@/components/ui/button'
 
 const DAILY_DIMS = [
   { key: 'daily-snapshot' as const, label: 'Chain snapshot' },
@@ -274,17 +275,17 @@ export function DailyDataChecklistSection({
               onChange={e => setTradeDate(e.target.value)}
             />
           </label>
-          <button type="button" className="btn-secondary" disabled={disabled || loading} onClick={() => void loadChecklist()}>
+          <Button type="button" variant="secondary" disabled={disabled || loading} onClick={() => void loadChecklist()}>
             {loading ? 'Loading…' : 'Refresh'}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn-secondary"
+            variant="secondary"
             disabled={disabled || loading || batchBusy || busyKey != null}
             onClick={() => void onBackfillAll()}
           >
             {batchBusy ? 'Backfilling…' : 'Backfill all missing'}
-          </button>
+          </Button>
         </div>
       </div>
       {!configured ? (

@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Bar, IbAccountSnapshot, RealtimeQuote, StatusResponse } from '../types'
 import { fetchBars, fetchQuotes } from '../api'
+import { PageSection } from '@/components/shared/page-section'
+import { Button } from '@/components/ui/button'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { SectionPageTitle, SECTION_TITLE_CLASS } from '../components/SectionPageTitle'
 import { fmtTs, fmtUsd } from '../utils/format'
 
 const BAR_PERIODS = [
@@ -66,29 +69,22 @@ export function MarketDataPage({ status, onGoToScreener, breadcrumbLabel = 'Scre
   }, [candidateSymbols.join(','), barSymbol])
 
   return (
-    <div className="card process-section market-data-page">
-      <h2 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-        {onGoToScreener ? (
-          <>
-            <button
-              type="button"
-              className="page-title-breadcrumb-link"
-              onClick={onGoToScreener}
-              aria-label="Go to Screener"
-            >
-              Research
-            </button>
-            {' / '}
-            {breadcrumbLabel}
-            <InfoTooltip text="Manage bars and market data: fetch by symbol and write to DB (stock_day / stock_min) for replay and risk." />
-          </>
-        ) : (
-          <>
-            Market data
-            <InfoTooltip text="Manage bars and market data: fetch by symbol and write to DB (stock_day / stock_min) for replay and risk." />
-          </>
-        )}
-      </h2>
+    <PageSection className="market-data-page">
+      {onGoToScreener ? (
+        <SectionPageTitle
+          menu="Research"
+          pageTitle={breadcrumbLabel}
+          onMenuClick={onGoToScreener}
+          menuNavigateAriaLabel="Go to Screener"
+          infoText="Manage bars and market data: fetch by symbol and write to DB (stock_day / stock_min) for replay and risk."
+          style={{ marginBottom: 'var(--space-2)' }}
+        />
+      ) : (
+        <h2 className={SECTION_TITLE_CLASS} style={{ marginBottom: 'var(--space-2)' }}>
+          Market data
+          <InfoTooltip text="Manage bars and market data: fetch by symbol and write to DB (stock_day / stock_min) for replay and risk." />
+        </h2>
+      )}
 
       {quotes.length > 0 && (
         <section className="replay-section realtime-quotes-wall" aria-labelledby="realtime-quotes-head">
@@ -122,7 +118,7 @@ export function MarketDataPage({ status, onGoToScreener, breadcrumbLabel = 'Scre
       )}
 
       <section className="replay-section" aria-labelledby="bars-head">
-        <h3 id="bars-head" className="page-title-with-tooltip">
+        <h3 id="bars-head" className={SECTION_TITLE_CLASS}>
           Bars
           <InfoTooltip text="View bars from DB by symbol and period. For fetching/backfill, use Settings → Status → Feed → Interactive Brokers." />
         </h3>
@@ -154,9 +150,9 @@ export function MarketDataPage({ status, onGoToScreener, breadcrumbLabel = 'Scre
           </select>
         </div>
         <div className="replay-toolbar">
-          <button
+          <Button
             type="button"
-            className="btn btn-secondary"
+            variant="secondary"
             disabled={barsLoading || !barSymbol.trim()}
             onClick={async () => {
               const symbol = barSymbol.trim() || candidateSymbols[0] || ''
@@ -174,7 +170,7 @@ export function MarketDataPage({ status, onGoToScreener, breadcrumbLabel = 'Scre
             aria-label="Load bars from DB"
           >
             {barsLoading ? 'Loading…' : 'Load from DB'}
-          </button>
+          </Button>
         </div>
         {bars.length === 0 ? (
           <div className="replay-placeholder">No bars. Enter symbol and click "Fetch bars" or "Load from DB".</div>
@@ -205,6 +201,6 @@ export function MarketDataPage({ status, onGoToScreener, breadcrumbLabel = 'Scre
           </table>
         )}
       </section>
-    </div>
+    </PageSection>
   )
 }

@@ -11,19 +11,7 @@ const frontendRoot = path.resolve(__dirname, '..')
 const srcRoot = path.join(frontendRoot, 'src')
 const stylesDir = path.join(srcRoot, 'styles')
 
-const BANNED_CLASS_FRAGMENTS = [
-  'card',
-  'process-section',
-  'btn-',
-  'table-scroll',
-  'settings-page',
-  'lamp-icon',
-  'app-header-',
-  'page-title-',
-  'wl2',
-  'od-detail',
-  'riv-',
-]
+import { findBannedInText } from './legacy-class-match.mjs'
 
 const LEGACY_ALLOWLIST = new Set([
   path.join(srcRoot, 'components', 'ui', 'card.tsx'),
@@ -50,13 +38,7 @@ function walkTsFiles(dir, acc = []) {
 }
 
 function countBannedInFile(filePath) {
-  const text = fs.readFileSync(filePath, 'utf8')
-  const hits = []
-  for (const frag of BANNED_CLASS_FRAGMENTS) {
-    const re = new RegExp(`className\\s*=\\s*['"\`][^'"\`]*\\b${frag.replace(/-/g, '\\-')}`, 'g')
-    if (re.test(text)) hits.push(frag)
-  }
-  return hits
+  return findBannedInText(fs.readFileSync(filePath, 'utf8'))
 }
 
 function formatBytes(n) {
@@ -67,9 +49,10 @@ function formatBytes(n) {
 
 console.log('=== Legacy CSS retirement metrics ===\n')
 
-const legacyPath = path.join(stylesDir, 'legacy.css')
 const designTokensPath = path.join(stylesDir, 'design-tokens.css')
-console.log(`legacy.css lines:        ${lineCount(legacyPath)}`)
+const appSurfacesPath = path.join(stylesDir, 'app-surfaces.css')
+console.log(`legacy.css lines:        ${lineCount(path.join(stylesDir, 'legacy.css'))} (deleted when 0)`)
+console.log(`app-surfaces.css lines:  ${lineCount(appSurfacesPath)}`)
 console.log(`design-tokens.css lines: ${lineCount(designTokensPath)}`)
 console.log('')
 

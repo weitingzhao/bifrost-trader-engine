@@ -5,6 +5,7 @@ import type { GreeksCoverageResponse } from '../../api'
 import type { RealtimeQuote } from '../../types'
 import { getContractLabelParts, parseOptionContractKey } from '../../utils/format'
 import type { OpenOptionPosition } from '../portfolio/types'
+import { Button } from '@/components/ui/button'
 import { OptionContractDetailPanel } from './OptionContractDetailPanel'
 import { computeDerivedMetrics, normalizeOptionRight, parseDteNumeric } from './optionContractMetrics'
 import { useOptionContractLiquidity } from './useOptionContractLiquidity'
@@ -244,13 +245,20 @@ export function OptionContractDetailFromOpenPosition({
   if (loading) {
     return (
       <div className="od-contract-detail od-contract-detail--drawer" aria-busy="true" aria-label="Loading option contract">
-        <div className="od-detail-header">
-          <h3 className="od-detail-title">
-            {symbol || '—'} <span className="od-detail-expiry">· loading…</span>
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-[var(--color-bg)] px-3 py-2">
+          <h3 className="m-0 min-w-0 flex-1 text-[0.95rem] font-bold text-[var(--color-text)]">
+            {symbol || '—'} <span className="text-[0.8rem] font-normal text-[var(--color-text-muted)]">· loading…</span>
           </h3>
-          <button type="button" className="od-detail-close" onClick={onClose} aria-label="Close contract detail">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0 text-muted-foreground"
+            onClick={onClose}
+            aria-label="Close contract detail"
+          >
             ✕
-          </button>
+          </Button>
         </div>
         <p className="section-hint" style={{ margin: '0.75rem 0 0' }}>
           Loading contract detail (Massive snapshots)…

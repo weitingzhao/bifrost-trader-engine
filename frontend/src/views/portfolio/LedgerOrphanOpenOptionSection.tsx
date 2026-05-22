@@ -1,49 +1,15 @@
 import type { Execution, OptExecutionGroup, OptionStockLinkSummary } from '../../types'
+import {
+  ExecRowIconButton,
+  LinkStockLegIconButton,
+  LinkStrategyIconButton,
+  sectionHeadingWithTooltipClass,
+} from '@/components/shared/exec-row-buttons'
 import ExecSourceBadge from '../../components/ExecSourceBadge'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import { fmtExpiry, fmtTradeDate, fmtTs, fmtUsd, getContractLabelParts } from '../../utils/format'
 import { getOptGroupKey, ledgerOptDetailRowPnl } from './ledgerOptHelpers'
 import { LedgerStgInsCell } from './LedgerStgInsCell'
-
-function LinkStrategyIconButton({ onClick, title }: { onClick: () => void; title: string }) {
-  return (
-    <button
-      type="button"
-      className="btn btn-icon-small"
-      onClick={e => {
-        e.stopPropagation()
-        onClick()
-      }}
-      title={title}
-      aria-label={title}
-    >
-      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-      </svg>
-    </button>
-  )
-}
-
-function LinkStockLegIconButton({ onClick, title }: { onClick: () => void; title: string }) {
-  return (
-    <button
-      type="button"
-      className="btn btn-icon-small"
-      onClick={e => {
-        e.stopPropagation()
-        onClick()
-      }}
-      title={title}
-      aria-label={title}
-    >
-      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M3 18h6v-6H3v6zm9-12h6V3h-6v3zM3 8h6V3H3v5zm9 10h6v-6h-6v6z" />
-        <path d="M14 9h2M9 14v2" />
-      </svg>
-    </button>
-  )
-}
 
 export interface LedgerOrphanOpenOptionSectionProps {
   sortedOpenUnrealized: OptExecutionGroup[]
@@ -79,7 +45,7 @@ export function LedgerOrphanOpenOptionSection({
     <>
       {sortedOpenUnrealized.length > 0 && (
         <div className="replay-portfolio-table-wrap replay-portfolio-table-wrap--no-scroll">
-          <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">
+          <h5 className={`replay-sub replay-opt-detail-title ${sectionHeadingWithTooltipClass}`}>
             Open Option
             <InfoTooltip text="Option positions with non-zero net quantity and future expiry. They are excluded from the Summary (fully closed trades only) and the Closed Option table above." />
           </h5>
@@ -192,7 +158,7 @@ export function LedgerOrphanOpenOptionSection({
 
       {expiredUnrealized.length > 0 && (
         <div className="replay-portfolio-table-wrap replay-portfolio-table-wrap--no-scroll">
-          <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">
+          <h5 className={`replay-sub replay-opt-detail-title ${sectionHeadingWithTooltipClass}`}>
             Expired but not closed
             <InfoTooltip text="These option contracts have expired but net quantity is not zero. Some executions may be missing in the trade ledger; add the missing trades to close the position." />
           </h5>
@@ -297,9 +263,7 @@ export function LedgerOrphanOpenOptionSection({
                         : '—'}
                     </td>
                     <td className="replay-opt-actions-cell">
-                      <button
-                        type="button"
-                        className="btn btn-icon-small"
+                      <ExecRowIconButton
                         onClick={e => {
                           e.stopPropagation()
                           onExpiredCloseClick(groupKey)
@@ -321,7 +285,7 @@ export function LedgerOrphanOpenOptionSection({
                           <circle cx="12" cy="12" r="10" />
                           <path d="m15 9-6 6M9 9l6 6" />
                         </svg>
-                      </button>
+                      </ExecRowIconButton>
                     </td>
                   </tr>
                 )
@@ -331,7 +295,7 @@ export function LedgerOrphanOpenOptionSection({
         </div>
       )}
 
-      <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">
+      <h5 className={`replay-sub replay-opt-detail-title ${sectionHeadingWithTooltipClass}`}>
         Details (per trade)
         <InfoTooltip text="Click an orphan option row above to load its execution details." />
       </h5>
@@ -443,9 +407,7 @@ export function LedgerOrphanOpenOptionSection({
                     <td>
                       {ex.account_executions_id != null ? (
                         <span className="replay-exec-row-actions">
-                          <button
-                            type="button"
-                            className="btn btn-icon-small"
+                          <ExecRowIconButton
                             onClick={() => onEditExecution(ex)}
                             title="Edit"
                             aria-label="Edit execution"
@@ -454,7 +416,7 @@ export function LedgerOrphanOpenOptionSection({
                               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                             </svg>
-                          </button>
+                          </ExecRowIconButton>
                           <LinkStrategyIconButton
                             title="Assign strategy opportunity and instance"
                             onClick={() => onLinkExecution(ex, groupTrades)}
@@ -465,9 +427,8 @@ export function LedgerOrphanOpenOptionSection({
                               onClick={() => onLinkStockExecution(ex)}
                             />
                           ) : null}
-                          <button
-                            type="button"
-                            className="btn btn-icon-small btn-icon-danger"
+                          <ExecRowIconButton
+                            variant="danger"
                             onClick={() => onDeleteExecution(ex)}
                             title="Delete"
                             aria-label="Delete execution"
@@ -478,7 +439,7 @@ export function LedgerOrphanOpenOptionSection({
                               <line x1="10" y1="11" x2="10" y2="17" />
                               <line x1="14" y1="11" x2="14" y2="17" />
                             </svg>
-                          </button>
+                          </ExecRowIconButton>
                         </span>
                       ) : (
                         '—'

@@ -1,6 +1,8 @@
 import type { StatusResponse } from '../types'
+import { PageSection } from '@/components/shared/page-section'
+import { Button } from '@/components/ui/button'
 import { DraggableModal } from '../components/DraggableModal'
-import { InfoTooltip } from '../components/InfoTooltip'
+import { SettingsCoverageTitle } from './settings/SettingsCoverageTitle'
 import { useBarsCoverage } from './data/useBarsCoverage'
 import { DataCoveragePanel } from './data/panels'
 import { fmtDurationSeconds, fmtTs } from '../utils/format'
@@ -15,29 +17,13 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
   const cov = useBarsCoverage(status)
 
   return (
-    <div className="card process-section market-data-page market-data-page--settings-embed">
-      <h2 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-        <button
-          type="button"
-          className="page-title-breadcrumb-link"
-          onClick={() => { window.location.hash = '#settings-heartbeat' }}
-          aria-label="Go to Settings"
-        >
-          Settings
-        </button>
-        {' / '}
-        <button
-          type="button"
-          className="page-title-breadcrumb-link"
-          onClick={() => { window.location.hash = '#coverage-stock' }}
-          aria-label="Go to Stock coverage group"
-        >
-          Stock
-        </button>
-        {' / '}
-        IB Live (Redis)
-        <InfoTooltip text="IB-backed coverage of Watchlist stocks and reference indices by bar period. Includes backfill controls for end-of-day pulls and index refresh. For delayed Massive stock reference data, use Data Coverage → Stock → Massive Delay (DB)." />
-      </h2>
+    <PageSection className="market-data-page market-data-page--settings-embed">
+      <SettingsCoverageTitle
+        groupLabel="Stock"
+        groupHash="#coverage-stock"
+        pageTitle="IB Live (Redis)"
+        infoText="IB-backed coverage of Watchlist stocks and reference indices by bar period. Includes backfill controls for end-of-day pulls and index refresh. For delayed Massive stock reference data, use Data Coverage → Stock → Massive Delay (DB)."
+      />
 
       <DataCoveragePanel
         coverage={cov.coverage}
@@ -83,17 +69,16 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
         panelStyle={{ width: '92vw', maxHeight: '85vh' }}
         footer={
           <div className="data-reset-modal-actions">
-            <button
+            <Button
               type="button"
-              className="btn btn-secondary"
+              variant="secondary"
               disabled={cov.watchlistRefreshRunning}
               onClick={() => cov.setWatchlistRefreshPreview(null)}
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="btn btn-primary"
               disabled={
                 cov.watchlistRefreshRunning ||
                 cov.watchlistRefreshPreview?.ready_to_enqueue === false ||
@@ -104,7 +89,7 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
               }}
             >
               {cov.watchlistRefreshRunning ? 'Queuing…' : 'Confirm and Queue'}
-            </button>
+            </Button>
           </div>
         }
       >
@@ -188,26 +173,26 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
         titleId="reset-modal-title"
         footer={
           <div className="data-reset-modal-actions">
-            <button
+            <Button
               type="button"
-              className="btn btn-secondary"
+              variant="secondary"
               onClick={() => {
                 cov.setResetConfirmSymbol(null)
                 cov.setResetConfirmIsIndex(false)
               }}
             >
               No
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="btn btn-reset"
+              variant="destructive"
               disabled={!cov.resetConfirmIsIndex && cov.resetPeriods.length === 0}
               onClick={() => {
                 void cov.handleConfirmReset()
               }}
             >
               Yes
-            </button>
+            </Button>
           </div>
         }
       >
@@ -248,26 +233,25 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
         maxWidth="min(420px, calc(100vw - 24px))"
         footer={
           <div className="data-reset-modal-actions">
-            <button
+            <Button
               type="button"
-              className="btn btn-secondary"
+              variant="secondary"
               onClick={() => {
                 cov.setPullModalSymbol(null)
                 cov.setPullModalIsIndex(false)
               }}
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="btn btn-primary"
               disabled={cov.pullRangeMode === null || (!cov.pullModalIsIndex && cov.pullSelectedPeriods.length === 0)}
               onClick={() => {
                 void cov.handleConfirmPull()
               }}
             >
               Confirm
-            </button>
+            </Button>
           </div>
         }
       >
@@ -372,6 +356,6 @@ export function StockCoveragePage({ status }: StockCoveragePageProps) {
           </>
         )}
       </DraggableModal>
-    </div>
+    </PageSection>
   )
 }

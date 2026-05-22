@@ -13,6 +13,7 @@ import {
   fetchTickerReferenceSearch,
 } from '../../api'
 import type { TickerReferenceJobKind, TickerReferenceSearchRow } from '../../api'
+import { Button } from '@/components/ui/button'
 import { RefJobDetailPanel } from './RefJobDetailPanel'
 import { useMassiveRefJobSession } from './MassiveRefJobSessionContext'
 import {
@@ -642,9 +643,9 @@ export function MassiveTickerReferenceDbSection({
                     {activeJobCount} active
                   </span>
                 ) : null}
-                <button type="button" className="btn btn-secondary" onClick={() => refJobSession.openJobsSheet()}>
+                <Button type="button" variant="secondary" onClick={() => refJobSession.openJobsSheet()}>
                   Jobs
-                </button>
+                </Button>
               </div>
             ) : null}
           </div>

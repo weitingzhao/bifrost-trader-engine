@@ -1,5 +1,8 @@
 import type { StatusResponse } from '../../../types'
 import { InfoTooltip } from '../../../components/InfoTooltip'
+import { Button } from '@/components/ui/button'
+import { SettingsTitleLamp } from '../../settings/SettingsTitleLamp'
+import type { LampTone } from '@/components/shared/lamp-indicator'
 
 type Lamp = 'green' | 'yellow' | 'red' | 'none'
 
@@ -49,10 +52,10 @@ export function StatusMonitorPanel({
       <div className="daemon-header">
         <div className="daemon-header-main daemon-header-with-lamp">
           <div>
-            <h2 className="daemon-card-title page-title-with-tooltip">
-              <span className={`title-inline-lamp lamp-icon ${monitorLamp}`} title="Monitor status lamp" aria-hidden>
+            <h2 className="daemon-card-title inline-flex flex-wrap items-center gap-2 m-0">
+              <SettingsTitleLamp lamp={monitorLamp as LampTone} title="Monitor status lamp">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
-              </span>
+              </SettingsTitleLamp>
               Server
             </h2>
             <div>
@@ -81,9 +84,9 @@ export function StatusMonitorPanel({
         <div className="monitor-api-ib-col monitor-api-ib-col-api">
           <div className="daemon-group">
             <div className="daemon-group-header">
-              <span className={`title-inline-lamp lamp-icon ${apiHealthLamp}`} title="API service (green if /health reachable, else red)" aria-hidden>
+              <SettingsTitleLamp lamp={apiHealthLamp as LampTone} title="API service (green if /health reachable, else red)">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
-              </span>
+              </SettingsTitleLamp>
               <span className="daemon-group-title">API service</span>
             </div>
             <div className="daemon-group-body">
@@ -125,9 +128,9 @@ export function StatusMonitorPanel({
           <div className="daemon-group">
             <div className="daemon-group-header daemon-group-header-with-action">
               <div className="daemon-group-header-left">
-                <span className={`title-inline-lamp lamp-icon ${monitorIbGroupLamp}`} title="Monitor IB connection status" aria-hidden>
+                <SettingsTitleLamp lamp={monitorIbGroupLamp as LampTone} title="Monitor IB connection status">
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
-                </span>
+                </SettingsTitleLamp>
                 <span className="daemon-group-title">IB connection</span>
               </div>
               {(monitorOperator?.connected || monitorAccount2?.connected) ? (
@@ -145,15 +148,15 @@ export function StatusMonitorPanel({
                   </svg>
                 </button>
               ) : (
-                <button
+                <Button
                   type="button"
-                  className="btn-resume"
+                  size="sm"
                   disabled={!monitorEnabled}
                   title={monitorEnabled ? 'Establish monitor IB connection (Operator + Secondary account if configured)' : 'Monitor stopped; cannot connect'}
                   onClick={onMonitorConnect}
                 >
                   Connect
-                </button>
+                </Button>
               )}
             </div>
             <div className="daemon-group-body">

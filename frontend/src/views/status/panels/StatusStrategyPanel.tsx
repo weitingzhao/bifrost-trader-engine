@@ -2,6 +2,10 @@ import { useCallback, useMemo, useState } from 'react'
 import type { StatusResponse } from '../../../types'
 import { DraggableModal } from '../../../components/DraggableModal'
 import { InfoTooltip } from '../../../components/InfoTooltip'
+import { Button } from '@/components/ui/button'
+import type { LampTone } from '@/components/shared/lamp-indicator'
+import { SettingsStatusMessage } from '../../settings/SettingsStatusMessage'
+import { SettingsTitleLamp } from '../../settings/SettingsTitleLamp'
 import { STRATEGY_METRIC_LABEL_COMPACT } from '../statusLabels'
 
 type Lamp = 'green' | 'yellow' | 'red' | 'none'
@@ -101,22 +105,22 @@ export function StatusStrategyPanel({
       titleId="strategy-flatten-confirm-title"
       footer={
         <div className="data-reset-modal-actions">
-          <button
+          <Button
             type="button"
-            className="btn btn-secondary"
+            variant="secondary"
             onClick={() => setFlattenDialogOpen(false)}
             disabled={flattenDialogBusy}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn-shutdown-all"
+            variant="destructive"
             onClick={() => void confirmFlatten()}
             disabled={flattenDialogBusy}
           >
             {flattenDialogBusy ? 'Sending…' : 'Confirm'}
-          </button>
+          </Button>
         </div>
       }
     >
@@ -125,9 +129,9 @@ export function StatusStrategyPanel({
         <code>flatten</code> to the daemon control channel; the daemon is meant to consume it and work toward
         closing or reducing hedge exposure (actual execution depends on daemon and broker state).
       </p>
-      <p className="settings-page-msg settings-page-msg--error" style={{ marginTop: 'var(--space-2)' }} role="alert">
+      <SettingsStatusMessage error className="mt-2">
         High risk — only confirm in a real emergency when you accept possible market and account impact.
-      </p>
+      </SettingsStatusMessage>
     </DraggableModal>
   )
 
@@ -148,9 +152,9 @@ export function StatusStrategyPanel({
       <>
       <div id="system-panel-strategy" role="tabpanel" aria-labelledby="tab-strategy" className={panelClass}>
         <div className="strategy-compact-header">
-          <span className={`title-inline-lamp lamp-icon ${hedgeLamp}`} title="Trading strategy status" aria-hidden>
+          <SettingsTitleLamp lamp={hedgeLamp as LampTone} title="Trading strategy status">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /></svg>
-          </span>
+          </SettingsTitleLamp>
           <span className="strategy-compact-title">Trading Strategy</span>
         </div>
         <div className="strategy-compact-meta-row">
@@ -257,10 +261,10 @@ export function StatusStrategyPanel({
     <div id="system-panel-strategy" role="tabpanel" aria-labelledby="tab-strategy" className={panelClass}>
       <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
         <div>
-          <h2 className="daemon-card-title page-title-with-tooltip">
-            <span className={`title-inline-lamp lamp-icon ${hedgeLamp}`} title="Trading strategy status lamp" aria-hidden>
+          <h2 className="daemon-card-title inline-flex flex-wrap items-center gap-2 m-0">
+            <SettingsTitleLamp lamp={hedgeLamp as LampTone} title="Trading strategy status lamp">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /></svg>
-            </span>
+            </SettingsTitleLamp>
             Trading Strategy
             <InfoTooltip text="Depends on daemon; business logic; may support multiple strategies later." />
           </h2>

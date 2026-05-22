@@ -1,3 +1,4 @@
+import { optContractInspectorBtnClass } from '@/components/shared/exec-row-buttons'
 import type { Execution, RealtimeQuote } from '../../types'
 import type { OpenOptionPosition } from '../portfolio/types'
 import { OptionExecutionRow } from './OptionExecutionRow'
@@ -212,7 +213,7 @@ export function PositionOptionsTab({
                             {instanceIcon}
                             <button
                               type="button"
-                              className="riv-opt-contract-btn"
+                              className={optContractInspectorBtnClass}
                               onClick={e => { e.stopPropagation(); onOpenOptionInspector(pos) }}
                               aria-label={`Option details for ${p.symbol} ${p.rightLabel}${strikeStr}`}
                             >
@@ -225,7 +226,7 @@ export function PositionOptionsTab({
                             {instanceIcon}
                             <button
                               type="button"
-                              className="riv-opt-contract-btn"
+                              className={optContractInspectorBtnClass}
                               onClick={e => { e.stopPropagation(); onOpenOptionInspector(pos) }}
                               aria-label={`Option details for ${pos.contract_key}`}
                             >

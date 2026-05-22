@@ -12,10 +12,7 @@ const frontendRoot = path.resolve(__dirname, '..')
 const srcRoot = path.join(frontendRoot, 'src')
 const allowlistPath = path.join(__dirname, 'legacy-class-allowlist.json')
 
-const BANNED = [
-  'card', 'process-section', 'btn-', 'table-scroll', 'settings-page', 'lamp-icon',
-  'app-header-', 'page-title-', 'wl2', 'od-detail', 'riv-',
-]
+import { findBannedInText } from './legacy-class-match.mjs'
 
 const { files: allowed } = JSON.parse(fs.readFileSync(allowlistPath, 'utf8'))
 const allowedSet = new Set(allowed)
@@ -36,37 +33,11 @@ function walk(dir, acc = []) {
   return acc
 }
 
-function classTokensFromAttr(classAttr) {
-  return classAttr
-    .split(/\s+/)
-    .flatMap(token => token.split(/\$\{/)[0].trim())
-    .filter(Boolean)
-}
-
-function findBanned(text) {
-  const found = new Set()
-  const re = /className\s*=\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g
-  let m
-  while ((m = re.exec(text)) !== null) {
-    const cls = m[1] ?? m[2] ?? m[3] ?? ''
-    for (const token of classTokensFromAttr(cls)) {
-      for (const frag of BANNED) {
-        if (frag.endsWith('-')) {
-          if (token.includes(frag)) found.add(frag)
-        } else if (token === frag) {
-          found.add(frag)
-        }
-      }
-    }
-  }
-  return [...found]
-}
-
 const violations = []
 for (const full of walk(srcRoot)) {
   const rel = path.relative(frontendRoot, full).replace(/\\/g, '/')
   if (SKIP.has(rel) || allowedSet.has(rel)) continue
-  const hits = findBanned(fs.readFileSync(full, 'utf8'))
+  const hits = findBannedInText(fs.readFileSync(full, 'utf8'))
   if (hits.length > 0) violations.push({ rel, hits })
 }
 

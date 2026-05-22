@@ -1,6 +1,9 @@
 import { InfoTooltip } from '../../components/InfoTooltip'
 import type { MassiveCeleryBeatEntry } from '../../api/research/research'
 
+const CELERY_SECTION_TITLE =
+  'm-0 inline-flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground'
+
 function fmtCrontabUtc(c: Record<string, string | number>): string {
   const h = c.hour
   const m = c.minute ?? 0
@@ -25,7 +28,7 @@ export function CeleryBeatSchedulePanel({ entries, timezone, loading, error }: C
       className="replay-section dashboard-section dashboard-celery-beat-schedule-panel"
       aria-labelledby="dashboard-celery-beat-schedule-head"
     >
-      <h3 id="dashboard-celery-beat-schedule-head" className="page-title-with-tooltip dashboard-celery-beat-schedule-head">
+      <h3 id="dashboard-celery-beat-schedule-head" className={`${CELERY_SECTION_TITLE} dashboard-celery-beat-schedule-head`}>
         Scheduled Celery Beat
         <InfoTooltip text="Periodic tasks registered in Celery Beat (same beat_schedule as scripts/systemd Celery Beat). Times are UTC. Execution still requires Beat process and workers consuming the routed queues." />
         <span className="dashboard-celery-beat-schedule-head-tz">Timezone: {tz}</span>

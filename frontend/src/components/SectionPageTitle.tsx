@@ -2,6 +2,16 @@ import type { CSSProperties, ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { InfoTooltip } from './InfoTooltip'
 
+export const PAGE_TITLE_CLASS =
+  'm-0 inline-flex flex-wrap items-center gap-2 text-[length:var(--text-headline)] font-bold tracking-tight text-foreground'
+
+export const BREADCRUMB_LINK_CLASS =
+  'border-0 bg-transparent p-0 font-inherit text-[var(--color-link)] hover:text-[var(--color-link-hover)] hover:underline focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]'
+
+/** Section h3 with InfoTooltip (replaces page-title-with-tooltip). */
+export const SECTION_TITLE_CLASS =
+  'm-0 inline-flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground'
+
 export interface SectionPageTitleProps {
   id?: string
   menu: string
@@ -30,7 +40,7 @@ export function SectionPageTitle({
     onMenuClick != null ? (
       <button
         type="button"
-        className="border-0 bg-transparent p-0 font-inherit text-[var(--color-link)] hover:text-[var(--color-link-hover)] hover:underline focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]"
+        className={BREADCRUMB_LINK_CLASS}
         onClick={onMenuClick}
         aria-label={aria}
       >
@@ -43,10 +53,7 @@ export function SectionPageTitle({
   return (
     <h2
       id={id}
-      className={cn(
-        'm-0 inline-flex flex-wrap items-center gap-2 text-[length:var(--text-headline)] font-bold tracking-tight text-foreground',
-        className,
-      )}
+      className={cn(PAGE_TITLE_CLASS, className)}
       style={style}
     >
       {menuEl}

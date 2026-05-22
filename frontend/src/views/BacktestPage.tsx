@@ -1,4 +1,5 @@
 import type { StatusResponse } from '../types'
+import { PageSection } from '@/components/shared/page-section'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 
 interface BacktestPageProps {
@@ -9,7 +10,7 @@ interface BacktestPageProps {
 
 export function BacktestPage({ status: _status, onGoToScreener, breadcrumbLabel = 'Backtest' }: BacktestPageProps) {
   return (
-    <div className="card process-section">
+    <PageSection>
       <div className="research-page-head">
         <SectionPageTitle
           id="backtest-head"
@@ -24,6 +25,6 @@ export function BacktestPage({ status: _status, onGoToScreener, breadcrumbLabel 
       <p className="section-hint">
         Backtest and strategy validation will be available in a later release.
       </p>
-    </div>
+    </PageSection>
   )
 }

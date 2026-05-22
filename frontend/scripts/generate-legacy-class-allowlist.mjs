@@ -8,10 +8,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const frontendRoot = path.resolve(__dirname, '..')
 const srcRoot = path.join(frontendRoot, 'src')
 
-const BANNED = [
-  'card', 'process-section', 'btn-', 'table-scroll', 'settings-page', 'lamp-icon',
-  'app-header-', 'page-title-', 'wl2', 'od-detail', 'riv-',
-]
+import { findBannedInText } from './legacy-class-match.mjs'
+
 const SKIP = new Set([
   path.join(srcRoot, 'components', 'ui', 'card.tsx'),
   path.join(srcRoot, 'components', 'shared', 'kpi-card.tsx'),
@@ -28,18 +26,10 @@ function walk(dir, acc = []) {
   return acc
 }
 
-function hasBanned(text) {
-  for (const frag of BANNED) {
-    const re = new RegExp(`className\\s*=\\s*['"\`][^'"\`]*\\b${frag.replace(/-/g, '\\-')}`)
-    if (re.test(text)) return true
-  }
-  return false
-}
-
 const allowed = []
 for (const f of walk(srcRoot)) {
   if (SKIP.has(f)) continue
-  if (hasBanned(fs.readFileSync(f, 'utf8'))) {
+  if (findBannedInText(fs.readFileSync(f, 'utf8')).length > 0) {
     allowed.push(path.relative(frontendRoot, f).replace(/\\/g, '/'))
   }
 }

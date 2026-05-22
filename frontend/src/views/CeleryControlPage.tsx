@@ -58,7 +58,8 @@ import {
 } from './settings/SettingsPageHeader'
 import { SettingsTitleLamp } from './settings/SettingsTitleLamp'
 import { Button } from '@/components/ui/button'
-import type { LampTone } from '@/components/shared/lamp-indicator'
+import { LampIndicator, type LampTone } from '@/components/shared/lamp-indicator'
+import { SettingsStatusMessage } from './settings/SettingsStatusMessage'
 import { computeCeleryRuntimeLamp, supportedQueueNamesFromSummary } from '../utils/celeryRuntime'
 import { opsHostEnvFromConfigProfile } from '../utils/opsHostEnvPill'
 import {
@@ -101,6 +102,9 @@ import {
   IcoWorkerInstanceRemove,
   IcoWorkerScaleRemoveAll,
 } from './celery/CeleryWorkerIconButtons'
+
+const CELERY_SECTION_TITLE =
+  'm-0 inline-flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground'
 
 export interface CeleryControlPageProps {
   embeddedInSettings?: boolean
@@ -1506,22 +1510,22 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
       overlayClassName="celery-control-confirm-overlay"
       footer={
         <div className="data-reset-modal-actions">
-          <button
+          <Button
             type="button"
-            className="btn btn-secondary"
+            variant="secondary"
             onClick={() => resetConfirmDialog()}
             disabled={confirmState.confirming}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn-shutdown-all"
+            variant="destructive"
             onClick={() => void confirmState.action?.()}
             disabled={confirmState.confirming}
           >
             {confirmState.confirming ? 'Executing…' : (confirmState.confirmLabel ?? 'Confirm')}
-          </button>
+          </Button>
         </div>
       }
     >
@@ -1662,7 +1666,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           className="replay-section dashboard-section dashboard-worker-instance-situation"
           aria-labelledby="dashboard-worker-instance-situation-head"
         >
-          <h3 id="dashboard-worker-instance-situation-head" className="page-title-with-tooltip">
+          <h3 id="dashboard-worker-instance-situation-head" className={CELERY_SECTION_TITLE}>
             Worker instance situation
             <InfoTooltip text="Per profile: max_worker_instances from ops.worker_profiles (GET /ops/workers/profiles). Dev and Prod columns count Celery workers on the broker whose nodename instance id matches the profile (GET /ops/workers), using worker_config_profile from Redis presence (BIFROST_CONFIG). Workers without dev/prod in presence are summarized in the row hover text. Add all / Reset use on-host systemd counts toward max. Edit config.yaml and reload Ops to change limits." />
           </h3>
@@ -1798,7 +1802,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
         </button>
       </div>
 
-      <div className="dashboard-grid settings-page-groups">
+      <div className="dashboard-grid">
           <div className="dashboard-celery-group">
           {/* ── Tab: Queues & Instances (job DB + systemd workers + broker) ── */}
           <div
@@ -1817,12 +1821,12 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             <div className="dashboard-celery-worker-instances-main">
             {/* ── Worker Instances (7/12): running units + scale controls ─────────────────────────────────── */}
             <section className="replay-section dashboard-section dashboard-scaling" aria-labelledby="dashboard-scale-head">
-              <h3 id="dashboard-scale-head" className="page-title-with-tooltip">
+              <h3 id="dashboard-scale-head" className={CELERY_SECTION_TITLE}>
                 Worker Instances
                 <InfoTooltip text="Running systemd/Celery worker units on this Ops host. Instance IDs are profile_key-sequence (Cycle). Queue summary: click a queue cell to filter this list. Profile bubbles: Add Instance / ALL with Add all, Reset all, Remove all. Per row: Recreate / Remove. Limits and Dev/Prod stack counts are in Worker instance situation (next to Queue summary above). Host chip = Ops API environment (GET /ops/health), not broker queue scope." />
               </h3>
               {scaleMsg.text && (
-                <span className={`settings-page-msg ${scaleMsg.isErr ? 'msg-error' : 'msg-ok'}`}>{scaleMsg.text}</span>
+                <SettingsStatusMessage error={scaleMsg.isErr}>{scaleMsg.text}</SettingsStatusMessage>
               )}
               {instances.length > 0 && workerInstancesQueueFilter != null && workerInstancesQueueFilter.trim() !== '' && (
                 <div className="dashboard-worker-instances-filter-bar" role="status">
@@ -1831,13 +1835,14 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                     <strong>{formatQueueLabel(workerInstancesQueueFilter.trim())}</strong>
                     <code className="dashboard-worker-instances-filter-key">{workerInstancesQueueFilter.trim()}</code>
                   </span>
-                  <button
+                  <Button
                     type="button"
-                    className="btn btn-secondary dashboard-worker-instances-filter-clear"
+                    variant="secondary"
+                    className="dashboard-worker-instances-filter-clear"
                     onClick={() => setWorkerInstancesQueueFilter(null)}
                   >
                     Show all instances
-                  </button>
+                  </Button>
                 </div>
               )}
               {instances.length > 0 && (
@@ -2179,12 +2184,12 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               className="replay-section dashboard-section dashboard-broker-ctrl dashboard-broker-ctrl--celery-column"
               aria-labelledby="dashboard-broker-ctrl-head"
             >
-              <h3 id="dashboard-broker-ctrl-head" className="page-title-with-tooltip">
+              <h3 id="dashboard-broker-ctrl-head" className={CELERY_SECTION_TITLE}>
                 Redis / Broker
                 <InfoTooltip text="Live metrics (reachability, memory, clients, Celery-related keys) come from the configured Redis. Start, stop, and restart only apply when Redis is managed by systemd on the same host as Ops." />
               </h3>
               {brokerMsg.text && (
-                <span className={`settings-page-msg ${brokerMsg.isErr ? 'msg-error' : 'msg-ok'}`}>{brokerMsg.text}</span>
+                <SettingsStatusMessage error={brokerMsg.isErr}>{brokerMsg.text}</SettingsStatusMessage>
               )}
               {extBroker ? (
                 <div className="dashboard-broker-ctrl-body">
@@ -2206,7 +2211,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                     <div className="dashboard-broker-ctrl-actions">
                       <button
                         type="button"
-                        className="btn-resume dashboard-btn dashboard-btn--start"
+                        className="dashboard-btn dashboard-btn--start"
                         onClick={() => onBrokerAction('start')}
                         disabled={brokerBusy || !canAdmin}
                       >
@@ -2214,7 +2219,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                       </button>
                       <button
                         type="button"
-                        className="btn-resume dashboard-btn dashboard-btn--restart"
+                        className="dashboard-btn dashboard-btn--restart"
                         onClick={() => onBrokerAction('restart')}
                         disabled={brokerBusy || !canAdmin}
                       >
@@ -2222,7 +2227,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                       </button>
                       <button
                         type="button"
-                        className="btn-shutdown-all dashboard-btn dashboard-btn--stop"
+                        className="dashboard-btn dashboard-btn--stop"
                         onClick={() => onBrokerAction('stop')}
                         disabled={brokerBusy || !canAdmin}
                       >
@@ -2258,7 +2263,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             className={`replay-section dashboard-section dashboard-console-section${consoleTarget !== 'none' && (consoleTarget === 'broker' ? !!consoleUrl : true) ? ' dashboard-console-section--active' : ''}`}
             aria-labelledby="dashboard-console-head"
           >
-            <h3 id="dashboard-console-head" className="page-title-with-tooltip">
+            <h3 id="dashboard-console-head" className={CELERY_SECTION_TITLE}>
               Console
               <InfoTooltip text="Broker: Ops SSE (journald or tail of BIFROST_BROKER_CONSOLE_LOG on macOS). Worker: per-worker Redis stream via Ops /ops/console/worker (tail/clear: /ops/celery/logs)." />
             </h3>
@@ -2292,12 +2297,12 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
 
           {/* ── Runtime Snapshot (below Console) ── */}
           <section className="replay-section dashboard-section dashboard-snapshot" aria-labelledby="dashboard-snapshot-head">
-            <h3 id="dashboard-snapshot-head" className="page-title-with-tooltip">
+            <h3 id="dashboard-snapshot-head" className={CELERY_SECTION_TITLE}>
               Runtime Snapshot
               <InfoTooltip text="Broker from Redis; workers from Redis presence + Celery inspect. Worker Dev/Prod badge = that process BIFROST_CONFIG (config.dev.yaml vs config.prod.yaml) from the worker Redis heartbeat. Ops role in the header = this Ops API host only. Text after @ in the worker id is the machine hostname. Remove stops the unit on the Ops control host; another machine using the same broker can still show a worker with the same instance id until stopped there." />
             </h3>
             <div className="dashboard-snapshot-celery-lamp-row" role="status">
-              <span className={`title-inline-lamp lamp-icon ${runtimeCeleryLamp}`} aria-hidden>●</span>
+              <LampIndicator lamp={runtimeCeleryLamp as LampTone} title={runtimeCeleryStatusText} />
               <strong className="dashboard-snapshot-celery-lamp-title">Celery (aggregate)</strong>
               <span className={`dashboard-snapshot-celery-lamp-status dashboard-svc-status--${runtimeCeleryLamp}`}>
                 {runtimeCeleryStatusText}
@@ -2315,7 +2320,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               }}
             >
               <div className="dashboard-broker-header">
-                <span className={`title-inline-lamp lamp-icon ${brokerLamp}`} aria-hidden>●</span>
+                <LampIndicator lamp={brokerLamp as LampTone} />
                 <strong>Broker</strong>
                 <span className="dashboard-broker-status">
                   {broker?.connected ? 'Connected' : 'Disconnected'}
@@ -2392,7 +2397,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                       <div className="dashboard-worker-header">
                         <div className="dashboard-worker-header-row1">
                           <div className="dashboard-worker-header-leading">
-                            <span className={`title-inline-lamp lamp-icon ${lamp}`} aria-hidden>●</span>
+                            <LampIndicator lamp={lamp as LampTone} />
                             <OpsHostEnvPillBadge
                               pill={workerStackPill}
                               className="dashboard-celery-env-pill"
@@ -2471,19 +2476,20 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               <div className="celery-support-tasks-sheet">
                 <div className="celery-support-tasks-sheet__head">
                   <div className="celery-support-tasks-sheet__head-lead">
-                    <h3 id="celery-support-tasks-head" className="page-title-with-tooltip">
+                    <h3 id="celery-support-tasks-head" className={CELERY_SECTION_TITLE}>
                       Support Tasks
                       <InfoTooltip text="GET /ops/celery/capabilities: Queue kind/mode matrix for run_massive_job and the full worker task registry below. Celery Beat task names are listed in the Scheduled Jobs tab. Use the filter icon in Queue summary to narrow the matrix by broker queue." />
                     </h3>
                   </div>
-                  <button
+                  <Button
                     type="button"
-                    className="btn btn-secondary btn-sm"
+                    variant="secondary"
+                    size="sm"
                     onClick={() => void loadSupportTasks()}
                     disabled={supportTasksLoading}
                   >
                     Refresh
-                  </button>
+                  </Button>
                 </div>
 
                 {supportTasksBrokerFilter ? (
@@ -2495,13 +2501,14 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                         ({supportTasksBrokerFilter})
                       </span>
                     </span>
-                    <button
+                    <Button
                       type="button"
-                      className="btn btn-secondary btn-sm"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => setSupportTasksBrokerFilter(null)}
                     >
                       Clear filter
-                    </button>
+                    </Button>
                   </div>
                 ) : null}
 
@@ -2521,7 +2528,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                     >
                       <h4
                         id="celery-support-tasks-matrix-head"
-                        className="celery-support-tasks-sheet__block-title page-title-with-tooltip"
+                        className="celery-support-tasks-sheet__block-title"
                       >
                         Queue kind / mode
                         <InfoTooltip text="Documented Massive job kind and payload mode combinations (run_massive_job). Columns include Task name (Beat insert task for scheduled kinds, else src.massive.tasks.run_massive_job) and Job style. Control bar: Kind / Mode · source / Task name filters; Job style bubbles; Mode column visibility; Effects; Broker queue column. Queue summary filter still applies first. Routing uses celery_queue_for_massive_job(kind). Mode does not affect queue selection." />
@@ -2580,13 +2587,15 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                               {(matrixKindFilterText.trim() !== '' ||
                                 matrixModeLineFilterText.trim() !== '' ||
                                 matrixTaskNameFilterText.trim() !== '') && (
-                                <button
+                                <Button
                                   type="button"
-                                  className="btn btn-secondary btn-sm celery-matrix-clear-row-filters"
+                                  variant="secondary"
+                                  size="sm"
+                                  className="celery-matrix-clear-row-filters"
                                   onClick={clearMatrixRowFilters}
                                 >
                                   Clear
-                                </button>
+                                </Button>
                               )}
                             </div>
                             <span className="celery-matrix-control-bar__divider" aria-hidden />
@@ -2893,7 +2902,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                       >
                         <h4
                           id="celery-support-tasks-registry-head"
-                          className="celery-support-tasks-sheet__block-title page-title-with-tooltip"
+                          className="celery-support-tasks-sheet__block-title"
                         >
                           Registered Celery tasks
                           <InfoTooltip text="Full worker task registry from GET /ops/celery/capabilities (same list as the former Task registry sheet). Task route default queue is used when apply_async omits queue=." />
@@ -2949,19 +2958,20 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               <div className="celery-support-tasks-sheet">
                 <div className="celery-support-tasks-sheet__head">
                   <div className="celery-support-tasks-sheet__head-lead">
-                    <h3 id="celery-scheduled-jobs-head" className="page-title-with-tooltip">
+                    <h3 id="celery-scheduled-jobs-head" className={CELERY_SECTION_TITLE}>
                       Scheduled Jobs
                       <InfoTooltip text="Celery Beat task names from GET /ops/celery/capabilities (same source as the former Celery Beat block under Support Tasks). Most enqueue run_massive_job; beat_refresh_expirations runs in-process and does not correspond to a matrix row. UTC cron-style times are in Scheduled Celery Beat (Queues and Instances tab, above Redis/Broker)." />
                     </h3>
                   </div>
-                  <button
+                  <Button
                     type="button"
-                    className="btn btn-secondary btn-sm"
+                    variant="secondary"
+                    size="sm"
                     onClick={() => void loadSupportTasks()}
                     disabled={supportTasksLoading}
                   >
                     Refresh
-                  </button>
+                  </Button>
                 </div>
 
                 {supportTasksLoading ? (
@@ -2976,7 +2986,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                   <div aria-labelledby="celery-scheduled-jobs-beat-head">
                     <h4
                       id="celery-scheduled-jobs-beat-head"
-                      className="celery-support-tasks-sheet__block-title page-title-with-tooltip"
+                      className="celery-support-tasks-sheet__block-title"
                     >
                       Celery Beat (scheduled)
                       <InfoTooltip text="Tasks invoked on a schedule by Celery Beat. Most enqueue run_massive_job; beat_refresh_expirations runs in-process and does not correspond to a matrix row." />

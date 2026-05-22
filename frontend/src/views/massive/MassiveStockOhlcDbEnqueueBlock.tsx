@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { postMassiveSync, fetchMarketTradingDay } from '../../api'
 import type { BarCoverageItem, StatusResponse } from '../../types'
 import { InfoTooltip } from '../../components/InfoTooltip'
+import { Button } from '@/components/ui/button'
 import {
   coverageCell,
   coverageCompact,
@@ -495,36 +496,37 @@ export function MassiveStockOhlcDbEnqueueBlock({
                 className="replay-toolbar massive-delay-custom-bars-toolbar"
                 style={{ flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-3)', alignItems: 'center' }}
               >
-                <button
+                <Button
                   type="button"
-                  className="btn btn-secondary btn-sm"
+                  variant="secondary"
+                  size="sm"
                   disabled={disabled || coverageLoading}
                   onClick={() => void onRefreshCoverage()}
                   aria-label="Refresh bars coverage"
                 >
                   {coverageLoading ? '…' : 'Refresh coverage'}
-                </button>
+                </Button>
                 <InfoTooltip text="Same GET /bars/coverage list as Data Coverage → Stock → IB Live. Used for grouping and display only." />
                 <span className="massive-delay-custom-bars-sync-all-group">
-                  <button
+                  <Button
                     type="button"
-                    className="btn btn-primary btn-sm"
+                    size="sm"
                     disabled={disabled || ohlcHttpBusy || allCoverageSymbols.length === 0}
                     onClick={() => void enqueueCustomBarsAllSymbols('daily')}
                     aria-label="Enqueue Massive daily smart sync for all coverage symbols"
                   >
                     {ohlcHttpBusy ? '…' : 'Sync all (daily, smart)'}
-                  </button>
+                  </Button>
                   <InfoTooltip text={`Daily smart: through NY today, ~${backfillYears}y back if empty, else gap-fill + 2-session overlap. One job per batch (up to ${CUSTOM_BARS_SYMBOL_BATCH} symbols).`} />
-                  <button
+                  <Button
                     type="button"
-                    className="btn btn-primary btn-sm"
+                    size="sm"
                     disabled={disabled || ohlcHttpBusy || allCoverageSymbols.length === 0}
                     onClick={() => void enqueueCustomBarsAllSymbols('intraday')}
                     aria-label="Enqueue Massive intraday (1m, 5m, 1h) custom bars for all coverage symbols"
                   >
                     {ohlcHttpBusy ? '…' : 'Sync all (intraday)'}
-                  </button>
+                  </Button>
                   <InfoTooltip text="1m, 5m, 1h for the latest resolved US regular session (09:30–16:00 ET). One job per batch; same window as table Intraday Sync." />
                 </span>
               </div>
@@ -661,26 +663,28 @@ export function MassiveStockOhlcDbEnqueueBlock({
                                   className="data-coverage-actions data-coverage-sync-cells-pair"
                                 >
                                   <div className="data-coverage-sync-pair-row">
-                                    <button
+                                    <Button
                                       type="button"
-                                      className="btn btn-secondary btn-sm"
+                                      variant="secondary"
+                                      size="sm"
                                       disabled={disabled || ohlcHttpBusy}
                                       title="Daily smart: through NY today; gap-fill or full window when empty (see server backfill years)"
                                       aria-label={`Sync Massive daily smart for ${row.symbol}`}
                                       onClick={() => void enqueueCustomBarsRow(row.symbol, 'daily')}
                                     >
                                       {ohlcHttpBusy ? '…' : 'Sync'}
-                                    </button>
-                                    <button
+                                    </Button>
+                                    <Button
                                       type="button"
-                                      className="btn btn-secondary btn-sm"
+                                      variant="secondary"
+                                      size="sm"
                                       disabled={disabled || ohlcHttpBusy}
                                       title="Intraday: latest US regular session window (1m, 5m, 1h); override in Advanced"
                                       aria-label={`Sync Massive intraday custom bars for ${row.symbol}`}
                                       onClick={() => void enqueueCustomBarsRow(row.symbol, 'intraday')}
                                     >
                                       {ohlcHttpBusy ? '…' : 'Sync'}
-                                    </button>
+                                    </Button>
                                   </div>
                                 </td>
                               </tr>
@@ -771,40 +775,40 @@ export function MassiveStockOhlcDbEnqueueBlock({
                   </div>
                   <div className="ref-jobs-md-enqueue-actions ref-jobs-md-enqueue-actions--stack">
                     {customBarsSingleTimespanOnly ? (
-                      <button
+                      <Button
                         type="button"
-                        className="btn btn-secondary"
+                        variant="secondary"
                         disabled={disabled}
                         onClick={() => void enqueueStockOhlcSyncAdvanced('daily')}
                       >
                         {ohlcHttpBusy ? 'Enqueueing…' : 'Enqueue sync'}
-                      </button>
+                      </Button>
                     ) : (
                       <>
-                        <button
+                        <Button
                           type="button"
-                          className="btn btn-secondary"
+                          variant="secondary"
                           disabled={disabled}
                           onClick={() => void enqueueStockOhlcSyncAdvanced('daily', 'daily_smart')}
                         >
                           {ohlcHttpBusy ? 'Enqueueing…' : 'Enqueue daily (smart)'}
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
-                          className="btn btn-secondary"
+                          variant="secondary"
                           disabled={disabled}
                           onClick={() => void enqueueStockOhlcSyncAdvanced('daily', 'window')}
                         >
                           {ohlcHttpBusy ? 'Enqueueing…' : 'Enqueue daily (manual window)'}
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
-                          className="btn btn-secondary"
+                          variant="secondary"
                           disabled={disabled}
                           onClick={() => void enqueueStockOhlcSyncAdvanced('intraday')}
                         >
                           {ohlcHttpBusy ? 'Enqueueing…' : 'Enqueue intraday (1m · 5m · 1h)'}
-                        </button>
+                        </Button>
                       </>
                     )}
                   </div>
@@ -888,14 +892,14 @@ export function MassiveStockOhlcDbEnqueueBlock({
               </div>
 
               <div className="ref-jobs-md-enqueue-actions">
-                <button
+                <Button
                   type="button"
-                  className="btn btn-secondary"
+                  variant="secondary"
                   disabled={disabled}
                   onClick={() => void enqueueStockOhlcSync()}
                 >
                   {ohlcHttpBusy ? 'Enqueueing…' : 'Enqueue sync'}
-                </button>
+                </Button>
               </div>
             </div>
           )}

@@ -1,5 +1,6 @@
 import type { MarketHolidayRow } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
+import { Button } from '@/components/ui/button'
 
 export interface HolidaysSectionProps {
   currentYear: number
@@ -54,9 +55,9 @@ export function HolidaysSection({
               ))}
             </select>
           </label>
-          <button type="button" className="btn-pause" onClick={loadHolidays} disabled={holidaysLoading}>
+          <Button type="button" variant="secondary" onClick={loadHolidays} disabled={holidaysLoading}>
             Refresh
-          </button>
+          </Button>
         </div>
         <div className="settings-holidays-add-row">
           <label className="settings-holidays-add-label">
@@ -80,9 +81,9 @@ export function HolidaysSection({
               aria-label="Holiday label"
             />
           </label>
-          <button type="button" className="btn-resume" onClick={onAddHoliday} disabled={holidaysLoading}>
+          <Button type="button" onClick={onAddHoliday} disabled={holidaysLoading}>
             Add
-          </button>
+          </Button>
         </div>
         {holidayMsg.text && (
           <div className={`settings-holidays-msg ${holidayMsg.isErr ? 'msg-error' : 'msg-ok'}`}>
@@ -115,9 +116,9 @@ export function HolidaysSection({
                     <td>{h.status ?? '—'}</td>
                     <td style={{ fontSize: '0.75rem', opacity: 0.7 }}>{h.source ?? '—'}</td>
                     <td>
-                      <button type="button" className="btn-pause" onClick={() => onDeleteHoliday(h.holiday_date)}>
+                      <Button type="button" variant="secondary" onClick={() => onDeleteHoliday(h.holiday_date)}>
                         Delete
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}

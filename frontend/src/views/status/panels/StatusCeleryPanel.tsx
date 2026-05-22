@@ -1,6 +1,8 @@
 import type { StatusResponse } from '../../../types'
 import { InfoTooltip } from '../../../components/InfoTooltip'
 import { fmtSince, fmtTs } from '../../../utils/format'
+import { SettingsTitleLamp } from '../../settings/SettingsTitleLamp'
+import type { LampTone } from '@/components/shared/lamp-indicator'
 
 type Lamp = 'green' | 'yellow' | 'red' | 'none'
 
@@ -37,10 +39,10 @@ export function StatusCeleryPanel({
       <div className="daemon-header">
         <div className="daemon-header-main daemon-header-with-lamp">
           <div>
-            <h2 className="daemon-card-title page-title-with-tooltip">
-              <span className={`title-inline-lamp lamp-icon ${celeryLamp}`} title="Celery status lamp" aria-hidden>
+            <h2 className="daemon-card-title inline-flex flex-wrap items-center gap-2 m-0">
+              <SettingsTitleLamp lamp={celeryLamp as LampTone} title="Celery status lamp">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
-              </span>
+              </SettingsTitleLamp>
               Celery
             </h2>
             <div>
@@ -61,9 +63,9 @@ export function StatusCeleryPanel({
       <div className="daemon-groups">
         <div className="daemon-group">
           <div className="daemon-group-header">
-            <span className={`title-inline-lamp lamp-icon ${brokerLamp}`} title="Celery broker (Redis) status" aria-hidden>
+            <SettingsTitleLamp lamp={brokerLamp as LampTone} title="Celery broker (Redis) status">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
-            </span>
+            </SettingsTitleLamp>
             <span className="daemon-group-title">Broker (Redis)</span>
             <InfoTooltip text="Celery broker and result backend. Same Redis as config.redis (db 1 for Celery). Required for queued bars backfill." />
           </div>
@@ -85,9 +87,9 @@ export function StatusCeleryPanel({
         </div>
         <div className="daemon-group">
           <div className="daemon-group-header">
-            <span className={`title-inline-lamp lamp-icon ${workerLamp}`} title="Celery workers responding to inspect ping" aria-hidden>
+            <SettingsTitleLamp lamp={workerLamp as LampTone} title="Celery workers responding to inspect ping">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
-            </span>
+            </SettingsTitleLamp>
             <span className="daemon-group-title">Celery Workers</span>
             <InfoTooltip text="Workers that responded to inspect ping. Worker connects to IB using Settings → Celery worker_market; connection is kept so backfill can use it. Scale and consoles live under Settings → Celery." />
           </div>

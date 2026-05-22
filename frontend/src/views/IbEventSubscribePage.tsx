@@ -1,6 +1,7 @@
 import type { StatusResponse } from '../types'
 import { IbEventSubscribePanel } from './status/panels/IbEventSubscribePanel'
 import { SettingsPageCard } from './settings/SettingsPageCard'
+import { SettingsPageGroups } from './settings/SettingsPageGroups'
 
 export interface IbEventSubscribePageProps {
   status: StatusResponse | null
@@ -15,11 +16,11 @@ export function IbEventSubscribePage({ status, loadStatus, embeddedInSettings }:
       embedded={embeddedInSettings}
       className={embeddedInSettings ? 'daemon-status-page daemon-status-page--embedded' : 'daemon-status-page'}
     >
-      <div className="daemon-groups settings-page-groups">
+      <SettingsPageGroups className="daemon-groups">
         <section className="replay-section" aria-label="IB Event Subscribe">
           <IbEventSubscribePanel status={status} loadStatus={loadStatus} />
         </section>
-      </div>
+      </SettingsPageGroups>
     </SettingsPageCard>
   )
 }

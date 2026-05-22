@@ -10,6 +10,7 @@ import {
   carLegTypeDescription,
 } from './modelAnalysisExplain'
 import type { PortfolioView } from './portfolio/types'
+import { Button } from '@/components/ui/button'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 
 interface Props {
@@ -232,14 +233,15 @@ export function ModelAnalysisPage({ status, onViewChange }: Props) {
               Secondary
             </button>
           </div>
-          <button
+          <Button
             type="button"
-            className="btn btn-small model-analysis-refresh"
+            size="sm"
+            className="model-analysis-refresh"
             onClick={() => selectedAccount && fetchAnalysis(selectedAccount)}
             disabled={loading || !selectedAccount}
           >
             {loading ? 'Loading…' : 'Refresh'}
-          </button>
+          </Button>
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { cn } from '@/lib/utils'
 import type {
   IbAccountSnapshot,
   IbPositionRow,
@@ -228,23 +229,23 @@ function formatStrike(strike: number | null | undefined): string {
 }
 
 function renderQuoteCell(q: RealtimeQuote | undefined): ReactNode {
-  if (!q) return <span className="wl2-muted">—</span>
+  if (!q) return <span className="text-muted-foreground">—</span>
   const last = q.last != null && Number.isFinite(q.last) ? q.last : null
   const bid = q.bid != null && Number.isFinite(q.bid) ? q.bid : null
   const ask = q.ask != null && Number.isFinite(q.ask) ? q.ask : null
   return (
-    <span className="wl2-quote">
-      <span className="wl2-quote__last">{last != null ? fmtUsd(last) : '—'}</span>
+    <span className="inline-flex flex-col gap-0.5">
+      <span className="font-semibold tabular-nums">{last != null ? fmtUsd(last) : '—'}</span>
       {(bid != null || ask != null) && (
-        <span className="wl2-quote__ba">
+        <span className="text-[0.72rem] text-muted-foreground">
           {bid != null && (
-            <span className={`wl2-quote__v${last != null && bid < last ? ' pnl-negative' : last != null && bid > last ? ' pnl-positive' : ''}`}>
+            <span className={`tabular-nums${last != null && bid < last ? ' pnl-negative' : last != null && bid > last ? ' pnl-positive' : ''}`}>
               {bid.toFixed(2)}
             </span>
           )}
-          <span className="wl2-quote__sep">/</span>
+          <span className="text-muted-foreground">/</span>
           {ask != null && (
-            <span className={`wl2-quote__v${last != null && ask > last ? ' pnl-negative' : last != null && ask < last ? ' pnl-positive' : ''}`}>
+            <span className={`tabular-nums${last != null && ask > last ? ' pnl-negative' : last != null && ask < last ? ' pnl-positive' : ''}`}>
               {ask.toFixed(2)}
             </span>
           )}
@@ -1101,16 +1102,16 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
       const symU = sym.trim().toUpperCase()
       const selU = (selectedSizingSymbol ?? '').trim().toUpperCase()
       const isSelected = Boolean(symU && selU === symU)
-      const trClass = [opts?.showSizeBtn && isSelected ? 'wl2-row--sizing-selected' : '', !optOn ? 'wl2-row--dim' : '']
+      const trClass = [opts?.showSizeBtn && isSelected ? 'bg-primary/10' : '', !optOn ? 'opacity-55' : '']
         .filter(Boolean)
         .join(' ') || undefined
       return (
         <tr key={item.contract_key} className={trClass}>
-          <td className="wl2-td--sym" title={item.contract_key}>
-            <span className="wl2-sym-cell">
+          <td className="min-w-[6rem]" title={item.contract_key}>
+            <span className="inline-flex items-center gap-1">
               <button
                 type="button"
-                className="wl2-sym-btn"
+                className="cursor-pointer border-0 bg-transparent p-0 font-inherit text-inherit hover:text-primary"
                 onClick={() => {
                   handleAnalyze(item)
                   if (opts?.showSizeBtn && sym) void handleSizeCompute(sym)
@@ -1130,21 +1131,21 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                     : `Bar stats for ${watchlistItemLabel(item)}`
                 }
               >
-                <span className="wl2-sym">{watchlistItemLabel(item)}</span>
+                <span className="font-semibold tracking-wide">{watchlistItemLabel(item)}</span>
                 {(barStatsLoadingSymbol === symU
                   || (Boolean(opts?.showSizeBtn) && isSelected && sizeComputeLoading))
-                  ? <span className="wl2-sym-btn__wait" aria-hidden> ⏳</span>
+                  ? <span className="text-muted-foreground" aria-hidden> ⏳</span>
                   : null}
               </button>
-              {held && <span className="wl2-badge wl2-badge--hold" title="Holding">H</span>}
+              {held && <span className="rounded px-1 py-px text-[0.6rem] font-bold uppercase bg-amber-500/15 text-amber-600" title="Holding">H</span>}
             </span>
           </td>
-          <td className="wl2-td--quote">{renderQuoteCell(q)}</td>
+          <td className="min-w-[7rem] tabular-nums">{renderQuoteCell(q)}</td>
           {!opts?.hideOpt ? (
-            <td className="wl2-td--opt">
+            <td className="w-12 text-center">
               <button
                 type="button"
-                className={`wl2-opt-pill${optOn ? ' wl2-opt-pill--on' : ''}`}
+                className={`cursor-pointer rounded-full border border-border px-2 py-0.5 text-[0.65rem] font-semibold text-muted-foreground${optOn ? ' border-primary bg-primary/15 text-primary' : ''}`}
                 onClick={() => handleOptionableToggle(item)}
                 aria-label={`Option? for ${watchlistItemLabel(item)}`}
                 title={optOn ? 'Included in Option Discovery' : 'Not in Option Discovery'}
@@ -1154,9 +1155,9 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
             </td>
           ) : null}
           {!opts?.hideCategory ? (
-            <td className="wl2-td--cat">
+            <td className="w-28">
               <AppSelect
-                className="wl2-cat-select"
+                className="max-w-full rounded border border-border bg-background px-1 py-0.5 text-[0.72rem]"
                 value={String(item.category_id ?? '')}
                 onChange={v => handleWatchlistCategoryChange(item, v ? Number(v) : null)}
                 aria-label={`Category for ${watchlistItemLabel(item)}`}
@@ -1167,11 +1168,11 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               />
             </td>
           ) : null}
-          <td className="wl2-td--acts">
-            <span className="wl2-acts">
+          <td className="w-16 whitespace-nowrap">
+            <span className="inline-flex gap-0.5">
               <button
                 type="button"
-                className="wl2-act-icon"
+                className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
                 onClick={() => openAddOptionModal(item)}
                 title="Add option contract"
                 aria-label="Add option"
@@ -1180,7 +1181,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               </button>
               <button
                 type="button"
-                className="wl2-act-icon wl2-act-icon--rm"
+                className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground text-destructive hover:bg-destructive/10 hover:text-destructive"
                 onClick={() => handleRemoveWatchlist(item)}
                 title="Remove"
                 aria-label="Remove from watchlist"
@@ -1200,33 +1201,33 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
       const held = hasPosition(item)
       return (
         <tr key={item.contract_key}>
-          <td className="wl2-td--sym" title={item.contract_key}>
-            <span className="wl2-sym-cell">
+          <td className="min-w-[6rem]" title={item.contract_key}>
+            <span className="inline-flex items-center gap-1">
               <button
                 type="button"
-                className="wl2-sym-btn"
+                className="cursor-pointer border-0 bg-transparent p-0 font-inherit text-inherit hover:text-primary"
                 onClick={() => handleAnalyze(item)}
                 disabled={barStatsLoadingSymbol !== null}
                 title="Bar stats for underlying (PostgreSQL stock_day / stock_min)"
                 aria-label={`Bar stats for underlying ${und}`}
               >
-                <span className="wl2-sym">{item.symbol || watchlistItemLabel(item)}</span>
-                {barStatsLoadingSymbol === und.trim().toUpperCase() ? <span className="wl2-sym-btn__wait" aria-hidden> ⏳</span> : null}
+                <span className="font-semibold tracking-wide">{item.symbol || watchlistItemLabel(item)}</span>
+                {barStatsLoadingSymbol === und.trim().toUpperCase() ? <span className="text-muted-foreground" aria-hidden> ⏳</span> : null}
               </button>
-              {held && <span className="wl2-badge wl2-badge--hold" title="Holding">H</span>}
+              {held && <span className="rounded px-1 py-px text-[0.6rem] font-bold uppercase bg-amber-500/15 text-amber-600" title="Holding">H</span>}
             </span>
           </td>
-          <td className="wl2-td--quote">{renderQuoteCell(q)}</td>
-          <td className="wl2-td--exp">{formatExpiry(item.expiry)}</td>
-          <td className="wl2-td--right">
-            <span className={`wl2-right-badge${(item.option_right || '').toUpperCase() === 'C' || (item.option_right || '').toUpperCase() === 'CALL' ? ' wl2-right-badge--c' : ' wl2-right-badge--p'}`}>
+          <td className="min-w-[7rem] tabular-nums">{renderQuoteCell(q)}</td>
+          <td className="w-24 tabular-nums text-muted-foreground">{formatExpiry(item.expiry)}</td>
+          <td className="w-10 text-center">
+            <span className={`inline-flex rounded px-1.5 py-px text-[0.65rem] font-bold${(item.option_right || '').toUpperCase() === 'C' || (item.option_right || '').toUpperCase() === 'CALL' ? ' bg-emerald-500/15 text-emerald-600' : ' bg-rose-500/15 text-rose-600'}`}>
               {formatOptionRight(item.option_right)}
             </span>
           </td>
-          <td className="wl2-td--strike">{item.strike != null ? formatStrike(item.strike) : '—'}</td>
-          <td className="wl2-td--cat">
+          <td className="w-20 text-right tabular-nums">{item.strike != null ? formatStrike(item.strike) : '—'}</td>
+          <td className="w-28">
             <AppSelect
-              className="wl2-cat-select"
+              className="max-w-full rounded border border-border bg-background px-1 py-0.5 text-[0.72rem]"
               value={String(item.category_id ?? '')}
               onChange={v => handleWatchlistCategoryChange(item, v ? Number(v) : null)}
               aria-label={`Category for ${item.symbol || watchlistItemLabel(item)}`}
@@ -1236,10 +1237,10 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               ]}
             />
           </td>
-          <td className="wl2-td--acts">
+          <td className="w-16 whitespace-nowrap">
             <button
               type="button"
-              className="wl2-act-icon wl2-act-icon--rm"
+              className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground text-destructive hover:bg-destructive/10 hover:text-destructive"
               onClick={() => handleRemoveWatchlist(item)}
               title="Remove"
               aria-label="Remove from watchlist"
@@ -1254,9 +1255,9 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
   const addCategoryForHeader = watchingCategoryId != null ? watchingCategoryId : undefined
 
   return (
-    <PageSection className="watchlist-page wl2 w-full max-w-none">
+    <PageSection className="watchlist-page w-full max-w-none">
       {/* ── Header bar ── */}
-      <header className="wl2-header">
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
         <div className="research-page-head">
           <SectionPageTitle
             menu="Research"
@@ -1266,13 +1267,13 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
             infoText="Stock screener workflow: Watching (ideas) → Sizing (pre-trade sizing) → Positions (live IB holdings). Categories Watching / Sizing match Portfolio → Accounts. Quotes use IB / Redis. Bar-chart OHLC in the analysis panel is read from PostgreSQL (Massive or IB sources); use Fetch from Massive to enqueue Massive custom_bars sync."
             style={{ margin: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem' }}
           >
-            <span className="wl2-header__count">{watchlistItems.length}</span>
+            <span className="rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[0.7rem] font-semibold text-primary">{watchlistItems.length}</span>
           </SectionPageTitle>
-          <div className="wl2-header__add">
+          <div className="flex items-center gap-1.5">
           {(primaryTab === 'watching' || primaryTab === 'positions') && positionsNotInWatchlist.length > 0 && (
             <button
               type="button"
-              className="wl2-btn wl2-btn--ghost wl2-header__pos-btn"
+              className="cursor-pointer rounded-md border border-transparent px-2.5 py-1 text-[0.85rem] font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed border-border bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 h-8 px-2.5 text-[0.8rem]"
               onClick={() => setShowPositionPicker(v => !v)}
               title="Add from positions (category Watching)"
             >
@@ -1283,7 +1284,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
             <>
               <input
                 type="text"
-                className="wl2-header__input"
+                className="h-8 w-full min-w-0 max-w-56 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus:border-primary"
                 placeholder="Add symbol → Watching…"
                 value={addContractKey}
                 onChange={e => setAddContractKey(e.target.value)}
@@ -1300,7 +1301,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               />
               <button
                 type="button"
-                className="wl2-btn wl2-btn--primary wl2-header__add-btn"
+                className="cursor-pointer rounded-md border border-transparent px-2.5 py-1 text-[0.85rem] font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed border-primary bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 inline-flex h-8 w-8 items-center justify-center p-0 text-lg leading-none"
                 disabled={addPending || !addContractKey.trim()}
                 onClick={() => {
                   const { contract_key, symbol, sec_type } = normalizeToContractKey(addContractKey)
@@ -1318,12 +1319,12 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
       </header>
 
       {watchlistError && (
-        <div className="wl2-error" role="alert">{watchlistError}</div>
+        <div className="mb-1 py-1 text-[0.78rem] text-destructive" role="alert">{watchlistError}</div>
       )}
 
       {/* ── Position picker ── */}
       {showPositionPicker && positionsNotInWatchlist.length > 0 && (primaryTab === 'watching' || primaryTab === 'positions') && (
-        <div className="wl2-pos-picker">
+        <div className="mb-2 flex flex-wrap gap-1 py-1">
           {positionsNotInWatchlist.map((p, idx) => {
             const ck = positionToContractKey(p)
             const label = p.symbol || ck.split('|')[0]
@@ -1331,7 +1332,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               <button
                 key={ck + String(idx)}
                 type="button"
-                className="wl2-pos-picker__chip"
+                className="cursor-pointer rounded-full border border-border bg-background px-2 py-0.5 text-[0.72rem] font-medium text-muted-foreground hover:border-primary hover:bg-primary hover:text-primary-foreground disabled:opacity-50"
                 disabled={addPending}
                 onClick={() => {
                   const exp = (p.expiry ?? p.lastTradeDateOrContractMonth) as string | undefined
@@ -1348,24 +1349,24 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
 
       {/* ── Step-by-step workflow (Watching → Sizing → Positions) ── */}
       {!watchlistLoading && (
-        <div className="wl2-stepper" role="tablist" aria-label="Position workflow steps">
+        <div className="mb-4 flex flex-wrap items-stretch gap-2" role="tablist" aria-label="Position workflow steps">
           <button
             type="button"
             role="tab"
             aria-selected={primaryTab === 'watching'}
             aria-current={primaryTab === 'watching' ? 'step' : undefined}
-            className={`wl2-step${primaryTab === 'watching' ? ' wl2-step--active' : ''}${primaryTab === 'sizing' || primaryTab === 'positions' ? ' wl2-step--done' : ''}`}
+            className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 transition-colors hover:bg-muted/50${primaryTab === 'watching' ? ' border-primary bg-primary/10 text-foreground' : ''}${primaryTab === 'sizing' || primaryTab === 'positions' ? ' border-primary/50 text-foreground' : ''}`}
             onClick={() => { setPrimaryTab('watching'); setShowPositionPicker(false) }}
           >
-            <span className="wl2-step__index" aria-hidden>1</span>
-            <span className="wl2-step__body">
-              <span className="wl2-step__title">Watching</span>
-              <span className="wl2-step__desc">Screen names &amp; ideas</span>
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[0.72rem] font-bold" aria-hidden>1</span>
+            <span className="flex min-w-0 flex-col gap-0.5 text-left">
+              <span className="text-[0.85rem] font-semibold">Watching</span>
+              <span className="text-[0.72rem] text-muted-foreground">Screen names &amp; ideas</span>
             </span>
-            <span className="wl2-step__badge">{watchingTabCount}</span>
+            <span className="ml-auto rounded-full bg-muted px-2 py-0.5 font-mono text-[0.65rem] font-semibold text-muted-foreground">{watchingTabCount}</span>
           </button>
           <span
-            className={`wl2-step-connector${primaryTab === 'sizing' || primaryTab === 'positions' ? ' wl2-step-connector--done' : ''}`}
+            className={`hidden h-px w-4 shrink-0 bg-border sm:block${primaryTab === 'sizing' || primaryTab === 'positions' ? ' bg-primary' : ''}`}
             aria-hidden
           />
           <button
@@ -1373,18 +1374,18 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
             role="tab"
             aria-selected={primaryTab === 'sizing'}
             aria-current={primaryTab === 'sizing' ? 'step' : undefined}
-            className={`wl2-step wl2-step--sizing-hub${primaryTab === 'sizing' ? ' wl2-step--active' : ''}${primaryTab === 'positions' ? ' wl2-step--done' : ''}`}
+            className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 transition-colors hover:bg-muted/50 ${primaryTab === 'sizing' ? ' border-primary bg-primary/10 text-foreground' : ''}${primaryTab === 'positions' ? ' border-primary/50 text-foreground' : ''}`}
             onClick={() => { setPrimaryTab('sizing'); setShowPositionPicker(false); setPromoteContractKey('') }}
           >
-            <span className="wl2-step__index" aria-hidden>2</span>
-            <span className="wl2-step__body">
-              <span className="wl2-step__title">Sizing</span>
-              <span className="wl2-step__desc">Size before you trade</span>
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[0.72rem] font-bold" aria-hidden>2</span>
+            <span className="flex min-w-0 flex-col gap-0.5 text-left">
+              <span className="text-[0.85rem] font-semibold">Sizing</span>
+              <span className="text-[0.72rem] text-muted-foreground">Size before you trade</span>
             </span>
-            <span className="wl2-step__badge">{sizingTabCount}</span>
+            <span className="ml-auto rounded-full bg-muted px-2 py-0.5 font-mono text-[0.65rem] font-semibold text-muted-foreground">{sizingTabCount}</span>
           </button>
           <span
-            className={`wl2-step-connector${primaryTab === 'positions' ? ' wl2-step-connector--done' : ''}`}
+            className={`hidden h-px w-4 shrink-0 bg-border sm:block${primaryTab === 'positions' ? ' bg-primary' : ''}`}
             aria-hidden
           />
           <button
@@ -1392,38 +1393,50 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
             role="tab"
             aria-selected={primaryTab === 'positions'}
             aria-current={primaryTab === 'positions' ? 'step' : undefined}
-            className={`wl2-step${primaryTab === 'positions' ? ' wl2-step--active' : ''}`}
+            className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 transition-colors hover:bg-muted/50${primaryTab === 'positions' ? ' border-primary bg-primary/10 text-foreground' : ''}`}
             onClick={() => { setPrimaryTab('positions'); setPromoteContractKey('') }}
           >
-            <span className="wl2-step__index" aria-hidden>3</span>
-            <span className="wl2-step__body">
-              <span className="wl2-step__title">Positions</span>
-              <span className="wl2-step__desc">Live IB holdings</span>
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[0.72rem] font-bold" aria-hidden>3</span>
+            <span className="flex min-w-0 flex-col gap-0.5 text-left">
+              <span className="text-[0.85rem] font-semibold">Positions</span>
+              <span className="text-[0.72rem] text-muted-foreground">Live IB holdings</span>
             </span>
-            <span className="wl2-step__badge">{positionsTabCount}</span>
+            <span className="ml-auto rounded-full bg-muted px-2 py-0.5 font-mono text-[0.65rem] font-semibold text-muted-foreground">{positionsTabCount}</span>
           </button>
         </div>
       )}
 
       {!watchlistLoading && primaryTab === 'positions' && (
-        <div className="wl2-substep-wrap">
-          <span className="wl2-substep-label">Step 3 — instrument type</span>
-          <nav className="wl2-tabs wl2-tabs--sub" aria-label="Positions instrument type">
+        <div className="-mt-1 mb-3 flex flex-wrap items-center gap-3 pl-2">
+          <span className="text-[0.72rem] font-semibold uppercase tracking-wide text-muted-foreground">Step 3 — instrument type</span>
+          <nav className="-mt-1 mb-3 flex gap-0 border-b border-border pl-2" aria-label="Positions instrument type">
             <button
               type="button"
-              className={`wl2-tabs__btn${positionSubTab === 'stocks' ? ' wl2-tabs__btn--active' : ''}`}
+              className={cn(
+                'inline-flex cursor-pointer items-center gap-1.5 border-0 border-b-2 border-transparent bg-transparent px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground',
+                positionSubTab === 'stocks' && 'border-b-primary text-foreground',
+              )}
               onClick={() => setPositionSubTab('stocks')}
             >
               Stocks
-              <span className="wl2-tabs__badge">{positionStockRows.length}</span>
+              <span className={cn(
+                'rounded-lg bg-muted px-1.5 font-mono text-[0.65rem] font-semibold leading-normal text-muted-foreground',
+                positionSubTab === 'stocks' && 'bg-primary text-primary-foreground',
+              )}>{positionStockRows.length}</span>
             </button>
             <button
               type="button"
-              className={`wl2-tabs__btn${positionSubTab === 'options' ? ' wl2-tabs__btn--active' : ''}`}
+              className={cn(
+                'inline-flex cursor-pointer items-center gap-1.5 border-0 border-b-2 border-transparent bg-transparent px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground',
+                positionSubTab === 'options' && 'border-b-primary text-foreground',
+              )}
               onClick={() => setPositionSubTab('options')}
             >
               Options
-              <span className="wl2-tabs__badge">{positionOptRows.length}</span>
+              <span className={cn(
+                'rounded-lg bg-muted px-1.5 font-mono text-[0.65rem] font-semibold leading-normal text-muted-foreground',
+                positionSubTab === 'options' && 'bg-primary text-primary-foreground',
+              )}>{positionOptRows.length}</span>
             </button>
           </nav>
         </div>
@@ -1431,33 +1444,33 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
 
       {/* ── Main content ── */}
       {watchlistLoading ? (
-        <div className="wl2-empty">Loading…</div>
+        <div className="py-4 text-center text-[0.82rem] text-muted-foreground">Loading…</div>
       ) : primaryTab === 'watching' ? (
         <>
-          <p className="wl2-tier-hint">
+          <p className="mb-3 text-[0.8rem] leading-snug text-muted-foreground">
             <strong>Step 1.</strong> Tickers you add in the header are stored with category <strong>Watching</strong> (same names as Portfolio → Accounts). Symbols may appear here even if you already hold them. Option legs in Watching / uncategorized are in the second table below.
           </p>
           {watchingCategoryId == null && (
-            <p className="wl2-tier-hint wl2-tier-hint--warn">
+            <p className="mb-3 text-[0.8rem] leading-snug text-muted-foreground text-amber-500">
               The <strong>Watching</strong> category is missing or still being created. If this persists, add <strong>Watching</strong> and <strong>Sizing</strong> under Portfolio → Accounts.
             </p>
           )}
           {watchlistItems.length === 0 && watchingStockRows.length === 0 && watchingOptionRows.length === 0 ? (
-            <div className="wl2-empty">No symbols yet. Type a ticker in the header to start in Watching.</div>
+            <div className="py-4 text-center text-[0.82rem] text-muted-foreground">No symbols yet. Type a ticker in the header to start in Watching.</div>
           ) : (
             <>
-              <div className="wl2-table-wrap">
+              <div className="overflow-x-auto rounded-lg border border-border">
                 {watchingStockRows.length === 0 && otherCategoryStockRows.length === 0 ? (
-                  <div className="wl2-empty">No stock rows in Watching / uncategorized.</div>
+                  <div className="py-4 text-center text-[0.82rem] text-muted-foreground">No stock rows in Watching / uncategorized.</div>
                 ) : (
-                  <table className="wl2-table">
+                  <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:px-2 [&_td]:py-1.5 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-2 [&_th]:text-left [&_th]:text-[0.68rem] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
                     <thead>
                       <tr>
-                        <th className="wl2-th--sym">Symbol</th>
-                        <th className="wl2-th--quote">Last / B·A</th>
-                        <th className="wl2-th--opt" title="Show in Option Discovery">Opt</th>
-                        <th className="wl2-th--cat">Category</th>
-                        <th className="wl2-th--acts" />
+                        <th className="min-w-[6rem]">Symbol</th>
+                        <th className="min-w-[7rem]">Last / B·A</th>
+                        <th className="w-12 text-center" title="Show in Option Discovery">Opt</th>
+                        <th className="w-28">Category</th>
+                        <th className="w-16" />
                       </tr>
                     </thead>
                     <tbody>
@@ -1465,10 +1478,10 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                     </tbody>
                     {otherCategoryStockRows.length > 0 && (
                       <tbody>
-                        <tr className="wl2-group-row">
+                        <tr className="bg-muted/40">
                           <td colSpan={5}>
-                            <span className="wl2-group-label">Other portfolio categories</span>
-                            <span className="wl2-group-count">{otherCategoryStockRows.length}</span>
+                            <span className="text-[0.72rem] font-semibold uppercase tracking-wide text-muted-foreground">Other portfolio categories</span>
+                            <span className="ml-2 font-mono text-[0.65rem] text-muted-foreground">{otherCategoryStockRows.length}</span>
                           </td>
                         </tr>
                         {renderStockRows(otherCategoryStockRows)}
@@ -1479,18 +1492,18 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               </div>
               {watchingOptionRows.length > 0 && (
                 <>
-                  <p className="wl2-tier-hint" style={{ marginTop: 'var(--space-4)' }}>Options on the list (Watching / uncategorized)</p>
-                  <div className="wl2-table-wrap">
-                    <table className="wl2-table">
+                  <p className="mb-3 text-[0.8rem] leading-snug text-muted-foreground" style={{ marginTop: 'var(--space-4)' }}>Options on the list (Watching / uncategorized)</p>
+                  <div className="overflow-x-auto rounded-lg border border-border">
+                    <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:px-2 [&_td]:py-1.5 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-2 [&_th]:text-left [&_th]:text-[0.68rem] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
                       <thead>
                         <tr>
-                          <th className="wl2-th--sym">Symbol</th>
-                          <th className="wl2-th--quote">Last / B·A</th>
-                          <th className="wl2-th--exp">Expiry</th>
-                          <th className="wl2-th--right">R</th>
-                          <th className="wl2-th--strike">Strike</th>
-                          <th className="wl2-th--cat">Category</th>
-                          <th className="wl2-th--acts" />
+                          <th className="min-w-[6rem]">Symbol</th>
+                          <th className="min-w-[7rem]">Last / B·A</th>
+                          <th className="w-24">Expiry</th>
+                          <th className="w-10 text-center">R</th>
+                          <th className="w-20 text-right">Strike</th>
+                          <th className="w-28">Category</th>
+                          <th className="w-16" />
                         </tr>
                       </thead>
                       <tbody>{renderOptionRows(watchingOptionRows)}</tbody>
@@ -1503,25 +1516,25 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
         </>
       ) : primaryTab === 'sizing' ? (
         <>
-          <p className="wl2-tier-hint">
+          <p className="mb-3 text-[0.8rem] leading-snug text-muted-foreground">
             <strong>Step 2.</strong> The table lists stocks tagged <strong>Sizing</strong>. Pick any stock symbol from your watchlist below, then <strong>Move to Sizing</strong>.
           </p>
 
           <section
-            className="wl2-sizing-dash"
-            aria-labelledby="wl2-sizing-dash-portfolio-risk-power-head"
+            className="mb-4 rounded-[10px] border border-border bg-muted/30 p-3"
+            aria-labelledby="mb-2"
           >
-            <div className="wl2-sizing-dash__title-row">
-              <h4 id="wl2-sizing-dash-portfolio-risk-power-head" className="wl2-sizing-dash__title wl2-sizing-dash__title--inline">
+            <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <h4 id="mb-2" className="mb-1 text-[0.95rem] font-semibold tracking-tight text-foreground m-0 shrink-0">
                 Portfolio risk power
               </h4>
               <InfoTooltip text={WL_HELP_PORTFOLIO_TABLE} />
               <button
                 type="button"
-                className="section-header-icon-btn wl2-portfolio-risk-power__toggle"
+                className="section-header-icon-btn ml-auto"
                 onClick={() => setPortfolioRiskPowerCollapsed(v => !v)}
                 aria-expanded={!portfolioRiskPowerCollapsed}
-                aria-controls="wl2-portfolio-risk-power-body"
+                aria-controls="min-w-0"
                 title={portfolioRiskPowerCollapsed ? 'Expand portfolio risk power' : 'Collapse portfolio risk power'}
                 aria-label={portfolioRiskPowerCollapsed ? 'Expand portfolio risk power' : 'Collapse portfolio risk power'}
               >
@@ -1546,57 +1559,57 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
             </div>
 
             {portfolioRiskPowerCollapsed ? (
-              <div id="wl2-portfolio-risk-power-body" className="wl2-portfolio-risk-power-summary" role="status" aria-live="polite">
-                <div className="wl2-portfolio-risk-power-summary__item">
-                  <span className="wl2-portfolio-risk-power-summary__name">Host</span>
-                  <span className="wl2-portfolio-risk-power-summary__metric">
+              <div id="min-w-0" className="mb-2 flex flex-nowrap flex-wrap items-center gap-3 rounded-lg border border-border/85 bg-muted/30 px-2.5 py-2" role="status" aria-live="polite">
+                <div className="flex min-w-0 flex-nowrap items-baseline gap-2 whitespace-nowrap">
+                  <span className="text-[0.67rem] font-semibold uppercase tracking-wide text-muted-foreground">Host</span>
+                  <span className="text-[0.78rem] tabular-nums text-foreground whitespace-nowrap">
                     Cash:{' '}
-                    <span className="wl2-portfolio-risk-power-summary__metric-value">
+                    <span className="font-bold text-primary/90">
                       {hostCashPie ? fmtUsd(hostCashPie.cash) : '—'}
                     </span>
                   </span>
-                  <span className="wl2-portfolio-risk-power-summary__metric">
+                  <span className="text-[0.78rem] tabular-nums text-foreground whitespace-nowrap">
                     STK:{' '}
-                    <span className="wl2-portfolio-risk-power-summary__metric-value">
+                    <span className="font-bold text-primary/90">
                       {hostCashPie ? fmtUsd(hostCashPie.stkExFi) : '—'}
                     </span>
                   </span>
                 </div>
-                <div className="wl2-portfolio-risk-power-summary__item">
-                  <span className="wl2-portfolio-risk-power-summary__name">Secondary</span>
-                  <span className="wl2-portfolio-risk-power-summary__metric">
+                <div className="flex min-w-0 flex-nowrap items-baseline gap-2 whitespace-nowrap">
+                  <span className="text-[0.67rem] font-semibold uppercase tracking-wide text-muted-foreground">Secondary</span>
+                  <span className="text-[0.78rem] tabular-nums text-foreground whitespace-nowrap">
                     Cash:{' '}
-                    <span className="wl2-portfolio-risk-power-summary__metric-value">
+                    <span className="font-bold text-primary/90">
                       {secondaryCashPie ? fmtUsd(secondaryCashPie.cash) : '—'}
                     </span>
                   </span>
-                  <span className="wl2-portfolio-risk-power-summary__metric">
+                  <span className="text-[0.78rem] tabular-nums text-foreground whitespace-nowrap">
                     STK:{' '}
-                    <span className="wl2-portfolio-risk-power-summary__metric-value">
+                    <span className="font-bold text-primary/90">
                       {secondaryCashPie ? fmtUsd(secondaryCashPie.stkExFi) : '—'}
                     </span>
                   </span>
                 </div>
-                <div className="wl2-portfolio-risk-power-summary__item wl2-portfolio-risk-power-summary__item--maxdd">
-                  <span className="wl2-portfolio-risk-power-summary__name">Max drawdown %</span>
-                  <span className="wl2-portfolio-risk-power-summary__metric wl2-portfolio-risk-power-summary__metric--emph">
+                <div className="flex min-w-0 flex-nowrap items-baseline gap-2 whitespace-nowrap ml-auto">
+                  <span className="text-[0.67rem] font-semibold uppercase tracking-wide text-muted-foreground">Max drawdown %</span>
+                  <span className="text-[0.78rem] tabular-nums text-foreground whitespace-nowrap text-[0.88rem] font-bold text-primary">
                     {staticMaxDdPctCap.toFixed(0)}%
                   </span>
-                  <span className="wl2-portfolio-risk-power-summary__metric">
+                  <span className="text-[0.78rem] tabular-nums text-foreground whitespace-nowrap">
                     Static risk budget:{' '}
-                    <span className="wl2-portfolio-risk-power-summary__metric-value">
+                    <span className="font-bold text-primary/90">
                       {capital > 0 ? fmtUsd(staticRiskBudgetUsd) : '—'}
                     </span>
                   </span>
-                  <span className="wl2-portfolio-risk-power-summary__metric">
+                  <span className="text-[0.78rem] tabular-nums text-foreground whitespace-nowrap">
                     Max drawdown:{' '}
-                    <span className="wl2-portfolio-risk-power-summary__metric-value">
+                    <span className="font-bold text-primary/90">
                       {portfolioDdFromHistory.usd != null ? fmtUsd(portfolioDdFromHistory.usd) : '—'}
                     </span>
                   </span>
-                  <span className="wl2-portfolio-risk-power-summary__metric">
+                  <span className="text-[0.78rem] tabular-nums text-foreground whitespace-nowrap">
                     Per-trade loss:{' '}
-                    <span className="wl2-portfolio-risk-power-summary__metric-value">
+                    <span className="font-bold text-primary/90">
                       {capital > 0 ? fmtUsd(staticRiskUsdPerTrade) : '—'}
                     </span>
                   </span>
@@ -1604,24 +1617,24 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               </div>
             ) : (
             <>
-            <div id="wl2-portfolio-risk-power-body" className="wl2-portfolio-max-dd-row">
-              <div className="wl2-range-field wl2-range-field--portfolio">
-                <div className="wl2-range-field__head">
-                  <div className="wl2-range-field__label-row">
-                    <label className="wl2-range-field__label" htmlFor="wl-portfolio-max-dd-pct">
+            <div id="min-w-0" className="mb-2 grid grid-cols-[minmax(11rem,2fr)_minmax(11rem,2fr)_minmax(0,8fr)] items-start gap-3">
+              <div className="mb-2 max-w-md min-w-0 mb-0 max-w-none min-w-0">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1">
+                    <label className="text-[0.72rem] font-semibold text-muted-foreground" htmlFor="wl-portfolio-max-dd-pct">
                       Max drawdown %
                     </label>
                     <InfoTooltip text={WL_HELP_MAX_DD_SCENARIO} />
                   </div>
-                  <span className="wl2-range-field__readout" aria-live="polite">
+                  <span className="text-[0.82rem] font-semibold tabular-nums text-foreground" aria-live="polite">
                     {staticMaxDdPctCap}
-                    <span className="wl2-range-field__readout-unit">%</span>
+                    <span className="text-muted-foreground">%</span>
                   </span>
                 </div>
                 <input
                   id="wl-portfolio-max-dd-pct"
                   type="range"
-                  className="wl2-range-elegant"
+                  className="min-w-0"
                   min={5}
                   max={50}
                   step={1}
@@ -1637,40 +1650,40 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                     ['--wl-range-pct' as string]: `${((staticMaxDdPctCap - 5) / (50 - 5)) * 100}%`,
                   }}
                 />
-                <div className="wl2-range-field__scale" aria-hidden>
+                <div className="mt-1" aria-hidden>
                   <span>5%</span>
                   <span>50%</span>
                 </div>
-                <div className="wl2-range-field__metrics-row">
-                  <div className="wl2-range-field__metric-tile wl2-range-field__metric-tile--highlight">
-                    <span className="wl2-range-field__metric-tile-label">Max drawdown (history)</span>
-                    <span className="wl2-range-field__metric-tile-value">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-md border border-border bg-muted/30 px-2 py-1.5 border-primary/40 bg-primary/5">
+                    <span className="text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">Max drawdown (history)</span>
+                    <span className="text-[0.82rem] font-semibold tabular-nums">
                       {portfolioDdFromHistory.usd != null ? fmtUsd(portfolioDdFromHistory.usd) : '—'}
                     </span>
                     {portfolioDdFromHistory.pctOfNav != null ? (
-                      <span className="wl2-range-field__metric-tile-sub">
+                      <span className="text-[0.65rem] text-muted-foreground">
                         {portfolioDdFromHistory.pctOfNav.toFixed(2)}% of NAV
                       </span>
                     ) : null}
                   </div>
                 </div>
               </div>
-              <div className="wl2-range-field wl2-range-field--portfolio">
-                <div className="wl2-range-field__head">
-                  <div className="wl2-range-field__label-row">
-                    <label className="wl2-range-field__label" htmlFor="wl-static-risk-pct">
+              <div className="mb-2 max-w-md min-w-0 mb-0 max-w-none min-w-0">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1">
+                    <label className="text-[0.72rem] font-semibold text-muted-foreground" htmlFor="wl-static-risk-pct">
                       Static Risk % (per trade)
                     </label>
                   </div>
-                  <span className="wl2-range-field__readout" aria-live="polite">
+                  <span className="text-[0.82rem] font-semibold tabular-nums text-foreground" aria-live="polite">
                     {staticRiskPctPerTrade.toFixed(1)}
-                    <span className="wl2-range-field__readout-unit">%</span>
+                    <span className="text-muted-foreground">%</span>
                   </span>
                 </div>
                 <input
                   id="wl-static-risk-pct"
                   type="range"
-                  className="wl2-range-elegant"
+                  className="min-w-0"
                   min={0.1}
                   max={5}
                   step={0.1}
@@ -1686,34 +1699,34 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                     ['--wl-range-pct' as string]: `${((staticRiskPctPerTrade - 0.1) / (5 - 0.1)) * 100}%`,
                   }}
                 />
-                <div className="wl2-range-field__scale" aria-hidden>
+                <div className="mt-1" aria-hidden>
                   <span>0.1%</span>
                   <span>5.0%</span>
                 </div>
-                <div className="wl2-range-field__metrics-row wl2-range-field__metrics-row--single">
-                  <div className="wl2-range-field__metric-tile wl2-range-field__metric-tile--highlight">
-                    <span className="wl2-range-field__metric-tile-label">Per-trade fixed loss budget</span>
-                    <span className="wl2-range-field__metric-tile-value">
+                <div className="grid grid-cols-2 gap-2 grid-cols-1">
+                  <div className="rounded-md border border-border bg-muted/30 px-2 py-1.5 border-primary/40 bg-primary/5">
+                    <span className="text-[0.65rem] font-semibold uppercase tracking-wide text-muted-foreground">Per-trade fixed loss budget</span>
+                    <span className="text-[0.82rem] font-semibold tabular-nums">
                       {capital > 0 ? fmtUsd(staticRiskUsdPerTrade) : '—'}
                     </span>
-                    <span className="wl2-range-field__metric-tile-sub">
+                    <span className="text-[0.65rem] text-muted-foreground">
                       Total capital × {staticRiskPctPerTrade.toFixed(1)}%
                     </span>
                   </div>
                 </div>
               </div>
 
-              <div className="wl2-table-wrap wl2-sizing-dash__table-wrap">
-              <table className="wl2-table wl2-table--dense wl2-portfolio-metric-table">
+              <div className="overflow-x-auto rounded-lg border border-border mt-2 min-w-0">
+              <table className="w-full border-collapse text-xs [&_td]:border-b [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[0.68rem] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
                 <thead>
                   <tr>
                     <th>Account</th>
-                    <th className="wl2-td-num">Cash (IB)</th>
-                    <th className="wl2-td-num">Cash-like</th>
-                    <th className="wl2-td-num">Cash total</th>
-                    <th className="wl2-td-num">Positions MV</th>
-                    <th className="wl2-td-num">Net liq.</th>
-                    <th className="wl2-td-num wl2-portfolio-metric-table__max-dd">Max DD @ {staticMaxDdPctCap}%</th>
+                    <th className="text-right tabular-nums">Cash (IB)</th>
+                    <th className="text-right tabular-nums">Cash-like</th>
+                    <th className="text-right tabular-nums">Cash total</th>
+                    <th className="text-right tabular-nums">Positions MV</th>
+                    <th className="text-right tabular-nums">Net liq.</th>
+                    <th className="text-right tabular-nums">Max DD @ {staticMaxDdPctCap}%</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1721,41 +1734,41 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                     <td>
                       <strong>Host</strong>
                       {portfolioAccountTable.hostId ? (
-                        <div className="wl2-portfolio-metric-table__sub">
-                          <code className="wl2-code">{portfolioAccountTable.hostId}</code>
+                        <div className="text-muted-foreground">
+                          <code className="font-mono text-xs">{portfolioAccountTable.hostId}</code>
                         </div>
                       ) : (
-                        <div className="wl2-portfolio-metric-table__sub">event_host / trading not set</div>
+                        <div className="text-muted-foreground">event_host / trading not set</div>
                       )}
                     </td>
                     {portfolioAccountTable.hostRow ? (
                       <>
-                        <td className="wl2-td-num">
-                          <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.hostRow.ibCash)}</span>
+                        <td className="text-right tabular-nums">
+                          <span className="font-bold text-primary">{fmtUsd(portfolioAccountTable.hostRow.ibCash)}</span>
                         </td>
-                        <td className="wl2-td-num">
-                          <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.hostRow.cashLike)}</span>
+                        <td className="text-right tabular-nums">
+                          <span className="font-bold text-primary">{fmtUsd(portfolioAccountTable.hostRow.cashLike)}</span>
                         </td>
-                        <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.hostRow.cashTotal)}</td>
-                        <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.hostRow.positionsMv)}</td>
-                        <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.hostRow.netLiq)}</td>
-                        <td className="wl2-td-num wl2-portfolio-metric-table__max-dd">
-                          <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.hostRow.maxDdUsd)}</span>
+                        <td className="text-right tabular-nums">{fmtUsd(portfolioAccountTable.hostRow.cashTotal)}</td>
+                        <td className="text-right tabular-nums">{fmtUsd(portfolioAccountTable.hostRow.positionsMv)}</td>
+                        <td className="text-right tabular-nums">{fmtUsd(portfolioAccountTable.hostRow.netLiq)}</td>
+                        <td className="text-right tabular-nums">
+                          <span className="font-bold text-primary">{fmtUsd(portfolioAccountTable.hostRow.maxDdUsd)}</span>
                         </td>
                       </>
                     ) : (
                       <>
-                        <td className="wl2-td-num">
-                          <span className="wl2-portfolio-num--emph wl2-portfolio-num--muted">—</span>
+                        <td className="text-right tabular-nums">
+                          <span className="font-bold text-primary text-muted-foreground">—</span>
                         </td>
-                        <td className="wl2-td-num">
-                          <span className="wl2-portfolio-num--emph wl2-portfolio-num--muted">—</span>
+                        <td className="text-right tabular-nums">
+                          <span className="font-bold text-primary text-muted-foreground">—</span>
                         </td>
-                        <td className="wl2-td-num">—</td>
-                        <td className="wl2-td-num">—</td>
-                        <td className="wl2-td-num">—</td>
-                        <td className="wl2-td-num wl2-portfolio-metric-table__max-dd">
-                          <span className="wl2-portfolio-num--emph wl2-portfolio-num--muted">—</span>
+                        <td className="text-right tabular-nums">—</td>
+                        <td className="text-right tabular-nums">—</td>
+                        <td className="text-right tabular-nums">—</td>
+                        <td className="text-right tabular-nums">
+                          <span className="font-bold text-primary text-muted-foreground">—</span>
                         </td>
                       </>
                     )}
@@ -1764,61 +1777,61 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                     <td>
                       <strong>Secondary</strong>
                       {portfolioAccountTable.secondaryId ? (
-                        <div className="wl2-portfolio-metric-table__sub">
-                          <code className="wl2-code">{portfolioAccountTable.secondaryId}</code>
+                        <div className="text-muted-foreground">
+                          <code className="font-mono text-xs">{portfolioAccountTable.secondaryId}</code>
                         </div>
                       ) : (
-                        <div className="wl2-portfolio-metric-table__sub">event_secondary not set (optional)</div>
+                        <div className="text-muted-foreground">event_secondary not set (optional)</div>
                       )}
                     </td>
                     {portfolioAccountTable.secondaryRow ? (
                       <>
-                        <td className="wl2-td-num">
-                          <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.secondaryRow.ibCash)}</span>
+                        <td className="text-right tabular-nums">
+                          <span className="font-bold text-primary">{fmtUsd(portfolioAccountTable.secondaryRow.ibCash)}</span>
                         </td>
-                        <td className="wl2-td-num">
-                          <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.secondaryRow.cashLike)}</span>
+                        <td className="text-right tabular-nums">
+                          <span className="font-bold text-primary">{fmtUsd(portfolioAccountTable.secondaryRow.cashLike)}</span>
                         </td>
-                        <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.secondaryRow.cashTotal)}</td>
-                        <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.secondaryRow.positionsMv)}</td>
-                        <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.secondaryRow.netLiq)}</td>
-                        <td className="wl2-td-num wl2-portfolio-metric-table__max-dd">
-                          <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.secondaryRow.maxDdUsd)}</span>
+                        <td className="text-right tabular-nums">{fmtUsd(portfolioAccountTable.secondaryRow.cashTotal)}</td>
+                        <td className="text-right tabular-nums">{fmtUsd(portfolioAccountTable.secondaryRow.positionsMv)}</td>
+                        <td className="text-right tabular-nums">{fmtUsd(portfolioAccountTable.secondaryRow.netLiq)}</td>
+                        <td className="text-right tabular-nums">
+                          <span className="font-bold text-primary">{fmtUsd(portfolioAccountTable.secondaryRow.maxDdUsd)}</span>
                         </td>
                       </>
                     ) : (
                       <>
-                        <td className="wl2-td-num">
-                          <span className="wl2-portfolio-num--emph wl2-portfolio-num--muted">—</span>
+                        <td className="text-right tabular-nums">
+                          <span className="font-bold text-primary text-muted-foreground">—</span>
                         </td>
-                        <td className="wl2-td-num">
-                          <span className="wl2-portfolio-num--emph wl2-portfolio-num--muted">—</span>
+                        <td className="text-right tabular-nums">
+                          <span className="font-bold text-primary text-muted-foreground">—</span>
                         </td>
-                        <td className="wl2-td-num">—</td>
-                        <td className="wl2-td-num">—</td>
-                        <td className="wl2-td-num">—</td>
-                        <td className="wl2-td-num wl2-portfolio-metric-table__max-dd">
-                          <span className="wl2-portfolio-num--emph wl2-portfolio-num--muted">—</span>
+                        <td className="text-right tabular-nums">—</td>
+                        <td className="text-right tabular-nums">—</td>
+                        <td className="text-right tabular-nums">—</td>
+                        <td className="text-right tabular-nums">
+                          <span className="font-bold text-primary text-muted-foreground">—</span>
                         </td>
                       </>
                     )}
                   </tr>
-                  <tr className="wl2-portfolio-metric-table__total">
+                  <tr className="font-semibold">
                     <td>
                       <strong>Total</strong>
-                      <div className="wl2-portfolio-metric-table__sub">All accounts in snapshot</div>
+                      <div className="text-muted-foreground">All accounts in snapshot</div>
                     </td>
-                    <td className="wl2-td-num">
-                      <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.totalRow.ibCash)}</span>
+                    <td className="text-right tabular-nums">
+                      <span className="font-bold text-primary">{fmtUsd(portfolioAccountTable.totalRow.ibCash)}</span>
                     </td>
-                    <td className="wl2-td-num">
-                      <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.totalRow.cashLike)}</span>
+                    <td className="text-right tabular-nums">
+                      <span className="font-bold text-primary">{fmtUsd(portfolioAccountTable.totalRow.cashLike)}</span>
                     </td>
-                    <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.totalRow.cashTotal)}</td>
-                    <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.totalRow.positionsMv)}</td>
-                    <td className="wl2-td-num">{fmtUsd(portfolioAccountTable.totalRow.netLiq)}</td>
-                    <td className="wl2-td-num wl2-portfolio-metric-table__max-dd">
-                      <span className="wl2-portfolio-num--emph">{fmtUsd(portfolioAccountTable.totalRow.maxDdUsd)}</span>
+                    <td className="text-right tabular-nums">{fmtUsd(portfolioAccountTable.totalRow.cashTotal)}</td>
+                    <td className="text-right tabular-nums">{fmtUsd(portfolioAccountTable.totalRow.positionsMv)}</td>
+                    <td className="text-right tabular-nums">{fmtUsd(portfolioAccountTable.totalRow.netLiq)}</td>
+                    <td className="text-right tabular-nums">
+                      <span className="font-bold text-primary">{fmtUsd(portfolioAccountTable.totalRow.maxDdUsd)}</span>
                     </td>
                   </tr>
                 </tbody>
@@ -1829,92 +1842,92 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
             )}
 
             {!portfolioRiskPowerCollapsed && (
-            <div className="wl2-cash-pie-split-wrap">
-              <div className="wl2-cash-pie-split-wrap__head">
-                <h5 className="wl2-sizing-dash__subtitle wl2-sizing-dash__subtitle--sm wl2-sizing-dash__subtitle--pie">
+            <div className="min-w-0">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <h5 className="mb-2 text-[0.88rem] font-semibold text-foreground mt-3 text-[0.82rem] font-semibold text-muted-foreground mb-0 shrink-0">
                   Cash & ex‑FI stocks vs net liquidation
                 </h5>
                 <InfoTooltip text={WL_HELP_CASH_PIE} />
               </div>
-              <div className="wl2-cash-pie-split">
-                <div className="wl2-cash-pie-panel">
-                  <h6 className="wl2-cash-pie-panel__title">Host</h6>
+              <div className="flex min-w-0 flex-col gap-2">
+                <div className="min-w-0">
+                  <h6 className="mb-1 text-[0.72rem] font-semibold uppercase tracking-wide text-muted-foreground">Host</h6>
                   {hostCashPie ? (
                     <>
-                      <div className="wl2-cash-pie-layout">
+                      <div className="grid grid-cols-[auto_1fr] items-center gap-3">
                         <div
-                          className="wl2-cash-pie"
+                          className="relative inline-flex items-center justify-center"
                           role="img"
                           aria-label={`Host: cash ${hostCashPie.cashPctOfNet.toFixed(1)} percent, STK ex-FI ${hostCashPie.stkPctOfNet.toFixed(1)} percent, other ${hostCashPie.otherPctOfNet.toFixed(1)} percent of net liquidation`}
                         >
                           <div
-                            className="wl2-cash-pie__ring"
+                            className="relative h-24 w-24 shrink-0 rounded-full"
                             style={{
                               background: `conic-gradient(
                                 color-mix(in srgb, var(--color-accent) 88%, #050a10) 0turn ${hostCashPie.cashTurnEnd}turn,
-                                color-mix(in srgb, var(--wl2-pie-stk) 74%, var(--color-bg)) ${hostCashPie.cashTurnEnd}turn ${hostCashPie.stkTurnEnd}turn,
+                                color-mix(in srgb, var(--text-emerald-500) 74%, var(--color-bg)) ${hostCashPie.cashTurnEnd}turn ${hostCashPie.stkTurnEnd}turn,
                                 color-mix(in srgb, var(--color-border) 72%, var(--color-surface)) ${hostCashPie.stkTurnEnd}turn 1turn
                               )`,
                             }}
                           />
-                          <div className="wl2-cash-pie__hole">
-                            <span className="wl2-cash-pie__pct">{hostCashPie.cashPctOfNet.toFixed(1)}%</span>
-                            <span className="wl2-cash-pie__pct wl2-cash-pie__pct--stk">{hostCashPie.stkPctOfNet.toFixed(1)}%</span>
-                            <span className="wl2-cash-pie__label">cash · stk ex‑FI</span>
+                          <div className="absolute inset-[22%] rounded-full bg-background">
+                            <span className="text-[0.72rem] font-semibold tabular-nums">{hostCashPie.cashPctOfNet.toFixed(1)}%</span>
+                            <span className="text-[0.72rem] font-semibold tabular-nums text-emerald-500">{hostCashPie.stkPctOfNet.toFixed(1)}%</span>
+                            <span className="text-[0.65rem] text-muted-foreground">cash · stk ex‑FI</span>
                           </div>
                         </div>
-                        <div className="wl2-cash-pie-legend wl2-cash-pie-legend--paired" role="list">
-                          <div className="wl2-cash-pie-legend__pair" role="listitem">
-                            <div className="wl2-cash-pie-legend__pair-left">
-                              <span className="wl2-cash-pie-dot wl2-cash-pie-dot--cash" aria-hidden />
-                              <span className="wl2-cash-pie-legend__text">
+                        <div className="flex flex-col gap-0.5 text-xs flex flex-col gap-1" role="list">
+                          <div className="flex items-baseline justify-between gap-2" role="listitem">
+                            <div className="min-w-0">
+                              <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-sky-500" aria-hidden />
+                              <span className="text-[0.72rem] text-muted-foreground">
                                 <strong>Cash total</strong>
-                                <span className="wl2-cash-pie-legend__val">
+                                <span className="text-[0.78rem] font-semibold tabular-nums">
                                   {fmtUsd(hostCashPie.cash)}{' '}
-                                  <span className="wl2-cash-pie-legend__pct">({hostCashPie.cashPctOfNet.toFixed(1)}%)</span>
+                                  <span className="text-[0.72rem] tabular-nums text-muted-foreground">({hostCashPie.cashPctOfNet.toFixed(1)}%)</span>
                                 </span>
                               </span>
                             </div>
-                            <div className="wl2-cash-pie-legend__pair-right">
-                              <div className="wl2-cash-pie-legend__text wl2-cash-pie-legend__text--tr">
+                            <div className="text-right">
+                              <div className="text-[0.72rem] text-muted-foreground text-right">
                                 <strong>Net liq.</strong>
-                                <span className="wl2-cash-pie-legend__val">{fmtUsd(hostCashPie.net)}</span>
+                                <span className="text-[0.78rem] font-semibold tabular-nums">{fmtUsd(hostCashPie.net)}</span>
                               </div>
                             </div>
                           </div>
-                          <div className="wl2-cash-pie-legend__pair" role="listitem">
-                            <div className="wl2-cash-pie-legend__pair-left">
-                              <span className="wl2-cash-pie-dot wl2-cash-pie-dot--stk" aria-hidden />
-                              <span className="wl2-cash-pie-legend__text">
+                          <div className="flex items-baseline justify-between gap-2" role="listitem">
+                            <div className="min-w-0">
+                              <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
+                              <span className="text-[0.72rem] text-muted-foreground">
                                 <strong>STK ex‑FI</strong>
-                                <span className="wl2-cash-pie-legend__val">
+                                <span className="text-[0.78rem] font-semibold tabular-nums">
                                   {fmtUsd(hostCashPie.stkExFi)}{' '}
-                                  <span className="wl2-cash-pie-legend__pct">({hostCashPie.stkPctOfNet.toFixed(1)}%)</span>
+                                  <span className="text-[0.72rem] tabular-nums text-muted-foreground">({hostCashPie.stkPctOfNet.toFixed(1)}%)</span>
                                 </span>
                               </span>
                             </div>
-                            <div className="wl2-cash-pie-legend__pair-right">
-                              <div className="wl2-cash-pie-legend__text wl2-cash-pie-legend__text--tr">
+                            <div className="text-right">
+                              <div className="text-[0.72rem] text-muted-foreground text-right">
                                 <strong>Ex‑FI net liq.</strong>
-                                <span className="wl2-cash-pie-legend__val">{fmtUsd(hostCashPie.netLiqExFi)}</span>
+                                <span className="text-[0.78rem] font-semibold tabular-nums">{fmtUsd(hostCashPie.netLiqExFi)}</span>
                               </div>
                             </div>
                           </div>
-                          <div className="wl2-cash-pie-legend__pair" role="listitem">
-                            <div className="wl2-cash-pie-legend__pair-left">
-                              <span className="wl2-cash-pie-dot wl2-cash-pie-dot--rest" aria-hidden />
-                              <span className="wl2-cash-pie-legend__text">
+                          <div className="flex items-baseline justify-between gap-2" role="listitem">
+                            <div className="min-w-0">
+                              <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-muted-foreground" aria-hidden />
+                              <span className="text-[0.72rem] text-muted-foreground">
                                 <strong>Other</strong>
-                                <span className="wl2-cash-pie-legend__val">
+                                <span className="text-[0.78rem] font-semibold tabular-nums">
                                   {fmtUsd(hostCashPie.other)}{' '}
-                                  <span className="wl2-cash-pie-legend__pct">({hostCashPie.otherPctOfNet.toFixed(1)}%)</span>
+                                  <span className="text-[0.72rem] tabular-nums text-muted-foreground">({hostCashPie.otherPctOfNet.toFixed(1)}%)</span>
                                 </span>
                               </span>
                             </div>
-                            <div className="wl2-cash-pie-legend__pair-right">
-                              <div className="wl2-cash-pie-legend__text wl2-cash-pie-legend__text--tr">
+                            <div className="text-right">
+                              <div className="text-[0.72rem] text-muted-foreground text-right">
                                 <strong>Cash / ex‑FI</strong>
-                                <span className="wl2-cash-pie-legend__val">
+                                <span className="text-[0.78rem] font-semibold tabular-nums">
                                   {hostCashPie.cashPctExFi != null ? `${hostCashPie.cashPctExFi.toFixed(1)}%` : '—'}
                                 </span>
                               </div>
@@ -1924,7 +1937,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                       </div>
                     </>
                   ) : (
-                    <p className="wl2-cash-pie-panel__empty">
+                    <p className="text-[0.78rem] italic text-muted-foreground">
                       {portfolioCashRollup.hostReason === 'no_config'
                         ? 'Set event_host or trading in Settings → IB.'
                         : portfolioCashRollup.hostReason === 'no_account'
@@ -1933,84 +1946,84 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                     </p>
                   )}
                 </div>
-                <div className="wl2-cash-pie-panel">
-                  <h6 className="wl2-cash-pie-panel__title">Secondary</h6>
+                <div className="min-w-0">
+                  <h6 className="mb-1 text-[0.72rem] font-semibold uppercase tracking-wide text-muted-foreground">Secondary</h6>
                   {secondaryCashPie ? (
                     <>
-                      <div className="wl2-cash-pie-layout">
+                      <div className="grid grid-cols-[auto_1fr] items-center gap-3">
                         <div
-                          className="wl2-cash-pie"
+                          className="relative inline-flex items-center justify-center"
                           role="img"
                           aria-label={`Secondary: cash ${secondaryCashPie.cashPctOfNet.toFixed(1)} percent, STK ex-FI ${secondaryCashPie.stkPctOfNet.toFixed(1)} percent, other ${secondaryCashPie.otherPctOfNet.toFixed(1)} percent of net liquidation`}
                         >
                           <div
-                            className="wl2-cash-pie__ring"
+                            className="relative h-24 w-24 shrink-0 rounded-full"
                             style={{
                               background: `conic-gradient(
                                 color-mix(in srgb, var(--color-accent) 88%, #050a10) 0turn ${secondaryCashPie.cashTurnEnd}turn,
-                                color-mix(in srgb, var(--wl2-pie-stk) 74%, var(--color-bg)) ${secondaryCashPie.cashTurnEnd}turn ${secondaryCashPie.stkTurnEnd}turn,
+                                color-mix(in srgb, var(--text-emerald-500) 74%, var(--color-bg)) ${secondaryCashPie.cashTurnEnd}turn ${secondaryCashPie.stkTurnEnd}turn,
                                 color-mix(in srgb, var(--color-border) 72%, var(--color-surface)) ${secondaryCashPie.stkTurnEnd}turn 1turn
                               )`,
                             }}
                           />
-                          <div className="wl2-cash-pie__hole">
-                            <span className="wl2-cash-pie__pct">{secondaryCashPie.cashPctOfNet.toFixed(1)}%</span>
-                            <span className="wl2-cash-pie__pct wl2-cash-pie__pct--stk">{secondaryCashPie.stkPctOfNet.toFixed(1)}%</span>
-                            <span className="wl2-cash-pie__label">cash · stk ex‑FI</span>
+                          <div className="absolute inset-[22%] rounded-full bg-background">
+                            <span className="text-[0.72rem] font-semibold tabular-nums">{secondaryCashPie.cashPctOfNet.toFixed(1)}%</span>
+                            <span className="text-[0.72rem] font-semibold tabular-nums text-emerald-500">{secondaryCashPie.stkPctOfNet.toFixed(1)}%</span>
+                            <span className="text-[0.65rem] text-muted-foreground">cash · stk ex‑FI</span>
                           </div>
                         </div>
-                        <div className="wl2-cash-pie-legend wl2-cash-pie-legend--paired" role="list">
-                          <div className="wl2-cash-pie-legend__pair" role="listitem">
-                            <div className="wl2-cash-pie-legend__pair-left">
-                              <span className="wl2-cash-pie-dot wl2-cash-pie-dot--cash" aria-hidden />
-                              <span className="wl2-cash-pie-legend__text">
+                        <div className="flex flex-col gap-0.5 text-xs flex flex-col gap-1" role="list">
+                          <div className="flex items-baseline justify-between gap-2" role="listitem">
+                            <div className="min-w-0">
+                              <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-sky-500" aria-hidden />
+                              <span className="text-[0.72rem] text-muted-foreground">
                                 <strong>Cash total</strong>
-                                <span className="wl2-cash-pie-legend__val">
+                                <span className="text-[0.78rem] font-semibold tabular-nums">
                                   {fmtUsd(secondaryCashPie.cash)}{' '}
-                                  <span className="wl2-cash-pie-legend__pct">({secondaryCashPie.cashPctOfNet.toFixed(1)}%)</span>
+                                  <span className="text-[0.72rem] tabular-nums text-muted-foreground">({secondaryCashPie.cashPctOfNet.toFixed(1)}%)</span>
                                 </span>
                               </span>
                             </div>
-                            <div className="wl2-cash-pie-legend__pair-right">
-                              <div className="wl2-cash-pie-legend__text wl2-cash-pie-legend__text--tr">
+                            <div className="text-right">
+                              <div className="text-[0.72rem] text-muted-foreground text-right">
                                 <strong>Net liq.</strong>
-                                <span className="wl2-cash-pie-legend__val">{fmtUsd(secondaryCashPie.net)}</span>
+                                <span className="text-[0.78rem] font-semibold tabular-nums">{fmtUsd(secondaryCashPie.net)}</span>
                               </div>
                             </div>
                           </div>
-                          <div className="wl2-cash-pie-legend__pair" role="listitem">
-                            <div className="wl2-cash-pie-legend__pair-left">
-                              <span className="wl2-cash-pie-dot wl2-cash-pie-dot--stk" aria-hidden />
-                              <span className="wl2-cash-pie-legend__text">
+                          <div className="flex items-baseline justify-between gap-2" role="listitem">
+                            <div className="min-w-0">
+                              <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
+                              <span className="text-[0.72rem] text-muted-foreground">
                                 <strong>STK ex‑FI</strong>
-                                <span className="wl2-cash-pie-legend__val">
+                                <span className="text-[0.78rem] font-semibold tabular-nums">
                                   {fmtUsd(secondaryCashPie.stkExFi)}{' '}
-                                  <span className="wl2-cash-pie-legend__pct">({secondaryCashPie.stkPctOfNet.toFixed(1)}%)</span>
+                                  <span className="text-[0.72rem] tabular-nums text-muted-foreground">({secondaryCashPie.stkPctOfNet.toFixed(1)}%)</span>
                                 </span>
                               </span>
                             </div>
-                            <div className="wl2-cash-pie-legend__pair-right">
-                              <div className="wl2-cash-pie-legend__text wl2-cash-pie-legend__text--tr">
+                            <div className="text-right">
+                              <div className="text-[0.72rem] text-muted-foreground text-right">
                                 <strong>Ex‑FI net liq.</strong>
-                                <span className="wl2-cash-pie-legend__val">{fmtUsd(secondaryCashPie.netLiqExFi)}</span>
+                                <span className="text-[0.78rem] font-semibold tabular-nums">{fmtUsd(secondaryCashPie.netLiqExFi)}</span>
                               </div>
                             </div>
                           </div>
-                          <div className="wl2-cash-pie-legend__pair" role="listitem">
-                            <div className="wl2-cash-pie-legend__pair-left">
-                              <span className="wl2-cash-pie-dot wl2-cash-pie-dot--rest" aria-hidden />
-                              <span className="wl2-cash-pie-legend__text">
+                          <div className="flex items-baseline justify-between gap-2" role="listitem">
+                            <div className="min-w-0">
+                              <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-muted-foreground" aria-hidden />
+                              <span className="text-[0.72rem] text-muted-foreground">
                                 <strong>Other</strong>
-                                <span className="wl2-cash-pie-legend__val">
+                                <span className="text-[0.78rem] font-semibold tabular-nums">
                                   {fmtUsd(secondaryCashPie.other)}{' '}
-                                  <span className="wl2-cash-pie-legend__pct">({secondaryCashPie.otherPctOfNet.toFixed(1)}%)</span>
+                                  <span className="text-[0.72rem] tabular-nums text-muted-foreground">({secondaryCashPie.otherPctOfNet.toFixed(1)}%)</span>
                                 </span>
                               </span>
                             </div>
-                            <div className="wl2-cash-pie-legend__pair-right">
-                              <div className="wl2-cash-pie-legend__text wl2-cash-pie-legend__text--tr">
+                            <div className="text-right">
+                              <div className="text-[0.72rem] text-muted-foreground text-right">
                                 <strong>Cash / ex‑FI</strong>
-                                <span className="wl2-cash-pie-legend__val">
+                                <span className="text-[0.78rem] font-semibold tabular-nums">
                                   {secondaryCashPie.cashPctExFi != null
                                     ? `${secondaryCashPie.cashPctExFi.toFixed(1)}%`
                                     : '—'}
@@ -2022,7 +2035,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                       </div>
                     </>
                   ) : (
-                    <p className="wl2-cash-pie-panel__empty">
+                    <p className="text-[0.78rem] italic text-muted-foreground">
                       {portfolioCashRollup.secondaryReason === 'no_config'
                         ? 'event_secondary is optional; not set.'
                         : portfolioCashRollup.secondaryReason === 'no_account'
@@ -2037,23 +2050,23 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
 
           </section>
 
-          <div className="wl2-sizing-sheet-order-row">
-            <div className="wl2-sizing-sheet-order-row__sheet">
-          <section className="wl2-sizing-dash wl2-sizing-dash--workflow-col">
-            <div className="wl2-symbol-section" aria-labelledby="wl2-sizing-symbol-sheet-head">
-            <h5 id="wl2-sizing-symbol-sheet-head" className="wl2-sizing-dash__subtitle wl2-sizing-dash__subtitle--workflow">
+          <div className="mb-4 grid grid-cols-[minmax(0,3fr)_minmax(0,9fr)] items-start gap-3 max-[960px]:grid-cols-1">
+            <div className="min-w-0">
+          <section className="mb-4 rounded-[10px] border border-border bg-muted/30 p-3 mb-0 min-w-0">
+            <div className="min-w-0" aria-labelledby="mb-2">
+            <h5 id="mb-2" className="mb-2 text-[0.88rem] font-semibold text-foreground mt-3">
               Sizing symbol sheet
             </h5>
-            <div className="wl2-table-wrap wl2-sizing-symbol-sheet-wrap">
+            <div className="overflow-x-auto rounded-lg border border-border min-w-0">
               {sizingStockRows.length === 0 ? (
-                <div className="wl2-empty">No Sizing symbols yet. Promote from Watching above.</div>
+                <div className="py-4 text-center text-[0.82rem] text-muted-foreground">No Sizing symbols yet. Promote from Watching above.</div>
               ) : (
-                <table className="wl2-table">
+                <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:px-2 [&_td]:py-1.5 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-2 [&_th]:text-left [&_th]:text-[0.68rem] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
                   <thead>
                     <tr>
-                      <th className="wl2-th--sym">Symbol</th>
-                      <th className="wl2-th--quote">Last / B·A</th>
-                      <th className="wl2-th--acts" />
+                      <th className="min-w-[6rem]">Symbol</th>
+                      <th className="min-w-[7rem]">Last / B·A</th>
+                      <th className="w-16" />
                     </tr>
                   </thead>
                   <tbody>{renderStockRows(sizingStockRows, { showSizeBtn: true, hideCategory: true, hideOpt: true })}</tbody>
@@ -2063,28 +2076,28 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
 
             {selectedSizingSymbol && !sizeComputeLoading && sizeAtrResult && (
               <section
-                className="wl2-sizing-dash wl2-sizing-dash--nested wl2-order-section--danger"
-                aria-labelledby="wl2-order-section-head"
+                className="mb-4 rounded-[10px] border border-border bg-muted/30 p-3 mb-0 mt-3 bg-background/70 p-3 border-destructive/40 bg-destructive/10 shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--destructive)_22%,transparent)]"
+                aria-labelledby="mb-2"
               >
-                <div className="wl2-order-risk-head">
-                  <h5 id="wl2-order-section-head" className="wl2-sizing-dash__subtitle wl2-order-risk-head__title">
+                <div className="mb-2">
+                  <h5 id="mb-2" className="mb-2 text-[0.88rem] font-semibold text-foreground text-[0.82rem] font-semibold text-destructive">
                     Order section
                   </h5>
                   <InfoTooltip text={WL_HELP_ORDER_SECTION} />
                 </div>
-                <div className="wl2-order-bid-symbol-row">
-                  <span className="wl2-order-bid-symbol-row__label">Current bid</span>
-                  <span className="wl2-order-bid-symbol-row__value">
+                <div className="mb-2 flex min-w-0 flex-nowrap items-baseline gap-x-1.5 gap-y-1 overflow-x-auto whitespace-nowrap rounded-md border border-destructive/20 bg-muted/40 px-2 py-1.5">
+                  <span className="shrink-0 text-[0.64rem] font-semibold uppercase tracking-wide text-muted-foreground">Current bid</span>
+                  <span className="shrink-0 text-[0.95rem] font-semibold tabular-nums text-foreground">
                     {selectedSizingBid != null ? fmtUsd(selectedSizingBid) : '—'}
                   </span>
-                  <span className="wl2-order-bid-symbol-row__sep" aria-hidden>
+                  <span className="shrink-0 text-[0.75rem] font-medium text-muted-foreground" aria-hidden>
                     ,
                   </span>
-                  <span className="wl2-order-bid-symbol-row__sym">{selectedSizingSymbol}</span>
+                  <span className="shrink-0 text-[0.82rem] font-bold tabular-nums tracking-wide text-foreground">{selectedSizingSymbol}</span>
                 </div>
-                <div className="wl2-order-compact-grid wl2-order-compact-grid--order-row2">
-                  <label className="wl2-order-compact-field" htmlFor="wl-order-entry">
-                    <span className="wl2-order-compact-field__label">ENTRY</span>
+                <div className="grid grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.9fr)] items-end gap-x-1.5 gap-y-1 grid-cols-3">
+                  <label className="flex min-w-0 flex-col gap-0.5" htmlFor="wl-order-entry">
+                    <span className="text-[0.64rem] font-semibold uppercase tracking-wide text-muted-foreground">ENTRY</span>
                     <input
                       id="wl-order-entry"
                       type="number"
@@ -2096,8 +2109,8 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                       inputMode="decimal"
                     />
                   </label>
-                  <label className="wl2-order-compact-field" htmlFor="wl-order-exit">
-                    <span className="wl2-order-compact-field__label">EXIT</span>
+                  <label className="flex min-w-0 flex-col gap-0.5" htmlFor="wl-order-exit">
+                    <span className="text-[0.64rem] font-semibold uppercase tracking-wide text-muted-foreground">EXIT</span>
                     <input
                       id="wl-order-exit"
                       type="number"
@@ -2109,10 +2122,10 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                       inputMode="decimal"
                     />
                   </label>
-                  <label className="wl2-order-compact-field" htmlFor="wl-order-shares">
-                    <span className="wl2-order-compact-field__label">
+                  <label className="flex min-w-0 flex-col gap-0.5" htmlFor="wl-order-shares">
+                    <span className="text-[0.64rem] font-semibold uppercase tracking-wide text-muted-foreground">
                       AMT
-                      <span className="wl2-order-compact-field__hint">step 100</span>
+                      <span className="text-[0.65rem] text-muted-foreground">step 100</span>
                     </span>
                     <input
                       id="wl-order-shares"
@@ -2130,25 +2143,25 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
             )}
 
             {selectedSizingSymbol && !sizeComputeLoading && sizeAtrResult && (
-              <section className="wl2-sizing-dash wl2-sizing-dash--nested" aria-labelledby="wl2-risk-verify-head">
-                <div className="wl2-order-risk-head">
-                  <h5 id="wl2-risk-verify-head" className="wl2-sizing-dash__subtitle wl2-order-risk-head__title">
+              <section className="mb-4 rounded-[10px] border border-border bg-muted/30 p-3 mb-0 mt-3 bg-background/70 p-3" aria-labelledby="mb-2">
+                <div className="mb-2">
+                  <h5 id="mb-2" className="mb-2 text-[0.88rem] font-semibold text-foreground text-[0.82rem] font-semibold text-destructive">
                     Order risk verify
                   </h5>
                   <InfoTooltip text={WL_HELP_ORDER_RISK_VERIFY} />
                 </div>
-                <div className="wl2-order-atr-sheet wl2-order-risk-group">
-                  <h6 className="wl2-order-atr-sheet__title">Risk sheet</h6>
-                  <div className="wl2-order-sheet-two-col">
-                    <div className="wl2-order-sheet-two-col__col">
-                      <div className="wl2-sizing-dash__card wl2-sizing-dash__card--highlight">
-                        <span className="wl2-sizing-dash__label">Distance</span>
-                        <span className="wl2-sizing-dash__value">
+                <div className="min-w-0 min-w-0">
+                  <h6 className="text-[0.82rem] font-semibold">Risk sheet</h6>
+                  <div className="grid grid-cols-2 gap-3 max-[960px]:grid-cols-1">
+                    <div className="min-w-0">
+                      <div className="rounded-lg border border-border/85 bg-muted/40 px-3 py-2 border-primary/40 bg-primary/5">
+                        <span className="mb-0.5 block text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">Distance</span>
+                        <span className="block text-[0.88rem] font-semibold tabular-nums text-foreground">
                           {manualOrderAnalytics.distance != null ? (
                             <>
                               {fmtUsd(manualOrderAnalytics.distance)}
                               {manualOrderAnalytics.distancePctOfBid != null ? (
-                                <span className="wl2-order-metric__suffix">
+                                <span className="text-muted-foreground">
                                   {' '}
                                   ({(manualOrderAnalytics.distancePctOfBid * 100).toFixed(2)}%)
                                 </span>
@@ -2159,31 +2172,31 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                           )}
                         </span>
                       </div>
-                      <div className="wl2-sizing-dash__card wl2-sizing-dash__card--highlight">
-                        <span className="wl2-sizing-dash__label">Positional drawdown</span>
-                        <span className="wl2-sizing-dash__value">
+                      <div className="rounded-lg border border-border/85 bg-muted/40 px-3 py-2 border-primary/40 bg-primary/5">
+                        <span className="mb-0.5 block text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">Positional drawdown</span>
+                        <span className="block text-[0.88rem] font-semibold tabular-nums text-foreground">
                           {manualOrderAnalytics.positionalDrawdownRatio != null
                             ? `${(manualOrderAnalytics.positionalDrawdownRatio * 100).toFixed(2)}% of entry`
                             : '—'}
                         </span>
                       </div>
-                      <div className="wl2-sizing-dash__card wl2-sizing-dash__card--highlight">
-                        <span className="wl2-sizing-dash__label">Risk per share</span>
-                        <span className="wl2-sizing-dash__value">
+                      <div className="rounded-lg border border-border/85 bg-muted/40 px-3 py-2 border-primary/40 bg-primary/5">
+                        <span className="mb-0.5 block text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">Risk per share</span>
+                        <span className="block text-[0.88rem] font-semibold tabular-nums text-foreground">
                           {manualOrderAnalytics.riskPerShare != null ? fmtUsd(manualOrderAnalytics.riskPerShare) : '—'}
                         </span>
                       </div>
                     </div>
-                    <div className="wl2-order-sheet-two-col__col">
-                      <div className="wl2-sizing-dash__card">
-                        <span className="wl2-sizing-dash__label">Order risk ($)</span>
-                        <span className="wl2-sizing-dash__value">
+                    <div className="min-w-0">
+                      <div className="rounded-lg border border-border/85 bg-muted/40 px-3 py-2">
+                        <span className="mb-0.5 block text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">Order risk ($)</span>
+                        <span className="block text-[0.88rem] font-semibold tabular-nums text-foreground">
                           {manualOrderAnalytics.orderRiskUsd != null ? fmtUsd(manualOrderAnalytics.orderRiskUsd) : '—'}
                         </span>
                       </div>
-                      <div className="wl2-sizing-dash__card">
-                        <span className="wl2-sizing-dash__label">Risk % of NAV</span>
-                        <span className="wl2-sizing-dash__value">
+                      <div className="rounded-lg border border-border/85 bg-muted/40 px-3 py-2">
+                        <span className="mb-0.5 block text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">Risk % of NAV</span>
+                        <span className="block text-[0.88rem] font-semibold tabular-nums text-foreground">
                           {manualOrderAnalytics.riskPct != null ? `${manualOrderAnalytics.riskPct.toFixed(2)}%` : '—'}
                         </span>
                       </div>
@@ -2191,31 +2204,27 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                   </div>
                 </div>
 
-                <div className="wl2-order-atr-sheet wl2-order-risk-group">
-                  <h6 className="wl2-order-atr-sheet__title">Capital sheet</h6>
-                  <div className="wl2-sizing-dash__cards wl2-sizing-dash__cards--tight wl2-order-two-col-cards">
-                    <div className="wl2-sizing-dash__card">
-                      <span className="wl2-sizing-dash__label">Investment</span>
-                      <span className="wl2-sizing-dash__value">
+                <div className="min-w-0 min-w-0">
+                  <h6 className="text-[0.82rem] font-semibold">Capital sheet</h6>
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] gap-2 grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] grid grid-cols-2 gap-2 max-[960px]:grid-cols-1">
+                    <div className="rounded-lg border border-border/85 bg-muted/40 px-3 py-2">
+                      <span className="mb-0.5 block text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">Investment</span>
+                      <span className="block text-[0.88rem] font-semibold tabular-nums text-foreground">
                         {manualOrderAnalytics.investmentUsd != null ? fmtUsd(manualOrderAnalytics.investmentUsd) : '—'}
                       </span>
                     </div>
-                    <div className="wl2-sizing-dash__card">
-                      <span className="wl2-sizing-dash__label">Investment weight</span>
-                      <span className="wl2-sizing-dash__value">
+                    <div className="rounded-lg border border-border/85 bg-muted/40 px-3 py-2">
+                      <span className="mb-0.5 block text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">Investment weight</span>
+                      <span className="block text-[0.88rem] font-semibold tabular-nums text-foreground">
                         {manualOrderAnalytics.investmentWeightPct != null
                           ? `${manualOrderAnalytics.investmentWeightPct.toFixed(2)}% of NAV`
                           : '—'}
                       </span>
                     </div>
-                    <div className="wl2-sizing-dash__card">
-                      <span className="wl2-sizing-dash__label">CASH LEFT</span>
+                    <div className="rounded-lg border border-border/85 bg-muted/40 px-3 py-2">
+                      <span className="mb-0.5 block text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">CASH LEFT</span>
                       <span
-                        className={`wl2-sizing-dash__value${
-                          manualOrderAnalytics.cashLeftAfter != null && manualOrderAnalytics.cashLeftAfter < 0
-                            ? ' wl2-sizing-dash__value--warn'
-                            : ''
-                        }`}
+                        className={`block text-[0.88rem] font-semibold tabular-nums text-foreground${ manualOrderAnalytics.cashLeftAfter != null && manualOrderAnalytics.cashLeftAfter < 0 ? ' text-amber-500' : '' }`}
                       >
                         {manualOrderAnalytics.cashLeftAfter != null ? fmtUsd(manualOrderAnalytics.cashLeftAfter) : '—'}
                       </span>
@@ -2223,28 +2232,28 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                   </div>
                 </div>
 
-                <div className="wl2-order-atr-sheet" aria-labelledby="wl2-order-atr-sheet-head">
-                  <h6 id="wl2-order-atr-sheet-head" className="wl2-order-atr-sheet__title">
+                <div className="min-w-0" aria-labelledby="mb-2 flex items-center gap-2">
+                  <h6 id="mb-2 flex items-center gap-2" className="text-[0.82rem] font-semibold">
                     ATR sheet
                   </h6>
-                  <div className="wl2-sizing-dash__cards wl2-sizing-dash__cards--tight wl2-order-two-col-cards">
-                    <div className="wl2-sizing-dash__card wl2-sizing-dash__card--highlight">
-                      <span className="wl2-sizing-dash__label">ATR(14)</span>
-                      <span className="wl2-sizing-dash__value">
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] gap-2 grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] grid grid-cols-2 gap-2 max-[960px]:grid-cols-1">
+                    <div className="rounded-lg border border-border/85 bg-muted/40 px-3 py-2 border-primary/40 bg-primary/5">
+                      <span className="mb-0.5 block text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">ATR(14)</span>
+                      <span className="block text-[0.88rem] font-semibold tabular-nums text-foreground">
                         {manualOrderAnalytics.atr14 != null ? fmtUsd(manualOrderAnalytics.atr14) : '—'}
                       </span>
                     </div>
-                    <div className="wl2-sizing-dash__card wl2-sizing-dash__card--highlight">
-                      <span className="wl2-sizing-dash__label">ATR % of entry</span>
-                      <span className="wl2-sizing-dash__value">
+                    <div className="rounded-lg border border-border/85 bg-muted/40 px-3 py-2 border-primary/40 bg-primary/5">
+                      <span className="mb-0.5 block text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">ATR % of entry</span>
+                      <span className="block text-[0.88rem] font-semibold tabular-nums text-foreground">
                         {manualOrderAnalytics.atrPctPercent != null
                           ? `${manualOrderAnalytics.atrPctPercent.toFixed(2)}%`
                           : '—'}
                       </span>
                     </div>
-                    <div className="wl2-sizing-dash__card wl2-sizing-dash__card--highlight">
-                      <span className="wl2-sizing-dash__label">ATR risk</span>
-                      <span className="wl2-sizing-dash__value">
+                    <div className="rounded-lg border border-border/85 bg-muted/40 px-3 py-2 border-primary/40 bg-primary/5">
+                      <span className="mb-0.5 block text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">ATR risk</span>
+                      <span className="block text-[0.88rem] font-semibold tabular-nums text-foreground">
                         {manualOrderAnalytics.atrRisk != null
                           ? `${manualOrderAnalytics.atrRisk.toFixed(2)} ATR`
                           : '—'}
@@ -2253,7 +2262,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                   </div>
                 </div>
                 {!manualOrderAnalytics.isComplete ? (
-                  <p className="wl2-sizing-dash__footnote">
+                  <p className="mt-2 text-[0.72rem] text-muted-foreground">
                     Enter Entry price, Exit price, and Share amt above to complete the risk check.
                   </p>
                 ) : null}
@@ -2264,16 +2273,16 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
           </section>
             </div>
 
-            <div className="wl2-sizing-sheet-order-row__order">
+            <div className="min-w-0">
           {/* ── Order sizing (selected symbol) ── */}
           {selectedSizingSymbol && (
-            <div className="wl2-sizing-sheet-order-row__panel">
-            <div className="wl2-sizing-panel">
-              <div className="wl2-sizing-panel__head">
-                <h4 className="wl2-sizing-panel__title">Order sizing — {selectedSizingSymbol}</h4>
+            <div className="min-w-0 w-full">
+            <div className="min-w-0">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <h4 className="text-[0.82rem] font-semibold text-foreground">Order sizing — {selectedSizingSymbol}</h4>
                 <button
                   type="button"
-                  className="wl2-act-icon wl2-act-icon--rm"
+                  className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground text-destructive hover:bg-destructive/10 hover:text-destructive"
                   onClick={() => {
                     sizingPanelDismissedRef.current = true
                     setSelectedSizingSymbol(null)
@@ -2289,21 +2298,21 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                 </button>
               </div>
 
-              <div className="wl2-sizing-panel__controls">
-                <div className="wl2-sizing-panel__control wl2-sizing-panel__control--block">
-                  <div className="wl2-range-field wl2-range-field--kelly-compact">
-                    <div className="wl2-range-field__head">
-                      <label className="wl2-range-field__label" htmlFor="wl-kelly-fraction">
+              <div className="flex flex-wrap gap-2">
+                <div className="min-w-0 block w-full">
+                  <div className="mb-2 max-w-md min-w-0 max-w-none">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <label className="text-[0.72rem] font-semibold text-muted-foreground" htmlFor="wl-kelly-fraction">
                         Kelly fraction
                       </label>
-                      <span className="wl2-range-field__readout wl2-range-field__readout--kelly" aria-live="polite">
+                      <span className="text-[0.82rem] font-semibold tabular-nums text-foreground text-primary" aria-live="polite">
                         {kellyFraction.toFixed(2)}
                       </span>
                     </div>
                     <input
                       id="wl-kelly-fraction"
                       type="range"
-                      className="wl2-range-elegant"
+                      className="min-w-0"
                       min={0.05}
                       max={1}
                       step={0.05}
@@ -2317,18 +2326,18 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                         ['--wl-range-pct' as string]: `${((kellyFraction - 0.05) / (1 - 0.05)) * 100}%`,
                       }}
                     />
-                    <div className="wl2-range-field__scale" aria-hidden>
+                    <div className="mt-1" aria-hidden>
                       <span>0.05</span>
                       <span>1.00</span>
                     </div>
-                    <div className="wl2-range-field__kelly-num">
-                      <label className="wl2-range-field__kelly-num-label" htmlFor="wl-kelly-fraction-num">
+                    <div className="flex items-center gap-1">
+                      <label className="text-[0.65rem] text-muted-foreground" htmlFor="wl-kelly-fraction-num">
                         Exact
                       </label>
                       <input
                         id="wl-kelly-fraction-num"
                         type="number"
-                        className="wl2-range-field__kelly-num-input"
+                        className="w-16 rounded border border-border bg-background px-1.5 py-0.5 text-sm tabular-nums"
                         min={0.05}
                         max={1}
                         step={0.05}
@@ -2341,7 +2350,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                     </div>
                   </div>
                 </div>
-                <span className="wl2-sizing-panel__control">
+                <span className="min-w-0">
                   <label htmlFor="wl-atr-mult" style={{ whiteSpace: 'nowrap' }}>ATR multiplier</label>
                   <input
                     id="wl-atr-mult"
@@ -2365,7 +2374,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               </div>
 
               {sizeComputeError && (
-                <p className="msg-error wl2-sizing-panel__alert" role="alert">
+                <p className="msg-error mb-2 text-[0.75rem] text-amber-500" role="alert">
                   {sizeComputeError}
                 </p>
               )}
@@ -2373,57 +2382,53 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
 
               {!sizeComputeLoading && sizeAtrResult && (
                 <>
-                  <section className="wl2-sizing-dash wl2-sizing-dash--nested" aria-labelledby="wl2-order-sizing-head">
-                    <h5 id="wl2-order-sizing-head" className="wl2-sizing-dash__subtitle">
+                  <section className="mb-4 rounded-[10px] border border-border bg-muted/30 p-3 mb-0 mt-3 bg-background/70 p-3" aria-labelledby="mb-2">
+                    <h5 id="mb-2" className="mb-2 text-[0.88rem] font-semibold text-foreground">
                       Order sizing
                     </h5>
-                    <p className="wl2-sizing-dash__hint" style={{ marginTop: 0 }}>
+                    <p className="mb-2 text-[0.75rem] leading-snug text-muted-foreground" style={{ marginTop: 0 }}>
                       Auto sizing suggestion from ATR + Kelly. Portfolio <strong>Max drawdown %</strong> and <strong>static risk budget</strong> are set in <strong>Portfolio risk power</strong> (expand if collapsed); the ladder row <em>Portfolio max DD budget</em> uses the same percentage.
                     </p>
-                    <div className="wl2-sizing-dash__cards wl2-sizing-dash__cards--tight">
-                      <div className="wl2-sizing-dash__card">
-                        <span className="wl2-sizing-dash__label">Intended shares</span>
-                        <span className="wl2-sizing-dash__value">
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] gap-2 grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))]">
+                      <div className="rounded-lg border border-border/85 bg-muted/40 px-3 py-2">
+                        <span className="mb-0.5 block text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">Intended shares</span>
+                        <span className="block text-[0.88rem] font-semibold tabular-nums text-foreground">
                           {sizingOrderAnalytics.intendedShares > 0 ? sizingOrderAnalytics.intendedShares.toLocaleString() : '—'}
                         </span>
                       </div>
-                      <div className="wl2-sizing-dash__card">
-                        <span className="wl2-sizing-dash__label">Intended risk %</span>
-                        <span className="wl2-sizing-dash__value">
+                      <div className="rounded-lg border border-border/85 bg-muted/40 px-3 py-2">
+                        <span className="mb-0.5 block text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">Intended risk %</span>
+                        <span className="block text-[0.88rem] font-semibold tabular-nums text-foreground">
                           {sizingOrderAnalytics.intendedRiskPct != null ? `${sizingOrderAnalytics.intendedRiskPct.toFixed(2)}%` : '—'}
                         </span>
                       </div>
-                      <div className="wl2-sizing-dash__card">
-                        <span className="wl2-sizing-dash__label">Investment</span>
-                        <span className="wl2-sizing-dash__value">
+                      <div className="rounded-lg border border-border/85 bg-muted/40 px-3 py-2">
+                        <span className="mb-0.5 block text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">Investment</span>
+                        <span className="block text-[0.88rem] font-semibold tabular-nums text-foreground">
                           {sizingOrderAnalytics.investmentUsd != null ? fmtUsd(sizingOrderAnalytics.investmentUsd) : '—'}
                         </span>
                       </div>
-                      <div className="wl2-sizing-dash__card">
-                        <span className="wl2-sizing-dash__label">Investment weight</span>
-                        <span className="wl2-sizing-dash__value">
+                      <div className="rounded-lg border border-border/85 bg-muted/40 px-3 py-2">
+                        <span className="mb-0.5 block text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">Investment weight</span>
+                        <span className="block text-[0.88rem] font-semibold tabular-nums text-foreground">
                           {sizingOrderAnalytics.investmentWeightPct != null
                             ? `${sizingOrderAnalytics.investmentWeightPct.toFixed(2)}% of NAV`
                             : '—'}
                         </span>
                       </div>
-                      <div className="wl2-sizing-dash__card">
-                        <span className="wl2-sizing-dash__label">Cash left (after notional)</span>
+                      <div className="rounded-lg border border-border/85 bg-muted/40 px-3 py-2">
+                        <span className="mb-0.5 block text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">Cash left (after notional)</span>
                         <span
-                          className={`wl2-sizing-dash__value${
-                            sizingOrderAnalytics.cashLeftAfter != null && sizingOrderAnalytics.cashLeftAfter < 0
-                              ? ' wl2-sizing-dash__value--warn'
-                              : ''
-                          }`}
+                          className={`block text-[0.88rem] font-semibold tabular-nums text-foreground${ sizingOrderAnalytics.cashLeftAfter != null && sizingOrderAnalytics.cashLeftAfter < 0 ? ' text-amber-500' : '' }`}
                         >
                           {sizingOrderAnalytics.cashLeftAfter != null ? fmtUsd(sizingOrderAnalytics.cashLeftAfter) : '—'}
                         </span>
                       </div>
                     </div>
 
-                    <h6 className="wl2-sizing-dash__subtitle wl2-sizing-dash__subtitle--sm">Constraint ladder (max shares @ stop)</h6>
-                    <div className="wl2-table-wrap wl2-sizing-dash__table-wrap">
-                      <table className="wl2-table wl2-table--dense">
+                    <h6 className="mb-2 text-[0.88rem] font-semibold text-foreground mt-3 text-[0.82rem] font-semibold text-muted-foreground">Constraint ladder (max shares @ stop)</h6>
+                    <div className="overflow-x-auto rounded-lg border border-border mt-2 min-w-0">
+                      <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:px-2 [&_td]:py-1.5 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-2 [&_th]:text-left [&_th]:text-[0.68rem] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground text-xs [&_td]:py-1 [&_th]:py-1.5">
                         <thead>
                           <tr>
                             <th>Source</th>
@@ -2444,7 +2449,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                             <td>—</td>
                             <td>{sizingOrderAnalytics.cashCapShares != null ? sizingOrderAnalytics.cashCapShares.toLocaleString() : '—'}</td>
                           </tr>
-                          <tr className="wl2-dash-row--focus">
+                          <tr className="bg-primary/5">
                             <td>
                               <strong>Available (min)</strong>
                             </td>
@@ -2460,12 +2465,12 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                         </tbody>
                       </table>
                     </div>
-                    <p className="wl2-sizing-dash__footnote">
+                    <p className="mt-2 text-[0.72rem] text-muted-foreground">
                       Buying power (aggregate): {fmtUsd(portfolioCashRollup.totalBuyingPower)}. History losses use GET /performance summary (same window as Kelly).
                     </p>
                   </section>
 
-                  <h5 className="wl2-sizing-dash__subtitle wl2-sizing-dash__subtitle--sm">Kelly &amp; ATR summary</h5>
+                  <h5 className="mb-2 text-[0.88rem] font-semibold text-foreground mt-3 text-[0.82rem] font-semibold text-muted-foreground">Kelly &amp; ATR summary</h5>
                   <div className="risk-summary-cards">
                     <div className="risk-card">
                       <span className="risk-card-label">ATR(14)</span>
@@ -2535,20 +2540,20 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
           </div>
           </div>
 
-          <div className="wl2-sizing-sheet-block wl2-sizing-sheet-block--promote" aria-labelledby="wl2-sizing-workflow-head">
-            <h4 id="wl2-sizing-workflow-head" className="wl2-sizing-dash__title">
+          <div className="mt-1 min-w-0 border-t border-border/90 pt-2 mt-0 border-t border-border/90 pt-3" aria-labelledby="mb-2">
+            <h4 id="mb-2" className="mb-1 text-[0.95rem] font-semibold tracking-tight text-foreground">
               Sizing sheet
             </h4>
 
-            <div className="wl2-sizing-promote wl2-sizing-promote--inline">
-              <div className="wl2-promote-combobox wl2-promote-combobox--compact" ref={promoteComboboxRef}>
+            <div className="mt-2 inline-flex">
+              <div className="relative min-w-[10rem] max-w-[12rem]" ref={promoteComboboxRef}>
                 <button
                   type="button"
-                  className="wl2-promote-combobox__trigger"
-                  id="wl2-promote-combobox-trigger"
+                  className="flex w-full items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-sm"
+                  id="relative min-w-0"
                   aria-label="pick new symbol — choose a watchlist row to move to Sizing"
                   aria-expanded={promotePickerOpen}
-                  aria-controls="wl2-promote-listbox"
+                  aria-controls="max-h-40 overflow-auto"
                   aria-haspopup="listbox"
                   onClick={() => {
                     setPromotePickerOpen(o => {
@@ -2565,7 +2570,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                   }}
                 >
                   <span
-                    className={`wl2-promote-combobox__value${promoteSelectedItem ? '' : ' wl2-promote-combobox__value--placeholder'}`}
+                    className={`truncate${promoteSelectedItem ? '' : ' text-muted-foreground'}`}
                     title={
                       promoteSelectedItem
                         ? watchlistItemLabel(promoteSelectedItem)
@@ -2576,18 +2581,18 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                       ? watchlistItemLabel(promoteSelectedItem)
                       : 'pick new symbol'}
                   </span>
-                  <span className="wl2-promote-combobox__chev" aria-hidden>
+                  <span className="text-muted-foreground" aria-hidden>
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
                       <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </span>
                 </button>
                 {promotePickerOpen && (
-                  <ul id="wl2-promote-listbox" role="listbox" className="wl2-promote-combobox__menu" aria-labelledby="wl2-promote-combobox-trigger">
-                    <li className="wl2-promote-combobox__filter-li" role="presentation" onPointerDown={e => e.preventDefault()}>
+                  <ul id="max-h-40 overflow-auto" role="listbox" className="absolute z-50 mt-1 max-h-48 w-full overflow-auto rounded-md border border-border bg-popover py-1 shadow-md" aria-labelledby="relative min-w-0">
+                    <li className="list-none" role="presentation" onPointerDown={e => e.preventDefault()}>
                       <input
                         type="search"
-                        className="wl2-promote-combobox__filter"
+                        className="w-full border-0 border-b border-border bg-transparent px-2 py-1.5 text-sm outline-none"
                         value={promoteFilter}
                         onChange={e => setPromoteFilter(e.target.value)}
                         placeholder="Filter symbols…"
@@ -2608,7 +2613,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                       <li
                         role="option"
                         aria-selected={promoteContractKey.trim() === ''}
-                        className={`wl2-promote-combobox__opt wl2-promote-combobox__opt--placeholder${promoteContractKey.trim() === '' ? ' wl2-promote-combobox__opt--active' : ''}`}
+                        className={`cursor-pointer px-2 py-1 text-sm hover:bg-muted text-muted-foreground italic${promoteContractKey.trim() === '' ? ' bg-primary/15 text-foreground' : ''}`}
                         onPointerDown={e => e.preventDefault()}
                         onClick={() => {
                           setPromoteContractKey('')
@@ -2619,7 +2624,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                       </li>
                     )}
                     {stocksForPromoteMenu.length === 0 ? (
-                      <li className="wl2-promote-combobox__opt wl2-promote-combobox__opt--nomatch" role="presentation">
+                      <li className="cursor-pointer px-2 py-1 text-sm hover:bg-muted text-muted-foreground italic" role="presentation">
                         {promoteFilter.trim() ? 'No matches' : 'No symbols in your watchlist'}
                       </li>
                     ) : (
@@ -2631,7 +2636,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                             key={key}
                             role="option"
                             aria-selected={sel}
-                            className={`wl2-promote-combobox__opt${sel ? ' wl2-promote-combobox__opt--active' : ''}`}
+                            className={`cursor-pointer px-2 py-1 text-sm hover:bg-muted${sel ? ' bg-primary/15 text-foreground' : ''}`}
                             onPointerDown={e => e.preventDefault()}
                             onClick={() => {
                               setPromoteContractKey(key)
@@ -2648,7 +2653,7 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               </div>
               <button
                 type="button"
-                className="wl2-btn wl2-btn--primary wl2-btn--icon"
+                className="cursor-pointer rounded-md border border-transparent px-2.5 py-1 text-[0.85rem] font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed border-primary bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 inline-flex h-9 w-9 min-w-9 items-center justify-center p-0"
                 disabled={!promoteContractKey.trim() || sizingCategoryId == null || addPending}
                 onClick={() => void handlePromoteToSizing()}
                 title="Move to Sizing"
@@ -2666,28 +2671,28 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
               </button>
             </div>
             {sizingCategoryId == null && (
-              <p className="wl2-tier-hint wl2-tier-hint--warn">The <strong>Sizing</strong> category is missing; you cannot promote rows yet.</p>
+              <p className="mb-3 text-[0.8rem] leading-snug text-muted-foreground text-amber-500">The <strong>Sizing</strong> category is missing; you cannot promote rows yet.</p>
             )}
           </div>
         </>
       ) : (
         <>
-          <p className="wl2-tier-hint">
+          <p className="mb-3 text-[0.8rem] leading-snug text-muted-foreground">
             <strong>Step 3.</strong> Rows on this list that match your current IB portfolio snapshot. The same symbol can still appear in Watching or Sizing when you keep it there.
           </p>
           {positionSubTab === 'stocks' && (
-            <div className="wl2-table-wrap">
+            <div className="overflow-x-auto rounded-lg border border-border">
               {positionStockRows.length === 0 ? (
-                <div className="wl2-empty">No held stocks from this list.</div>
+                <div className="py-4 text-center text-[0.82rem] text-muted-foreground">No held stocks from this list.</div>
               ) : (
-                <table className="wl2-table">
+                <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:px-2 [&_td]:py-1.5 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-2 [&_th]:text-left [&_th]:text-[0.68rem] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
                   <thead>
                     <tr>
-                      <th className="wl2-th--sym">Symbol</th>
-                      <th className="wl2-th--quote">Last / B·A</th>
-                      <th className="wl2-th--opt" title="Show in Option Discovery">Opt</th>
-                      <th className="wl2-th--cat">Category</th>
-                      <th className="wl2-th--acts" />
+                      <th className="min-w-[6rem]">Symbol</th>
+                      <th className="min-w-[7rem]">Last / B·A</th>
+                      <th className="w-12 text-center" title="Show in Option Discovery">Opt</th>
+                      <th className="w-28">Category</th>
+                      <th className="w-16" />
                     </tr>
                   </thead>
                   <tbody>{renderStockRows(positionStockRows)}</tbody>
@@ -2696,20 +2701,20 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
             </div>
           )}
           {positionSubTab === 'options' && (
-            <div className="wl2-table-wrap">
+            <div className="overflow-x-auto rounded-lg border border-border">
               {positionOptRows.length === 0 ? (
-                <div className="wl2-empty">No held options from this list.</div>
+                <div className="py-4 text-center text-[0.82rem] text-muted-foreground">No held options from this list.</div>
               ) : (
-                <table className="wl2-table">
+                <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:px-2 [&_td]:py-1.5 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-2 [&_th]:text-left [&_th]:text-[0.68rem] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
                   <thead>
                     <tr>
-                      <th className="wl2-th--sym">Symbol</th>
-                      <th className="wl2-th--quote">Last / B·A</th>
-                      <th className="wl2-th--exp">Expiry</th>
-                      <th className="wl2-th--right">R</th>
-                      <th className="wl2-th--strike">Strike</th>
-                      <th className="wl2-th--cat">Category</th>
-                      <th className="wl2-th--acts" />
+                      <th className="min-w-[6rem]">Symbol</th>
+                      <th className="min-w-[7rem]">Last / B·A</th>
+                      <th className="w-24">Expiry</th>
+                      <th className="w-10 text-center">R</th>
+                      <th className="w-20 text-right">Strike</th>
+                      <th className="w-28">Category</th>
+                      <th className="w-16" />
                     </tr>
                   </thead>
                   <tbody>{renderOptionRows(positionOptRows)}</tbody>
@@ -2733,41 +2738,41 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
       {/* ── Add option modal ── */}
       {addOptionForSymbol != null && (
         <div
-          className="wl2-modal-backdrop"
+          className="fixed inset-0 z-[300] flex items-center justify-center bg-black/45 p-4"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="wl2-add-opt-title"
+          aria-labelledby="mb-2 text-sm font-semibold"
           onClick={e => e.target === e.currentTarget && closeAddOptionModal()}
         >
-          <div className="wl2-modal" onClick={e => e.stopPropagation()}>
-            <h4 id="wl2-add-opt-title" className="wl2-modal__title">
+          <div className="w-full max-w-md rounded-lg border border-border bg-background p-4 shadow-xl" onClick={e => e.stopPropagation()}>
+            <h4 id="mb-2 text-sm font-semibold" className="mb-3 text-base font-semibold text-foreground">
               Add option · <strong>{addOptionForSymbol}</strong>
             </h4>
-            <div className="wl2-modal__fields">
-              <label className="wl2-modal__field">
-                <span className="wl2-modal__field-label">Expiry</span>
+            <div className="flex flex-col gap-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-[0.72rem] font-semibold text-muted-foreground">Expiry</span>
                 <input
                   type="text"
                   placeholder="yyyy-mm-dd"
                   value={addOptExpiry}
                   onChange={e => setAddOptExpiry(e.target.value)}
-                  className="wl2-modal__input"
+                  className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
                 />
               </label>
-              <label className="wl2-modal__field">
-                <span className="wl2-modal__field-label">Right</span>
+              <label className="flex flex-col gap-1">
+                <span className="text-[0.72rem] font-semibold text-muted-foreground">Right</span>
                 <AppSelect
                   value={addOptRight}
                   onChange={v => setAddOptRight(v as 'CALL' | 'PUT')}
-                  className="wl2-modal__input"
+                  className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
                   options={[
                     { value: 'CALL', label: 'CALL' },
                     { value: 'PUT', label: 'PUT' },
                   ]}
                 />
               </label>
-              <label className="wl2-modal__field">
-                <span className="wl2-modal__field-label">Strike</span>
+              <label className="flex flex-col gap-1">
+                <span className="text-[0.72rem] font-semibold text-muted-foreground">Strike</span>
                 <input
                   type="number"
                   step="0.01"
@@ -2775,15 +2780,15 @@ export function WatchlistPage({ status, onBreadcrumbResearch }: WatchlistPagePro
                   placeholder="e.g. 120"
                   value={addOptStrike}
                   onChange={e => setAddOptStrike(e.target.value)}
-                  className="wl2-modal__input"
+                  className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
                 />
               </label>
             </div>
-            <div className="wl2-modal__footer">
-              <button type="button" className="wl2-btn wl2-btn--ghost" onClick={closeAddOptionModal}>Cancel</button>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="cursor-pointer rounded-md border border-transparent px-2.5 py-1 text-[0.85rem] font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed border-border bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50" onClick={closeAddOptionModal}>Cancel</button>
               <button
                 type="button"
-                className="wl2-btn wl2-btn--primary"
+                className="cursor-pointer rounded-md border border-transparent px-2.5 py-1 text-[0.85rem] font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed border-primary bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
                 disabled={addPending || !addOptExpiry.trim() || !addOptStrike.trim()}
                 onClick={() => submitAddOption()}
               >

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
-import '../styles/data-readiness.css'
 import { PageSection } from '@/components/shared/page-section'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import {
@@ -2711,7 +2710,7 @@ function StockDataReadinessPageInner({
       </div>
 
       {/* ── Readiness Status ─────────────────────────────────────────────── */}
-      <div className="card sdp-readiness-status-card">
+      <div className="sdp-readiness-status-card rounded-lg border border-border bg-card">
         <div className="sdp-readiness-status-header">
           <span className="sdp-readiness-status-title">Readiness Status</span>
           {summary?.snapshot_populated && snap != null && (
@@ -3451,7 +3450,7 @@ function StockDataReadinessPageInner({
             Click <strong>Check Coverage</strong> to load the instrument-type support matrix.
           </div>
         ) : (
-          <div className="table-scroll-x">
+          <div className="overflow-x-auto min-w-0 rounded-lg border border-border">
             <table className="sdp-table sdp-table--compact">
               <thead>
                 <tr>
@@ -3586,7 +3585,7 @@ function StockDataReadinessPageInner({
         <div style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-dim)', marginBottom: 'var(--space-3)' }}>
           Symbols included in universe, not price-ready, today
         </div>
-        <div className="table-scroll-x">
+        <div className="overflow-x-auto min-w-0 rounded-lg border border-border">
           <table className="sdp-table">
             <thead>
               <tr>
@@ -3640,7 +3639,7 @@ function StockDataReadinessPageInner({
             {queuesErr}
           </div>
         )}
-        <div className="table-scroll-x">
+        <div className="overflow-x-auto min-w-0 rounded-lg border border-border">
           <table className="sdp-table">
             <thead>
               <tr>

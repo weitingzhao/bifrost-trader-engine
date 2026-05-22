@@ -1168,7 +1168,7 @@ export function OptionDiscoveryPage({
             </span>
           )}
           {massiveStatus?.configured && massiveStatus && !massiveStatus.trades_enabled && (
-            <span className="page-title-with-tooltip" style={{ marginLeft: '0.35rem' }}>
+            <span className="inline-flex items-center" style={{ marginLeft: '0.35rem' }}>
               <InfoTooltip text="Tape (last trades) is not available on this tier. Enable trades in Massive config for Developer." />
             </span>
           )}

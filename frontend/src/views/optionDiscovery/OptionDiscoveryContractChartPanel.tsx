@@ -3,6 +3,7 @@ import type { Bar } from '../../types'
 import { fetchOptionBars, pollMassiveJobUntilDone, postMassiveSync } from '../../api'
 import { BarsCandlestickChart, finiteVwap } from '../data/BarsCandlestickChart'
 import { InfoTooltip } from '../../components/InfoTooltip'
+import { sectionHeadingWithTooltipClass } from '@/components/shared/exec-row-buttons'
 import { OdChartExpandOnHover } from './OdChartExpandOnHover'
 import { buildPolygonOptionsTicker } from '../../utils/polygonOptionsTicker'
 import { OPTION_BAR_PERIODS } from '../../utils/optionBarPeriods'
@@ -209,7 +210,7 @@ export function OptionDiscoveryContractChartPanel({
               <path d="M16 14l3 3-3 3" />
             </svg>
           </button>
-          <span className="page-title-with-tooltip" style={{ marginLeft: '0.25rem' }}>
+          <span className={sectionHeadingWithTooltipClass} style={{ marginLeft: '0.25rem' }}>
             <InfoTooltip text="Reads OHLC from PostgreSQL (option_day for Daily, option_min for intraday). Backfill enqueues Massive /v2/aggs on the Celery queue: daily bars upsert option_day (~2y window); intraday upserts option_min (7 days). You can also use Feed → Massive Option → Aggregate Bars (OHLC)." />
           </span>
           <label

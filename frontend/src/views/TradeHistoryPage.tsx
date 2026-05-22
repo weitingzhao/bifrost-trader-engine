@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import type { StatusResponse } from '../types'
+import { PageSection } from '@/components/shared/page-section'
+import { Button } from '@/components/ui/button'
 import { SectionPageTitle } from '../components/SectionPageTitle'
 import type { PortfolioView } from './portfolio/types'
 import { LedgerView } from './portfolio/LedgerView'
@@ -20,7 +22,7 @@ export function TradeHistoryPage({
 }: TradeHistoryPageProps) {
   const [addJournalOpen, setAddJournalOpen] = useState(false)
   return (
-    <div className="card process-section replay-page">
+    <PageSection className="replay-page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
         <SectionPageTitle
           menu="Portfolio"
@@ -29,9 +31,10 @@ export function TradeHistoryPage({
           infoText="Trade ledger is the workspace for open and closed trades, Flex/TWS imports, and manual journal entries (journal_closed) for reconciliation. Instance groups option trades by strategy instance (With instance) or unlinked (No instance); Options shows all Closed/Open option contracts; Stocks lists all execution sources. Instance and Options both use the official execution book (Flex + journal) from the database."
           style={{ margin: 0 }}
         />
-        <button
+        <Button
           type="button"
-          className="btn btn-secondary trade-ledger-add-journal-btn"
+          variant="secondary"
+          className="trade-ledger-add-journal-btn"
           onClick={() => setAddJournalOpen(true)}
           aria-label="Add manual journal execution to trade ledger (journal_closed)"
         >
@@ -54,7 +57,7 @@ export function TradeHistoryPage({
             <path d="M8 11h6" />
           </svg>
           <span>Add journal</span>
-        </button>
+        </Button>
       </div>
       <LedgerView
         status={status}
@@ -62,6 +65,6 @@ export function TradeHistoryPage({
         addJournalOpen={addJournalOpen}
         onAddJournalOpenChange={setAddJournalOpen}
       />
-    </div>
+    </PageSection>
   )
 }

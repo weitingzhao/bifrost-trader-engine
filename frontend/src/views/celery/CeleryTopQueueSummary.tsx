@@ -11,6 +11,10 @@ import {
   CeleryQueueRefreshIcon,
   CeleryQueueTrashIcon,
 } from './celeryBulkDeleteIcons'
+import { LampIndicator, type LampTone } from '@/components/shared/lamp-indicator'
+
+const CELERY_SECTION_TITLE =
+  'm-0 inline-flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground'
 
 export { formatQueueLabel } from '../../utils/celeryQueueLabels'
 
@@ -172,7 +176,7 @@ export function CeleryTopQueueSummary({
       className="replay-section dashboard-section dashboard-queue-summary dashboard-celery-top-queue-summary"
       aria-labelledby="dashboard-celery-top-queue-summary-head"
     >
-      <h3 id="dashboard-celery-top-queue-summary-head" className="page-title-with-tooltip">
+      <h3 id="dashboard-celery-top-queue-summary-head" className={CELERY_SECTION_TITLE}>
         Queue summary
         <InfoTooltip text="R/C = Redis LLEN / Celery inspect (active + reserved). P/R/D/F = PostgreSQL job rows. If PostgreSQL P is non-zero but Redis R is 0, tasks may not be on the broker (stuck rows, deduplicated enqueue, or wrong Redis). St. = consumer status (lamp yellow if no worker in this snapshot consumes that queue). Dev vs Prod worker counts: Worker instance situation next to this table. Click a queue name or PG cell filters Worker Instances; click Total to show all instances. Default action: delete pending. Click a PG count to switch the action icon." />
       </h3>
@@ -232,22 +236,15 @@ export function CeleryTopQueueSummary({
                         {onNavigateQueueCoverageConsole ? (
                           <button
                             type="button"
-                            className={`dashboard-queue-summary-status-console-nav title-inline-lamp lamp-icon ${qCov.lamp}`}
+                            className="dashboard-queue-summary-status-console-nav"
                             title={`${qCov.title} — Open Console & Runtime tab → Console for this queue`}
                             aria-label={`Open console for queue ${qs.name}: ${qCov.title}`}
                             onClick={() => onNavigateQueueCoverageConsole(qs.name)}
                           >
-                            <span aria-hidden>●</span>
+                            <LampIndicator lamp={qCov.lamp as LampTone} />
                           </button>
                         ) : (
-                          <span
-                            className={`title-inline-lamp lamp-icon ${qCov.lamp}`}
-                            title={qCov.title}
-                            aria-label={qCov.title}
-                            role="img"
-                          >
-                            <span aria-hidden>●</span>
-                          </span>
+                          <LampIndicator lamp={qCov.lamp as LampTone} title={qCov.title} />
                         )}
                       </div>
                     </td>
@@ -522,22 +519,18 @@ export function CeleryTopQueueSummary({
                       {onNavigateAggregateCoverageConsole ? (
                         <button
                           type="button"
-                          className={`dashboard-queue-summary-status-console-nav title-inline-lamp lamp-icon ${runtimeCeleryLamp}`}
+                          className="dashboard-queue-summary-status-console-nav"
                           title={`${runtimeCeleryStatusText} — Open Console & Runtime tab → Broker console`}
                           aria-label={`Open broker console: ${runtimeCeleryStatusText}`}
                           onClick={() => onNavigateAggregateCoverageConsole()}
                         >
-                          <span aria-hidden>●</span>
+                          <LampIndicator lamp={runtimeCeleryLamp as LampTone} />
                         </button>
                       ) : (
-                        <span
-                          className={`title-inline-lamp lamp-icon ${runtimeCeleryLamp}`}
+                        <LampIndicator
+                          lamp={runtimeCeleryLamp as LampTone}
                           title={runtimeCeleryStatusText}
-                          aria-label={runtimeCeleryStatusText}
-                          role="img"
-                        >
-                          <span aria-hidden>●</span>
-                        </span>
+                        />
                       )}
                     </div>
                   </td>

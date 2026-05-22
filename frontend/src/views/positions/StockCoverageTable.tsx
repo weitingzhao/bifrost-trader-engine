@@ -5,6 +5,7 @@ import {
   coverageRowMarketValueTotal, groupCoverageByAccount,
 } from './positionUtils'
 import type { CoveragePoolSortCol } from './positionUtils'
+import { stockSymbolInspectorBtnClass } from '@/components/shared/exec-row-buttons'
 import type { StockCoverageItem } from '../portfolio/types'
 
 interface StockCoverageTableProps {
@@ -124,7 +125,7 @@ export function StockCoverageTable({
           {tableOpts?.onInspectCoverageSymbol ? (
             <button
               type="button"
-              className="riv-stock-symbol-btn"
+              className={stockSymbolInspectorBtnClass}
               onClick={() => tableOpts.onInspectCoverageSymbol?.(ci)}
               aria-label={`Stock details for ${ci.symbol} in account ${acc}`}
             >

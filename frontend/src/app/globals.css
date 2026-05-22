@@ -1,10 +1,14 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "../styles/design-tokens.css";
+@import "../styles/message-center.css";
 @import "../styles/shadcn-tokens.css";
 
 @source "../../src/**/*.{ts,tsx}";
 
-@import "../styles/legacy.css";
+@import "../styles/app-surfaces.css";
+@import "../styles/feed-massive.css";
 @import "../styles/settings-celery.css";
 @import "../styles/stock-inspector.css";
+@import "../styles/stock-screener.css";
+@import "../styles/data-readiness.css";
